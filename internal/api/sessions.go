@@ -31,7 +31,7 @@ func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 
 // create handles POST /api/sessions — spawns a bash session.
 func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
-	sess, err := h.mgr.Spawn()
+	sess, err := h.mgr.Spawn(session.SpawnOpts{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "couldn't start a session")
 		return

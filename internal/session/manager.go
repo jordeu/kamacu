@@ -180,6 +180,33 @@ func (m *Manager) listWhere(keep func(*Session) bool) []Info {
 	return out
 }
 
+// StopAllForTask stops every RUNNING session of the task concurrently and
+// blocks until all have fully exited. Each Stop already blocks through the
+// SIGTERM grace (D-14) and is idempotent, so concurrent and repeated calls
+// are safe; stopping concurrently collapses the worst case to a single grace
+// window — required because the DELETE /worktree handler calls this inline
+// in the request (D-32 cleanup gate).
+func (m *Manager) StopAllForTask(taskID int64) {
+	m.mu.Lock()
+	targets := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.taskID == taskID && s.Info().Status == StatusRunning {
+			targets = append(targets, s)
+		}
+	}
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, s := range targets {
+		wg.Add(1)
+		go func(s *Session) {
+			defer wg.Done()
+			s.Stop()
+		}(s)
+	}
+	wg.Wait()
+}
+
 // Remove deletes an exited session (freeing its ring). Running sessions are
 // rejected with ErrStillRunning; unknown IDs with ErrNotFound.
 func (m *Manager) Remove(id string) error {

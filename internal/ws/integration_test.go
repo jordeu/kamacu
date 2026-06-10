@@ -205,7 +205,7 @@ func TestIntegrationEvilOriginRejected(t *testing.T) {
 	srv, mgr := newTestServer(t)
 	ctx := integrationCtx(t)
 
-	sess, err := mgr.Spawn()
+	sess, err := mgr.Spawn(session.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}

@@ -32,7 +32,7 @@ func newWSServer(t *testing.T) (*httptest.Server, *session.Manager) {
 // spawn starts a bash session and guarantees teardown.
 func spawn(t *testing.T, mgr *session.Manager) *session.Session {
 	t.Helper()
-	sess, err := mgr.Spawn()
+	sess, err := mgr.Spawn(session.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
