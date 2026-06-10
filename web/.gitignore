@@ -8,7 +8,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist rules live in the root .gitignore: web/dist/* is ignored except the
+# committed placeholder web/dist/index.html (required so go:embed never breaks
+# a fresh-clone build)
 dist-ssr
 *.local
 

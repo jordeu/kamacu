@@ -2,14 +2,17 @@ package main
 
 import (
 	"flag"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"kangent/internal/api"
 	"kangent/internal/store"
+	"kangent/web"
 )
 
 func main() {
@@ -45,6 +48,27 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// SPA fallback: serve the embedded Vite build; deep links get index.html,
+	// unknown /api/* paths 404 and never serve HTML.
+	dist, _ := fs.Sub(web.DistFS, "dist")
+	fileServer := http.FileServerFS(dist)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if p != "" {
+			if f, err := dist.Open(p); err == nil {
+				f.Close()
+				fileServer.ServeHTTP(w, r) // hashed asset → cacheable
+				return
+			}
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFileFS(w, r, dist, "index.html") // deep links → SPA
 	})
 
 	slog.Info("kangent listening", "url", "http://"+*addr)
