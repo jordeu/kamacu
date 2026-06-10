@@ -3,6 +3,9 @@ package session
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -23,13 +26,20 @@ func eventually(t *testing.T, timeout time.Duration, msg string, cond func() boo
 	t.Fatalf("timed out after %s waiting for: %s", timeout, msg)
 }
 
-// spawnForTest spawns a session and guarantees the bash process tree is gone
-// when the test finishes, even if the test fails midway.
+// spawnForTest spawns a default-options session and guarantees the bash
+// process tree is gone when the test finishes, even if the test fails midway.
 func spawnForTest(t *testing.T, m *Manager) *Session {
 	t.Helper()
-	s, err := m.Spawn()
+	return spawnForTestOpts(t, m, SpawnOpts{})
+}
+
+// spawnForTestOpts is spawnForTest with explicit SpawnOpts (cwd / task
+// association), sharing the same teardown guarantee.
+func spawnForTestOpts(t *testing.T, m *Manager, opts SpawnOpts) *Session {
+	t.Helper()
+	s, err := m.Spawn(opts)
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Spawn(%+v): %v", opts, err)
 	}
 	t.Cleanup(func() {
 		// Best-effort teardown: SIGKILL the whole session (leader group plus
@@ -475,5 +485,135 @@ func TestListNewestFirst(t *testing.T) {
 	if list[0].ID != s2.Info().ID || list[1].ID != s1.Info().ID {
 		t.Errorf("List order = [%s, %s], want newest first [%s, %s]",
 			list[0].Label, list[1].Label, s2.Info().Label, s1.Info().Label)
+	}
+}
+
+// TestTaskScopedLabels covers the UI-SPEC label contract: task-scoped
+// sessions get "Bash 1", "Bash 2"... per task, monotonic and never reused
+// even after stops; task-less sessions keep the global "bash #N" counter.
+func TestTaskScopedLabels(t *testing.T) {
+	m := NewManager()
+
+	s1 := spawnForTestOpts(t, m, SpawnOpts{TaskID: 7})
+	if got := s1.Info(); got.Label != "Bash 1" || got.TaskID != 7 {
+		t.Errorf("task 7 first spawn: Label=%q TaskID=%d, want Label=%q TaskID=7", got.Label, got.TaskID, "Bash 1")
+	}
+
+	s2 := spawnForTestOpts(t, m, SpawnOpts{TaskID: 7})
+	if got := s2.Info().Label; got != "Bash 2" {
+		t.Errorf("task 7 second spawn: Label=%q, want %q", got, "Bash 2")
+	}
+
+	s3 := spawnForTestOpts(t, m, SpawnOpts{TaskID: 8})
+	if got := s3.Info(); got.Label != "Bash 1" || got.TaskID != 8 {
+		t.Errorf("task 8 first spawn: Label=%q TaskID=%d, want Label=%q TaskID=8 (counters are per-task)", got.Label, got.TaskID, "Bash 1")
+	}
+
+	// Stop task 7's "Bash 1": the counter is monotonic, never reused —
+	// the next task-7 spawn must be "Bash 3", not "Bash 1".
+	setTestGrace(s1, 200*time.Millisecond)
+	s1.Stop()
+	s4 := spawnForTestOpts(t, m, SpawnOpts{TaskID: 7})
+	if got := s4.Info().Label; got != "Bash 3" {
+		t.Errorf("task 7 spawn after stop: Label=%q, want %q (counter never reused)", got, "Bash 3")
+	}
+
+	// The global dev counter is independent of task counters.
+	dev := spawnForTest(t, m)
+	if got := dev.Info(); got.Label != "bash #1" || got.TaskID != 0 {
+		t.Errorf("dev spawn: Label=%q TaskID=%d, want Label=%q TaskID=0", got.Label, got.TaskID, "bash #1")
+	}
+}
+
+// TestSpawnCwd proves the shell really starts in the requested directory.
+// The mar''ker quote-split means the echoed COMMAND can never satisfy the
+// assertion — only the shell's expansion of $PWD can.
+func TestSpawnCwd(t *testing.T) {
+	dir := t.TempDir()
+	// bash reports the physical cwd (getcwd); t.TempDir may sit behind a
+	// symlink (e.g. /tmp on some hosts), so compare against the resolved path.
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", dir, err)
+	}
+
+	m := NewManager()
+	s := spawnForTestOpts(t, m, SpawnOpts{Cwd: dir, TaskID: 1})
+
+	if err := s.WriteInput([]byte("echo mar''ker:$PWD\r")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	want := "marker:" + resolved
+	eventually(t, 5*time.Second, "snapshot to contain "+want, func() bool {
+		return bytes.Contains(s.Snapshot(), []byte(want))
+	})
+}
+
+// TestSpawnInvalidCwdFailsBeforeRegistration: a bad cwd (deleted worktree)
+// must produce a clean error mentioning the path BEFORE any PTY is allocated
+// or session registered — not a confusing shell error.
+func TestSpawnInvalidCwdFailsBeforeRegistration(t *testing.T) {
+	m := NewManager()
+	_ = spawnForTest(t, m) // pre-existing session; List length must not change
+
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		cwd  string
+	}{
+		{"nonexistent path", "/nonexistent/path-xyz"},
+		{"path is a file", file},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := len(m.List())
+			_, err := m.Spawn(SpawnOpts{Cwd: tt.cwd, TaskID: 3})
+			if err == nil {
+				t.Fatalf("Spawn(Cwd=%q) = nil error, want failure", tt.cwd)
+			}
+			if !strings.Contains(err.Error(), tt.cwd) {
+				t.Errorf("error %q does not mention the path %q", err, tt.cwd)
+			}
+			if after := len(m.List()); after != before {
+				t.Errorf("List len changed %d -> %d: failed spawn must not register a session", before, after)
+			}
+		})
+	}
+}
+
+// TestListByTask: filtering by task, newest first; ListByTask(0) returns
+// only unscoped dev sessions.
+func TestListByTask(t *testing.T) {
+	m := NewManager()
+	a := spawnForTestOpts(t, m, SpawnOpts{TaskID: 7})
+	b := spawnForTestOpts(t, m, SpawnOpts{TaskID: 7})
+	_ = spawnForTestOpts(t, m, SpawnOpts{TaskID: 8})
+	d := spawnForTest(t, m) // unscoped
+
+	task7 := m.ListByTask(7)
+	if len(task7) != 2 {
+		t.Fatalf("ListByTask(7) len = %d, want 2", len(task7))
+	}
+	if task7[0].ID != b.Info().ID || task7[1].ID != a.Info().ID {
+		t.Errorf("ListByTask(7) order = [%s, %s], want newest first [%s, %s]",
+			task7[0].Label, task7[1].Label, b.Info().Label, a.Info().Label)
+	}
+	for _, info := range task7 {
+		if info.TaskID != 7 {
+			t.Errorf("ListByTask(7) returned session with TaskID=%d", info.TaskID)
+		}
+	}
+
+	dev := m.ListByTask(0)
+	if len(dev) != 1 || dev[0].ID != d.Info().ID {
+		t.Errorf("ListByTask(0) = %v, want exactly the unscoped session %s", dev, d.Info().ID)
+	}
+
+	if got := m.ListByTask(99); len(got) != 0 {
+		t.Errorf("ListByTask(99) len = %d, want 0", len(got))
 	}
 }
