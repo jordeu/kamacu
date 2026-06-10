@@ -29,6 +29,15 @@ const (
 	StatusExited  Status = "exited"
 )
 
+// Agent status tuning (D-47). Both windows are deliberate constants, not
+// config: the settle window absorbs claude's final-response paint around the
+// Stop hook (Pitfall 1), and the quiet threshold tolerates slow tool-output
+// gaps mid-turn (the idle prompt is verified byte-silent, so this is generous).
+const (
+	agentSettleWindow   = 2 * time.Second
+	agentQuietThreshold = 10 * time.Second
+)
+
 // Info is a JSON-ready snapshot of a session for the REST layer.
 type Info struct {
 	ID        string    `json:"id"`
@@ -38,6 +47,10 @@ type Info struct {
 	CreatedAt time.Time `json:"createdAt"`
 	TaskID    int64     `json:"taskId,omitempty"` // 0 omitted for dev sessions
 	Kind      Kind      `json:"kind,omitempty"`   // "bash" or "agent"
+
+	// Agent-only fields (kind == "agent").
+	AgentStatus   string `json:"agentStatus,omitempty"`   // working | idle | waiting | exited
+	StopRequested bool   `json:"stopRequested,omitempty"` // server-initiated Stop (exit 143 renders gray, not red)
 }
 
 // Session is a single shell running on its own PTY. The PTY's lifetime is
@@ -68,7 +81,14 @@ type Session struct {
 	exitCode     int
 	lastWinsize  pty.Winsize // last size applied to the PTY (jiggle detection)
 	setsizeCalls int         // recorded pty.Setsize invocations (test observability)
-	lastActivity time.Time   // agent: effective output/input activity for working-vs-idle
+
+	// Agent status state machine (D-47); all zero/unused for KindBash.
+	lastActivity  time.Time  // effective output/input activity for working-vs-idle
+	waiting       bool       // sticky until attach/stdin/Stop-hook/exit
+	hooksAlive    bool       // set by SessionStart hook POST; gates the BEL fallback
+	stopHookAt    time.Time  // last Stop hook — settle window anchor (Pitfall 1)
+	stopRequested bool       // Stop() was called server-side (exit-143-is-gray)
+	bel           belScanner // OSC-aware bare-BEL scanner, state across chunks
 
 	done      chan struct{} // closed after the exit watcher finishes
 	termGrace time.Duration // D-14 grace between SIGTERM and SIGKILL
@@ -87,6 +107,7 @@ func (s *Session) pump() {
 		if n > 0 {
 			chunk := append([]byte(nil), buf[:n]...)
 			s.mu.Lock()
+			s.noteAgentOutputLocked(chunk)
 			_, _ = s.ring.Write(chunk)
 			for id, q := range s.conns {
 				select {
@@ -154,6 +175,10 @@ func (s *Session) Info() Info {
 		TaskID:    s.taskID,
 		Kind:      kind,
 	}
+	if s.kind == KindAgent {
+		info.AgentStatus = s.agentStatusLocked()
+	}
+	info.StopRequested = s.stopRequested
 	if s.status == StatusExited {
 		code := s.exitCode
 		info.ExitCode = &code
@@ -165,6 +190,77 @@ func (s *Session) Info() Info {
 // (the Phase 5 --resume key). Empty for bash sessions.
 func (s *Session) ClaudeSessionID() string {
 	return s.claudeSessionID
+}
+
+// noteAgentOutputLocked applies an output chunk's agent-status effects:
+// the OSC-aware BEL fallback (hooks-dead mode only — Pitfall 2) and the
+// settle-gated activity timestamp. Output NEVER clears waiting, and never
+// counts as activity inside the post-Stop settle window (Pitfall 1).
+// Caller holds s.mu. No-op for bash sessions.
+func (s *Session) noteAgentOutputLocked(chunk []byte) {
+	if s.kind != KindAgent {
+		return
+	}
+	if bare := s.bel.scan(chunk); bare > 0 && !s.hooksAlive {
+		s.waiting = true // BEL fallback ONLY while hooks are not confirmed alive
+	}
+	if !s.waiting && time.Since(s.stopHookAt) > agentSettleWindow {
+		s.lastActivity = time.Now() // output -> working, post-settle, never from waiting
+	}
+}
+
+// SetWaiting marks the agent as needing input (Notification hook:
+// permission_prompt / elicitation_dialog). Sticky against output.
+func (s *Session) SetWaiting() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waiting = true
+}
+
+// SetIdle marks turn end (Stop hook): waiting clears, the status computes
+// idle IMMEDIATELY (activity zeroed), and the settle window opens so the
+// final response paint cannot flip idle back to working (Pitfall 1).
+func (s *Session) SetIdle() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waiting = false
+	s.stopHookAt = time.Now()
+	s.lastActivity = time.Time{}
+}
+
+// MarkHooksAlive records positive confirmation that the hook pipeline works
+// (SessionStart hook POST). From then on the BEL fallback is ignored.
+func (s *Session) MarkHooksAlive() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hooksAlive = true
+}
+
+// ClearWaitingOnAttach clears a waiting agent to idle when a client attaches
+// (D-45 — opening the task's agent tab acknowledges the prompt). Strict
+// no-op for bash sessions and non-waiting agents.
+func (s *Session) ClearWaitingOnAttach() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.kind == KindAgent && s.waiting {
+		s.waiting = false
+		s.lastActivity = time.Time{} // -> idle
+	}
+}
+
+// agentStatusLocked lazily computes the D-47 status. No ticker goroutine —
+// the 5s poll is the only consumer. Caller holds s.mu.
+func (s *Session) agentStatusLocked() string {
+	if s.status == StatusExited {
+		return "exited"
+	}
+	if s.waiting {
+		return "waiting"
+	}
+	if !s.lastActivity.IsZero() && time.Since(s.lastActivity) < agentQuietThreshold {
+		return "working"
+	}
+	return "idle"
 }
 
 // Attach subscribes a connection to the session's output. The ring-buffer
@@ -197,11 +293,17 @@ func (s *Session) Detach(connID string) {
 }
 
 // WriteInput writes raw input bytes to the PTY. Errors if the session exited.
+// For agents, stdin means the user typed/answered the prompt: waiting clears
+// and the session is working (D-47 state machine).
 func (s *Session) WriteInput(p []byte) error {
 	s.mu.Lock()
 	if s.status == StatusExited {
 		s.mu.Unlock()
 		return errors.New("session exited")
+	}
+	if s.kind == KindAgent {
+		s.waiting = false
+		s.lastActivity = time.Now()
 	}
 	s.mu.Unlock()
 	_, err := s.ptmx.Write(p)
@@ -284,6 +386,11 @@ func (s *Session) Stop() {
 	default:
 	}
 	s.stopOnce.Do(func() {
+		// Server-initiated stop: the resulting exit (143 after SIGTERM) was
+		// asked for — the UI renders it gray, never red (research OQ4).
+		s.mu.Lock()
+		s.stopRequested = true
+		s.mu.Unlock()
 		s.signalSession(syscall.SIGTERM)
 		select {
 		case <-s.done:
