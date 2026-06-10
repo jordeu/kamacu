@@ -38,7 +38,7 @@ Plans:
 - [x] 01-02-PLAN.md — REST API: projects CRUD with git repo-path validation, tasks CRUD, move endpoint with fractional ordering
 - [x] 01-03-PLAN.md — Frontend scaffold: Vite + Tailwind 4 + shadcn (zinc dark), UI-SPEC tokens, API contract layer, router shell
 - [x] 01-04-PLAN.md — Projects sidebar: collapsible list, add-project dialog with inline validation, rename, delete-with-confirm
-- [ ] 01-05-PLAN.md — Kanban board: dnd-kit four-column board, optimistic drag persistence, quick-add + New task dialog
+- [x] 01-05-PLAN.md — Kanban board: dnd-kit four-column board, optimistic drag persistence, quick-add + New task dialog
 - [ ] 01-06-PLAN.md — Task view: full-page route, tab-strip seam, markdown edit/preview, delete confirmation
 - [ ] 01-07-PLAN.md — Single binary: embed + SPA fallback, Makefile, restart-persistence smoke test, human verification
 

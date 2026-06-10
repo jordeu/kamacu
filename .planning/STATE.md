@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-06-10T07:04:52.791Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-06-10T07:06:09.983Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 1 (Foundation — Projects & Board) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P03 | 10 min | 3 tasks | 41 files |
 | Phase 01 P02 | 8 min | 3 tasks | 7 files |
 | Phase 01 P04 | 7 min | 2 tasks | 7 files |
+| Phase 01 P05 | 8 min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Sidebar collapse persisted via controlled SidebarProvider state + localStorage key kangent.sidebar (shadcn cookie write is never read back in an SPA)
 - [Phase 01]: Server validation errors mirrored inline sentence-cased under the path field; 409 duplicate message gets trailing period to match UI-SPEC copy
 - [Phase 01]: Deleting the currently-routed project refetches projects before navigating to / to avoid redirecting into the deleted project from stale cache
+- [Phase 01]: Board column derivation guard includes moveTask.isPending (not just active drag) to prevent post-drop snap-back flicker before the optimistic cache write lands
+- [Phase 01]: shadcn DialogContent width overrides need the responsive variant (sm:max-w-[560px]) since the component ships sm:max-w-sm
 
 ### Pending Todos
 
@@ -91,6 +94,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T07:04:52.788Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-06-10T07:06:09.979Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None

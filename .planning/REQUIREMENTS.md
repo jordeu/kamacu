@@ -14,7 +14,7 @@
 ### Tasks & Board
 
 - [x] **TASK-01**: User can create a task with title and markdown description in a project
-- [ ] **TASK-02**: User can view tasks on a kanban board with fixed columns: To Do / In Progress / In Review / Done
+- [x] **TASK-02**: User can view tasks on a kanban board with fixed columns: To Do / In Progress / In Review / Done
 - [x] **TASK-03**: User can drag tasks between columns and the new status persists
 - [x] **TASK-04**: User can edit a task's title/description and delete a task
 - [ ] **TASK-05**: User can click a task to open an expanded task view (description + session tabs)
@@ -96,7 +96,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROJ-02 | Phase 1 | Complete |
 | PROJ-03 | Phase 1 | Complete |
 | TASK-01 | Phase 1 | Complete |
-| TASK-02 | Phase 1 | Pending |
+| TASK-02 | Phase 1 | Complete |
 | TASK-03 | Phase 1 | Complete |
 | TASK-04 | Phase 1 | Complete |
 | TASK-05 | Phase 1 | Pending |
