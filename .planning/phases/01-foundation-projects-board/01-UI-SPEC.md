@@ -45,7 +45,7 @@ Declared values (all multiples of 4). Dense developer-tool density (D-02): defau
 | 2xl | 32px | Empty state vertical padding |
 | 3xl | 48px | Centered empty state container offset (no-projects state) |
 
-Exceptions: none. (No touch-target exception — desktop-first localhost tool; minimum interactive hit area is 28px height for dense rows, achieved via padding within the scale.)
+Exceptions: `md: 12px` sits off the 8-point progression and is declared as a justified exception — the locked dense developer-tool aesthetic (D-02) needs an intermediate step between 8px and 16px for card horizontal padding and sidebar/column internals; jumping straight to 16px reads airy, 8px reads cramped. It is still a multiple of 4 and the only off-progression token. (No touch-target exception — desktop-first localhost tool; minimum interactive hit area is 28px height for dense rows, achieved via padding within the scale.)
 
 ---
 
@@ -63,7 +63,7 @@ Exactly 4 sizes, 2 weights. Body is 14px (`text-sm` on `<body>` per RESEARCH.md 
 Rules:
 - Weights are 400 and 500 ONLY. No bold (600/700) anywhere in app chrome; rendered markdown `<strong>` may use the prose plugin's defaults.
 - Markdown prose: `prose prose-invert prose-sm max-w-none` (@tailwindcss/typography via `@plugin` in CSS) — D-10 preview mode.
-- Repo paths render in the mono stack at 13px equivalent (`text-[13px]` or `text-xs` mono is acceptable; prefer `text-sm font-mono` clipped with `truncate`).
+- Repo paths render in the mono stack at `text-sm font-mono` (14px, preferred — clipped with `truncate`) or `text-xs font-mono` (12px in dense meta contexts). No other mono sizes — both map onto the declared 4-size scale.
 
 ---
 
@@ -106,11 +106,11 @@ Tone: terse, lowercase-calm developer-tool voice. Sentence case everywhere (neve
 | Empty state — no description | Muted body text: `No description.` next to the `Edit` button in the Description tab |
 | Error — invalid repo path | Inline under the path field, destructive-colored 12px text: `Not a git repository: {path}` / `Path must be absolute` / `Not a directory: {path}` (mirror server messages verbatim). Field keeps its value for correction |
 | Error — duplicate project | `This repository is already added.` |
-| Error — board load failure | Centered in board area: `Couldn't load tasks.` + `Retry` button (refetch query) |
-| Error — save failure (task edit) | Inline near Save button: `Couldn't save. Try again.` — draft text is never cleared |
-| Destructive — delete task (D-11) | AlertDialog title: `Delete task?` Body: `"{title}" will be permanently deleted. This can't be undone.` Buttons: `Cancel` / `Delete` (destructive variant) |
+| Error — board load failure | Centered in board area: `Couldn't load tasks.` + `Retry loading` button (refetch query) |
+| Error — save failure (task edit) | Inline near the `Save description` button: `Couldn't save. Try again.` — draft text is never cleared |
+| Destructive — delete task (D-11) | AlertDialog title: `Delete task?` Body: `"{title}" will be permanently deleted. This can't be undone.` Buttons: `Cancel` / `Delete task` (destructive variant) |
 | Destructive — delete project | AlertDialog title: `Delete project?` Body: `"{name}" and all its tasks will be removed from Kangent. The repository on disk is untouched.` Buttons: `Cancel` / `Delete project` (destructive variant) |
-| Markdown editor toggle (D-10) | View mode: `Edit` button. Edit mode: `Save` (primary) / `Cancel` (ghost) |
+| Markdown editor toggle (D-10) | View mode: `Edit` button. Edit mode: `Save description` (primary) / `Cancel` (ghost) |
 | Back affordance (D-07) | Icon button (arrow-left) + tooltip `Back to board (Esc)` at top of task view |
 
 Column headers (fixed, TASK-02): `To Do` / `In Progress` / `In Review` / `Done` — rendered as 12px/500 uppercase muted labels with a muted task count (e.g. `TO DO 3`).
@@ -127,10 +127,10 @@ States the executor must implement; the auditor will check these.
 | Drag feedback | Dragged card renders in `DragOverlay` with subtle scale (1.02) + shadow; origin slot shows the card at 40% opacity; drop-target column gets the accent ring (Color §3) |
 | Drop persistence | Optimistic reorder, rollback on error (RESEARCH.md Pattern 7); no spinners during drag |
 | New task placement | Quick-add and dialog tasks land at top of To Do (D-09) |
-| Sidebar collapse (D-04) | shadcn Sidebar collapsible `icon` or `offcanvas` mode; toggle button in header; state persists in localStorage |
+| Sidebar collapse (D-04) | shadcn Sidebar collapsible `icon` or `offcanvas` mode; toggle button in header with tooltip `Toggle sidebar (Ctrl+B)` and `aria-label="Toggle sidebar"`; state persists in localStorage |
 | Tab strip (D-06) | shadcn Tabs rendered from a typed array — Phase 1 array is `[{id:"description", label:"Description"}]`; the single tab still renders as a visible tab strip (the seam must be visible, not hidden) |
 | Esc navigation (D-07) | Esc on task page navigates to `/projects/:pid` — suppressed when focus is in input/textarea/contenteditable or a dialog is open (RESEARCH.md Pitfall 9) |
-| Markdown editing (D-10) | Explicit Edit → textarea (mono NOT required; plain sans textarea, min-height 240px) → Save/Cancel; no autosave, no side-by-side preview |
+| Markdown editing (D-10) | Explicit Edit → textarea (mono NOT required; plain sans textarea, min-height 240px) → Save description/Cancel; no autosave, no side-by-side preview |
 | Hover | Cards and sidebar items: surface lightens one step (`#27272a`); cursor-grab only while pointer is over the card drag area |
 | Focus | All interactive elements get the accent focus-visible ring; keyboard drag via dnd-kit KeyboardSensor is wired |
 | Loading | Board initial load: 3 skeleton cards per column (shadcn skeleton); no full-page spinners |
@@ -157,6 +157,8 @@ No further shortcuts in Phase 1 — keep cheap and obvious per CONTEXT.
 | Task card | Secondary surface, sm/md padding, radius token, 1px zinc-800 border; title 14px/500 up to 2 lines (`line-clamp-2`); no description preview on cards (dense) |
 | Task view | Header row (back button + title + actions incl. delete in a dropdown-menu) → tab strip → tab content, max-width 860px for prose comfort, lg padding |
 | Dialogs | shadcn Dialog defaults, max-width 480px (New Task: 560px for the description textarea) |
+
+Focal point: on the board screen the `New task` button is the only high-contrast inverted element (zinc-50 on zinc-900) and is the visual anchor of the page header — everything else on the page is neutral surfaces and muted text, so the eye lands there first.
 
 ---
 
