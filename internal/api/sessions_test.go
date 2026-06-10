@@ -1,14 +1,19 @@
 package api
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"kangent/internal/session"
+	"kangent/internal/store"
+	"kangent/internal/worktree"
 )
 
 // newSessionServer starts an httptest server with only the session routes
@@ -41,6 +46,202 @@ func exitSession(t *testing.T, sess *session.Session) {
 	case <-sess.Done():
 	case <-time.After(10 * time.Second):
 		t.Fatal("session did not exit within 10s")
+	}
+}
+
+// newTaskSessionServer wires task routes AND session routes over one DB +
+// worktree service + manager, for the task-scoped session surface (TERM-04).
+func newTaskSessionServer(t *testing.T) (*httptest.Server, *session.Manager) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+	wt := worktree.NewService(t.TempDir())
+	mgr := session.NewManager()
+	mux := http.NewServeMux()
+	Routes(mux, db, wt)
+	SessionRoutes(mux, mgr, db)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		srv.Close()
+		for _, info := range mgr.List() {
+			if s, ok := mgr.Get(info.ID); ok {
+				s.Stop()
+			}
+		}
+		db.Close()
+	})
+	return srv, mgr
+}
+
+// worktreeTask creates a project on a healthy repo plus a provisioned task,
+// returning (taskID, worktreePath).
+func worktreeTask(t *testing.T, srv *httptest.Server, title string) (int64, string) {
+	t.Helper()
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	body := createTask(t, srv, pid, title)
+	id := taskID(t, body)
+	wtPath, _ := body["worktree_path"].(string)
+	if wtPath == "" {
+		t.Fatalf("task provisioning failed: %v", body)
+	}
+	return id, wtPath
+}
+
+func TestSessionCreateEmptyBodyDevRouteUnchanged(t *testing.T) {
+	srv, _ := newTaskSessionServer(t)
+
+	// The /terminal dev route POSTs with NO body — must keep working.
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("empty-body create: status = %d, want 201; body=%v", status, body)
+	}
+	if body["label"] != "bash #1" {
+		t.Errorf("label = %q, want %q (dev counter unchanged)", body["label"], "bash #1")
+	}
+	if _, present := body["taskId"]; present {
+		t.Errorf("taskId present on dev session JSON: %v — must be omitted", body["taskId"])
+	}
+}
+
+func TestSessionSpawnInTaskWorktree(t *testing.T) {
+	srv, mgr := newTaskSessionServer(t)
+	id, wtPath := worktreeTask(t, srv, "Tabbed Work")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%v", status, body)
+	}
+	if body["taskId"] != float64(id) {
+		t.Errorf("taskId = %v, want %d", body["taskId"], id)
+	}
+	if body["label"] != "Bash 1" {
+		t.Errorf("label = %q, want %q (per-task counter)", body["label"], "Bash 1")
+	}
+
+	// Behavioral cwd proof: the shell expands $PWD to the worktree path; the
+	// echoed command text only ever contains the literal "$PWD", so a marker
+	// match can't be satisfied by input echo.
+	sid, _ := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	if err := sess.WriteInput([]byte("echo \"mark:$PWD\"\n")); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	want := []byte("mark:" + wtPath)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if bytes.Contains(sess.Snapshot(), want) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("shell cwd is not the worktree: %q never appeared in output:\n%s", want, sess.Snapshot())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestSessionSpawnTaskValidation(t *testing.T) {
+	srv, _ := newTaskSessionServer(t)
+
+	// Unknown task → 404.
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": 424242})
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown task: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "task not found" {
+		t.Errorf("error = %q, want %q", body["error"], "task not found")
+	}
+
+	// Task with NULL worktree_path → 409 (D-30 server side).
+	pid := createProject(t, srv, gitRepo(t)) // unborn HEAD → no worktree
+	id := taskID(t, createTask(t, srv, pid, "Treeless"))
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
+	if status != http.StatusConflict {
+		t.Fatalf("no worktree: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "task has no worktree" {
+		t.Errorf("error = %q, want %q", body["error"], "task has no worktree")
+	}
+}
+
+func TestSessionListTaskFilter(t *testing.T) {
+	srv, mgr := newTaskSessionServer(t)
+	id, _ := worktreeTask(t, srv, "Filtered")
+
+	// One dev session + two task sessions.
+	if status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil); status != http.StatusCreated {
+		t.Fatalf("dev spawn: status = %d; body=%v", status, body)
+	}
+	var taskSessionIDs []string
+	for i := 0; i < 2; i++ {
+		status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
+		if status != http.StatusCreated {
+			t.Fatalf("task spawn %d: status = %d; body=%v", i, status, body)
+		}
+		taskSessionIDs = append(taskSessionIDs, body["id"].(string))
+	}
+
+	// Filtered list → exactly the task's sessions.
+	status, list := doJSONList(t, fmt.Sprintf("%s/api/sessions?task_id=%d", srv.URL, id))
+	if status != http.StatusOK {
+		t.Fatalf("filtered list: status = %d, want 200", status)
+	}
+	if len(list) != 2 {
+		t.Fatalf("filtered len = %d, want 2: %v", len(list), list)
+	}
+	for _, item := range list {
+		if item["taskId"] != float64(id) {
+			t.Errorf("filtered item taskId = %v, want %d", item["taskId"], id)
+		}
+	}
+
+	// Exited task sessions stay in the filtered list (exited-ghost handling
+	// is client-side per D-28).
+	sess, ok := mgr.Get(taskSessionIDs[0])
+	if !ok {
+		t.Fatalf("session %q not in manager", taskSessionIDs[0])
+	}
+	exitSession(t, sess)
+	_, list = doJSONList(t, fmt.Sprintf("%s/api/sessions?task_id=%d", srv.URL, id))
+	if len(list) != 2 {
+		t.Errorf("filtered len after exit = %d, want 2 (exited included)", len(list))
+	}
+
+	// Unfiltered list → everything.
+	status, list = doJSONList(t, srv.URL+"/api/sessions")
+	if status != http.StatusOK {
+		t.Fatalf("unfiltered list: status = %d, want 200", status)
+	}
+	if len(list) != 3 {
+		t.Errorf("unfiltered len = %d, want 3", len(list))
+	}
+
+	// Non-integer task_id → 400.
+	status, body := doJSON(t, "GET", srv.URL+"/api/sessions?task_id=abc", nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("bad task_id: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != "invalid task_id" {
+		t.Errorf("error = %q, want %q", body["error"], "invalid task_id")
+	}
+
+	// Empty filtered result is JSON [] — never null.
+	resp, err := http.Get(srv.URL + "/api/sessions?task_id=999999")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if got := strings.TrimSpace(string(raw)); got != "[]" {
+		t.Errorf("empty filtered body = %q, want %q", got, "[]")
 	}
 }
 
