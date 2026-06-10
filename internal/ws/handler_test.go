@@ -164,7 +164,11 @@ func TestResizeChangesPTYSize(t *testing.T) {
 //   - a LATER equal-size resize must NOT (debounce — resize storms must not
 //     re-trigger redraws).
 //
-// SIGWINCH delivery is observed via a bash trap that echoes a marker.
+// SIGWINCH delivery is observed via a WINCH trap inside a foreground
+// NON-interactive `bash -c` child: interactive bash reserves SIGWINCH for
+// its own line-editing machinery and does not run user WINCH traps promptly,
+// but a non-interactive foreground child (the recipient of the PTY's
+// SIGWINCH) runs them reliably (verified empirically).
 func TestResizeJiggleOnceOnEqualSize(t *testing.T) {
 	srv, mgr := newWSServer(t)
 	sess := spawn(t, mgr) // PTY starts at 80x24
@@ -173,19 +177,22 @@ func TestResizeJiggleOnceOnEqualSize(t *testing.T) {
 	conn := dial(t, ctx, srv, sess.Info().ID)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	// Phase 1: first resize frame, equal size → jiggle → SIGWINCH → trap fires.
-	sendFrame(t, ctx, conn, FrameData, "trap 'echo WIN-MARKER-'CH WINCH\n")
-	sendFrame(t, ctx, conn, FrameData, "read -t 10\n")
-	time.Sleep(300 * time.Millisecond) // let bash reach the read
+	// Phase 1: first resize frame, equal size → jiggle → SIGWINCH → trap
+	// fires. The READY marker is printed AFTER the trap is installed, so once
+	// it is observed the SIGWINCH cannot be lost no matter when it lands.
+	sendFrame(t, ctx, conn, FrameData, "bash -c 'trap \"echo WIN-MARKER-\"CH WINCH; echo READY-\"1\"; read -t 10; echo DONE-\"1\"'\n")
+	collectUntil(t, ctx, conn, "READY-1")
 	sendFrame(t, ctx, conn, FrameResize, `{"cols":80,"rows":24}`)
 	collectUntil(t, ctx, conn, "WIN-MARKER-CH")
+	// Wait for the child to pass its read before typing anything else —
+	// otherwise the next input line is swallowed as the read's input.
+	collectUntil(t, ctx, conn, "DONE-1")
 
 	// Phase 2: re-arm with a NEW trap message (so stragglers from phase 1
 	// can't confuse the assertion), then a SECOND equal-size resize. No
 	// SIGWINCH may arrive before the read times out.
-	sendFrame(t, ctx, conn, FrameData, "trap 'echo AGAIN-MARKER-'XX WINCH\n")
-	sendFrame(t, ctx, conn, FrameData, "read -t 2; echo PHASE2-'EN'D\n")
-	time.Sleep(300 * time.Millisecond)
+	sendFrame(t, ctx, conn, FrameData, "bash -c 'trap \"echo AGAIN-MARKER-\"XX WINCH; echo READY-\"2\"; read -t 2; echo PHASE2-\"EN\"D'\n")
+	collectUntil(t, ctx, conn, "READY-2")
 	sendFrame(t, ctx, conn, FrameResize, `{"cols":80,"rows":24}`)
 	out := collectUntil(t, ctx, conn, "PHASE2-END")
 	if strings.Contains(out, "AGAIN-MARKER-XX") {
