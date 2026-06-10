@@ -55,7 +55,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	connID := uuid.NewString()
 	q := sess.Attach(connID)
-	defer sess.Detach(connID) // Detach NEVER touches the PTY — that IS TERM-05
+	sess.ClearWaitingOnAttach() // D-45: opening the agent tab clears waiting; no-op for bash
+	defer sess.Detach(connID)   // Detach NEVER touches the PTY — that IS TERM-05
 
 	writeDone := make(chan struct{})
 	go h.writeLoop(ctx, conn, sess, q, writeDone)

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"kangent/internal/session"
 	"kangent/internal/worktree"
 )
 
@@ -43,8 +44,9 @@ var validStatuses = map[string]bool{
 }
 
 type taskHandlers struct {
-	db *sql.DB
-	wt *worktree.Service
+	db  *sql.DB
+	wt  *worktree.Service
+	mgr *session.Manager
 }
 
 const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error`
@@ -438,12 +440,18 @@ func renumberColumn(ctx context.Context, tx *sql.Tx, projectID int64, status str
 	return nil
 }
 
-// delete handles DELETE /api/tasks/{id} — hard delete (D-11).
+// delete handles DELETE /api/tasks/{id} — hard delete (D-11). The task's
+// running sessions (agent AND bash — D-42's one consistent rule) are stopped
+// BEFORE the row delete, mirroring the worktree cleanup gate's blocking
+// posture: a deleted task must never leave a headless claude holding its
+// worktree (research gap #1 / Pitfall 4). StopAllForTask blocks up to the 5s
+// SIGTERM grace — accepted single-user latency, same as DELETE /worktree.
 func (h *taskHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
+	h.mgr.StopAllForTask(id)
 	res, err := h.db.Exec(`DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

@@ -31,7 +31,7 @@ func newWorktreeServer(t *testing.T) (*httptest.Server, *testWorktreeEnv) {
 	wt := worktree.NewService(t.TempDir())
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	Routes(mux, db, wt)
+	Routes(mux, db, wt, mgr)
 	WorktreeRoutes(mux, db, wt, mgr)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {

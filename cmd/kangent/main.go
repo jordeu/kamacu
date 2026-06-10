@@ -87,8 +87,6 @@ func main() {
 	}
 	wtSvc := worktree.NewService(wtRoot)
 
-	mux := http.NewServeMux()
-	api.Routes(mux, db, wtSvc)
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
 		// Hooks curl localhost; addr is loopback-enforced above, and a
@@ -97,6 +95,9 @@ func main() {
 		Token:     hookToken,
 		ClaudeBin: *claudeBin,
 	})
+
+	mux := http.NewServeMux()
+	api.Routes(mux, db, wtSvc, mgr)
 	api.SessionRoutes(mux, mgr, db)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr)
 	api.HookRoutes(mux, mgr, hookToken)

@@ -36,7 +36,7 @@ func newAgentServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB) 
 		ClaudeBin: writeFakeClaude(t),
 	})
 	mux := http.NewServeMux()
-	Routes(mux, db, wt)
+	Routes(mux, db, wt, mgr)
 	SessionRoutes(mux, mgr, db)
 	AgentRoutes(mux, mgr, db)
 	srv := httptest.NewServer(mux)
