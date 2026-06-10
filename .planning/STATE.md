@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-06-10T10:21:07.176Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-06-10T10:31:09.539Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 12
-  completed_plans: 8
+  completed_plans: 9
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 2 (Terminal Engine) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P06 | 8 min | 2 tasks | 4 files |
 | Phase 01 P07 | 30 min | 3 tasks | 8 files |
 | Phase 02 P02 | 3 min | 2 tasks | 5 files |
+| Phase 02 P01 | 12 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,9 @@ Recent decisions affecting current work:
 - [Phase 02]: xterm deps pinned exactly (no caret) — addon set must move together with xterm 6
 - [Phase 02]: selectionForeground left unset in zincTheme to preserve cell colors under selection
 - [Phase 02]: Sessions list query uses refetchInterval 5000 to keep non-attached rows' status honest; no zustand this phase
+- [Phase 02]: Stop signals every process group in the shell's session via /proc scan, not just the leader pgroup — interactive bash job control puts background jobs in their own pgroups (TERM-06 would silently break otherwise)
+- [Phase 02]: Session exit notification is Done() channel + Info().ExitCode after done; WS layer sends the 'x' frame when Done fires
+- [Phase 02]: Manager.Remove returns ErrNotFound (added beyond interface contract) so the REST layer maps missing to 404 vs ErrStillRunning to 409
 
 ### Pending Todos
 
@@ -105,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T10:21:07.173Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-06-10T10:31:09.535Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None
