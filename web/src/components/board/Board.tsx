@@ -11,7 +11,8 @@ import {
   type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { useMoveTask } from "@/api/mutations";
 import { STATUSES, type Status, type Task } from "@/api/types";
 import { Column } from "./Column";
 import { TaskCardOverlay } from "./TaskCard";
@@ -35,7 +36,7 @@ interface BoardProps {
 }
 
 export function Board({ tasks, projectId }: BoardProps) {
-  void projectId; // used by Task 3 (quick-add wiring)
+  const moveTask = useMoveTask(projectId);
 
   const sensors = useSensors(
     // CRITICAL: 5px activation distance lets plain clicks navigate to the task
@@ -47,6 +48,11 @@ export function Board({ tasks, projectId }: BoardProps) {
   );
 
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  // Drag-origin slot, recorded at drag start for same-position no-op detection.
+  const [origin, setOrigin] = useState<{
+    status: Status;
+    index: number;
+  } | null>(null);
   // Local mirror of board order — dnd-kit needs synchronous reorders.
   const [columns, setColumns] = useState<Record<Status, Task[]>>(() =>
     groupTasks(tasks),
@@ -54,27 +60,114 @@ export function Board({ tasks, projectId }: BoardProps) {
 
   // Single derivation path: columns derive ONLY from query data, and the
   // derivation is FROZEN while a drag is active so a query invalidation
-  // mid-drag never clobbers the local order (Pitfall 6).
+  // mid-drag never clobbers the local order (Pitfall 6). The optimistic cache
+  // write in useMoveTask.onMutate keeps the post-drop order stable until
+  // onSettled invalidation brings server truth; on error the mutation's
+  // snapshot rollback restores the cache and the derived columns revert.
   useEffect(() => {
-    if (activeTask === null) {
+    if (activeTask === null && !moveTask.isPending) {
       setColumns(groupTasks(tasks));
     }
-  }, [tasks, activeTask]);
+  }, [tasks, activeTask, moveTask.isPending]);
+
+  function findColumnOf(taskId: number): Status | null {
+    for (const status of STATUSES) {
+      if (columns[status].some((t) => t.id === taskId)) return status;
+    }
+    return null;
+  }
+
+  /** Resolve an `over` id to a target column: `column:*` ids directly, task ids via their current local column. */
+  function resolveTargetColumn(overId: string | number): Status | null {
+    if (typeof overId === "string" && overId.startsWith("column:")) {
+      return overId.slice("column:".length) as Status;
+    }
+    return findColumnOf(Number(overId));
+  }
 
   function handleDragStart({ active }: DragStartEvent) {
-    const task = tasks.find((t) => t.id === Number(active.id)) ?? null;
-    setActiveTask(task);
+    const activeId = Number(active.id);
+    const status = findColumnOf(activeId);
+    if (status === null) return;
+    const index = columns[status].findIndex((t) => t.id === activeId);
+    setActiveTask(columns[status][index] ?? null);
+    setOrigin({ status, index });
   }
 
-  function handleDragOver(event: DragOverEvent) {
-    // Body completed in Task 2 (cross-column local preview).
-    void event;
+  // LOCAL state only — no network. Gives live cross-column preview.
+  function handleDragOver({ active, over }: DragOverEvent) {
+    if (!over) return;
+    const activeId = Number(active.id);
+    const from = findColumnOf(activeId);
+    const to = resolveTargetColumn(over.id);
+    if (from === null || to === null || from === to) return;
+
+    setColumns((prev) => {
+      const fromTasks = [...prev[from]];
+      const index = fromTasks.findIndex((t) => t.id === activeId);
+      if (index === -1) return prev;
+      const [moved] = fromTasks.splice(index, 1);
+
+      const toTasks = [...prev[to]];
+      // Insert at the hovered card's index, or at the end for bare-column hover.
+      let insertAt = toTasks.length;
+      if (!(typeof over.id === "string" && over.id.startsWith("column:"))) {
+        const overIndex = toTasks.findIndex((t) => t.id === Number(over.id));
+        if (overIndex !== -1) insertAt = overIndex;
+      }
+      toTasks.splice(insertAt, 0, { ...moved, status: to });
+
+      return { ...prev, [from]: fromTasks, [to]: toTasks };
+    });
   }
 
-  function handleDragEnd(event: DragEndEvent) {
-    // Body completed in Task 2 (afterId computation + move mutation).
-    void event;
-    setActiveTask(null);
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    const activeId = Number(active.id);
+
+    const finish = () => {
+      // Clearing activeTask unfreezes derivation.
+      setActiveTask(null);
+      setOrigin(null);
+    };
+
+    // Dropped outside any droppable — derivation snaps local state back to
+    // query truth.
+    if (!over) {
+      finish();
+      return;
+    }
+
+    const status = findColumnOf(activeId);
+    if (status === null) {
+      finish();
+      return;
+    }
+
+    // Final within-column index: cross-column placement already happened in
+    // handleDragOver; same-column reorders resolve here via arrayMove.
+    const columnTasks = columns[status];
+    const oldIndex = columnTasks.findIndex((t) => t.id === activeId);
+    let newIndex = oldIndex;
+    if (!(typeof over.id === "string" && over.id.startsWith("column:"))) {
+      const overIndex = columnTasks.findIndex((t) => t.id === Number(over.id));
+      if (overIndex !== -1) newIndex = overIndex;
+    }
+    const finalTasks = arrayMove(columnTasks, oldIndex, newIndex);
+    const finalIndex = finalTasks.findIndex((t) => t.id === activeId);
+    setColumns((prev) => ({ ...prev, [status]: finalTasks }));
+
+    // Same-position no-op (same column AND same index as drag origin) — skip
+    // the mutation entirely.
+    if (origin !== null && origin.status === status && origin.index === finalIndex) {
+      finish();
+      return;
+    }
+
+    // afterId = card directly ABOVE the final index; null at the top. Never
+    // the moving task itself (it sits at finalIndex, not finalIndex - 1).
+    const afterId = finalIndex === 0 ? null : finalTasks[finalIndex - 1].id;
+    moveTask.mutate({ id: activeId, status, afterId });
+    finish();
   }
 
   return (
