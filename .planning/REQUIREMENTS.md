@@ -8,7 +8,7 @@
 ### Projects
 
 - [x] **PROJ-01**: User can create a project by pointing at a local directory containing a git repo (path validated at creation)
-- [ ] **PROJ-02**: User can see all projects in a left sidebar and switch the board by clicking one
+- [x] **PROJ-02**: User can see all projects in a left sidebar and switch the board by clicking one
 - [x] **PROJ-03**: User can edit a project's name and delete a project (tasks removed from DB; repo on disk untouched)
 
 ### Tasks & Board
@@ -93,7 +93,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PROJ-01 | Phase 1 | Complete |
-| PROJ-02 | Phase 1 | Pending |
+| PROJ-02 | Phase 1 | Complete |
 | PROJ-03 | Phase 1 | Complete |
 | TASK-01 | Phase 1 | Complete |
 | TASK-02 | Phase 1 | Pending |
