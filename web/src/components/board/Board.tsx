@@ -14,6 +14,7 @@ import {
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useMoveTask } from "@/api/mutations";
 import { STATUSES, type Status, type Task } from "@/api/types";
+import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 import { Column } from "./Column";
 import { TaskCardOverlay } from "./TaskCard";
 
@@ -49,6 +50,9 @@ export function Board({ tasks, projectId }: BoardProps) {
   );
 
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  // D-31: a task that just landed in Done with a live worktree gets the
+  // cleanup offer — set from the move's onSuccess, AFTER the move persists.
+  const [cleanupTask, setCleanupTask] = useState<Task | null>(null);
   // Drag-origin slot, recorded at drag start for same-position no-op detection.
   const [origin, setOrigin] = useState<{
     status: Status;
@@ -167,7 +171,19 @@ export function Board({ tasks, projectId }: BoardProps) {
     // afterId = card directly ABOVE the final index; null at the top. Never
     // the moving task itself (it sits at finalIndex, not finalIndex - 1).
     const afterId = finalIndex === 0 ? null : finalTasks[finalIndex - 1].id;
-    moveTask.mutate({ id: activeId, status, afterId });
+    moveTask.mutate(
+      { id: activeId, status, afterId },
+      {
+        // Call-site callback (the shared hook stays untouched): the cleanup
+        // offer fires AFTER the move persists — the server response Task
+        // carries the worktree fields, so no stale-cache predicate. It never
+        // blocks or rolls back the move; declining keeps the worktree and
+        // re-entering Done prompts again (no suppression state).
+        onSuccess: (t) => {
+          if (status === "done" && t.worktree_path) setCleanupTask(t);
+        },
+      },
+    );
     finish();
   }
 
@@ -192,6 +208,18 @@ export function Board({ tasks, projectId }: BoardProps) {
       <DragOverlay>
         {activeTask ? <TaskCardOverlay task={activeTask} /> : null}
       </DragOverlay>
+      {cleanupTask && (
+        <CleanupWorktreeDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setCleanupTask(null);
+          }}
+          taskId={cleanupTask.id}
+          taskTitle={cleanupTask.title}
+          projectId={projectId}
+          trigger="done"
+        />
+      )}
     </DndContext>
   );
 }

@@ -18,6 +18,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -25,6 +26,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 import { DeleteTaskDialog } from "@/components/task/DeleteTaskDialog";
 import { DescriptionTab } from "@/components/task/DescriptionTab";
 import { TaskTabs, type TabDef } from "@/components/task/TaskTabs";
@@ -67,6 +69,7 @@ export default function TaskPage() {
 
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const cancelTitleEditRef = useRef(false);
 
   // Every session currently running for this task joins keepExitedIds.
@@ -364,6 +367,16 @@ export default function TaskPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {/* D-31 menu path: neutral item — it opens a gated dialog;
+                  `Delete task` stays the menu's only red item. */}
+              {task.worktree_path && (
+                <>
+                  <DropdownMenuItem onSelect={() => setCleanupOpen(true)}>
+                    Clean up worktree
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() => setDeleteOpen(true)}
@@ -386,6 +399,15 @@ export default function TaskPage() {
         value={activeTab}
         onValueChange={setActiveTab}
         trailing={trailing}
+      />
+
+      <CleanupWorktreeDialog
+        open={cleanupOpen}
+        onOpenChange={setCleanupOpen}
+        taskId={task.id}
+        taskTitle={task.title}
+        projectId={projectId}
+        trigger="menu"
       />
 
       <DeleteTaskDialog
