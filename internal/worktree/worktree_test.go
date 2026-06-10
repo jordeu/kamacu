@@ -271,6 +271,208 @@ func TestCreatePathCollision(t *testing.T) {
 	}
 }
 
+// makeWorktree creates repo's worktree on branch via the service and returns
+// its path. Fails the test on any error.
+func makeWorktree(t *testing.T, svc *Service, repo, slug string, id int64) (path, branch string) {
+	t.Helper()
+	ctx := context.Background()
+	branch = "task/" + slug + "-" + "1"
+	path = svc.PathFor(repo, slug, id)
+	base, err := svc.ResolveBase(ctx, repo)
+	if err != nil {
+		t.Fatalf("ResolveBase: %v", err)
+	}
+	if err := svc.Create(ctx, repo, branch, path, base); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	return path, branch
+}
+
+// assertBranchKept asserts the D-34 invariant: the branch survives Remove.
+func assertBranchKept(t *testing.T, repo, branch string) {
+	t.Helper()
+	if strings.TrimSpace(gitCmd(t, repo, "branch", "--list", branch)) == "" {
+		t.Errorf("branch %q was deleted — D-34 violated (Remove must never touch branches)", branch)
+	}
+}
+
+// assertNotListed asserts the worktree bookkeeping no longer mentions path
+// (prune ran after removal).
+func assertNotListed(t *testing.T, repo, path string) {
+	t.Helper()
+	if list := gitCmd(t, repo, "worktree", "list", "--porcelain"); strings.Contains(list, "worktree "+path) {
+		t.Errorf("worktree list still mentions %q after Remove:\n%s", path, list)
+	}
+}
+
+// addSubmodule wires sub into src as a file:// submodule and commits.
+// protocol.file.allow is set in src's LOCAL config (shared by its worktrees)
+// so the package's own `submodule update --init` is permitted too.
+func addSubmodule(t *testing.T, src, sub string) {
+	t.Helper()
+	gitCmd(t, src, "config", "protocol.file.allow", "always")
+	gitCmd(t, src, "-c", "protocol.file.allow=always", "submodule", "add", "file://"+sub, "sub")
+	gitCmd(t, src, "commit", "-m", "add submodule")
+}
+
+func TestDirtyCount(t *testing.T) {
+	ctx := context.Background()
+	repo := makeRepo(t)
+	svc := NewService(t.TempDir())
+	path, _ := makeWorktree(t, svc, repo, "dirty", 1)
+
+	n, err := svc.DirtyCount(ctx, path)
+	if err != nil {
+		t.Fatalf("DirtyCount clean: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("DirtyCount clean = %d, want 0", n)
+	}
+
+	// 1 modified tracked + 1 staged new + 2 untracked files in a dir = 4.
+	// Untracked MUST be counted per-file (-uall): plain `worktree remove`
+	// refuses on untracked-only dirt (Pitfall 2), so the count must see it.
+	if err := os.WriteFile(filepath.Join(path, "file.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "staged.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, path, "add", "staged.txt")
+	if err := os.MkdirAll(filepath.Join(path, "newdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(path, "newdir", f), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err = svc.DirtyCount(ctx, path)
+	if err != nil {
+		t.Fatalf("DirtyCount dirty: %v", err)
+	}
+	if n != 4 {
+		t.Errorf("DirtyCount = %d, want 4 (modified + staged + 2 untracked files)", n)
+	}
+}
+
+func TestRemoveCleanKeepsBranch(t *testing.T) {
+	ctx := context.Background()
+	repo := makeRepo(t)
+	svc := NewService(t.TempDir())
+	path, branch := makeWorktree(t, svc, repo, "clean", 1)
+
+	if err := svc.Remove(ctx, repo, path, false); err != nil {
+		t.Fatalf("Remove clean force=false: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("worktree dir still exists after Remove: %v", err)
+	}
+	assertBranchKept(t, repo, branch)
+	assertNotListed(t, repo, path)
+}
+
+func TestRemoveUntrackedDirtRequiresForce(t *testing.T) {
+	ctx := context.Background()
+	repo := makeRepo(t)
+	svc := NewService(t.TempDir())
+	path, branch := makeWorktree(t, svc, repo, "untracked", 1)
+	// Untracked-only dirt — verified to refuse plain remove (Pitfall 2).
+	if err := os.WriteFile(filepath.Join(path, "scratch.txt"), []byte("wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Remove(ctx, repo, path, false); err == nil {
+		t.Fatal("Remove with untracked dirt and force=false succeeded, want refusal")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("worktree dir vanished after refused Remove: %v", err)
+	}
+
+	if err := svc.Remove(ctx, repo, path, true); err != nil {
+		t.Fatalf("Remove force=true: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("worktree dir still exists after forced Remove: %v", err)
+	}
+	assertBranchKept(t, repo, branch)
+	assertNotListed(t, repo, path)
+}
+
+func TestRemoveMissingPathIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repo := makeRepo(t)
+	svc := NewService(t.TempDir())
+	never := filepath.Join(t.TempDir(), "never-a-worktree")
+
+	if err := svc.Remove(ctx, repo, never, false); err != nil {
+		t.Errorf("Remove on unregistered absent path = %v, want nil (idempotent)", err)
+	}
+}
+
+func TestRemoveCleanWithInitializedSubmodules(t *testing.T) {
+	ctx := context.Background()
+	sub := makeRepo(t)
+	src := makeRepo(t)
+	addSubmodule(t, src, sub)
+	svc := NewService(t.TempDir())
+	path, branch := makeWorktree(t, svc, src, "withsub", 1)
+	if err := svc.EnsureSubmodules(ctx, path); err != nil {
+		t.Fatalf("EnsureSubmodules: %v", err)
+	}
+	// Sanity: clean per our own check — the fallback must therefore be safe.
+	if n, err := svc.DirtyCount(ctx, path); err != nil || n != 0 {
+		t.Fatalf("DirtyCount = %d, %v; want 0, nil", n, err)
+	}
+
+	// Verified: plain remove refuses worktrees with initialized submodules
+	// even when clean (Pitfall 3) — Remove must fall back to --force.
+	if err := svc.Remove(ctx, src, path, false); err != nil {
+		t.Fatalf("Remove clean-with-submodules force=false: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("worktree dir still exists after Remove: %v", err)
+	}
+	assertBranchKept(t, src, branch)
+	assertNotListed(t, src, path)
+}
+
+func TestEnsureSubmodulesNoGitmodules(t *testing.T) {
+	ctx := context.Background()
+	repo := makeRepo(t)
+	svc := NewService(t.TempDir())
+	path, _ := makeWorktree(t, svc, repo, "plain", 1)
+
+	if err := svc.EnsureSubmodules(ctx, path); err != nil {
+		t.Errorf("EnsureSubmodules without .gitmodules = %v, want nil", err)
+	}
+}
+
+func TestEnsureSubmodulesInitializes(t *testing.T) {
+	ctx := context.Background()
+	sub := makeRepo(t)
+	src := makeRepo(t)
+	addSubmodule(t, src, sub)
+	svc := NewService(t.TempDir())
+	path, _ := makeWorktree(t, svc, src, "sub", 1)
+
+	// worktree add does not populate submodules (verified): '-' prefix.
+	before := gitCmd(t, path, "submodule", "status")
+	if !strings.Contains(before, "-") {
+		t.Fatalf("expected uninitialized submodule before EnsureSubmodules:\n%s", before)
+	}
+
+	if err := svc.EnsureSubmodules(ctx, path); err != nil {
+		t.Fatalf("EnsureSubmodules: %v", err)
+	}
+	for _, line := range strings.Split(gitCmd(t, path, "submodule", "status"), "\n") {
+		if strings.HasPrefix(line, "-") {
+			t.Errorf("submodule still uninitialized after EnsureSubmodules: %s", line)
+		}
+	}
+}
+
 func TestCreateRawShaBase(t *testing.T) {
 	ctx := context.Background()
 	repo := makeRepo(t)
