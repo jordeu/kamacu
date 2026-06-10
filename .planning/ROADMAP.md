@@ -52,8 +52,15 @@ Plans:
   3. User can close the browser tab while a command runs; the session keeps running server-side, and reopening reattaches with recent output replayed and a clean redraw
   4. User can stop a session from the UI and the entire process tree terminates — zero orphaned subprocesses
   5. WebSocket endpoints reject connections with wrong Origin/Host and require the per-instance token, so other websites cannot reach the shell
-**Plans**: TBD
+**Plans**: 5 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 02-01-PLAN.md — Session engine: internal/session manager, PTY spawn/pump/ring, attach replay, process-group Stop (zero orphans)
+- [ ] 02-02-PLAN.md — Frontend foundation: xterm 6 deps, Vite WS proxy fix, zinc xterm theme, typed session REST hooks
+- [ ] 02-03-PLAN.md — WS bridge + REST + security: binary protocol, session endpoints, loopback/Host/Origin enforcement
+- [ ] 02-04-PLAN.md — TerminalPane + socket hook: xterm config, resize/clipboard, reconnect backoff, exited/connection banners
+- [ ] 02-05-PLAN.md — /terminal dev route, end-to-end Go integration test, human verification of all five success criteria
 
 ### Phase 3: Worktree Isolation & Bash Tabs
 **Goal**: Every task gets its own isolated worktree and branch, with bash terminals working inside it and safe, confirmed cleanup
@@ -98,7 +105,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — Projects & Board | 0/7 | Complete    | 2026-06-10 |
-| 2. Terminal Engine | 0/TBD | Not started | - |
+| 2. Terminal Engine | 0/5 | Planned | - |
 | 3. Worktree Isolation & Bash Tabs | 0/TBD | Not started | - |
 | 4. Claude Code Agent Sessions | 0/TBD | Not started | - |
 | 5. Recovery & Review | 0/TBD | Not started | - |
