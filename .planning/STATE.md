@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-06-10T19:11:41.758Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-06-10T19:22:26.335Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 23
-  completed_plans: 21
+  completed_plans: 22
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 4 (Claude Code Agent Sessions) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -73,6 +73,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04-claude-code-agent-sessions P03 | 4 min | 2 tasks | 4 files |
 | Phase 04 P01 | 11 min | 2 tasks | 5 files |
 | Phase 04 P02 | 18 min | 3 tasks | 16 files |
+| Phase 04-claude-code-agent-sessions P04 | 6 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -144,6 +145,9 @@ Recent decisions affecting current work:
 - [Phase 04]: Hook receiver rejects an empty configured token outright so the endpoint can never run open; token compared constant-time and checked before any session work
 - [Phase 04]: Exited-session hook POSTs are ignored with 200 before body decode — late async curls are benign even when malformed
 - [Phase 04]: api and ws test packages carry their own fake-claude stub writers via AgentConfig.ClaudeBin — the real claude binary is never spawned in tests
+- [Phase 04]: showExitedClose gates Close on both the exited and not-found banners — a permanent Agent tab never offers Close on any banner
+- [Phase 04]: TerminalPane onConnect fires in the existing conn-state effect via a ref so the D-45 optimistic clear re-fires on every reconnect, mirroring the server's per-attach clear
+- [Phase 04]: Agent tab is the universal dangling-tab fallback (Pitfall-7 effect and removeTab) since it can never disappear
 
 ### Pending Todos
 
@@ -156,6 +160,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T19:11:41.755Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-06-10T19:22:26.329Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
