@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -11,14 +13,27 @@ import (
 	"strings"
 
 	"kangent/internal/api"
+	"kangent/internal/session"
 	"kangent/internal/store"
+	"kangent/internal/ws"
 	"kangent/web"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7333", "listen address (localhost-only by design)")
 	dbFlag := flag.String("db", "~/.kangent/kangent.db", "path to SQLite database file")
+	var devOrigins []string
+	flag.Func("dev-origin", "additional allowed Origin host:port for the Vite dev server (repeatable, e.g. localhost:5173)", func(v string) error {
+		devOrigins = append(devOrigins, v)
+		return nil
+	})
 	flag.Parse()
+
+	// D-21: localhost-only is enforced, not aspirational.
+	if err := ensureLoopback(*addr); err != nil {
+		slog.Error("refusing to start", "error", err)
+		os.Exit(1)
+	}
 
 	dbPath, err := expandHome(*dbFlag)
 	if err != nil {
@@ -42,8 +57,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Origin allowlist (D-20): exact loopback origins with the serving port,
+	// plus any --dev-origin entries (dev runs need the Vite server's origin:
+	// go run ./cmd/kangent --dev-origin localhost:5173 --dev-origin 127.0.0.1:5173).
+	_, port, _ := net.SplitHostPort(*addr)
+	originPatterns := append([]string{"127.0.0.1:" + port, "localhost:" + port}, devOrigins...)
+
 	mux := http.NewServeMux()
 	api.Routes(mux, db)
+	mgr := session.NewManager()
+	api.SessionRoutes(mux, mgr)
+	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -72,21 +96,51 @@ func main() {
 	})
 
 	slog.Info("kangent listening", "url", "http://"+*addr)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	if err := http.ListenAndServe(*addr, hostCheck(mux)); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
 // ensureLoopback rejects any listen address that is not loopback (D-21).
+// Empty host (":7333" = all interfaces) is refused, and non-"localhost"
+// hostnames are refused outright — never resolved — so /etc/hosts games
+// cannot widen the bind.
 func ensureLoopback(addr string) error {
-	return nil // stub
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid --addr %q: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("--addr %q is not a loopback address; kangent serves a shell and must stay local", addr)
+	}
+	return nil
 }
 
-// hostCheck is middleware rejecting non-loopback Host headers (DNS-rebinding
-// defense).
+// hostCheck is middleware wrapping the entire mux, rejecting non-loopback
+// Host headers (DNS-rebinding defense). Hostname-only and PORT-AGNOSTIC by
+// design: rebinding attacks present an attacker hostname, never a loopback
+// name, and port-agnosticism keeps the Vite dev proxy (which forwards
+// Host: 127.0.0.1:5173) working.
 func hostCheck(next http.Handler) http.Handler {
-	return next // stub
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h // strips the port, including the [::1]:7333 bracket form
+		}
+		switch host {
+		case "localhost", "127.0.0.1", "::1", "[::1]":
+			next.ServeHTTP(w, r)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"forbidden host"}`))
+		}
+	})
 }
 
 // expandHome resolves a leading "~" or "~/" to the current user's home directory.
