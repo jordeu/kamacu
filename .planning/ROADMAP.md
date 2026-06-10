@@ -30,8 +30,17 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can create a task with title and markdown description, edit it, delete it, and open its expanded task view
   4. User can drag tasks between the four fixed columns (To Do / In Progress / In Review / Done) and the new status persists
   5. All projects and tasks survive a server restart (SQLite persistence)
-**Plans**: TBD
+**Plans**: 7 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 01-01-PLAN.md — Backend foundation: Go module, SQLite store (pragma discipline), goose migrations, server entrypoint
+- [ ] 01-02-PLAN.md — REST API: projects CRUD with git repo-path validation, tasks CRUD, move endpoint with fractional ordering
+- [ ] 01-03-PLAN.md — Frontend scaffold: Vite + Tailwind 4 + shadcn (zinc dark), UI-SPEC tokens, API contract layer, router shell
+- [ ] 01-04-PLAN.md — Projects sidebar: collapsible list, add-project dialog with inline validation, rename, delete-with-confirm
+- [ ] 01-05-PLAN.md — Kanban board: dnd-kit four-column board, optimistic drag persistence, quick-add + New task dialog
+- [ ] 01-06-PLAN.md — Task view: full-page route, tab-strip seam, markdown edit/preview, delete confirmation
+- [ ] 01-07-PLAN.md — Single binary: embed + SPA fallback, Makefile, restart-persistence smoke test, human verification
 
 ### Phase 2: Terminal Engine
 **Goal**: User can run a real shell in the browser whose lifetime belongs to the server, not the browser tab
@@ -88,7 +97,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Projects & Board | 0/TBD | Not started | - |
+| 1. Foundation — Projects & Board | 0/7 | Not started | - |
 | 2. Terminal Engine | 0/TBD | Not started | - |
 | 3. Worktree Isolation & Bash Tabs | 0/TBD | Not started | - |
 | 4. Claude Code Agent Sessions | 0/TBD | Not started | - |
