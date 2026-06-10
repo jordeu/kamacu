@@ -71,8 +71,16 @@ Plans:
   2. User can open one or more bash session tabs in the task view, each with cwd set to the task's worktree
   3. Marking a task Done offers to delete its worktree while keeping the branch; nothing is removed without explicit confirmation
   4. Cleanup warns and requires confirmation when the worktree has uncommitted changes, and refuses entirely while sessions are running in it
-**Plans**: TBD
+**Plans**: 6 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 03-01-PLAN.md — internal/worktree git service: slug, base resolution, leak-safe create, dirty count, branch-keeping remove
+- [ ] 03-02-PLAN.md — Session manager task scoping: SpawnOpts{Cwd, TaskID}, per-task Bash N labels, StopAllForTask
+- [ ] 03-03-PLAN.md — Backend REST: migration 00002, task-create provisioning hook (D-25), worktree endpoints with cleanup gates, task-scoped sessions
+- [ ] 03-04-PLAN.md — Frontend: worktree API hooks, branch meta line with Retry/Create states, bash session tabs in TaskTabs
+- [ ] 03-05-PLAN.md — Cleanup dialog family (4 variants, type-to-confirm) + Done-transition and menu triggers
+- [ ] 03-06-PLAN.md — End-to-end lifecycle integration test, build gates, human verification
 
 ### Phase 4: Claude Code Agent Sessions
 **Goal**: User can start, drive, leave, and reattach to a real Claude Code session per task, and see at a glance which agents need attention
@@ -106,7 +114,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Foundation — Projects & Board | 0/7 | Complete    | 2026-06-10 |
 | 2. Terminal Engine | 0/5 | Complete    | 2026-06-10 |
-| 3. Worktree Isolation & Bash Tabs | 0/TBD | Not started | - |
+| 3. Worktree Isolation & Bash Tabs | 0/6 | Planned | - |
 | 4. Claude Code Agent Sessions | 0/TBD | Not started | - |
 | 5. Recovery & Review | 0/TBD | Not started | - |
 
