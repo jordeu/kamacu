@@ -1,7 +1,8 @@
 ---
 phase: 2
 slug: terminal-engine
-status: draft
+status: approved
+reviewed_at: 2026-06-10
 shadcn_initialized: true
 preset: radix-nova / zinc dark (components.json present — initialized in Phase 1)
 created: 2026-06-10
@@ -134,7 +135,7 @@ Tone inherited: terse, sentence case, no exclamation marks, no "please".
 | Exited banner (D-15) | `Session exited (code {N})` 14px/500 + actions `New terminal` (small primary) / `Close` (ghost). Signal deaths render whatever code the server reports — no special-casing copy |
 | Connecting (initial attach) | Centered muted body in pane: `Connecting…` — only shown if attach takes >150ms (no flash) |
 | Reconnecting (transient WS drop) | Banner: `Connection lost. Reconnecting…` (muted body). No actions — automatic |
-| Connection lost (retries exhausted) | Banner: `Couldn't reconnect.` + body `The session may still be running on the server.` + `Retry` button (ghost) |
+| Connection lost (retries exhausted) | Banner: `Couldn't reconnect.` + body `The session may still be running on the server.` + `Retry connection` button (ghost) |
 | Session not found (attach to dead/unknown id) | Banner: `Session not found.` + actions `New terminal` / `Close` |
 | Stop action | Button: `Stop`. During SIGTERM grace window (~5s, D-14): disabled, label `Stopping…`. No confirmation dialog — D-14 specifies one button; this is a dev surface killing a shell, not data |
 | New terminal failure | Inline near the button, destructive 12px text: `Couldn't start a session. Try again.` |
@@ -159,7 +160,7 @@ States the executor must implement; the auditor will check these.
 | Focus | Clicking anywhere in the terminal viewport focuses xterm; container shows the accent focus-visible ring only for keyboard focus (`:focus-visible`), not pointer clicks |
 | Stop (D-14) | Click `Stop` → button becomes disabled `Stopping…` → on exit notification the pane shows the exited banner and the rail row flips to `exited (code N)`. If SIGKILL fallback fires, same UX — the grace window is invisible apart from the delay |
 | Exited session (D-15) | Output frozen; banner docked at the TOP of the terminal viewport (zinc-900 strip, 1px zinc-800 bottom border, sm/md padding) so scrollback below stays fully scrollable and copyable. Banner intercepts pointer events; the rest of the pane does not. `Close` removes the session from the rail and shows the appropriate empty state |
-| Auto-reconnect (discretion — resolved) | On transient WS close: auto-retry with exponential backoff 0.5s → 1s → 2s → 4s → 8s (5 attempts), reconnecting banner visible, terminal input disabled but scrollback usable. Success: banner clears, replay + resize nudge runs. Exhausted: lost banner with `Retry` (restarts the cycle). Server-reported session-gone (close code) skips retries → `Session not found.` banner |
+| Auto-reconnect (discretion — resolved) | On transient WS close: auto-retry with exponential backoff 0.5s → 1s → 2s → 4s → 8s (5 attempts), reconnecting banner visible, terminal input disabled but scrollback usable. Success: banner clears, replay + resize nudge runs. Exhausted: lost banner with `Retry connection` (restarts the cycle). Server-reported session-gone (close code) skips retries → `Session not found.` banner |
 | Loading | Rail initial load: 2 skeleton rows (existing shadcn skeleton). Pane: `Connecting…` rule above. No full-page spinners |
 | No idle timeout (D-16) | No idle indicators, no "session will expire" copy anywhere |
 
