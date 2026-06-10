@@ -91,8 +91,15 @@ Plans:
   2. Each task card shows a live status badge: working / idle / waiting for input / exited
   3. App detects when Claude Code needs input or finishes via per-session hooks injected at spawn, with terminal bell as fallback
   4. User can leave a running Claude session, reopen the task later, and get a correctly redrawn TUI (alt-screen replay handled, not corrupted)
-**Plans**: TBD
+**Plans**: 5 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 04-01-PLAN.md — Session engine: agent Kind, claude spawn (--session-id, inline --settings overlay), D-47 status state machine, BEL fallback
+- [ ] 04-02-PLAN.md — Backend REST: migration 00003, token-gated hook receiver, agent spawn + 409, /api/agents/status, task-delete stop fix, D-45 WS attach clear
+- [ ] 04-03-PLAN.md — Frontend status surfaces: useAgentStatuses poll, StatusDot, card dot + waiting border, sidebar waiting chip
+- [ ] 04-04-PLAN.md — Agent tab: permanent first tab, pre-start/running/exited states, Insert description paste, tab dot
+- [ ] 04-05-PLAN.md — End-to-end agent lifecycle integration test, build gates, human verification with real claude
 
 ### Phase 5: Recovery & Review
 **Goal**: Work survives server restarts and finished agent work can be reviewed without leaving the app
@@ -115,7 +122,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Foundation — Projects & Board | 0/7 | Complete    | 2026-06-10 |
 | 2. Terminal Engine | 0/5 | Complete    | 2026-06-10 |
 | 3. Worktree Isolation & Bash Tabs | 0/6 | Complete    | 2026-06-10 |
-| 4. Claude Code Agent Sessions | 0/TBD | Not started | - |
+| 4. Claude Code Agent Sessions | 0/5 | Planned | - |
 | 5. Recovery & Review | 0/TBD | Not started | - |
 
 ---
