@@ -12,7 +12,7 @@ Kangent goes from empty repo to a working agent orchestrator in five phases. Pha
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation — Projects & Board** - Single binary, SQLite, projects sidebar, kanban board with task CRUD
+- [x] **Phase 1: Foundation — Projects & Board** - Single binary, SQLite, projects sidebar, kanban board with task CRUD (completed 2026-06-10)
 - [ ] **Phase 2: Terminal Engine** - Session manager + WebSocket bridge + browser terminal, proven against bash with detach/reattach
 - [ ] **Phase 3: Worktree Isolation & Bash Tabs** - Worktree + branch per task, safe confirmed cleanup, bash session tabs in the task view
 - [ ] **Phase 4: Claude Code Agent Sessions** - Start button spawns `claude` in the worktree; live status badges via injected hooks
@@ -97,7 +97,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Projects & Board | 0/7 | Not started | - |
+| 1. Foundation — Projects & Board | 0/7 | Complete    | 2026-06-10 |
 | 2. Terminal Engine | 0/TBD | Not started | - |
 | 3. Worktree Isolation & Bash Tabs | 0/TBD | Not started | - |
 | 4. Claude Code Agent Sessions | 0/TBD | Not started | - |
