@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, Ellipsis } from "lucide-react";
 import { useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
+import { useCreateWorktree } from "@/api/worktrees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,13 +22,12 @@ import {
 import { DeleteTaskDialog } from "@/components/task/DeleteTaskDialog";
 import { DescriptionTab } from "@/components/task/DescriptionTab";
 import { TaskTabs } from "@/components/task/TaskTabs";
+import { WorktreeMetaLine } from "@/components/task/WorktreeMetaLine";
 
 function isTypingTarget(el: Element | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
   return (
-    el.tagName === "INPUT" ||
-    el.tagName === "TEXTAREA" ||
-    el.isContentEditable
+    el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable
   );
 }
 
@@ -40,6 +40,7 @@ export default function TaskPage() {
   // Fetch by id so deep links work without the board cache (TASK-05).
   const { data: task, isPending, isError } = useTask(taskId);
   const updateTask = useUpdateTask(projectId);
+  const createWorktree = useCreateWorktree(taskId, projectId);
 
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -105,74 +106,88 @@ export default function TaskPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[860px] space-y-6 p-4">
-      <header className="flex items-center gap-2">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Back to board"
-                onClick={() => navigate(`/projects/${projectId}`)}
-              >
-                <ArrowLeft className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Back to board (Esc)</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+    // Full-width working surface (Layout Contract): terminals get the whole
+    // main area; header/meta and Description prose keep 860px islands.
+    <div className="w-full space-y-6 p-4">
+      <div className="max-w-[860px] space-y-2">
+        <header className="flex items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Back to board"
+                  onClick={() => navigate(`/projects/${projectId}`)}
+                >
+                  <ArrowLeft className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Back to board (Esc)</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
 
-        {titleDraft === null ? (
-          <button
-            type="button"
-            className="min-w-0 flex-1 truncate rounded-md px-1 py-0.5 text-left text-base font-medium hover:bg-muted/50"
-            title="Edit title"
-            onClick={() => setTitleDraft(task.title)}
-          >
-            {task.title}
-          </button>
-        ) : (
-          <Input
-            autoFocus
-            value={titleDraft}
-            className="h-8 flex-1 text-base font-medium"
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={(e) => commitTitle(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.currentTarget.blur();
-              } else if (e.key === "Escape") {
-                cancelTitleEditRef.current = true;
-                e.currentTarget.blur();
-              }
-            }}
-          />
-        )}
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label="Task actions">
-              <Ellipsis className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={() => setDeleteOpen(true)}
+          {titleDraft === null ? (
+            <button
+              type="button"
+              className="min-w-0 flex-1 truncate rounded-md px-1 py-0.5 text-left text-base font-medium hover:bg-muted/50"
+              title="Edit title"
+              onClick={() => setTitleDraft(task.title)}
             >
-              Delete task
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
+              {task.title}
+            </button>
+          ) : (
+            <Input
+              autoFocus
+              value={titleDraft}
+              className="h-8 flex-1 text-base font-medium"
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={(e) => commitTitle(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  cancelTitleEditRef.current = true;
+                  e.currentTarget.blur();
+                }
+              }}
+            />
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Task actions">
+                <Ellipsis className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setDeleteOpen(true)}
+              >
+                Delete task
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
+
+        <WorktreeMetaLine
+          task={task}
+          onCreate={() => createWorktree.mutate()}
+          creating={createWorktree.isPending}
+        />
+      </div>
 
       <TaskTabs
         tabs={[
           {
             id: "description",
             label: "Description",
-            content: <DescriptionTab task={task} projectId={projectId} />,
+            content: (
+              <div className="max-w-[860px]">
+                <DescriptionTab task={task} projectId={projectId} />
+              </div>
+            ),
           },
         ]}
       />
