@@ -27,6 +27,8 @@ export interface TabDef {
   muted?: boolean;
   /** Keep content mounted while inactive (terminal tabs: WS must survive). */
   keepMounted?: boolean;
+  /** Rendered before the label (Agent tab status dot, D-50). */
+  leading?: ReactNode;
 }
 
 export function TaskTabs({
@@ -60,8 +62,14 @@ export function TaskTabs({
             value={tab.id}
             className="flex-none px-2 data-active:after:bg-blue-500"
           >
-            <span className={tab.muted ? "text-muted-foreground" : undefined}>
-              {tab.label}
+            {/* dot + 4px gap + label (UI-SPEC) — trigger height unchanged */}
+            <span className="flex items-center gap-1">
+              {tab.leading}
+              <span
+                className={tab.muted ? "text-muted-foreground" : undefined}
+              >
+                {tab.label}
+              </span>
             </span>
             {tab.onClose && (
               <Tooltip>

@@ -5,6 +5,7 @@ import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
+import { useAgentStatuses } from "@/api/agents";
 import {
   useDeleteSession,
   useSessions,
@@ -26,6 +27,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { StatusDot } from "@/components/StatusDot";
+import { AgentTab } from "@/components/task/AgentTab";
 import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 import { DeleteTaskDialog } from "@/components/task/DeleteTaskDialog";
 import { DescriptionTab } from "@/components/task/DescriptionTab";
@@ -59,7 +62,18 @@ export default function TaskPage() {
   const stopSession = useStopSession();
   const deleteSession = useDeleteSession();
 
-  const [activeTab, setActiveTab] = useState("description");
+  // Agent tab dot (D-50) — same query/component as the board card dot.
+  const agentEntry = (useAgentStatuses().data ?? []).find(
+    (e) => e.taskId === taskId,
+  );
+
+  // Newest agent session, running or exited (server list is newest-first).
+  // An exited agent stays in the pane with the Start-again banner until a
+  // fresh spawn replaces it.
+  const agentSession = (sessions ?? []).find((s) => s.kind === "agent");
+
+  // D-39: opening a task ALWAYS lands on the Agent tab — no smart selection.
+  const [activeTab, setActiveTab] = useState("agent");
   // Sessions the user × -closed: muted, removed once they leave running.
   const [closingIds, setClosingIds] = useState<Set<string>>(new Set());
   // Ids seen RUNNING during this mount (RESEARCH OQ2): a session that exits
@@ -95,10 +109,13 @@ export default function TaskPage() {
     return (sessions ?? [])
       .filter(
         (s) =>
-          s.status === "running" ||
-          (s.status === "exited" &&
-            keepExitedIds.has(s.id) &&
-            !closingIds.has(s.id)),
+          // Agents never render as closable bash tabs (D-38) — the Agent
+          // tab owns them.
+          s.kind !== "agent" &&
+          (s.status === "running" ||
+            (s.status === "exited" &&
+              keepExitedIds.has(s.id) &&
+              !closingIds.has(s.id))),
       )
       .sort((a, b) =>
         a.createdAt === b.createdAt
@@ -108,20 +125,20 @@ export default function TaskPage() {
   }, [sessions, keepExitedIds, closingIds]);
 
   const tabIds = useMemo(
-    () => ["description", ...visibleSessions.map((s) => s.id)],
+    () => ["agent", "description", ...visibleSessions.map((s) => s.id)],
     [visibleSessions],
   );
 
   // Pitfall 7: a Radix Tabs value pointing at a removed tab renders blank.
   // When the active tab disappears (closing session exited via poll or 'x'
-  // frame), activate its left neighbor from the previous order, else
-  // Description — before paint, so there is no blank frame.
+  // frame), activate its left neighbor from the previous order, else the
+  // Agent tab (which can never disappear) — before paint, no blank frame.
   const prevTabIdsRef = useRef<string[]>(tabIds);
   useLayoutEffect(() => {
     const prev = prevTabIdsRef.current;
     prevTabIdsRef.current = tabIds;
     if (tabIds.includes(activeTab)) return;
-    let next = "description";
+    let next = "agent";
     for (let i = prev.indexOf(activeTab) - 1; i >= 0; i--) {
       if (tabIds.includes(prev[i])) {
         next = prev[i];
@@ -198,7 +215,7 @@ export default function TaskPage() {
       if (current !== id) return current;
       const ids = prevTabIdsRef.current;
       const idx = ids.indexOf(id);
-      return idx > 0 ? ids[idx - 1] : "description";
+      return idx > 0 ? ids[idx - 1] : "agent";
     });
     setKeepExitedIds((prev) => {
       const next = new Set(prev);
@@ -235,6 +252,24 @@ export default function TaskPage() {
   }
 
   const tabs: TabDef[] = [
+    {
+      id: "agent",
+      label: "Agent",
+      // D-50: same StatusDot/state source as the board card; no dot pre-start.
+      leading: agentEntry ? <StatusDot entry={agentEntry} /> : undefined,
+      // Switching tabs never detaches the agent WS.
+      keepMounted: true,
+      // NO onClose — permanent tab (D-38): stopped, never closed.
+      content: (
+        <div className="flex h-full min-h-[320px] w-full flex-col">
+          <AgentTab
+            task={task}
+            agentSession={agentSession}
+            projectId={projectId}
+          />
+        </div>
+      ),
+    },
     {
       id: "description",
       label: "Description",
