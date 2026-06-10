@@ -180,7 +180,12 @@ export function Board({ tasks, projectId }: BoardProps) {
     >
       <div className="flex h-full min-h-0 flex-1 gap-4 overflow-x-auto px-6 pb-6">
         {STATUSES.map((status) => (
-          <Column key={status} status={status} tasks={columns[status]} />
+          <Column
+            key={status}
+            status={status}
+            tasks={columns[status]}
+            projectId={projectId}
+          />
         ))}
       </div>
       <DragOverlay>
