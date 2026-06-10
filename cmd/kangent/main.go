@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -23,6 +25,7 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7333", "listen address (localhost-only by design)")
 	dbFlag := flag.String("db", "~/.kangent/kangent.db", "path to SQLite database file")
+	claudeBin := flag.String("claude-bin", "", "path to the claude binary (default: resolve \"claude\" on PATH at spawn time)")
 	var devOrigins []string
 	flag.Func("dev-origin", "additional allowed Origin host:port for the Vite dev server (repeatable, e.g. localhost:5173)", func(v string) error {
 		devOrigins = append(devOrigins, v)
@@ -58,6 +61,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Per-instance hook token (STAT-02 / research gap #2): generated fresh on
+	// every start, held in memory only — never logged, never persisted. It is
+	// embedded solely in the per-spawn settings overlay and checked by the
+	// hook receiver, so webpages firing no-CORS POSTs at localhost can never
+	// spoof agent status.
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		slog.Error("generating hook token", "error", err)
+		os.Exit(1)
+	}
+	hookToken := hex.EncodeToString(tokenBytes)
+
 	// Origin allowlist (D-20): exact loopback origins with the serving port,
 	// plus any --dev-origin entries (dev runs need the Vite server's origin:
 	// go run ./cmd/kangent --dev-origin localhost:5173 --dev-origin 127.0.0.1:5173).
@@ -75,8 +90,16 @@ func main() {
 	mux := http.NewServeMux()
 	api.Routes(mux, db, wtSvc)
 	mgr := session.NewManager()
+	mgr.SetAgentConfig(session.AgentConfig{
+		// Hooks curl localhost; addr is loopback-enforced above, and a
+		// "localhost" host also passes the port-agnostic hostCheck.
+		BaseURL:   "http://" + *addr,
+		Token:     hookToken,
+		ClaudeBin: *claudeBin,
+	})
 	api.SessionRoutes(mux, mgr, db)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr)
+	api.HookRoutes(mux, mgr, hookToken)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
