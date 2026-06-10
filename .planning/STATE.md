@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-06-10T14:31:07.995Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-06-10T14:33:05.823Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 13
+  completed_plans: 14
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 3 (Worktree Isolation & Bash Tabs) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -65,6 +65,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P03 | 20 min | 3 tasks | 9 files |
 | Phase 02 P05 | 48 min | 3 tasks | 3 files |
 | Phase 03 P02 | 11 min | 2 tasks | 6 files |
+| Phase 03 P01 | 13 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,8 @@ Recent decisions affecting current work:
 - [Phase 03]: Separate global seq counter on Manager keeps List ordering tiebreak correct across both label families (per-task counters would collide on seq)
 - [Phase 03]: Spawn cwd validation rejects existing-but-not-a-directory paths with the same error shape as nonexistent paths, before any PTY allocation
 - [Phase 03]: ListByTask(0) returns only unscoped dev sessions — taskID 0 is the dev sentinel, not a wildcard
+- [Phase 03]: ResolveBase verifies the current-branch ref resolves before returning it: symbolic-ref --short HEAD exits 0 on unborn HEAD, so an extra show-ref check is required for the D-25 error path
+- [Phase 03]: Worktree test isolation uses a controlled temp GIT_CONFIG_GLOBAL with protocol.file.allow=always — submodule clone subprocesses read global config, not the superproject's repo-local config
 
 ### Pending Todos
 
@@ -126,6 +129,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T14:31:07.978Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-06-10T14:33:05.819Z
+Stopped at: Completed 03-01-PLAN.md
 Resume file: None

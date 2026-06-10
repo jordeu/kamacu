@@ -21,9 +21,9 @@
 
 ### Git Worktrees
 
-- [ ] **GIT-01**: Creating a task automatically creates a new git worktree and branch for that task (collision-safe branch naming, e.g. slug + task ID)
+- [x] **GIT-01**: Creating a task automatically creates a new git worktree and branch for that task (collision-safe branch naming, e.g. slug + task ID)
 - [ ] **GIT-02**: When a task is marked Done, the app offers to delete its worktree, keeping the branch
-- [ ] **GIT-03**: Worktree cleanup warns and requires confirmation if the worktree has uncommitted changes, and refuses while sessions are running in it
+- [x] **GIT-03**: Worktree cleanup warns and requires confirmation if the worktree has uncommitted changes, and refuses while sessions are running in it
 
 ### Terminal Sessions
 
@@ -107,9 +107,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TERM-05 | Phase 2 | Complete |
 | TERM-06 | Phase 2 | Complete |
 | TERM-07 | Phase 2 | Complete |
-| GIT-01 | Phase 3 | Pending |
+| GIT-01 | Phase 3 | Complete |
 | GIT-02 | Phase 3 | Pending |
-| GIT-03 | Phase 3 | Pending |
+| GIT-03 | Phase 3 | Complete |
 | TERM-04 | Phase 3 | Complete |
 | TERM-01 | Phase 4 | Pending |
 | STAT-01 | Phase 4 | Pending |
