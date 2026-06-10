@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-06-10T07:06:09.983Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-06-10T07:06:37.930Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 1 (Foundation — Projects & Board) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -57,6 +57,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P02 | 8 min | 3 tasks | 7 files |
 | Phase 01 P04 | 7 min | 2 tasks | 7 files |
 | Phase 01 P05 | 8 min | 3 tasks | 6 files |
+| Phase 01 P06 | 8 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Deleting the currently-routed project refetches projects before navigating to / to avoid redirecting into the deleted project from stale cache
 - [Phase 01]: Board column derivation guard includes moveTask.isPending (not just active drag) to prevent post-drop snap-back flicker before the optimistic cache write lands
 - [Phase 01]: shadcn DialogContent width overrides need the responsive variant (sm:max-w-[560px]) since the component ships sm:max-w-sm
+- [Phase 01]: Accent blue-500 applied via explicit utility classes (tab indicator, prose links) instead of editing shared index.css — parallel wave-3 plans own no shared files
+- [Phase 01]: Task title edit commits through a single onBlur path (Enter/Esc funnel through blur with a cancel ref) to avoid double-mutate races
 
 ### Pending Todos
 
@@ -94,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T07:06:09.979Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-06-10T07:06:37.927Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None
