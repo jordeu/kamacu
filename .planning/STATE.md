@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-06-10T18:49:37.245Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-06-10T19:11:41.758Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 23
-  completed_plans: 20
+  completed_plans: 21
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 4 (Claude Code Agent Sessions) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -72,6 +72,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P06 | 27 min | 3 tasks | 1 files |
 | Phase 04-claude-code-agent-sessions P03 | 4 min | 2 tasks | 4 files |
 | Phase 04 P01 | 11 min | 2 tasks | 5 files |
+| Phase 04 P02 | 18 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,10 @@ Recent decisions affecting current work:
 - [Phase 04]: Agent-status pump logic factored into noteAgentOutputLocked so tests drive the real code path via in-package _test helpers instead of flaky PTY byte injection
 - [Phase 04]: Kangent session id generated up front in Spawn so the agent overlay hook URL embeds it before the process starts
 - [Phase 04]: stopRequested set inside stopOnce.Do before SIGTERM so natural exits can never observe it true (exit 143 renders gray only when Kangent asked)
+- [Phase 04]: kind=agent without task_id returns the same 409 'task has no worktree' body as a worktree-less task — one copy contract for the no-worktree gate
+- [Phase 04]: Hook receiver rejects an empty configured token outright so the endpoint can never run open; token compared constant-time and checked before any session work
+- [Phase 04]: Exited-session hook POSTs are ignored with 200 before body decode — late async curls are benign even when malformed
+- [Phase 04]: api and ws test packages carry their own fake-claude stub writers via AgentConfig.ClaudeBin — the real claude binary is never spawned in tests
 
 ### Pending Todos
 
@@ -151,6 +156,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T18:49:37.240Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-06-10T19:11:41.755Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
