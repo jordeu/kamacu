@@ -1,7 +1,8 @@
 ---
 phase: 3
 slug: worktree-isolation-bash-tabs
-status: draft
+status: approved
+reviewed_at: 2026-06-10
 shadcn_initialized: true
 preset: radix-nova / zinc dark (components.json present — initialized in Phase 1)
 created: 2026-06-10
