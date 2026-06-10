@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"kangent/internal/store"
 )
 
 // createTask POSTs a task to a project and returns the decoded response body.
@@ -155,5 +157,240 @@ func TestTaskDelete(t *testing.T) {
 	status, _ := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, id), nil)
 	if status != http.StatusNotFound {
 		t.Fatalf("after hard delete: GET status = %d, want 404", status)
+	}
+}
+
+// moveTask POSTs to /api/tasks/{id}/move and returns status + body.
+func moveTask(t *testing.T, srv *httptest.Server, id int64, status string, afterID *int64) (int, map[string]any) {
+	t.Helper()
+	return doJSON(t, "POST", fmt.Sprintf("%s/api/tasks/%d/move", srv.URL, id),
+		map[string]any{"status": status, "after_id": afterID})
+}
+
+// columnTasks returns the tasks of one column, in listed (position) order.
+func columnTasks(t *testing.T, srv *httptest.Server, pid int64, status string) []map[string]any {
+	t.Helper()
+	code, list := doJSONList(t, fmt.Sprintf("%s/api/projects/%d/tasks", srv.URL, pid))
+	if code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", code)
+	}
+	var col []map[string]any
+	for _, task := range list {
+		if task["status"] == status {
+			col = append(col, task)
+		}
+	}
+	return col
+}
+
+func TestMoveToTop(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	// existing occupants of in_review
+	o1 := taskID(t, createTask(t, srv, pid, "occupant1"))
+	o2 := taskID(t, createTask(t, srv, pid, "occupant2"))
+	moveTask(t, srv, o1, "in_review", nil)
+	moveTask(t, srv, o2, "in_review", nil)
+
+	x := taskID(t, createTask(t, srv, pid, "x"))
+	code, body := moveTask(t, srv, x, "in_review", nil)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%v", code, body)
+	}
+	if body["status"] != "in_review" {
+		t.Errorf("status = %q, want in_review", body["status"])
+	}
+	xPos := body["position"].(float64)
+	for _, task := range columnTasks(t, srv, pid, "in_review") {
+		if task["id"] != body["id"] && task["position"].(float64) <= xPos {
+			t.Errorf("task %v position %v <= moved task %v (must be top)", task["id"], task["position"], xPos)
+		}
+	}
+}
+
+func TestMoveBetween(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	// creates land at top, so creation order c, b, a gives column order a, b, c
+	c := taskID(t, createTask(t, srv, pid, "c"))
+	b := taskID(t, createTask(t, srv, pid, "b"))
+	taskID(t, createTask(t, srv, pid, "a"))
+	_ = c
+
+	x := taskID(t, createTask(t, srv, pid, "x")) // now at very top
+	// move x after b: expected order a(?), wait — x currently above a; after move: a? Let's just assert between b and its follower.
+	code, body := moveTask(t, srv, x, "todo", &b)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%v", code, body)
+	}
+	col := columnTasks(t, srv, pid, "todo")
+	// find b and x; x must be directly after b and strictly between b and the next one
+	var bPos, xPos float64
+	var xIdx = -1
+	for i, task := range col {
+		switch int64(task["id"].(float64)) {
+		case b:
+			bPos = task["position"].(float64)
+		case x:
+			xPos = task["position"].(float64)
+			xIdx = i
+		}
+	}
+	if xIdx < 1 || int64(col[xIdx-1]["id"].(float64)) != b {
+		t.Fatalf("x is not directly after b in column: %v", col)
+	}
+	if xPos <= bPos {
+		t.Errorf("x.position %v not > b.position %v", xPos, bPos)
+	}
+	if xIdx+1 < len(col) {
+		next := col[xIdx+1]["position"].(float64)
+		if xPos >= next {
+			t.Errorf("x.position %v not < next %v", xPos, next)
+		}
+	}
+}
+
+func TestMoveToBottom(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	taskID(t, createTask(t, srv, pid, "later-top"))
+	bottom := taskID(t, createTask(t, srv, pid, "will-be-bottom-anchor"))
+	// bottom of todo is the FIRST created task; recompute: last in column order
+	col := columnTasks(t, srv, pid, "todo")
+	last := int64(col[len(col)-1]["id"].(float64))
+	_ = bottom
+
+	x := taskID(t, createTask(t, srv, pid, "x"))
+	code, body := moveTask(t, srv, x, "todo", &last)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%v", code, body)
+	}
+	xPos := body["position"].(float64)
+	for _, task := range columnTasks(t, srv, pid, "todo") {
+		if task["id"] != body["id"] && task["position"].(float64) >= xPos {
+			t.Errorf("task %v position %v >= moved task %v (must be bottom)", task["id"], task["position"], xPos)
+		}
+	}
+}
+
+func TestMoveValidation(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	a := taskID(t, createTask(t, srv, pid, "a"))
+	b := taskID(t, createTask(t, srv, pid, "b"))
+	// put b in a different column
+	moveTask(t, srv, b, "in_review", nil)
+
+	// after_id in a different column than the target status
+	code, body := moveTask(t, srv, a, "todo", &b)
+	if code != http.StatusBadRequest {
+		t.Fatalf("cross-column after_id: status = %d, want 400; body=%v", code, body)
+	}
+
+	// after_id in a different project
+	pid2 := createProject(t, srv, gitRepo(t))
+	d := taskID(t, createTask(t, srv, pid2, "d"))
+	code, body = moveTask(t, srv, a, "todo", &d)
+	if code != http.StatusBadRequest {
+		t.Fatalf("cross-project after_id: status = %d, want 400; body=%v", code, body)
+	}
+
+	// bogus status
+	code, body = moveTask(t, srv, a, "bogus", nil)
+	if code != http.StatusBadRequest {
+		t.Fatalf("bogus status: status = %d, want 400; body=%v", code, body)
+	}
+	if body["error"] != "invalid status" {
+		t.Errorf("error = %q, want %q", body["error"], "invalid status")
+	}
+}
+
+func TestMoveStressRenormalize(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	// two anchors; creation order means anchorB sits ABOVE anchorA in todo
+	taskID(t, createTask(t, srv, pid, "anchorA"))
+	anchorB := taskID(t, createTask(t, srv, pid, "anchorB"))
+
+	// 200 tasks each squeezed between anchorB and whatever currently follows it
+	for i := 0; i < 200; i++ {
+		id := taskID(t, createTask(t, srv, pid, fmt.Sprintf("squeeze-%d", i)))
+		code, body := moveTask(t, srv, id, "todo", &anchorB)
+		if code != http.StatusOK {
+			t.Fatalf("squeeze %d: status = %d, body=%v", i, code, body)
+		}
+	}
+
+	col := columnTasks(t, srv, pid, "todo")
+	if len(col) != 202 {
+		t.Fatalf("column size = %d, want 202", len(col))
+	}
+	seen := map[int64]bool{}
+	for i, task := range col {
+		id := int64(task["id"].(float64))
+		if seen[id] {
+			t.Fatalf("duplicate task id %d in column", id)
+		}
+		seen[id] = true
+		if i > 0 {
+			prev := col[i-1]["position"].(float64)
+			cur := task["position"].(float64)
+			if prev >= cur {
+				t.Fatalf("positions not strictly increasing at index %d: %v >= %v", i, prev, cur)
+			}
+		}
+	}
+}
+
+func TestMovePersistsAcrossReopen(t *testing.T) {
+	srv, db, dbPath := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	a := taskID(t, createTask(t, srv, pid, "a"))
+	b := taskID(t, createTask(t, srv, pid, "b"))
+	c := taskID(t, createTask(t, srv, pid, "c"))
+	moveTask(t, srv, a, "in_progress", nil)
+	moveTask(t, srv, c, "in_progress", &a)
+	moveTask(t, srv, b, "done", nil)
+
+	var before []int64
+	for _, task := range columnTasks(t, srv, pid, "in_progress") {
+		before = append(before, int64(task["id"].(float64)))
+	}
+
+	srv.Close()
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	db2, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db2.Close()
+	rows, err := db2.Query(`SELECT id FROM tasks WHERE project_id = ? AND status = 'in_progress' ORDER BY position ASC`, pid)
+	if err != nil {
+		t.Fatalf("query reopened db: %v", err)
+	}
+	defer rows.Close()
+	var after []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		after = append(after, id)
+	}
+	if len(before) != len(after) {
+		t.Fatalf("in_progress sizes differ: before=%v after=%v", before, after)
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("order diverged after reopen: before=%v after=%v", before, after)
+		}
+	}
+	// also verify b really persisted to done
+	var st string
+	if err := db2.QueryRow(`SELECT status FROM tasks WHERE id = ?`, b).Scan(&st); err != nil || st != "done" {
+		t.Fatalf("task b status after reopen = %q (err %v), want done", st, err)
 	}
 }
