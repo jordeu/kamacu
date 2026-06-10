@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-06-10T06:37:13.476Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-06-10T06:44:07.950Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 1 (Foundation — Projects & Board) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 4 min | 2 tasks | 7 files |
+| Phase 01 P03 | 10 min | 3 tasks | 41 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Module path is 'kangent' (local-only single binary), not a github.com path
 - [Phase 01]: goose dialect 'sqlite3' paired with modernc driver name 'sqlite' — intentionally different strings
 - [Phase 01]: No --open/auto-browser flag in v1 server startup (default off)
+- [Phase 01]: shadcn CLI 4.x: --base-color removed; init with -b radix --preset nova, zinc ramp hand-encoded in index.css per UI-SPEC
+- [Phase 01]: No webfonts: removed preset-injected @fontsource-variable/geist; system sans/mono stacks only (offline-clean binary)
+- [Phase 01]: TS 6 deprecates baseUrl: @ alias uses paths-only in tsconfigs
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T06:37:13.473Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-06-10T06:44:07.945Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None

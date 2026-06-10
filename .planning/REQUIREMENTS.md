@@ -52,7 +52,7 @@
 ### Storage
 
 - [x] **STOR-01**: All projects, tasks, and session metadata persist in a local SQLite database across restarts
-- [ ] **STOR-02**: App runs as a single local process serving the API and frontend at localhost (single user, no auth beyond local binding + per-instance token)
+- [x] **STOR-02**: App runs as a single local process serving the API and frontend at localhost (single user, no auth beyond local binding + per-instance token)
 
 ## v2 Requirements
 
@@ -101,7 +101,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TASK-04 | Phase 1 | Pending |
 | TASK-05 | Phase 1 | Pending |
 | STOR-01 | Phase 1 | Complete |
-| STOR-02 | Phase 1 | Pending |
+| STOR-02 | Phase 1 | Complete |
 | TERM-02 | Phase 2 | Pending |
 | TERM-03 | Phase 2 | Pending |
 | TERM-05 | Phase 2 | Pending |
