@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"kangent/internal/store"
@@ -27,6 +31,122 @@ func taskID(t *testing.T, body map[string]any) int64 {
 		t.Fatalf("no numeric id in task body: %v", body)
 	}
 	return int64(id)
+}
+
+// gitRepoWithCommit creates a temp repo on branch main with one commit, so
+// worktree provisioning has a valid base (gitRepo's unborn HEAD does not).
+// Helper git commands run with isolated config + throwaway identity, matching
+// internal/worktree's test hygiene.
+func gitRepoWithCommit(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		full := append([]string{"-C", dir, "-c", "user.name=test", "-c", "user.email=test@test"}, args...)
+		cmd := exec.Command("git", full...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write file.txt: %v", err)
+	}
+	run("add", "file.txt")
+	run("commit", "-m", "initial")
+	return dir
+}
+
+// branchList returns `git -C repo branch --list pattern` output.
+func branchList(t *testing.T, repo, pattern string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", repo, "branch", "--list", pattern)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch --list %s: %v\n%s", pattern, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestTaskCreateProvisionsWorktree(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	repo := gitRepoWithCommit(t)
+	pid := createProject(t, srv, repo)
+
+	body := createTask(t, srv, pid, "Fix Login")
+	id := taskID(t, body)
+
+	wantBranch := fmt.Sprintf("task/fix-login-%d", id)
+	if body["branch"] != wantBranch {
+		t.Errorf("branch = %v, want %q", body["branch"], wantBranch)
+	}
+	if body["worktree_error"] != nil {
+		t.Errorf("worktree_error = %v, want null", body["worktree_error"])
+	}
+	wtPath, _ := body["worktree_path"].(string)
+	if wtPath == "" {
+		t.Fatalf("worktree_path = %v, want non-empty string", body["worktree_path"])
+	}
+	if !strings.HasSuffix(wtPath, fmt.Sprintf("/fix-login-%d", id)) {
+		t.Errorf("worktree_path = %q, want suffix /fix-login-%d", wtPath, id)
+	}
+	if fi, err := os.Stat(wtPath); err != nil || !fi.IsDir() {
+		t.Errorf("worktree dir missing on disk: %s (err %v)", wtPath, err)
+	}
+	if got := branchList(t, repo, wantBranch); got == "" {
+		t.Errorf("git branch --list %s is empty — branch not created (GIT-01)", wantBranch)
+	}
+}
+
+func TestTaskCreateBrokenRepoStill201(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	// gitRepo = bare `git init`, no commit: unborn HEAD → provisioning fails.
+	pid := createProject(t, srv, gitRepo(t))
+
+	status, body := doJSON(t, "POST", fmt.Sprintf("%s/api/projects/%d/tasks", srv.URL, pid),
+		map[string]any{"title": "No Base Yet"})
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 — git problems must never block idea capture (D-25); body=%v", status, body)
+	}
+	if body["branch"] != nil {
+		t.Errorf("branch = %v, want null on failed provisioning", body["branch"])
+	}
+	if body["worktree_path"] != nil {
+		t.Errorf("worktree_path = %v, want null on failed provisioning", body["worktree_path"])
+	}
+	werr, _ := body["worktree_error"].(string)
+	if werr == "" {
+		t.Errorf("worktree_error = %v, want non-empty error string (D-25)", body["worktree_error"])
+	}
+}
+
+func TestTaskJSONIncludesWorktreeFields(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	id := taskID(t, createTask(t, srv, pid, "Carry Fields"))
+
+	status, body := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("get status = %d, want 200; body=%v", status, body)
+	}
+	for _, key := range []string{"branch", "worktree_path", "worktree_error"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("GET /api/tasks/{id} missing %q", key)
+		}
+	}
+
+	status, list := doJSONList(t, fmt.Sprintf("%s/api/projects/%d/tasks", srv.URL, pid))
+	if status != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", status)
+	}
+	if len(list) != 1 {
+		t.Fatalf("list len = %d, want 1", len(list))
+	}
+	for _, key := range []string{"branch", "worktree_path", "worktree_error"} {
+		if _, ok := list[0][key]; !ok {
+			t.Errorf("GET /api/projects/{id}/tasks items missing %q", key)
+		}
+	}
 }
 
 func TestTaskCreateDefaults(t *testing.T) {
