@@ -15,6 +15,7 @@ import (
 	"kangent/internal/api"
 	"kangent/internal/session"
 	"kangent/internal/store"
+	"kangent/internal/worktree"
 	"kangent/internal/ws"
 	"kangent/web"
 )
@@ -63,8 +64,16 @@ func main() {
 	_, port, _ := net.SplitHostPort(*addr)
 	originPatterns := append([]string{"127.0.0.1:" + port, "localhost:" + port}, devOrigins...)
 
+	// D-23: worktrees live centrally outside every repo tree.
+	wtRoot, err := expandHome("~/.kangent/worktrees")
+	if err != nil {
+		slog.Error("resolving worktree root", "error", err)
+		os.Exit(1)
+	}
+	wtSvc := worktree.NewService(wtRoot)
+
 	mux := http.NewServeMux()
-	api.Routes(mux, db)
+	api.Routes(mux, db, wtSvc)
 	mgr := session.NewManager()
 	api.SessionRoutes(mux, mgr)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))

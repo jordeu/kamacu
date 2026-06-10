@@ -5,22 +5,34 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
+
+	"kangent/internal/worktree"
 )
 
 // Task is the JSON shape of a task row (RESEARCH.md Pattern 4). position is
 // included so the client can sort, but the client never writes it — ordering
 // is owned by the server via the move endpoint.
+//
+// The three worktree fields are all nullable; UI state is derived from them
+// (D-26): worktree_path set → active; worktree_error set → failed (Retry);
+// both NULL → absent ("Create worktree"). No status enum.
 type Task struct {
-	ID          int64   `json:"id"`
-	ProjectID   int64   `json:"project_id"`
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Status      string  `json:"status"`
-	Position    float64 `json:"position"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID            int64   `json:"id"`
+	ProjectID     int64   `json:"project_id"`
+	Title         string  `json:"title"`
+	Description   string  `json:"description"`
+	Status        string  `json:"status"`
+	Position      float64 `json:"position"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	Branch        *string `json:"branch"`
+	WorktreePath  *string `json:"worktree_path"`
+	WorktreeError *string `json:"worktree_error"`
 }
 
 var validStatuses = map[string]bool{
@@ -30,14 +42,59 @@ var validStatuses = map[string]bool{
 	"done":        true,
 }
 
-type taskHandlers struct{ db *sql.DB }
+type taskHandlers struct {
+	db *sql.DB
+	wt *worktree.Service
+}
 
-const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at`
+const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
-	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+		&t.Branch, &t.WorktreePath, &t.WorktreeError)
 	return t, err
+}
+
+// provisionWorktree creates the task's branch + worktree (GIT-01) and records
+// the outcome on the tasks row. It NEVER returns an error to fail the HTTP
+// request: git problems land in worktree_error (D-25) and the caller still
+// responds normally. Git operations run under a 30s timeout; per Pitfall 9 no
+// DB transaction spans them — only simple UPDATEs after they finish.
+//
+// On git success: UPDATE branch + worktree_path, clear worktree_error (the
+// Retry path of POST /api/tasks/{id}/worktree reuses this helper and must
+// erase a previously recorded failure). Submodule init is best-effort and
+// never fails creation (RESEARCH §Submodule Handling).
+// On git failure: UPDATE worktree_error only; returns the git error so the
+// caller can populate the response without re-reading.
+func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, taskID int64, title, repoPath string) (branch, path string, provErr error) {
+	slug := worktree.Slug(title)
+	branch = "task/" + slug + "-" + strconv.FormatInt(taskID, 10)
+	path = wt.PathFor(repoPath, slug, taskID)
+
+	wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	base, err := wt.ResolveBase(wctx, repoPath)
+	if err == nil {
+		err = wt.Create(wctx, repoPath, branch, path, base)
+	}
+	if err == nil {
+		if subErr := wt.EnsureSubmodules(wctx, path); subErr != nil {
+			slog.Warn("submodule init failed; worktree still usable", "path", path, "error", subErr)
+		}
+		if _, dbErr := db.ExecContext(ctx,
+			`UPDATE tasks SET branch = ?, worktree_path = ?, worktree_error = NULL WHERE id = ?`,
+			branch, path, taskID); dbErr != nil {
+			slog.Error("recording worktree on task", "task", taskID, "error", dbErr)
+		}
+		return branch, path, nil
+	}
+	if _, dbErr := db.ExecContext(ctx,
+		`UPDATE tasks SET worktree_error = ? WHERE id = ?`, err.Error(), taskID); dbErr != nil {
+		slog.Error("recording worktree error on task", "task", taskID, "error", dbErr)
+	}
+	return "", "", err
 }
 
 // listByProject handles GET /api/projects/{id}/tasks — the board fetch.
@@ -97,8 +154,8 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	var exists int
-	if err := h.db.QueryRow(`SELECT 1 FROM projects WHERE id = ?`, pid).Scan(&exists); err != nil {
+	var repoPath string
+	if err := h.db.QueryRow(`SELECT repo_path FROM projects WHERE id = ?`, pid).Scan(&repoPath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "project not found")
 		} else {
@@ -114,6 +171,17 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// GIT-01: provision synchronously (30s cap). ALWAYS 201 with the task —
+	// git problems never block idea capture; failures land in worktree_error
+	// for the task view's Retry affordance (D-25).
+	branch, path, provErr := provisionWorktree(r.Context(), h.db, h.wt, t.ID, t.Title, repoPath)
+	if provErr != nil {
+		msg := provErr.Error()
+		t.WorktreeError = &msg
+	} else {
+		t.Branch = &branch
+		t.WorktreePath = &path
 	}
 	writeJSON(w, http.StatusCreated, t)
 }

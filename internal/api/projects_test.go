@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"kangent/internal/store"
+	"kangent/internal/worktree"
 )
 
 // newTestServer opens an isolated SQLite database in a temp dir, migrates it,
@@ -30,7 +31,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *sql.DB, string) {
 		t.Fatalf("store.Migrate: %v", err)
 	}
 	mux := http.NewServeMux()
-	Routes(mux, db)
+	Routes(mux, db, worktree.NewService(t.TempDir()))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()
