@@ -163,3 +163,79 @@ func (s *Service) Create(ctx context.Context, repo, branch, path, base string) e
 	_, err := gitRun(ctx, repo, "worktree", "add", "-b", branch, path, base)
 	return err
 }
+
+// DirtyCount returns the number of porcelain=v2 records for the worktree at
+// wt, counting untracked files individually (--untracked-files=all). The
+// per-file untracked count is load-bearing: plain `worktree remove` refuses
+// on untracked-only dirt (Pitfall 2, verified), so the dirty check must see
+// exactly what remove checks. The count feeds the D-33 changed-file warning.
+func (s *Service) DirtyCount(ctx context.Context, wt string) (int, error) {
+	out, err := gitRun(ctx, wt, "status", "--porcelain=v2", "--untracked-files=all", "-z")
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, rec := range strings.Split(out, "\x00") {
+		if strings.TrimSpace(rec) != "" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// Remove removes the worktree at wt from repo, then prunes bookkeeping
+// (D-34). It NEVER deletes branches.
+//
+// Fallbacks (all verified on git 2.43):
+//   - Clean worktrees with INITIALIZED submodules refuse plain remove
+//     ("working trees containing submodules cannot be ... removed",
+//     Pitfall 3). When !force fails with that message, retry once with
+//     --force — safe because the caller verified cleanliness via DirtyCount.
+//   - A path never registered as a worktree whose directory is also absent
+//     is treated as already-removed success (idempotency).
+//   - "--force --force" is never used: only manual `git worktree lock`
+//     requires it, and a user's manual lock must surface as an error, not
+//     be bulldozed.
+//
+// Pitfall 4 (verified): git happily removes a worktree while live processes
+// are cwd'd inside it — no EBUSY; the processes survive with an ENOENT cwd.
+// The running-sessions gate (D-32) is therefore enforced by the API layer
+// BEFORE calling Remove; there is no git-level safety net and none here.
+func (s *Service) Remove(ctx context.Context, repo, wt string, force bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, wt)
+	if _, err := gitRun(ctx, repo, args...); err != nil {
+		if !force && strings.Contains(err.Error(), "submodules") {
+			_, err = gitRun(ctx, repo, "worktree", "remove", "--force", wt)
+		}
+		if err != nil && strings.Contains(err.Error(), "is not a working tree") {
+			if _, statErr := os.Stat(wt); os.IsNotExist(statErr) {
+				err = nil // never registered and already gone — idempotent
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+	// D-34 bookkeeping; verified harmless no-op when nothing to prune.
+	_, _ = gitRun(ctx, repo, "worktree", "prune")
+	return nil
+}
+
+// EnsureSubmodules best-effort initializes submodules if .gitmodules exists
+// at the worktree root (`worktree add` does not populate them — verified).
+// Errors are returned for logging only: callers must NOT fail worktree
+// creation on them (D-25 spirit) — the worktree is usable regardless, and a
+// bash tab lets the user run the init manually (e.g. when it needs network).
+func (s *Service) EnsureSubmodules(ctx context.Context, wt string) error {
+	if _, err := os.Stat(filepath.Join(wt, ".gitmodules")); err != nil {
+		return nil // no submodules — nothing to do, no git call needed
+	}
+	_, err := gitRun(ctx, wt, "submodule", "update", "--init", "--recursive")
+	return err
+}

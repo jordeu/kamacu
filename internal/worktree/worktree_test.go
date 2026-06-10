@@ -19,9 +19,23 @@ import (
 func TestMain(m *testing.M) {
 	// Never let host/global git config leak into any git call made by this
 	// test binary — including the package's own exec.CommandContext calls.
-	os.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	// The "global" config is a controlled temp file (not /dev/null) because
+	// the submodule tests need file-protocol clones, and the clone subprocess
+	// spawned by `submodule update --init` does not see the superproject's
+	// repo-local config — only global/system config or the environment.
+	dir, err := os.MkdirTemp("", "worktree-gitconfig")
+	if err != nil {
+		panic(err)
+	}
+	cfg := filepath.Join(dir, "gitconfig")
+	if err := os.WriteFile(cfg, []byte("[protocol \"file\"]\n\tallow = always\n"), 0o644); err != nil {
+		panic(err)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", cfg)
 	os.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // gitCmd runs git in dir with a throwaway identity and isolated config,
