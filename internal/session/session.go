@@ -37,6 +37,7 @@ type Info struct {
 	ExitCode  *int      `json:"exitCode,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	TaskID    int64     `json:"taskId,omitempty"` // 0 omitted for dev sessions
+	Kind      Kind      `json:"kind,omitempty"`   // "bash" or "agent"
 }
 
 // Session is a single shell running on its own PTY. The PTY's lifetime is
@@ -49,11 +50,13 @@ type Info struct {
 // markExited just before Done() fires; replay via Attach still works after
 // exit so late attachers can render the final output.
 type Session struct {
-	id        string
-	label     string
-	taskID    int64 // 0 = unscoped dev session; immutable after Spawn
-	seq       int
-	createdAt time.Time
+	id              string
+	label           string
+	taskID          int64 // 0 = unscoped dev session; immutable after Spawn
+	kind            Kind  // KindBash or KindAgent; immutable after Spawn
+	claudeSessionID string // agent only ("" for bash); the --session-id uuid, immutable after Spawn
+	seq             int
+	createdAt       time.Time
 
 	cmd  *exec.Cmd
 	ptmx *os.File
@@ -65,6 +68,7 @@ type Session struct {
 	exitCode     int
 	lastWinsize  pty.Winsize // last size applied to the PTY (jiggle detection)
 	setsizeCalls int         // recorded pty.Setsize invocations (test observability)
+	lastActivity time.Time   // agent: effective output/input activity for working-vs-idle
 
 	done      chan struct{} // closed after the exit watcher finishes
 	termGrace time.Duration // D-14 grace between SIGTERM and SIGKILL
@@ -138,18 +142,29 @@ func (s *Session) markExited(code int) {
 func (s *Session) Info() Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	kind := s.kind
+	if kind == "" {
+		kind = KindBash // legacy zero value: bash
+	}
 	info := Info{
 		ID:        s.id,
 		Label:     s.label,
 		Status:    s.status,
 		CreatedAt: s.createdAt,
 		TaskID:    s.taskID,
+		Kind:      kind,
 	}
 	if s.status == StatusExited {
 		code := s.exitCode
 		info.ExitCode = &code
 	}
 	return info
+}
+
+// ClaudeSessionID returns the uuid passed to claude as --session-id at spawn
+// (the Phase 5 --resume key). Empty for bash sessions.
+func (s *Session) ClaudeSessionID() string {
+	return s.claudeSessionID
 }
 
 // Attach subscribes a connection to the session's output. The ring-buffer

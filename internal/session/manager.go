@@ -29,6 +29,7 @@ type Manager struct {
 	counter      int           // monotonic global "bash #N" label counter; never reused
 	taskCounters map[int64]int // per-task "Bash N" label counters; never reused or reset
 	seq          int           // global spawn order, List sort tiebreak
+	agentCfg     AgentConfig   // set once at startup; read (copied) at agent spawn
 }
 
 // NewManager returns an empty Manager.
@@ -43,25 +44,45 @@ func NewManager() *Manager {
 type SpawnOpts struct {
 	Cwd    string // "" -> user home (preserves Phase 2 /terminal dev behavior)
 	TaskID int64  // 0 -> unscoped dev session, label "bash #N" (global counter)
+	Kind   Kind   // zero value = KindBash (full Phase 2/3 backward compatibility)
 }
 
-// Spawn starts a new interactive shell ($SHELL, fallback /bin/bash) on its
-// own PTY, cwd opts.Cwd (the user's home directory when empty), with an
-// explicit environment (never inherited blindly). pty.StartWithSize starts
-// the child in a new session with the PTY as controlling terminal, so the
-// child is session leader and PGID == child PID — no SysProcAttr needed.
+// SetAgentConfig installs the agent spawn configuration (hook receiver
+// origin, per-instance token, optional claude binary override). Called once
+// at startup before any agent spawn.
+func (m *Manager) SetAgentConfig(cfg AgentConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.agentCfg = cfg
+}
+
+// Spawn starts a new session on its own PTY. KindBash (the zero value) runs
+// an interactive shell ($SHELL, fallback /bin/bash), cwd opts.Cwd (the user's
+// home directory when empty), with an explicit minimal environment (never
+// inherited blindly). KindAgent runs the claude CLI in the task worktree with
+// inherit-all env (D-52), `--session-id <uuid>` for Phase 5 resume, and the
+// inline `--settings` hook overlay (D-53 — nothing written to disk).
+// pty.StartWithSize starts the child in a new session with the PTY as
+// controlling terminal, so the child is session leader and PGID == child PID
+// — no SysProcAttr needed.
 //
 // A non-empty Cwd is validated BEFORE any PTY allocation: a deleted worktree
 // must produce the clean "couldn't start a session" path, not a confusing
-// shell error, and must never register a session.
+// shell error, and must never register a session. Agents additionally require
+// a non-empty Cwd.
 func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/bash"
+	kind := opts.Kind
+	if kind == "" {
+		kind = KindBash
 	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
+	}
+	// Agents always run in a task worktree — fail before any PTY work.
+	if kind == KindAgent && opts.Cwd == "" {
+		return nil, fmt.Errorf("agent sessions require a working directory")
 	}
 	dir := home
 	if opts.Cwd != "" {
@@ -72,16 +93,52 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		dir = opts.Cwd
 	}
 
-	cmd := exec.Command(shell)
-	cmd.Dir = dir
-	cmd.Env = []string{
-		"TERM=xterm-256color",
-		"COLORTERM=truecolor",
-		"HOME=" + home,
-		"PATH=" + os.Getenv("PATH"),
-		"LANG=" + os.Getenv("LANG"),
-		"USER=" + os.Getenv("USER"),
-		"SHELL=" + shell,
+	// The kangent session id is generated up front: an agent's settings
+	// overlay embeds it in the hook receiver URL before the process starts.
+	id := uuid.NewString()
+
+	var cmd *exec.Cmd
+	var claudeSessionID string
+	if kind == KindAgent {
+		m.mu.Lock()
+		cfg := m.agentCfg
+		m.mu.Unlock()
+
+		claudeSessionID = uuid.NewString() // deterministic Phase 5 --resume key
+		bin := cfg.ClaudeBin
+		if bin == "" {
+			bin, err = exec.LookPath("claude")
+			if err != nil {
+				return nil, fmt.Errorf("claude binary not found on PATH: %w", err)
+			}
+		}
+		// D-51/D-53: no permission flags, no --add-dir, no --mcp-config —
+		// just the session identity and the inline hook overlay.
+		cmd = exec.Command(bin,
+			"--session-id", claudeSessionID,
+			"--settings", buildOverlayJSON(cfg.BaseURL, cfg.Token, id),
+		)
+		cmd.Dir = dir
+		// D-52: the agent inherits EVERYTHING the user's terminal would have
+		// (auth, MCP servers, node shims), then pins terminal identity. This
+		// deliberately differs from bash sessions' minimal explicit env.
+		cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+	} else {
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/bash"
+		}
+		cmd = exec.Command(shell)
+		cmd.Dir = dir
+		cmd.Env = []string{
+			"TERM=xterm-256color",
+			"COLORTERM=truecolor",
+			"HOME=" + home,
+			"PATH=" + os.Getenv("PATH"),
+			"LANG=" + os.Getenv("LANG"),
+			"USER=" + os.Getenv("USER"),
+			"SHELL=" + shell,
+		}
 	}
 
 	initial := pty.Winsize{Rows: 24, Cols: 80}
@@ -100,29 +157,37 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	m.seq++
 	seq := m.seq
 	var label string
-	if opts.TaskID == 0 {
+	switch {
+	case kind == KindAgent:
+		label = "Agent" // one agent per task — no counter (API enforces)
+	case opts.TaskID == 0:
 		m.counter++
 		label = fmt.Sprintf("bash #%d", m.counter)
-	} else {
+	default:
 		m.taskCounters[opts.TaskID]++
 		label = fmt.Sprintf("Bash %d", m.taskCounters[opts.TaskID])
 	}
 	m.mu.Unlock()
 
 	s := &Session{
-		id:        uuid.NewString(),
-		label:     label,
-		taskID:    opts.TaskID,
-		seq:       seq,
-		createdAt: time.Now(),
-		cmd:       cmd,
-		ptmx:      ptmx,
-		ring:      ring,
-		conns:       make(map[string]chan []byte),
-		status:      StatusRunning,
-		lastWinsize: initial,
-		done:        make(chan struct{}),
-		termGrace:   5 * time.Second, // D-14
+		id:              id,
+		label:           label,
+		taskID:          opts.TaskID,
+		kind:            kind,
+		claudeSessionID: claudeSessionID,
+		seq:             seq,
+		createdAt:       time.Now(),
+		cmd:             cmd,
+		ptmx:            ptmx,
+		ring:            ring,
+		conns:           make(map[string]chan []byte),
+		status:          StatusRunning,
+		lastWinsize:     initial,
+		done:            make(chan struct{}),
+		termGrace:       5 * time.Second, // D-14
+	}
+	if kind == KindAgent {
+		s.lastActivity = time.Now() // spawn -> working: startup output flows immediately
 	}
 
 	go s.pump()
