@@ -1,7 +1,8 @@
 ---
 phase: 1
 slug: foundation-projects-board
-status: draft
+status: approved
+reviewed_at: 2026-06-10
 shadcn_initialized: false
 preset: zinc-dark (init during Phase 1 execution — no frontend scaffold exists yet)
 created: 2026-06-10
