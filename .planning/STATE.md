@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-06-10T16:51:01.660Z"
+status: executing
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-06-10T18:41:35.016Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 18
-  completed_plans: 18
+  total_plans: 23
+  completed_plans: 19
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-10)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 3 — Worktree Isolation & Bash Tabs
+**Current focus:** Phase 4 — Claude Code Agent Sessions
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 4 (Claude Code Agent Sessions) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
 Last activity: 2026-06-10
 
 Progress: [░░░░░░░░░░] 0%
@@ -70,6 +70,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P04 | 15 min | 3 tasks | 7 files |
 | Phase 03 P05 | 6 min | 2 tasks | 3 files |
 | Phase 03 P06 | 27 min | 3 tasks | 1 files |
+| Phase 04-claude-code-agent-sessions P03 | 4 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -132,6 +133,8 @@ Recent decisions affecting current work:
 - [Phase 03]: Done-transition cleanup offer fires from a call-site onSuccess on moveTask.mutate — shared useMoveTask hook untouched, offer predicated on the server response Task
 - [Phase 03]: Integration-test git repo created on the outer t (not a subtest) so subtest TempDir cleanup never deletes .git/worktrees bookkeeping out from under later lifecycle stages
 - [Phase 03]: Lifecycle test cwd proven via echo mark:$PWD expansion — echoed input only contains the literal $PWD, so PTY command echo can never satisfy the assertion
+- [Phase 04]: CardRow extracted as the single inner card layout shared by CardShell, TaskCard, and TaskCardOverlay; per-card useAgentStatuses calls dedupe on the shared ["agent-statuses"] key
+- [Phase 04]: shrink-0 lives on the StatusDot tooltip wrapper span (the real flex item) as well as the inner dot, so card consumers pass only the mt-[6px] optical offset
 
 ### Pending Todos
 
@@ -144,6 +147,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T16:51:01.654Z
-Stopped at: Phase 4 UI-SPEC approved
-Resume file: .planning/phases/04-claude-code-agent-sessions/04-UI-SPEC.md
+Last session: 2026-06-10T18:41:35.005Z
+Stopped at: Completed 04-03-PLAN.md
+Resume file: None

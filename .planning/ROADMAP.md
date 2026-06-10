@@ -97,7 +97,7 @@ Plans:
 Plans:
 - [ ] 04-01-PLAN.md — Session engine: agent Kind, claude spawn (--session-id, inline --settings overlay), D-47 status state machine, BEL fallback
 - [ ] 04-02-PLAN.md — Backend REST: migration 00003, token-gated hook receiver, agent spawn + 409, /api/agents/status, task-delete stop fix, D-45 WS attach clear
-- [ ] 04-03-PLAN.md — Frontend status surfaces: useAgentStatuses poll, StatusDot, card dot + waiting border, sidebar waiting chip
+- [x] 04-03-PLAN.md — Frontend status surfaces: useAgentStatuses poll, StatusDot, card dot + waiting border, sidebar waiting chip
 - [ ] 04-04-PLAN.md — Agent tab: permanent first tab, pre-start/running/exited states, Insert description paste, tab dot
 - [ ] 04-05-PLAN.md — End-to-end agent lifecycle integration test, build gates, human verification with real claude
 

@@ -37,7 +37,7 @@
 
 ### Status & Attention
 
-- [ ] **STAT-01**: Each task card shows a live session status badge: working / idle / waiting for input / exited
+- [x] **STAT-01**: Each task card shows a live session status badge: working / idle / waiting for input / exited
 - [ ] **STAT-02**: App detects when Claude Code needs input or finishes via per-session hooks injected at spawn (terminal bell as fallback)
 
 ### Recovery
@@ -112,7 +112,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GIT-03 | Phase 3 | Complete |
 | TERM-04 | Phase 3 | Complete |
 | TERM-01 | Phase 4 | Pending |
-| STAT-01 | Phase 4 | Pending |
+| STAT-01 | Phase 4 | Complete |
 | STAT-02 | Phase 4 | Pending |
 | RCVR-01 | Phase 5 | Pending |
 | RCVR-02 | Phase 5 | Pending |
