@@ -24,22 +24,37 @@ var ErrNotFound = errors.New("session not found")
 // remove) each live in a single method so Phase 4 can add DB writes inside
 // them without restructuring.
 type Manager struct {
-	mu       sync.Mutex
-	sessions map[string]*Session
-	counter  int // monotonic "bash #N" label counter; never reused
+	mu           sync.Mutex
+	sessions     map[string]*Session
+	counter      int           // monotonic global "bash #N" label counter; never reused
+	taskCounters map[int64]int // per-task "Bash N" label counters; never reused or reset
+	seq          int           // global spawn order, List sort tiebreak
 }
 
 // NewManager returns an empty Manager.
 func NewManager() *Manager {
-	return &Manager{sessions: make(map[string]*Session)}
+	return &Manager{
+		sessions:     make(map[string]*Session),
+		taskCounters: make(map[int64]int),
+	}
+}
+
+// SpawnOpts configures a new session.
+type SpawnOpts struct {
+	Cwd    string // "" -> user home (preserves Phase 2 /terminal dev behavior)
+	TaskID int64  // 0 -> unscoped dev session, label "bash #N" (global counter)
 }
 
 // Spawn starts a new interactive shell ($SHELL, fallback /bin/bash) on its
-// own PTY, cwd the user's home directory, with an explicit environment
-// (never inherited blindly). pty.StartWithSize starts the child in a new
-// session with the PTY as controlling terminal, so the child is session
-// leader and PGID == child PID — no SysProcAttr needed.
-func (m *Manager) Spawn() (*Session, error) {
+// own PTY, cwd opts.Cwd (the user's home directory when empty), with an
+// explicit environment (never inherited blindly). pty.StartWithSize starts
+// the child in a new session with the PTY as controlling terminal, so the
+// child is session leader and PGID == child PID — no SysProcAttr needed.
+//
+// A non-empty Cwd is validated BEFORE any PTY allocation: a deleted worktree
+// must produce the clean "couldn't start a session" path, not a confusing
+// shell error, and must never register a session.
+func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"
@@ -48,9 +63,17 @@ func (m *Manager) Spawn() (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
 	}
+	dir := home
+	if opts.Cwd != "" {
+		fi, err := os.Stat(opts.Cwd)
+		if err != nil || !fi.IsDir() {
+			return nil, fmt.Errorf("working directory does not exist: %s", opts.Cwd)
+		}
+		dir = opts.Cwd
+	}
 
 	cmd := exec.Command(shell)
-	cmd.Dir = home
+	cmd.Dir = dir
 	cmd.Env = []string{
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
@@ -74,14 +97,23 @@ func (m *Manager) Spawn() (*Session, error) {
 	}
 
 	m.mu.Lock()
-	m.counter++
-	n := m.counter
+	m.seq++
+	seq := m.seq
+	var label string
+	if opts.TaskID == 0 {
+		m.counter++
+		label = fmt.Sprintf("bash #%d", m.counter)
+	} else {
+		m.taskCounters[opts.TaskID]++
+		label = fmt.Sprintf("Bash %d", m.taskCounters[opts.TaskID])
+	}
 	m.mu.Unlock()
 
 	s := &Session{
 		id:        uuid.NewString(),
-		label:     fmt.Sprintf("bash #%d", n),
-		seq:       n,
+		label:     label,
+		taskID:    opts.TaskID,
+		seq:       seq,
 		createdAt: time.Now(),
 		cmd:       cmd,
 		ptmx:      ptmx,
@@ -113,10 +145,25 @@ func (m *Manager) Get(id string) (*Session, bool) {
 // List returns Info snapshots for every session, newest first (CreatedAt
 // descending, spawn order as tiebreak).
 func (m *Manager) List() []Info {
+	return m.listWhere(func(*Session) bool { return true })
+}
+
+// ListByTask returns Info snapshots for sessions with the given TaskID,
+// newest first (same ordering contract as List). taskID 0 selects unscoped
+// dev sessions.
+func (m *Manager) ListByTask(taskID int64) []Info {
+	return m.listWhere(func(s *Session) bool { return s.taskID == taskID })
+}
+
+// listWhere snapshots sessions matching keep, newest first. The comparator
+// lives only here — List and ListByTask share it.
+func (m *Manager) listWhere(keep func(*Session) bool) []Info {
 	m.mu.Lock()
 	sessions := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		sessions = append(sessions, s)
+		if keep(s) {
+			sessions = append(sessions, s)
+		}
 	}
 	m.mu.Unlock()
 

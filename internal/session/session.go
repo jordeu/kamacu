@@ -36,6 +36,7 @@ type Info struct {
 	Status    Status    `json:"status"`
 	ExitCode  *int      `json:"exitCode,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
+	TaskID    int64     `json:"taskId,omitempty"` // 0 omitted for dev sessions
 }
 
 // Session is a single shell running on its own PTY. The PTY's lifetime is
@@ -50,6 +51,7 @@ type Info struct {
 type Session struct {
 	id        string
 	label     string
+	taskID    int64 // 0 = unscoped dev session; immutable after Spawn
 	seq       int
 	createdAt time.Time
 
@@ -141,6 +143,7 @@ func (s *Session) Info() Info {
 		Label:     s.label,
 		Status:    s.status,
 		CreatedAt: s.createdAt,
+		TaskID:    s.taskID,
 	}
 	if s.status == StatusExited {
 		code := s.exitCode
