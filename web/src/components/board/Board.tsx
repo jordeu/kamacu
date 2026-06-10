@@ -31,6 +31,7 @@ function groupTasks(tasks: Task[]): Record<Status, Task[]> {
 }
 
 interface BoardProps {
+  /** useTasks(projectId) query data, passed down from BoardPage — the single derivation source for columns. */
   tasks: Task[];
   projectId: number;
 }
