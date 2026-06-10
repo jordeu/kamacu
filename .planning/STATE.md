@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-06-10T12:15:40.870Z"
+status: executing
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-06-10T14:31:07.995Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 12
-  completed_plans: 12
+  total_plans: 18
+  completed_plans: 13
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-10)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 2 — Terminal Engine
+**Current focus:** Phase 3 — Worktree Isolation & Bash Tabs
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 3 (Worktree Isolation & Bash Tabs) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
 Last activity: 2026-06-10
 
 Progress: [░░░░░░░░░░] 0%
@@ -64,6 +64,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P04 | 8 min | 3 tasks | 2 files |
 | Phase 02 P03 | 20 min | 3 tasks | 9 files |
 | Phase 02 P05 | 48 min | 3 tasks | 3 files |
+| Phase 03 P02 | 11 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -110,6 +111,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Integration test marker uses shell quote-splitting (mar''ker) so PTY command echo never satisfies output assertions
 - [Phase 02]: Host-header 403 asserted in cmd/kangent main_test.go (hostCheck unexported); integration test covers the Origin CSWSH rejection end-to-end
 - [Phase 02]: Reattach replay asserted on the FIRST WS data frame — replay must precede live output
+- [Phase 03]: Separate global seq counter on Manager keeps List ordering tiebreak correct across both label families (per-task counters would collide on seq)
+- [Phase 03]: Spawn cwd validation rejects existing-but-not-a-directory paths with the same error shape as nonexistent paths, before any PTY allocation
+- [Phase 03]: ListByTask(0) returns only unscoped dev sessions — taskID 0 is the dev sentinel, not a wildcard
 
 ### Pending Todos
 
@@ -122,6 +126,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T12:15:40.867Z
-Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-worktree-isolation-bash-tabs/03-UI-SPEC.md
+Last session: 2026-06-10T14:31:07.978Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: None
