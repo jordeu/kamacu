@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-06-10T10:31:09.539Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-06-10T10:42:22.679Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 2 (Terminal Engine) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P07 | 30 min | 3 tasks | 8 files |
 | Phase 02 P02 | 3 min | 2 tasks | 5 files |
 | Phase 02 P01 | 12 min | 2 tasks | 5 files |
+| Phase 02 P04 | 8 min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Stop signals every process group in the shell's session via /proc scan, not just the leader pgroup — interactive bash job control puts background jobs in their own pgroups (TERM-06 would silently break otherwise)
 - [Phase 02]: Session exit notification is Done() channel + Info().ExitCode after done; WS layer sends the 'x' frame when Done fires
 - [Phase 02]: Manager.Remove returns ErrNotFound (added beyond interface contract) so the REST layer maps missing to 404 vs ErrStillRunning to 409
+- [Phase 02]: retry() reconnects immediately at attempt 0; the 5-step backoff applies to subsequent failures only
+- [Phase 02]: Post-connect resize force-sent (bypassing change detection) so the server SIGWINCH jiggle fires on reattach with unchanged dimensions
+- [Phase 02]: Focus ring scoped via has-[.xterm-helper-textarea:focus-visible] — pointer clicks may still show it (textarea focus-visible heuristic); verify live in 02-05
 
 ### Pending Todos
 
@@ -109,6 +113,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T10:31:09.535Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-06-10T10:42:22.675Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
