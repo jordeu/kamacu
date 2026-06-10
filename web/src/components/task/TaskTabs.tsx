@@ -3,8 +3,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
  * The task view's tab strip is the architectural seam for the whole product
- * (D-06): Phase 1 ships only the Description tab, later phases append Agent,
- * Bash, and Diff tabs to the same `TabDef[]` array.
+ * (D-06): Phase 1 ships only `{ id: "description", label: "Description" }`,
+ * later phases append Agent, Bash, and Diff tabs to the same `TabDef[]` array.
  */
 export interface TabDef {
   id: string;
