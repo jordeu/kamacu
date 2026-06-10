@@ -657,6 +657,242 @@ func TestStopAllForTask(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Agent status state machine (D-47): working / idle / waiting
+// ---------------------------------------------------------------------------
+
+// spawnAgentForTest spawns an agent session against a fresh fake-claude stub
+// with the standard test AgentConfig and teardown guarantee.
+func spawnAgentForTest(t *testing.T, m *Manager) *Session {
+	t.Helper()
+	stub := writeFakeClaude(t, filepath.Join(t.TempDir(), "args"))
+	m.SetAgentConfig(testAgentConfig(stub))
+	return spawnForTestOpts(t, m, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1})
+}
+
+// injectOutputForTest routes chunk through the exact locked mutations the
+// pump performs for agent output (BEL scan + settle-gated activity), without
+// the flakiness of driving bytes through the real PTY.
+func injectOutputForTest(s *Session, chunk []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noteAgentOutputLocked(chunk)
+}
+
+// setLastActivityForTest overrides the activity timestamp (quiet-threshold
+// manipulation).
+func setLastActivityForTest(s *Session, ts time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastActivity = ts
+}
+
+// setStopHookAtForTest moves the settle-window anchor (so tests need not
+// sleep through the real 2s window).
+func setStopHookAtForTest(s *Session, ts time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopHookAt = ts
+}
+
+func agentStatus(s *Session) string { return s.Info().AgentStatus }
+
+// TestAgentStatusFreshIsWorking: spawn -> working (lastActivity set at spawn,
+// startup output flows immediately).
+func TestAgentStatusFreshIsWorking(t *testing.T) {
+	m := NewManager()
+	s := spawnAgentForTest(t, m)
+	if got := agentStatus(s); got != "working" {
+		t.Errorf("fresh agent AgentStatus = %q, want %q", got, "working")
+	}
+}
+
+// TestAgentWaitingIsSticky: Notification -> waiting; output (prompt redraws)
+// must NEVER clear it; only a Stop hook (SetIdle) does here.
+func TestAgentWaitingIsSticky(t *testing.T) {
+	m := NewManager()
+	s := spawnAgentForTest(t, m)
+
+	s.SetWaiting()
+	if got := agentStatus(s); got != "waiting" {
+		t.Fatalf("after SetWaiting AgentStatus = %q, want %q", got, "waiting")
+	}
+
+	injectOutputForTest(s, []byte("permission prompt redraw"))
+	injectOutputForTest(s, []byte("spinner frame"))
+	if got := agentStatus(s); got != "waiting" {
+		t.Errorf("after output AgentStatus = %q, want %q (waiting is sticky)", got, "waiting")
+	}
+
+	s.SetIdle()
+	if got := agentStatus(s); got != "idle" {
+		t.Errorf("after SetIdle AgentStatus = %q, want %q", got, "idle")
+	}
+}
+
+// TestAgentSettleWindow: SetIdle is immediate even with recent output, and
+// output inside the 2s settle window must not flip idle -> working (Pitfall 1
+// — claude paints the final response around the Stop hook). Output after the
+// window does flip to working.
+func TestAgentSettleWindow(t *testing.T) {
+	m := NewManager()
+	s := spawnAgentForTest(t, m)
+	waitForQuiescentSnapshot(t, s, "fake claude ready") // startup output done
+
+	// Output arrived 1s ago — SetIdle must still flip to idle IMMEDIATELY.
+	setLastActivityForTest(s, time.Now().Add(-time.Second))
+	s.SetIdle()
+	if got := agentStatus(s); got != "idle" {
+		t.Fatalf("right after SetIdle AgentStatus = %q, want %q", got, "idle")
+	}
+
+	// Output within the settle window must NOT flip to working.
+	injectOutputForTest(s, []byte("final response paint"))
+	if got := agentStatus(s); got != "idle" {
+		t.Errorf("output within settle window: AgentStatus = %q, want %q", got, "idle")
+	}
+
+	// Move the settle anchor past the window: output now flips to working.
+	setStopHookAtForTest(s, time.Now().Add(-3*time.Second))
+	injectOutputForTest(s, []byte("new turn output"))
+	if got := agentStatus(s); got != "working" {
+		t.Errorf("output after settle window: AgentStatus = %q, want %q", got, "working")
+	}
+}
+
+// TestAgentStdinClearsWaiting: the user typing into a waiting agent answers
+// the prompt — waiting clears and the session is working.
+func TestAgentStdinClearsWaiting(t *testing.T) {
+	m := NewManager()
+	s := spawnAgentForTest(t, m)
+
+	s.SetWaiting()
+	if err := s.WriteInput([]byte("y")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	if got := agentStatus(s); got != "working" {
+		t.Errorf("after stdin AgentStatus = %q, want %q", got, "working")
+	}
+}
+
+// TestClearWaitingOnAttach: attaching to a waiting agent clears it to idle
+// (D-45); bash sessions are a strict no-op.
+func TestClearWaitingOnAttach(t *testing.T) {
+	m := NewManager()
+	s := spawnAgentForTest(t, m)
+
+	s.SetWaiting()
+	s.ClearWaitingOnAttach()
+	if got := agentStatus(s); got != "idle" {
+		t.Errorf("after ClearWaitingOnAttach AgentStatus = %q, want %q", got, "idle")
+	}
+
+	// A non-waiting agent is untouched (working stays working).
+	s2 := spawnAgentForTest(t, m)
+	s2.ClearWaitingOnAttach()
+	if got := agentStatus(s2); got != "working" {
+		t.Errorf("non-waiting agent after ClearWaitingOnAttach = %q, want %q", got, "working")
+	}
+
+	// Bash: no-op, no panic, no agent status.
+	b := spawnForTest(t, m)
+	b.ClearWaitingOnAttach()
+	if got := b.Info().AgentStatus; got != "" {
+		t.Errorf("bash AgentStatus = %q, want empty", got)
+	}
+}
+
+// TestAgentBelFallbackGating: a bare BEL marks waiting ONLY in hooks-dead
+// mode (no SessionStart received); OSC-terminated BELs never count (Pitfall 2
+// + research anti-pattern).
+func TestAgentBelFallbackGating(t *testing.T) {
+	m := NewManager()
+
+	t.Run("hooks dead: bare BEL -> waiting", func(t *testing.T) {
+		s := spawnAgentForTest(t, m)
+		injectOutputForTest(s, []byte{0x07})
+		if got := agentStatus(s); got != "waiting" {
+			t.Errorf("AgentStatus = %q, want %q", got, "waiting")
+		}
+	})
+
+	t.Run("hooks alive: BEL ignored", func(t *testing.T) {
+		s := spawnAgentForTest(t, m)
+		s.MarkHooksAlive()
+		injectOutputForTest(s, []byte{0x07})
+		if got := agentStatus(s); got == "waiting" {
+			t.Errorf("AgentStatus = %q; hooks-alive BEL must never mark waiting", got)
+		}
+	})
+
+	t.Run("OSC-terminated BEL never triggers", func(t *testing.T) {
+		s := spawnAgentForTest(t, m)
+		injectOutputForTest(s, []byte("\x1b]0;title\x07"))
+		if got := agentStatus(s); got == "waiting" {
+			t.Errorf("AgentStatus = %q; OSC terminator BEL must not mark waiting (hooks dead)", got)
+		}
+		s.MarkHooksAlive()
+		injectOutputForTest(s, []byte("\x1b]0;title\x07"))
+		if got := agentStatus(s); got == "waiting" {
+			t.Errorf("AgentStatus = %q; OSC terminator BEL must not mark waiting (hooks alive)", got)
+		}
+	})
+}
+
+// TestAgentStopRequestedDistinguishesExit: server-initiated Stop records
+// stopRequested so exit 143 can render gray; a natural exit stays false
+// (red stays reserved for exits Kangent didn't ask for).
+func TestAgentStopRequestedDistinguishesExit(t *testing.T) {
+	m := NewManager()
+
+	s := spawnAgentForTest(t, m)
+	setTestGrace(s, 200*time.Millisecond)
+	s.Stop()
+	info := s.Info()
+	if !info.StopRequested {
+		t.Error("StopRequested = false after server Stop, want true")
+	}
+	if info.AgentStatus != "exited" {
+		t.Errorf("AgentStatus = %q after Stop, want %q", info.AgentStatus, "exited")
+	}
+	if info.ExitCode == nil || *info.ExitCode != 143 {
+		t.Errorf("ExitCode = %v, want 143 (stub traps TERM)", info.ExitCode)
+	}
+
+	// Natural exit: a stub that exits on its own.
+	exitStub := filepath.Join(t.TempDir(), "fake-claude-exits")
+	if err := os.WriteFile(exitStub, []byte("#!/usr/bin/env bash\necho done\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write exiting stub: %v", err)
+	}
+	m.SetAgentConfig(testAgentConfig(exitStub))
+	s2 := spawnForTestOpts(t, m, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 2})
+	select {
+	case <-s2.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("exiting stub never exited")
+	}
+	info2 := s2.Info()
+	if info2.StopRequested {
+		t.Error("StopRequested = true after natural exit, want false")
+	}
+	if info2.AgentStatus != "exited" {
+		t.Errorf("AgentStatus = %q after natural exit, want %q", info2.AgentStatus, "exited")
+	}
+}
+
+// TestAgentQuietThresholdIdle: no activity for longer than the 10s threshold
+// computes idle (lazy computation, no ticker).
+func TestAgentQuietThresholdIdle(t *testing.T) {
+	m := NewManager()
+	s := spawnAgentForTest(t, m)
+	waitForQuiescentSnapshot(t, s, "fake claude ready") // startup output done
+
+	setLastActivityForTest(s, time.Now().Add(-(agentQuietThreshold + time.Second)))
+	if got := agentStatus(s); got != "idle" {
+		t.Errorf("AgentStatus = %q after >10s quiet, want %q", got, "idle")
+	}
+}
+
 // TestStopAllForTaskNoSessions: a task with no sessions returns immediately
 // with no panic and no block.
 func TestStopAllForTaskNoSessions(t *testing.T) {
