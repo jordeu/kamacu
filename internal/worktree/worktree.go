@@ -94,8 +94,9 @@ func (s *Service) PathFor(repoPath, slug string, taskID int64) string {
 }
 
 // ResolveBase returns a commit-ish to branch from, per D-24 (default branch
-// tip, local reads only — no network, ever; git remote set-head/show both
-// hit the network and are forbidden here). Chain (RESEARCH §1, all verified):
+// tip, local reads only — no network, ever; git's remote head
+// auto-detection commands hit the network and are forbidden here).
+// Chain (RESEARCH §1, all verified):
 //
 //  1. origin/HEAD symbolic ref → branch name N; prefer local refs/heads/N
 //     (the local tip per D-24), else the remote-tracking ref origin/N.
