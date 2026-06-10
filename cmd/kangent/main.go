@@ -78,6 +78,17 @@ func main() {
 	}
 }
 
+// ensureLoopback rejects any listen address that is not loopback (D-21).
+func ensureLoopback(addr string) error {
+	return nil // stub
+}
+
+// hostCheck is middleware rejecting non-loopback Host headers (DNS-rebinding
+// defense).
+func hostCheck(next http.Handler) http.Handler {
+	return next // stub
+}
+
 // expandHome resolves a leading "~" or "~/" to the current user's home directory.
 func expandHome(p string) (string, error) {
 	if p == "~" || strings.HasPrefix(p, "~/") {
