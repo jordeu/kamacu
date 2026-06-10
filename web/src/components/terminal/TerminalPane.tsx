@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -19,6 +20,7 @@ export interface TerminalPaneProps {
   exitCode?: number;
   onClosed?: () => void; // user clicked Close on a terminal banner
   onSessionExit?: () => void; // 'x' frame received — parent invalidates ["sessions"]
+  onNewTerminal?: () => void; // banner "New terminal" — parent spawns; the pane NEVER spawns
 }
 
 /**
@@ -30,11 +32,14 @@ export function TerminalPane({
   sessionId,
   label,
   status,
+  onClosed,
   onSessionExit,
+  onNewTerminal,
 }: TerminalPaneProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [term, setTerm] = useState<Terminal | null>(null);
   const [conn, setConn] = useState<ConnState>({ kind: "connecting" });
+  const [showConnecting, setShowConnecting] = useState(false);
   const [stopping, setStopping] = useState(false);
 
   const onSessionExitRef = useRef(onSessionExit);
@@ -50,11 +55,21 @@ export function TerminalPane({
     if (s.kind === "exited") onSessionExitRef.current?.();
   }, []);
 
-  const { sendResize } = useTerminalSocket({
+  const { sendResize, retry } = useTerminalSocket({
     sessionId,
     term,
     onState: handleState,
   });
+
+  // First-attach "Connecting…" only renders after a 150ms delay (no flash).
+  useEffect(() => {
+    if (conn.kind !== "connecting") {
+      setShowConnecting(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowConnecting(true), 150);
+    return () => window.clearTimeout(timer);
+  }, [conn.kind]);
 
   // ONE effect keyed on sessionId creates everything; its cleanup destroys
   // everything. StrictMode setup→cleanup→setup leaks nothing.
@@ -155,8 +170,8 @@ export function TerminalPane({
       term.options.disableStdin = false;
       fitAndSendRef.current(true); // re-fit + forced resize → server jiggle
     } else if (conn.kind !== "connecting") {
-      // reconnecting / lost / exited / not-found: input off (the hook gates
-      // too), scrollback stays usable.
+      // reconnecting / lost / exited / not-found: input off (the hook's
+      // onData forwarding gates on OPEN+!exited too), scrollback stays usable.
       term.options.disableStdin = true;
     }
   }, [conn, term]);
@@ -170,12 +185,88 @@ export function TerminalPane({
   const exited = conn.kind === "exited";
   const showStop = status === "running" && !exited && conn.kind !== "not-found";
 
+  // Header status text (12px muted) — only when not cleanly connected.
+  const headerStatus =
+    conn.kind === "connecting"
+      ? "Connecting…"
+      : conn.kind === "reconnecting"
+        ? "Reconnecting…"
+        : conn.kind === "lost"
+          ? "Connection lost"
+          : conn.kind === "exited"
+            ? "Exited"
+            : null;
+
+  // One banner at a time, docked under the header and above the viewport
+  // (zinc-900 surface, 1px zinc-800 bottom border). The terminal canvas is
+  // NEVER dimmed — exited history stays readable/copyable (D-15).
+  let banner: ReactNode = null;
+  if (conn.kind === "reconnecting") {
+    banner = (
+      <div className="flex shrink-0 items-center border-b border-border bg-card px-3 py-2">
+        <span className="text-sm text-muted-foreground">
+          Connection lost. Reconnecting…
+        </span>
+      </div>
+    );
+  } else if (conn.kind === "lost") {
+    banner = (
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+        <span className="text-sm font-medium">Couldn't reconnect.</span>
+        <span className="text-sm text-muted-foreground">
+          The session may still be running on the server.
+        </span>
+        <div className="ml-auto">
+          <Button variant="ghost" size="sm" onClick={retry}>
+            Retry connection
+          </Button>
+        </div>
+      </div>
+    );
+  } else if (conn.kind === "not-found") {
+    banner = (
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+        <span className="text-sm font-medium">Session not found.</span>
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" onClick={() => onNewTerminal?.()}>
+            New terminal
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
+            Close
+          </Button>
+        </div>
+      </div>
+    );
+  } else if (conn.kind === "exited") {
+    banner = (
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+        {/* No special-casing for signal codes — render the server's number as-is */}
+        <span className="text-sm font-medium">
+          Session exited (code {conn.code})
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" onClick={() => onNewTerminal?.()}>
+            New terminal
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
+            Close
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border has-[.xterm-helper-textarea:focus-visible]:ring-2 has-[.xterm-helper-textarea:focus-visible]:ring-blue-500">
       {/* Header bar — 36px: label left, status + Stop right, 1px separator below */}
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
         <span className="text-sm font-medium">{label}</span>
         <div className="ml-auto flex items-center gap-2">
+          {headerStatus && (
+            <span className="text-xs text-muted-foreground">
+              {headerStatus}
+            </span>
+          )}
           {showStop && (
             <Button
               variant="ghost"
@@ -190,6 +281,8 @@ export function TerminalPane({
         </div>
       </div>
 
+      {banner}
+
       {/* Viewport — 8px inset painted in terminal background (never page
           background); the canvas is NEVER dimmed (D-15). Clicking anywhere
           in the viewport focuses xterm. */}
@@ -198,6 +291,11 @@ export function TerminalPane({
         onClick={() => term?.focus()}
       >
         <div ref={viewportRef} className="h-full w-full" />
+        {conn.kind === "connecting" && showConnecting && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="text-sm text-muted-foreground">Connecting…</span>
+          </div>
+        )}
       </div>
     </div>
   );
