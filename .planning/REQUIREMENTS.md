@@ -7,16 +7,16 @@
 
 ### Projects
 
-- [ ] **PROJ-01**: User can create a project by pointing at a local directory containing a git repo (path validated at creation)
+- [x] **PROJ-01**: User can create a project by pointing at a local directory containing a git repo (path validated at creation)
 - [ ] **PROJ-02**: User can see all projects in a left sidebar and switch the board by clicking one
-- [ ] **PROJ-03**: User can edit a project's name and delete a project (tasks removed from DB; repo on disk untouched)
+- [x] **PROJ-03**: User can edit a project's name and delete a project (tasks removed from DB; repo on disk untouched)
 
 ### Tasks & Board
 
-- [ ] **TASK-01**: User can create a task with title and markdown description in a project
+- [x] **TASK-01**: User can create a task with title and markdown description in a project
 - [ ] **TASK-02**: User can view tasks on a kanban board with fixed columns: To Do / In Progress / In Review / Done
-- [ ] **TASK-03**: User can drag tasks between columns and the new status persists
-- [ ] **TASK-04**: User can edit a task's title/description and delete a task
+- [x] **TASK-03**: User can drag tasks between columns and the new status persists
+- [x] **TASK-04**: User can edit a task's title/description and delete a task
 - [ ] **TASK-05**: User can click a task to open an expanded task view (description + session tabs)
 
 ### Git Worktrees
@@ -92,13 +92,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROJ-01 | Phase 1 | Pending |
+| PROJ-01 | Phase 1 | Complete |
 | PROJ-02 | Phase 1 | Pending |
-| PROJ-03 | Phase 1 | Pending |
-| TASK-01 | Phase 1 | Pending |
+| PROJ-03 | Phase 1 | Complete |
+| TASK-01 | Phase 1 | Complete |
 | TASK-02 | Phase 1 | Pending |
-| TASK-03 | Phase 1 | Pending |
-| TASK-04 | Phase 1 | Pending |
+| TASK-03 | Phase 1 | Complete |
+| TASK-04 | Phase 1 | Complete |
 | TASK-05 | Phase 1 | Pending |
 | STOR-01 | Phase 1 | Complete |
 | STOR-02 | Phase 1 | Complete |
