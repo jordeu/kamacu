@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"kangent/internal/session"
 	"kangent/internal/store"
@@ -250,6 +253,137 @@ func TestSessionListTaskFilter(t *testing.T) {
 	raw, _ := io.ReadAll(resp.Body)
 	if got := strings.TrimSpace(string(raw)); got != "[]" {
 		t.Errorf("empty filtered body = %q, want %q", got, "[]")
+	}
+}
+
+// claudeSessionIDFor reads tasks.claude_session_id for a task.
+func claudeSessionIDFor(t *testing.T, db *sql.DB, taskID int64) sql.NullString {
+	t.Helper()
+	var csid sql.NullString
+	if err := db.QueryRow(`SELECT claude_session_id FROM tasks WHERE id = ?`, taskID).Scan(&csid); err != nil {
+		t.Fatalf("read claude_session_id: %v", err)
+	}
+	return csid
+}
+
+func TestSessionAgentSpawn(t *testing.T) {
+	srv, _, db := newAgentServer(t)
+	id, _ := worktreeTask(t, srv, "Agent Work")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%v", status, body)
+	}
+	if body["label"] != "Agent" {
+		t.Errorf("label = %q, want %q", body["label"], "Agent")
+	}
+	if body["kind"] != "agent" {
+		t.Errorf("kind = %q, want %q", body["kind"], "agent")
+	}
+	if body["agentStatus"] != "working" {
+		t.Errorf("agentStatus = %q, want %q (spawn -> working)", body["agentStatus"], "working")
+	}
+
+	// The claude session id is persisted on the task row BEFORE the reply —
+	// the Phase 5 --resume key.
+	csid := claudeSessionIDFor(t, db, id)
+	if !csid.Valid {
+		t.Fatal("tasks.claude_session_id is NULL after agent spawn")
+	}
+	if _, err := uuid.Parse(csid.String); err != nil {
+		t.Errorf("claude_session_id %q does not parse as a uuid: %v", csid.String, err)
+	}
+}
+
+func TestSessionAgentOnePerTask(t *testing.T) {
+	srv, _, _ := newAgentServer(t)
+	id, _ := worktreeTask(t, srv, "One Agent")
+
+	if status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"}); status != http.StatusCreated {
+		t.Fatalf("first spawn: status = %d; body=%v", status, body)
+	}
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusConflict {
+		t.Fatalf("second spawn: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "agent session already running" {
+		t.Errorf("error = %q, want %q", body["error"], "agent session already running")
+	}
+}
+
+func TestSessionAgentRestartAfterExit(t *testing.T) {
+	srv, mgr, db := newAgentServer(t)
+	id, _ := worktreeTask(t, srv, "Start Again")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("first spawn: status = %d; body=%v", status, body)
+	}
+	first := claudeSessionIDFor(t, db, id)
+	if !first.Valid {
+		t.Fatal("claude_session_id NULL after first spawn")
+	}
+	stopAndWait(t, mgr, body["id"].(string))
+
+	// "Start again" (D-41): a FRESH session after the first exited — 201, and
+	// the persisted claude_session_id is overwritten (latest wins).
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("respawn after exit: status = %d, want 201; body=%v", status, body)
+	}
+	second := claudeSessionIDFor(t, db, id)
+	if !second.Valid {
+		t.Fatal("claude_session_id NULL after respawn")
+	}
+	if _, err := uuid.Parse(second.String); err != nil {
+		t.Errorf("respawned claude_session_id %q does not parse as a uuid: %v", second.String, err)
+	}
+	if second.String == first.String {
+		t.Errorf("claude_session_id not overwritten on respawn: still %q", first.String)
+	}
+}
+
+func TestSessionAgentValidation(t *testing.T) {
+	srv, _, _ := newAgentServer(t)
+
+	// kind=agent without task_id: agents always need a worktree — same gate
+	// as a worktree-less task (D-30 wording contract).
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"kind": "agent"})
+	if status != http.StatusConflict {
+		t.Fatalf("agent without task_id: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "task has no worktree" {
+		t.Errorf("error = %q, want %q", body["error"], "task has no worktree")
+	}
+
+	// kind=agent on a task with NULL worktree_path (unborn HEAD repo).
+	pid := createProject(t, srv, gitRepo(t))
+	id := taskID(t, createTask(t, srv, pid, "Treeless Agent"))
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusConflict {
+		t.Fatalf("agent on worktree-less task: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "task has no worktree" {
+		t.Errorf("error = %q, want %q", body["error"], "task has no worktree")
+	}
+
+	// Unknown kind value -> 400.
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"kind": "bogus"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid kind: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != "invalid kind" {
+		t.Errorf("error = %q, want %q", body["error"], "invalid kind")
+	}
+
+	// Explicit kind=bash stays the Phase 3 task-scoped bash path.
+	tid, _ := worktreeTask(t, srv, "Explicit Bash")
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": tid, "kind": "bash"})
+	if status != http.StatusCreated {
+		t.Fatalf("explicit bash: status = %d, want 201; body=%v", status, body)
+	}
+	if body["label"] != "Bash 1" {
+		t.Errorf("explicit bash label = %q, want %q", body["label"], "Bash 1")
 	}
 }
 
