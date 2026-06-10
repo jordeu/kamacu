@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-06-10T15:18:57.690Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-06-10T15:28:58.374Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 16
+  completed_plans: 17
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 3 (Worktree Isolation & Bash Tabs) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -68,6 +68,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P01 | 13 min | 2 tasks | 2 files |
 | Phase 03 P03 | 19 min | 3 tasks | 11 files |
 | Phase 03 P04 | 15 min | 3 tasks | 7 files |
+| Phase 03 P05 | 6 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,9 @@ Recent decisions affecting current work:
 - [Phase 03]: Tab x renders only while running && !closing — closing/exited tabs drop the affordance; exited tabs close via the Phase 2 banner (chosen reading of UI-SPEC's 'x disabled')
 - [Phase 03]: TaskPage is a flex h-full column (TerminalPage pattern), not viewport calc(): bash tabs fill below the strip; Description scrolls in its 860px island
 - [Phase 03]: TabDef gained keepMounted — onClose presence can't discriminate mounting since closing tabs lose onClose but must keep their WS (forceMount + data-inactive:hidden)
+- [Phase 03]: Verbatim UI-SPEC copy kept in single template literals in JSX so contract phrases stay grep-able and line-wrapping can never split them
+- [Phase 03]: Cleanup dialog onError refetches worktree state so a 409 raced-state response re-derives the correct variant in place (Pitfall 8 server re-check)
+- [Phase 03]: Done-transition cleanup offer fires from a call-site onSuccess on moveTask.mutate — shared useMoveTask hook untouched, offer predicated on the server response Task
 
 ### Pending Todos
 
@@ -137,6 +141,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T15:18:57.687Z
-Stopped at: Completed 03-04-PLAN.md
+Last session: 2026-06-10T15:28:58.367Z
+Stopped at: Completed 03-05-PLAN.md
 Resume file: None
