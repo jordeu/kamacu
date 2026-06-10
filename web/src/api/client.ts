@@ -52,6 +52,9 @@ export function patch<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
-export function del<T = void>(path: string): Promise<T> {
-  return api<T>(path, { method: "DELETE" });
+export function del<T = void>(path: string, body?: unknown): Promise<T> {
+  return api<T>(path, {
+    method: "DELETE",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }

@@ -26,4 +26,9 @@ export interface Task {
   position: number;
   created_at: string;
   updated_at: string;
+  // Worktree presence (Phase 3): path set -> active; error set -> failed
+  // (Retry); both null -> absent (Create worktree). Derived, no status enum.
+  branch: string | null;
+  worktree_path: string | null;
+  worktree_error: string | null;
 }
