@@ -16,6 +16,7 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ Kanban board per project with fixed columns (To Do / In Progress / In Review / Done), drag-and-drop with persisted manual order — Phase 1
 - ✓ Tasks with title, markdown description, status; full CRUD and full-page task view with extensible tab strip — Phase 1
 - ✓ All projects/tasks stored in local SQLite; single Go binary serves embedded SPA at localhost — Phase 1
+- ✓ Real PTY-backed terminal in the browser: full interactive TUI, resize/scrollback/copy-paste, server-owned sessions that survive tab closes with replay on reattach, full-process-tree stop, Origin/Host-validated WebSocket with loopback-only binding — Phase 2
 
 ### Active
 
@@ -80,4 +81,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-10 after Phase 1 completion (Foundation — Projects & Board: single binary + SQLite + kanban CRUD shipped and human-verified)*
+*Last updated: 2026-06-10 after Phase 2 completion (Terminal Engine: server-owned PTY sessions, browser terminal with reattach, shipped and human-verified)*
