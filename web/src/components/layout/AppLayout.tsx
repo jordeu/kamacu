@@ -56,7 +56,13 @@ export function AppLayout() {
         style={{ "--sidebar-width": "15rem" } as CSSProperties}
       >
         <ProjectSidebar />
-        <main className="relative flex-1 overflow-hidden">
+        <main
+          className={
+            open
+              ? "relative flex-1 overflow-hidden"
+              : "relative flex-1 overflow-hidden pl-9"
+          }
+        >
           <CollapsedSidebarTrigger />
           <Outlet />
         </main>
