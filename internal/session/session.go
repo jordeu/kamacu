@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/armon/circbuf"
+	"github.com/creack/pty"
 )
 
 // Status is a session lifecycle state.
@@ -55,11 +56,13 @@ type Session struct {
 	cmd  *exec.Cmd
 	ptmx *os.File
 
-	mu       sync.Mutex
-	ring     *circbuf.Buffer        // 1 MiB raw output ring (replay source)
-	conns    map[string]chan []byte // per-conn output queues, buffered 256
-	status   Status
-	exitCode int
+	mu           sync.Mutex
+	ring         *circbuf.Buffer        // 1 MiB raw output ring (replay source)
+	conns        map[string]chan []byte // per-conn output queues, buffered 256
+	status       Status
+	exitCode     int
+	lastWinsize  pty.Winsize // last size applied to the PTY (jiggle detection)
+	setsizeCalls int         // recorded pty.Setsize invocations (test observability)
 
 	done      chan struct{} // closed after the exit watcher finishes
 	termGrace time.Duration // D-14 grace between SIGTERM and SIGKILL
@@ -201,6 +204,107 @@ func (s *Session) Snapshot() []byte {
 // fires, Info().ExitCode is final.
 func (s *Session) Done() <-chan struct{} {
 	return s.done
+}
+
+// Resize applies a new PTY size.
+//
+// Contract for the WS handler (plan 02-03): pass forceRedraw=true exactly
+// ONCE per attach — on the first resize frame after each attach — and false
+// for every later resize. The kernel sends SIGWINCH only when the winsize
+// actually CHANGES (man7 TIOCSWINSZ), so when a reattaching client's fitted
+// size equals the PTY's current size, the only way to make full-screen
+// programs repaint the replayed scrollback is a "jiggle": two real size
+// changes (rows-1, then rows). The once-per-attach debounce matters because
+// resize storms duplicate TUI output (claude-code resize-storm bug #49086).
+func (s *Session) Resize(cols, rows uint16, forceRedraw bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status == StatusExited {
+		return errors.New("session exited")
+	}
+	want := pty.Winsize{Rows: rows, Cols: cols}
+	if want != s.lastWinsize {
+		// A real change delivers SIGWINCH by itself.
+		return s.setsizeLocked(want)
+	}
+	if !forceRedraw {
+		return nil
+	}
+	// Same size + forceRedraw: jiggle through rows-1 so two real changes
+	// fire SIGWINCH and the foreground program performs a full repaint.
+	if err := s.setsizeLocked(pty.Winsize{Rows: rows - 1, Cols: cols}); err != nil {
+		return err
+	}
+	return s.setsizeLocked(want)
+}
+
+// setsizeLocked applies ws to the PTY and records it. Caller holds s.mu.
+func (s *Session) setsizeLocked(ws pty.Winsize) error {
+	s.setsizeCalls++
+	if err := pty.Setsize(s.ptmx, &ws); err != nil {
+		return err
+	}
+	s.lastWinsize = ws
+	return nil
+}
+
+// Stop tears the session down per D-14: SIGTERM to every process group in
+// the shell's session, a grace window (default 5s), then SIGKILL to anything
+// remaining. Idempotent — concurrent and repeated calls are safe — and
+// blocks until the exit watcher has finished.
+//
+// The whole SESSION is signaled, not just the leader's process group:
+// interactive bash enables job control, so children like `sleep 300 &` live
+// in their own process groups and would survive a kill(-leaderPGID) (TERM-06
+// would silently break). Known limit (shared with every terminal
+// multiplexer): a child that itself calls setsid() escapes the session and
+// cannot be caught.
+func (s *Session) Stop() {
+	select {
+	case <-s.done:
+		return // already exited — nothing to do
+	default:
+	}
+	s.stopOnce.Do(func() {
+		s.signalSession(syscall.SIGTERM)
+		select {
+		case <-s.done:
+		case <-time.After(s.termGrace):
+			s.signalSession(syscall.SIGKILL)
+		}
+	})
+	<-s.done
+	// Defense in depth: the leader is reaped, but a group forked at the exact
+	// moment of the kill sweep could linger. Sweep until the session is empty
+	// (bounded; normally zero iterations).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		groups := sessionPGIDs(s.cmd.Process.Pid)
+		if len(groups) == 0 {
+			return
+		}
+		for _, pgid := range groups {
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// signalSession sends sig to every process group in the child's session,
+// always including the leader's own group (PGID == PID, since pty.Start made
+// the child a session leader). ESRCH is ignored.
+func (s *Session) signalSession(sig syscall.Signal) {
+	pid := s.cmd.Process.Pid
+	leaderSignaled := false
+	for _, pgid := range sessionPGIDs(pid) {
+		if pgid == pid {
+			leaderSignaled = true
+		}
+		_ = syscall.Kill(-pgid, sig)
+	}
+	if !leaderSignaled {
+		_ = syscall.Kill(-pid, sig)
+	}
 }
 
 // sessionPGIDs returns the distinct process-group IDs of every live process

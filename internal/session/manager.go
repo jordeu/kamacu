@@ -86,10 +86,11 @@ func (m *Manager) Spawn() (*Session, error) {
 		cmd:       cmd,
 		ptmx:      ptmx,
 		ring:      ring,
-		conns:     make(map[string]chan []byte),
-		status:    StatusRunning,
-		done:      make(chan struct{}),
-		termGrace: 5 * time.Second, // D-14
+		conns:       make(map[string]chan []byte),
+		status:      StatusRunning,
+		lastWinsize: initial,
+		done:        make(chan struct{}),
+		termGrace:   5 * time.Second, // D-14
 	}
 
 	go s.pump()
