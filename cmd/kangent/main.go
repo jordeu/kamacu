@@ -75,7 +75,7 @@ func main() {
 	mux := http.NewServeMux()
 	api.Routes(mux, db, wtSvc)
 	mgr := session.NewManager()
-	api.SessionRoutes(mux, mgr)
+	api.SessionRoutes(mux, mgr, db)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {

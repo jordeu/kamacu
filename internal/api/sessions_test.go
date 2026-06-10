@@ -21,9 +21,17 @@ import (
 // sessions are stopped on cleanup.
 func newSessionServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	SessionRoutes(mux, mgr)
+	SessionRoutes(mux, mgr, db)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() {

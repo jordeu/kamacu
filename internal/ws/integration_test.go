@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"kangent/internal/api"
 	"kangent/internal/session"
+	"kangent/internal/store"
 	"kangent/internal/ws"
 )
 
@@ -25,9 +27,17 @@ import (
 // it over httptest. Cleanup stops every session so no bash outlives the run.
 func newTestServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	api.SessionRoutes(mux, mgr)
+	api.SessionRoutes(mux, mgr, db)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
