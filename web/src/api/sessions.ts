@@ -4,11 +4,14 @@ import type { ApiError } from "./client";
 
 export interface TermSession {
   id: string; // opaque uuid — NEVER parse
-  label: string; // "bash #3" (dev) or "Bash 3" (task-scoped) — server-assigned
+  label: string; // "bash #3" (dev), "Bash 3" (task-scoped), "Agent" — server-assigned
   status: "running" | "exited";
   exitCode?: number;
   createdAt: string; // RFC3339
   taskId?: number; // omitted for unscoped dev sessions
+  kind?: "bash" | "agent"; // session discriminator (04-02 server Info JSON)
+  agentStatus?: "working" | "idle" | "waiting" | "exited"; // agent sessions only
+  stopRequested?: boolean; // Kangent-initiated stop (gray-dot discriminator)
 }
 
 export function useSessions(taskId?: number) {
@@ -42,6 +45,24 @@ export function useSpawnSession(taskId?: number) {
       }
       // Prefix-matches the scoped ["sessions", taskId] keys too.
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+export function useSpawnAgent(taskId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      post<TermSession>("/api/sessions", { task_id: taskId, kind: "agent" }),
+    onSuccess: (session) => {
+      // Same spawn-select race fix as useSpawnSession: write the fresh
+      // session into the scoped cache so the pane attaches immediately.
+      queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
+        old ? [session, ...old] : [session],
+      );
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      // Board/tab dots appear without waiting a poll period.
+      queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
     },
   });
 }

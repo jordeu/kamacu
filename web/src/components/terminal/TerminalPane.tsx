@@ -21,6 +21,11 @@ export interface TerminalPaneProps {
   onClosed?: () => void; // user clicked Close on a terminal banner
   onSessionExit?: () => void; // 'x' frame received — parent invalidates ["sessions"]
   onNewTerminal?: () => void; // banner "New terminal" — parent spawns; the pane NEVER spawns
+  headerActions?: ReactNode; // header right group, BEFORE Stop (D-36 slot)
+  exitedPrimaryLabel?: string; // exited-banner primary action label; default "New terminal"
+  showExitedClose?: boolean; // default true; false hides the banner's ghost Close (D-38)
+  onReady?: (api: { paste: (text: string) => void } | null) => void; // imperative paste handle
+  onConnect?: () => void; // fires when conn state becomes "connected" (D-45 hook)
 }
 
 /**
@@ -35,6 +40,11 @@ export function TerminalPane({
   onClosed,
   onSessionExit,
   onNewTerminal,
+  headerActions,
+  exitedPrimaryLabel,
+  showExitedClose,
+  onReady,
+  onConnect,
 }: TerminalPaneProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [term, setTerm] = useState<Terminal | null>(null);
@@ -44,6 +54,11 @@ export function TerminalPane({
 
   const onSessionExitRef = useRef(onSessionExit);
   onSessionExitRef.current = onSessionExit;
+  // Ref-stabilized like onSessionExit so effect deps never change.
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const onConnectRef = useRef(onConnect);
+  onConnectRef.current = onConnect;
 
   // Set by the mount effect; lets the conn-state effect force a fit + resize
   // send after every (re)connect (the forced send triggers the server-side
@@ -153,8 +168,10 @@ export function TerminalPane({
     fitAndSend(false);
 
     setTerm(term);
+    onReadyRef.current?.({ paste: (t: string) => term.paste(t) });
 
     return () => {
+      onReadyRef.current?.(null);
       setTerm(null);
       fitAndSendRef.current = () => {};
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
@@ -169,6 +186,7 @@ export function TerminalPane({
     if (conn.kind === "connected") {
       term.options.disableStdin = false;
       fitAndSendRef.current(true); // re-fit + forced resize → server jiggle
+      onConnectRef.current?.(); // D-45 optimistic waiting-clear hook
     } else if (conn.kind !== "connecting") {
       // reconnecting / lost / exited / not-found: input off (the hook's
       // onData forwarding gates on OPEN+!exited too), scrollback stays usable.
@@ -229,11 +247,13 @@ export function TerminalPane({
         <span className="text-sm font-medium">Session not found.</span>
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" onClick={() => onNewTerminal?.()}>
-            New terminal
+            {exitedPrimaryLabel ?? "New terminal"}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
-            Close
-          </Button>
+          {showExitedClose !== false && (
+            <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
+              Close
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -246,11 +266,13 @@ export function TerminalPane({
         </span>
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" onClick={() => onNewTerminal?.()}>
-            New terminal
+            {exitedPrimaryLabel ?? "New terminal"}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
-            Close
-          </Button>
+          {showExitedClose !== false && (
+            <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
+              Close
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -267,6 +289,7 @@ export function TerminalPane({
               {headerStatus}
             </span>
           )}
+          {headerActions}
           {showStop && (
             <Button
               variant="ghost"
