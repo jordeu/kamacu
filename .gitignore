@@ -2,3 +2,6 @@ bin/
 web/node_modules/
 web/dist/*
 !web/dist/index.html
+
+# Claude Code runtime artifacts
+.claude/scheduled_tasks.lock

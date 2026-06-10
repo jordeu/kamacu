@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-06-10T10:54:26.928Z"
+status: verifying
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-06-10T11:44:15.259Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 
 Phase: 2 (Terminal Engine) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-10
 
 Progress: [░░░░░░░░░░] 0%
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P01 | 12 min | 2 tasks | 5 files |
 | Phase 02 P04 | 8 min | 3 tasks | 2 files |
 | Phase 02 P03 | 20 min | 3 tasks | 9 files |
+| Phase 02 P05 | 48 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,10 @@ Recent decisions affecting current work:
 - [Phase 02]: WS writer treats a closed attach queue as its exit signal: session exited → 'x' frame + 1000 close; otherwise slow-consumer drop → 1013 close so the client reconnects with fresh replay
 - [Phase 02]: SIGWINCH/jiggle tested behaviorally with a WINCH trap inside a foreground NON-interactive bash -c child — interactive bash defers user WINCH traps, so prompt-level traps never fire
 - [Phase 02]: hostCheck hostname allowlist is port-agnostic (Vite proxy forwards Host: 127.0.0.1:5173); ensureLoopback refuses non-localhost hostnames unresolved
+- [Phase 02]: Spawn-select race closed by attaching from the spawn mutation result while the sessions-list invalidation is in flight
+- [Phase 02]: Integration test marker uses shell quote-splitting (mar''ker) so PTY command echo never satisfies output assertions
+- [Phase 02]: Host-header 403 asserted in cmd/kangent main_test.go (hostCheck unexported); integration test covers the Origin CSWSH rejection end-to-end
+- [Phase 02]: Reattach replay asserted on the FIRST WS data frame — replay must precede live output
 
 ### Pending Todos
 
@@ -117,6 +122,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T10:54:26.924Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-06-10T11:44:02.368Z
+Stopped at: Completed 02-05-PLAN.md
 Resume file: None

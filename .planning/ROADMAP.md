@@ -60,7 +60,7 @@ Plans:
 - [x] 02-02-PLAN.md — Frontend foundation: xterm 6 deps, Vite WS proxy fix, zinc xterm theme, typed session REST hooks
 - [x] 02-03-PLAN.md — WS bridge + REST + security: binary protocol, session endpoints, loopback/Host/Origin enforcement
 - [x] 02-04-PLAN.md — TerminalPane + socket hook: xterm config, resize/clipboard, reconnect backoff, exited/connection banners
-- [ ] 02-05-PLAN.md — /terminal dev route, end-to-end Go integration test, human verification of all five success criteria
+- [x] 02-05-PLAN.md — /terminal dev route, end-to-end Go integration test, human verification of all five success criteria
 
 ### Phase 3: Worktree Isolation & Bash Tabs
 **Goal**: Every task gets its own isolated worktree and branch, with bash terminals working inside it and safe, confirmed cleanup
