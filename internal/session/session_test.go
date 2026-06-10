@@ -289,6 +289,180 @@ func TestRemoveSemantics(t *testing.T) {
 	}
 }
 
+// setTestGrace shortens the SIGTERM→SIGKILL grace window so escalation tests
+// stay well under the suite timeout. Must be called before Stop.
+func setTestGrace(s *Session, d time.Duration) {
+	s.mu.Lock()
+	s.termGrace = d
+	s.mu.Unlock()
+}
+
+// waitForSessionGroups polls until the shell's session contains at least n
+// distinct process groups. Interactive bash runs every pipeline (foreground
+// or background) in its own group, so a spawned `sleep` shows up as a second
+// group in the session.
+func waitForSessionGroups(t *testing.T, s *Session, n int) {
+	t.Helper()
+	eventually(t, 5*time.Second, "session to contain child process group", func() bool {
+		return len(sessionPGIDs(s.cmd.Process.Pid)) >= n
+	})
+}
+
+// TestStopZeroDescendants is THE TERM-06 test: Stop must terminate the entire
+// process tree, including background children like `sleep 300 &`.
+func TestStopZeroDescendants(t *testing.T) {
+	m := NewManager()
+	s := spawnForTest(t, m)
+	setTestGrace(s, 200*time.Millisecond)
+	pgid := s.cmd.Process.Pid // session leader => PGID == PID
+
+	if err := s.WriteInput([]byte("sleep 300 &\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	waitForSessionGroups(t, s, 2)
+
+	s.Stop()
+
+	// Leader's process group must be entirely gone.
+	if err := syscall.Kill(-pgid, 0); err != syscall.ESRCH {
+		t.Errorf("Kill(-pgid, 0) = %v, want ESRCH (group must be empty)", err)
+	}
+	// And the whole session — including the background sleep's own process
+	// group — must be empty (zero orphaned subprocesses).
+	eventually(t, 2*time.Second, "session to have zero surviving processes", func() bool {
+		return len(sessionPGIDs(pgid)) == 0
+	})
+
+	info := s.Info()
+	if info.Status != StatusExited {
+		t.Errorf("Status after Stop = %q, want %q", info.Status, StatusExited)
+	}
+	if info.ExitCode == nil || *info.ExitCode != 137 {
+		t.Errorf("ExitCode after SIGKILL = %v, want 137 (128+SIGKILL)", info.ExitCode)
+	}
+}
+
+func TestStopOnExitedSessionIsIdempotent(t *testing.T) {
+	m := NewManager()
+	s := spawnForTest(t, m)
+
+	if err := s.WriteInput([]byte("exit\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("session did not exit")
+	}
+
+	// Stop on an exited session must return immediately, repeatedly, and
+	// concurrently, without panicking or hanging.
+	for i := 0; i < 2; i++ {
+		done := make(chan struct{})
+		go func() {
+			s.Stop()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("Stop on exited session did not return immediately")
+		}
+	}
+}
+
+func TestStopEscalatesToSigkill(t *testing.T) {
+	m := NewManager()
+	s := spawnForTest(t, m)
+	setTestGrace(s, 200*time.Millisecond)
+	pgid := s.cmd.Process.Pid
+
+	// Interactive bash already ignores SIGTERM; trap '' TERM makes the child
+	// sleep inherit SIG_IGN too, so NOTHING in the tree dies from SIGTERM.
+	if err := s.WriteInput([]byte("trap '' TERM; sleep 300\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	waitForSessionGroups(t, s, 2)
+
+	start := time.Now()
+	s.Stop()
+	elapsed := time.Since(start)
+
+	if elapsed < 200*time.Millisecond {
+		t.Errorf("Stop returned in %s, before the grace window — SIGTERM cannot have killed a trap-protected tree", elapsed)
+	}
+	info := s.Info()
+	if info.Status != StatusExited {
+		t.Errorf("Status = %q, want %q", info.Status, StatusExited)
+	}
+	if info.ExitCode == nil || *info.ExitCode != 137 {
+		t.Errorf("ExitCode = %v, want 137 (proves SIGKILL escalation)", info.ExitCode)
+	}
+	eventually(t, 2*time.Second, "trap-protected tree to be fully gone", func() bool {
+		return len(sessionPGIDs(pgid)) == 0
+	})
+}
+
+func TestStopConcurrentCallsAllReturn(t *testing.T) {
+	m := NewManager()
+	s := spawnForTest(t, m)
+	setTestGrace(s, 200*time.Millisecond)
+
+	results := make(chan struct{}, 2)
+	go func() { s.Stop(); results <- struct{}{} }()
+	go func() { s.Stop(); results <- struct{}{} }()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-results:
+		case <-time.After(5 * time.Second):
+			t.Fatal("concurrent Stop call never returned")
+		}
+	}
+}
+
+func TestResizeAndJiggle(t *testing.T) {
+	m := NewManager()
+	s := spawnForTest(t, m)
+
+	calls := func() int {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.setsizeCalls
+	}
+	size := func() (uint16, uint16) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.lastWinsize.Cols, s.lastWinsize.Rows
+	}
+
+	steps := []struct {
+		name        string
+		cols, rows  uint16
+		forceRedraw bool
+		wantDelta   int // expected change in recorded Setsize call count
+	}{
+		{"real size change", 100, 40, false, 1},
+		{"same size without force is a no-op", 100, 40, false, 0},
+		{"same size with force jiggles (rows-1 then rows)", 100, 40, true, 2},
+		{"changed size with force is a single set", 120, 50, true, 1},
+	}
+	for _, tt := range steps {
+		t.Run(tt.name, func(t *testing.T) {
+			before := calls()
+			if err := s.Resize(tt.cols, tt.rows, tt.forceRedraw); err != nil {
+				t.Fatalf("Resize(%d, %d, %v): %v", tt.cols, tt.rows, tt.forceRedraw, err)
+			}
+			if got := calls() - before; got != tt.wantDelta {
+				t.Errorf("setsize calls delta = %d, want %d", got, tt.wantDelta)
+			}
+			gotCols, gotRows := size()
+			if gotCols != tt.cols || gotRows != tt.rows {
+				t.Errorf("lastWinsize = %dx%d, want %dx%d", gotCols, gotRows, tt.cols, tt.rows)
+			}
+		})
+	}
+}
+
 func TestListNewestFirst(t *testing.T) {
 	m := NewManager()
 	s1 := spawnForTest(t, m)
