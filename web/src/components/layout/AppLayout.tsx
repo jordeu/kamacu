@@ -8,6 +8,7 @@ import {
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
@@ -48,16 +49,18 @@ export function AppLayout() {
   }
 
   return (
-    <SidebarProvider
-      open={open}
-      onOpenChange={handleOpenChange}
-      style={{ "--sidebar-width": "15rem" } as CSSProperties}
-    >
-      <ProjectSidebar />
-      <main className="relative flex-1 overflow-hidden">
-        <CollapsedSidebarTrigger />
-        <Outlet />
-      </main>
-    </SidebarProvider>
+    <TooltipProvider delayDuration={0}>
+      <SidebarProvider
+        open={open}
+        onOpenChange={handleOpenChange}
+        style={{ "--sidebar-width": "15rem" } as CSSProperties}
+      >
+        <ProjectSidebar />
+        <main className="relative flex-1 overflow-hidden">
+          <CollapsedSidebarTrigger />
+          <Outlet />
+        </main>
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }
