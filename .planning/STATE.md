@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-06-10T10:42:22.679Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-06-10T10:54:26.928Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 2 (Terminal Engine) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P02 | 3 min | 2 tasks | 5 files |
 | Phase 02 P01 | 12 min | 2 tasks | 5 files |
 | Phase 02 P04 | 8 min | 3 tasks | 2 files |
+| Phase 02 P03 | 20 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 02]: retry() reconnects immediately at attempt 0; the 5-step backoff applies to subsequent failures only
 - [Phase 02]: Post-connect resize force-sent (bypassing change detection) so the server SIGWINCH jiggle fires on reattach with unchanged dimensions
 - [Phase 02]: Focus ring scoped via has-[.xterm-helper-textarea:focus-visible] — pointer clicks may still show it (textarea focus-visible heuristic); verify live in 02-05
+- [Phase 02]: WS writer treats a closed attach queue as its exit signal: session exited → 'x' frame + 1000 close; otherwise slow-consumer drop → 1013 close so the client reconnects with fresh replay
+- [Phase 02]: SIGWINCH/jiggle tested behaviorally with a WINCH trap inside a foreground NON-interactive bash -c child — interactive bash defers user WINCH traps, so prompt-level traps never fire
+- [Phase 02]: hostCheck hostname allowlist is port-agnostic (Vite proxy forwards Host: 127.0.0.1:5173); ensureLoopback refuses non-localhost hostnames unresolved
 
 ### Pending Todos
 
@@ -113,6 +117,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T10:42:22.675Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-06-10T10:54:26.924Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None

@@ -33,7 +33,7 @@
 - [ ] **TERM-04**: User can open additional bash session tabs running in the task's worktree
 - [x] **TERM-05**: Sessions keep running on the server when the browser tab closes; reopening the task reattaches with recent output replayed and a clean TUI redraw
 - [x] **TERM-06**: User can stop a running session from the task view; process tree is fully terminated (no orphaned subprocesses)
-- [ ] **TERM-07**: WebSocket terminal endpoints validate Origin/Host so other websites cannot reach the shell (CSWSH protection)
+- [x] **TERM-07**: WebSocket terminal endpoints validate Origin/Host so other websites cannot reach the shell (CSWSH protection)
 
 ### Status & Attention
 
@@ -106,7 +106,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TERM-03 | Phase 2 | Complete |
 | TERM-05 | Phase 2 | Complete |
 | TERM-06 | Phase 2 | Complete |
-| TERM-07 | Phase 2 | Pending |
+| TERM-07 | Phase 2 | Complete |
 | GIT-01 | Phase 3 | Pending |
 | GIT-02 | Phase 3 | Pending |
 | GIT-03 | Phase 3 | Pending |
