@@ -27,7 +27,7 @@
 
 ### Terminal Sessions
 
-- [ ] **TERM-01**: User can start the task's agent session via an explicit Start button that spawns the `claude` CLI in a PTY with cwd set to the task's worktree
+- [x] **TERM-01**: User can start the task's agent session via an explicit Start button that spawns the `claude` CLI in a PTY with cwd set to the task's worktree
 - [x] **TERM-02**: User can interact with the session as a real terminal in the browser (full interactive TUI: plan mode, slash commands, permission prompts)
 - [x] **TERM-03**: Terminal supports resize (fit to pane), scrollback, and copy/paste including bracketed paste
 - [x] **TERM-04**: User can open additional bash session tabs running in the task's worktree
@@ -38,7 +38,7 @@
 ### Status & Attention
 
 - [x] **STAT-01**: Each task card shows a live session status badge: working / idle / waiting for input / exited
-- [ ] **STAT-02**: App detects when Claude Code needs input or finishes via per-session hooks injected at spawn (terminal bell as fallback)
+- [x] **STAT-02**: App detects when Claude Code needs input or finishes via per-session hooks injected at spawn (terminal bell as fallback)
 
 ### Recovery
 
@@ -111,9 +111,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GIT-02 | Phase 3 | Complete |
 | GIT-03 | Phase 3 | Complete |
 | TERM-04 | Phase 3 | Complete |
-| TERM-01 | Phase 4 | Pending |
+| TERM-01 | Phase 4 | Complete |
 | STAT-01 | Phase 4 | Complete |
-| STAT-02 | Phase 4 | Pending |
+| STAT-02 | Phase 4 | Complete |
 | RCVR-01 | Phase 5 | Pending |
 | RCVR-02 | Phase 5 | Pending |
 | REVW-01 | Phase 5 | Pending |

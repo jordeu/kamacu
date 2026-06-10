@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-06-10T18:41:35.016Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-06-10T18:49:37.245Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 23
-  completed_plans: 19
+  completed_plans: 20
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 4 (Claude Code Agent Sessions) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -71,6 +71,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P05 | 6 min | 2 tasks | 3 files |
 | Phase 03 P06 | 27 min | 3 tasks | 1 files |
 | Phase 04-claude-code-agent-sessions P03 | 4 min | 2 tasks | 4 files |
+| Phase 04 P01 | 11 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -135,6 +136,9 @@ Recent decisions affecting current work:
 - [Phase 03]: Lifecycle test cwd proven via echo mark:$PWD expansion — echoed input only contains the literal $PWD, so PTY command echo can never satisfy the assertion
 - [Phase 04]: CardRow extracted as the single inner card layout shared by CardShell, TaskCard, and TaskCardOverlay; per-card useAgentStatuses calls dedupe on the shared ["agent-statuses"] key
 - [Phase 04]: shrink-0 lives on the StatusDot tooltip wrapper span (the real flex item) as well as the inner dot, so card consumers pass only the mt-[6px] optical offset
+- [Phase 04]: Agent-status pump logic factored into noteAgentOutputLocked so tests drive the real code path via in-package _test helpers instead of flaky PTY byte injection
+- [Phase 04]: Kangent session id generated up front in Spawn so the agent overlay hook URL embeds it before the process starts
+- [Phase 04]: stopRequested set inside stopOnce.Do before SIGTERM so natural exits can never observe it true (exit 143 renders gray only when Kangent asked)
 
 ### Pending Todos
 
@@ -147,6 +151,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T18:41:35.005Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-06-10T18:49:37.240Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
