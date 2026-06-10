@@ -92,13 +92,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap) | | |
+| PROJ-01 | Phase 1 | Pending |
+| PROJ-02 | Phase 1 | Pending |
+| PROJ-03 | Phase 1 | Pending |
+| TASK-01 | Phase 1 | Pending |
+| TASK-02 | Phase 1 | Pending |
+| TASK-03 | Phase 1 | Pending |
+| TASK-04 | Phase 1 | Pending |
+| TASK-05 | Phase 1 | Pending |
+| STOR-01 | Phase 1 | Pending |
+| STOR-02 | Phase 1 | Pending |
+| TERM-02 | Phase 2 | Pending |
+| TERM-03 | Phase 2 | Pending |
+| TERM-05 | Phase 2 | Pending |
+| TERM-06 | Phase 2 | Pending |
+| TERM-07 | Phase 2 | Pending |
+| GIT-01 | Phase 3 | Pending |
+| GIT-02 | Phase 3 | Pending |
+| GIT-03 | Phase 3 | Pending |
+| TERM-04 | Phase 3 | Pending |
+| TERM-01 | Phase 4 | Pending |
+| STAT-01 | Phase 4 | Pending |
+| STAT-02 | Phase 4 | Pending |
+| RCVR-01 | Phase 5 | Pending |
+| RCVR-02 | Phase 5 | Pending |
+| REVW-01 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 24 total
-- Mapped to phases: 0
-- Unmapped: 24 ⚠️
+- v1 requirements: 25 total
+- Mapped to phases: 25
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-10*
-*Last updated: 2026-06-10 after initial definition*
+*Last updated: 2026-06-10 after roadmap creation (traceability mapped)*
