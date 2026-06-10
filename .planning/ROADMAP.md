@@ -51,7 +51,7 @@ Plans:
   2. Terminal resizes to fit its pane, has scrollback, and supports copy/paste including bracketed paste
   3. User can close the browser tab while a command runs; the session keeps running server-side, and reopening reattaches with recent output replayed and a clean redraw
   4. User can stop a session from the UI and the entire process tree terminates — zero orphaned subprocesses
-  5. WebSocket endpoints reject connections with wrong Origin/Host and require the per-instance token, so other websites cannot reach the shell
+  5. WebSocket endpoints reject connections with wrong Origin/Host (strict loopback allowlist) and the server refuses to bind non-loopback addresses, so other websites cannot reach the shell (per-instance token deferred — D-20)
 **Plans**: 5 plans
 **UI hint**: yes
 
