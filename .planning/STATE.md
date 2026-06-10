@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 1 UI-SPEC approved
-last_updated: "2026-06-10T06:02:57.393Z"
-last_activity: 2026-06-10 — Roadmap created (5 phases, 25/25 requirements mapped)
+status: executing
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-06-10T06:37:13.476Z"
+last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 7
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-10)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 1 — Foundation: Projects & Board
+**Current focus:** Phase 1 — Foundation — Projects & Board
 
 ## Current Position
 
-Phase: 1 of 5 (Foundation — Projects & Board)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-06-10 — Roadmap created (5 phases, 25/25 requirements mapped)
+Phase: 1 (Foundation — Projects & Board) — EXECUTING
+Plan: 2 of 7
+Status: Ready to execute
+Last activity: 2026-06-10
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P01 | 4 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,9 @@ Recent decisions affecting current work:
 - [Roadmap]: Terminal engine (Phase 2) built and proven against plain bash before Claude Code enters the picture — highest-risk subsystem de-risked first
 - [Roadmap]: WS security (Origin/Host validation + per-instance token) bound to Phase 2, the phase that exposes the endpoint — not deferred hardening
 - [Roadmap]: Bash tabs (TERM-04) assigned to Phase 3, where worktree cwds first exist
+- [Phase 01]: Module path is 'kangent' (local-only single binary), not a github.com path
+- [Phase 01]: goose dialect 'sqlite3' paired with modernc driver name 'sqlite' — intentionally different strings
+- [Phase 01]: No --open/auto-browser flag in v1 server startup (default off)
 
 ### Pending Todos
 
@@ -76,6 +80,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T06:02:57.390Z
-Stopped at: Phase 1 UI-SPEC approved
-Resume file: .planning/phases/01-foundation-projects-board/01-UI-SPEC.md
+Last session: 2026-06-10T06:37:13.473Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
