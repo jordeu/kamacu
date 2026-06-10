@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation — Projects & Board** - Single binary, SQLite, projects sidebar, kanban board with task CRUD (completed 2026-06-10)
 - [x] **Phase 2: Terminal Engine** - Session manager + WebSocket bridge + browser terminal, proven against bash with detach/reattach (completed 2026-06-10)
-- [ ] **Phase 3: Worktree Isolation & Bash Tabs** - Worktree + branch per task, safe confirmed cleanup, bash session tabs in the task view
+- [x] **Phase 3: Worktree Isolation & Bash Tabs** - Worktree + branch per task, safe confirmed cleanup, bash session tabs in the task view (completed 2026-06-10)
 - [ ] **Phase 4: Claude Code Agent Sessions** - Start button spawns `claude` in the worktree; live status badges via injected hooks
 - [ ] **Phase 5: Recovery & Review** - Restart reconciliation, `claude --resume` recovery, read-only diff tab
 
@@ -80,7 +80,7 @@ Plans:
 - [x] 03-03-PLAN.md — Backend REST: migration 00002, task-create provisioning hook (D-25), worktree endpoints with cleanup gates, task-scoped sessions
 - [x] 03-04-PLAN.md — Frontend: worktree API hooks, branch meta line with Retry/Create states, bash session tabs in TaskTabs
 - [x] 03-05-PLAN.md — Cleanup dialog family (4 variants, type-to-confirm) + Done-transition and menu triggers
-- [ ] 03-06-PLAN.md — End-to-end lifecycle integration test, build gates, human verification
+- [x] 03-06-PLAN.md — End-to-end lifecycle integration test, build gates, human verification
 
 ### Phase 4: Claude Code Agent Sessions
 **Goal**: User can start, drive, leave, and reattach to a real Claude Code session per task, and see at a glance which agents need attention

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-06-10T15:28:58.374Z"
+status: verifying
+stopped_at: Completed 03-06-PLAN.md (Phase 3 complete, human-verified)
+last_updated: "2026-06-10T15:57:50.144Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 18
-  completed_plans: 17
+  completed_plans: 18
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 
 Phase: 3 (Worktree Isolation & Bash Tabs) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-10
 
 Progress: [░░░░░░░░░░] 0%
@@ -69,6 +69,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P03 | 19 min | 3 tasks | 11 files |
 | Phase 03 P04 | 15 min | 3 tasks | 7 files |
 | Phase 03 P05 | 6 min | 2 tasks | 3 files |
+| Phase 03 P06 | 27 min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,8 @@ Recent decisions affecting current work:
 - [Phase 03]: Verbatim UI-SPEC copy kept in single template literals in JSX so contract phrases stay grep-able and line-wrapping can never split them
 - [Phase 03]: Cleanup dialog onError refetches worktree state so a 409 raced-state response re-derives the correct variant in place (Pitfall 8 server re-check)
 - [Phase 03]: Done-transition cleanup offer fires from a call-site onSuccess on moveTask.mutate — shared useMoveTask hook untouched, offer predicated on the server response Task
+- [Phase 03]: Integration-test git repo created on the outer t (not a subtest) so subtest TempDir cleanup never deletes .git/worktrees bookkeeping out from under later lifecycle stages
+- [Phase 03]: Lifecycle test cwd proven via echo mark:$PWD expansion — echoed input only contains the literal $PWD, so PTY command echo can never satisfy the assertion
 
 ### Pending Todos
 
@@ -141,6 +144,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T15:28:58.367Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-06-10T15:57:50.141Z
+Stopped at: Completed 03-06-PLAN.md (Phase 3 complete, human-verified)
 Resume file: None
