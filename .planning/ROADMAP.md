@@ -78,7 +78,7 @@ Plans:
 - [x] 03-01-PLAN.md — internal/worktree git service: slug, base resolution, leak-safe create, dirty count, branch-keeping remove
 - [x] 03-02-PLAN.md — Session manager task scoping: SpawnOpts{Cwd, TaskID}, per-task Bash N labels, StopAllForTask
 - [x] 03-03-PLAN.md — Backend REST: migration 00002, task-create provisioning hook (D-25), worktree endpoints with cleanup gates, task-scoped sessions
-- [ ] 03-04-PLAN.md — Frontend: worktree API hooks, branch meta line with Retry/Create states, bash session tabs in TaskTabs
+- [x] 03-04-PLAN.md — Frontend: worktree API hooks, branch meta line with Retry/Create states, bash session tabs in TaskTabs
 - [ ] 03-05-PLAN.md — Cleanup dialog family (4 variants, type-to-confirm) + Done-transition and menu triggers
 - [ ] 03-06-PLAN.md — End-to-end lifecycle integration test, build gates, human verification
 

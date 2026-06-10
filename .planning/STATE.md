@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-06-10T14:57:43.421Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-06-10T15:18:57.690Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 15
+  completed_plans: 16
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 3 (Worktree Isolation & Bash Tabs) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-06-10
 
@@ -67,6 +67,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P02 | 11 min | 2 tasks | 6 files |
 | Phase 03 P01 | 13 min | 2 tasks | 2 files |
 | Phase 03 P03 | 19 min | 3 tasks | 11 files |
+| Phase 03 P04 | 15 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -121,6 +122,9 @@ Recent decisions affecting current work:
 - [Phase Phase 03]: provisionWorktree owns the outcome UPDATEs (success clears worktree_error) so task-create and the POST /worktree retry path share one persistence flow
 - [Phase Phase 03]: GET/DELETE /worktree treat a manually deleted worktree dir as clean (dirty=0) — Remove self-heals git bookkeeping, so a missing tree never blocks cleanup
 - [Phase Phase 03]: Worktree cleanup 409 bodies are exact API contract: 'sessions running' and 'worktree has uncommitted changes' — dialog-variant discriminators for 03-05
+- [Phase 03]: Tab x renders only while running && !closing — closing/exited tabs drop the affordance; exited tabs close via the Phase 2 banner (chosen reading of UI-SPEC's 'x disabled')
+- [Phase 03]: TaskPage is a flex h-full column (TerminalPage pattern), not viewport calc(): bash tabs fill below the strip; Description scrolls in its 860px island
+- [Phase 03]: TabDef gained keepMounted — onClose presence can't discriminate mounting since closing tabs lose onClose but must keep their WS (forceMount + data-inactive:hidden)
 
 ### Pending Todos
 
@@ -133,6 +137,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T14:57:43.419Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-06-10T15:18:57.687Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
