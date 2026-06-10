@@ -47,7 +47,11 @@ export function useCreateWorktree(taskId: number, projectId: number) {
  */
 export function useCleanupWorktree(taskId: number, projectId: number) {
   const queryClient = useQueryClient();
-  return useMutation<void, ApiError, { stop_sessions: boolean; force: boolean }>({
+  return useMutation<
+    void,
+    ApiError,
+    { stop_sessions: boolean; force: boolean }
+  >({
     mutationFn: (body) => del(`/api/tasks/${taskId}/worktree`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["task", taskId] });

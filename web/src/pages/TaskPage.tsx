@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, Ellipsis } from "lucide-react";
+import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
+import {
+  useDeleteSession,
+  useSessions,
+  useSpawnSession,
+  useStopSession,
+} from "@/api/sessions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,16 +23,17 @@ import {
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { DeleteTaskDialog } from "@/components/task/DeleteTaskDialog";
 import { DescriptionTab } from "@/components/task/DescriptionTab";
-import { TaskTabs } from "@/components/task/TaskTabs";
+import { TaskTabs, type TabDef } from "@/components/task/TaskTabs";
 import { WorktreeMetaLine } from "@/components/task/WorktreeMetaLine";
+import { TerminalPane } from "@/components/terminal/TerminalPane";
 
 function isTypingTarget(el: Element | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
+  // Covers the xterm helper textarea too — focused terminals keep Esc.
   return (
     el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable
   );
@@ -36,20 +44,95 @@ export default function TaskPage() {
   const projectId = Number(projectIdParam);
   const taskId = Number(taskIdParam);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Fetch by id so deep links work without the board cache (TASK-05).
   const { data: task, isPending, isError } = useTask(taskId);
   const updateTask = useUpdateTask(projectId);
   const createWorktree = useCreateWorktree(taskId, projectId);
 
+  // Bash session lifecycle (D-27..D-30) — the server is tab truth (D-28).
+  const { data: sessions } = useSessions(taskId);
+  const spawn = useSpawnSession(taskId);
+  const stopSession = useStopSession();
+  const deleteSession = useDeleteSession();
+
+  const [activeTab, setActiveTab] = useState("description");
+  // Sessions the user × -closed: muted, removed once they leave running.
+  const [closingIds, setClosingIds] = useState<Set<string>>(new Set());
+  // Ids seen RUNNING during this mount (RESEARCH OQ2): a session that exits
+  // on its own keeps a muted tab until banner-Close within this visit; a
+  // later revisit shows running sessions only.
+  const [keepExitedIds, setKeepExitedIds] = useState<Set<string>>(new Set());
+
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cancelTitleEditRef = useRef(false);
 
+  // Every session currently running for this task joins keepExitedIds.
+  useEffect(() => {
+    if (!sessions) return;
+    setKeepExitedIds((prev) => {
+      let next: Set<string> | null = null;
+      for (const s of sessions) {
+        if (s.status === "running" && !prev.has(s.id)) {
+          next ??= new Set(prev);
+          next.add(s.id);
+        }
+      }
+      return next ?? prev;
+    });
+  }, [sessions]);
+
+  // Visible bash tabs: running sessions, plus self-exited ones kept muted
+  // within this visit. User-initiated closes (closingIds) drop on exit.
+  // Spawn order left-to-right: createdAt ascending, label tiebreak (the
+  // server list is newest-first).
+  const visibleSessions = useMemo(() => {
+    return (sessions ?? [])
+      .filter(
+        (s) =>
+          s.status === "running" ||
+          (s.status === "exited" &&
+            keepExitedIds.has(s.id) &&
+            !closingIds.has(s.id)),
+      )
+      .sort((a, b) =>
+        a.createdAt === b.createdAt
+          ? a.label.localeCompare(b.label)
+          : a.createdAt.localeCompare(b.createdAt),
+      );
+  }, [sessions, keepExitedIds, closingIds]);
+
+  const tabIds = useMemo(
+    () => ["description", ...visibleSessions.map((s) => s.id)],
+    [visibleSessions],
+  );
+
+  // Pitfall 7: a Radix Tabs value pointing at a removed tab renders blank.
+  // When the active tab disappears (closing session exited via poll or 'x'
+  // frame), activate its left neighbor from the previous order, else
+  // Description — before paint, so there is no blank frame.
+  const prevTabIdsRef = useRef<string[]>(tabIds);
+  useLayoutEffect(() => {
+    const prev = prevTabIdsRef.current;
+    prevTabIdsRef.current = tabIds;
+    if (tabIds.includes(activeTab)) return;
+    let next = "description";
+    for (let i = prev.indexOf(activeTab) - 1; i >= 0; i--) {
+      if (tabIds.includes(prev[i])) {
+        next = prev[i];
+        break;
+      }
+    }
+    setActiveTab(next);
+  }, [tabIds, activeTab]);
+
   // Esc returns to the board (D-07) — always the explicit board route, never
   // history-back, because deep-linked tabs have no history. Suppressed while
-  // typing in inputs/textareas/contenteditable or while any Radix dialog/menu
-  // is open.
+  // typing in inputs/textareas/contenteditable (the xterm helper textarea IS
+  // a textarea, so focused terminals keep Esc) or while any Radix
+  // dialog/menu is open.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
@@ -105,27 +188,147 @@ export default function TaskPage() {
     updateTask.mutate({ id: task.id, title: trimmed });
   }
 
+  // Removes a tab NOW (banner-Close on an exited session) — next active tab
+  // is computed in the same update (Pitfall 7).
+  function removeTab(id: string, opts?: { deleteServerSide?: boolean }) {
+    setActiveTab((current) => {
+      if (current !== id) return current;
+      const ids = prevTabIdsRef.current;
+      const idx = ids.indexOf(id);
+      return idx > 0 ? ids[idx - 1] : "description";
+    });
+    setKeepExitedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setClosingIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    // Banner-Close frees the server-side ring buffer (mirrors TerminalPage).
+    if (opts?.deleteServerSide) deleteSession.mutate(id);
+  }
+
+  // × on a running tab (D-29): stop fires immediately, tab enters the
+  // closing state (muted); removal happens when the session leaves running.
+  function handleCloseTab(id: string) {
+    setClosingIds((prev) => new Set(prev).add(id));
+    stopSession.mutate(id);
+  }
+
+  // Spawning happens ONLY from click handlers — never from effects
+  // (StrictMode double-mount would double-spawn). The hook's setQueryData
+  // makes the tab render immediately; activate it in the same success.
+  function handleSpawn() {
+    spawn.mutate(undefined, {
+      onSuccess: (s) => {
+        setKeepExitedIds((prev) => new Set(prev).add(s.id));
+        setActiveTab(s.id);
+      },
+    });
+  }
+
+  const tabs: TabDef[] = [
+    {
+      id: "description",
+      label: "Description",
+      content: (
+        <div className="h-full max-w-[860px] overflow-y-auto">
+          <DescriptionTab task={task} projectId={projectId} />
+        </div>
+      ),
+    },
+    ...visibleSessions.map((s): TabDef => {
+      const closing = closingIds.has(s.id);
+      return {
+        id: s.id,
+        label: s.label,
+        muted: closing || s.status === "exited",
+        onClose:
+          s.status === "running" && !closing
+            ? () => handleCloseTab(s.id)
+            : undefined,
+        keepMounted: true,
+        // Bash content is exempt from the 860px constraint — terminal real
+        // estate fills the main area below the strip (min 320px).
+        content: (
+          <div className="flex h-full min-h-[320px] w-full flex-col">
+            <TerminalPane
+              key={s.id}
+              sessionId={s.id}
+              label={s.label}
+              status={s.status}
+              exitCode={s.exitCode}
+              onSessionExit={() =>
+                queryClient.invalidateQueries({
+                  queryKey: ["sessions", taskId],
+                })
+              }
+              onClosed={() => removeTab(s.id, { deleteServerSide: true })}
+              onNewTerminal={handleSpawn}
+            />
+          </div>
+        ),
+      };
+    }),
+  ];
+
+  const canSpawn = Boolean(task.worktree_path) && !spawn.isPending;
+
+  const trailing = (
+    <div className="flex items-center gap-2">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* Disabled buttons swallow pointer events — the span keeps the
+              explanation tooltip firing (D-30). */}
+          <span className="inline-flex">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="New bash session"
+              disabled={!canSpawn}
+              onClick={handleSpawn}
+            >
+              <Plus className="size-4" />
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          {task.worktree_path
+            ? "New bash session"
+            : "Bash sessions need a worktree"}
+        </TooltipContent>
+      </Tooltip>
+      {spawn.isError && !spawn.isPending && (
+        <span className="text-xs whitespace-nowrap text-red-500">
+          Couldn't start a session. Try again.
+        </span>
+      )}
+    </div>
+  );
+
   return (
     // Full-width working surface (Layout Contract): terminals get the whole
     // main area; header/meta and Description prose keep 860px islands.
-    <div className="w-full space-y-6 p-4">
-      <div className="max-w-[860px] space-y-2">
+    <div className="flex h-full w-full flex-col gap-6 p-4">
+      <div className="max-w-[860px] shrink-0 space-y-2">
         <header className="flex items-center gap-2">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Back to board"
-                  onClick={() => navigate(`/projects/${projectId}`)}
-                >
-                  <ArrowLeft className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Back to board (Esc)</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Back to board"
+                onClick={() => navigate(`/projects/${projectId}`)}
+              >
+                <ArrowLeft className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Back to board (Esc)</TooltipContent>
+          </Tooltip>
 
           {titleDraft === null ? (
             <button
@@ -179,17 +382,10 @@ export default function TaskPage() {
       </div>
 
       <TaskTabs
-        tabs={[
-          {
-            id: "description",
-            label: "Description",
-            content: (
-              <div className="max-w-[860px]">
-                <DescriptionTab task={task} projectId={projectId} />
-              </div>
-            ),
-          },
-        ]}
+        tabs={tabs}
+        value={activeTab}
+        onValueChange={setActiveTab}
+        trailing={trailing}
       />
 
       <DeleteTaskDialog
