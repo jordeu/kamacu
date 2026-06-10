@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Phase 2 UI-SPEC approved
-last_updated: "2026-06-10T08:25:56.068Z"
+status: executing
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-06-10T10:21:07.176Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 12
+  completed_plans: 8
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-10)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 1 — Foundation — Projects & Board
+**Current focus:** Phase 2 — Terminal Engine
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 2 (Terminal Engine) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
 Last activity: 2026-06-10
 
 Progress: [░░░░░░░░░░] 0%
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P05 | 8 min | 3 tasks | 6 files |
 | Phase 01 P06 | 8 min | 2 tasks | 4 files |
 | Phase 01 P07 | 30 min | 3 tasks | 8 files |
+| Phase 02 P02 | 3 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Committed placeholder web/dist/index.html (gitignore web/dist/* with !index.html) so go build never fails on fresh clone; real build output never committed
 - [Phase 01]: AppLayout wrapped once in TooltipProvider delayDuration=0 — Radix tooltips without a provider throw on first render and blank the whole app
 - [Phase 01]: Collapsed-sidebar toggle gets a reserved pl-9 gutter on main instead of floating over page headers
+- [Phase 02]: xterm deps pinned exactly (no caret) — addon set must move together with xterm 6
+- [Phase 02]: selectionForeground left unset in zincTheme to preserve cell colors under selection
+- [Phase 02]: Sessions list query uses refetchInterval 5000 to keep non-attached rows' status honest; no zustand this phase
 
 ### Pending Todos
 
@@ -101,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T08:25:56.063Z
-Stopped at: Phase 2 UI-SPEC approved
-Resume file: .planning/phases/02-terminal-engine/02-UI-SPEC.md
+Last session: 2026-06-10T10:21:07.173Z
+Stopped at: Completed 02-02-PLAN.md
+Resume file: None

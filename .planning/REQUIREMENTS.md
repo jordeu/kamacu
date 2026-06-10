@@ -29,7 +29,7 @@
 
 - [ ] **TERM-01**: User can start the task's agent session via an explicit Start button that spawns the `claude` CLI in a PTY with cwd set to the task's worktree
 - [ ] **TERM-02**: User can interact with the session as a real terminal in the browser (full interactive TUI: plan mode, slash commands, permission prompts)
-- [ ] **TERM-03**: Terminal supports resize (fit to pane), scrollback, and copy/paste including bracketed paste
+- [x] **TERM-03**: Terminal supports resize (fit to pane), scrollback, and copy/paste including bracketed paste
 - [ ] **TERM-04**: User can open additional bash session tabs running in the task's worktree
 - [ ] **TERM-05**: Sessions keep running on the server when the browser tab closes; reopening the task reattaches with recent output replayed and a clean TUI redraw
 - [ ] **TERM-06**: User can stop a running session from the task view; process tree is fully terminated (no orphaned subprocesses)
@@ -103,7 +103,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-01 | Phase 1 | Complete |
 | STOR-02 | Phase 1 | Complete |
 | TERM-02 | Phase 2 | Pending |
-| TERM-03 | Phase 2 | Pending |
+| TERM-03 | Phase 2 | Complete |
 | TERM-05 | Phase 2 | Pending |
 | TERM-06 | Phase 2 | Pending |
 | TERM-07 | Phase 2 | Pending |

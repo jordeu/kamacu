@@ -57,7 +57,7 @@ Plans:
 
 Plans:
 - [ ] 02-01-PLAN.md — Session engine: internal/session manager, PTY spawn/pump/ring, attach replay, process-group Stop (zero orphans)
-- [ ] 02-02-PLAN.md — Frontend foundation: xterm 6 deps, Vite WS proxy fix, zinc xterm theme, typed session REST hooks
+- [x] 02-02-PLAN.md — Frontend foundation: xterm 6 deps, Vite WS proxy fix, zinc xterm theme, typed session REST hooks
 - [ ] 02-03-PLAN.md — WS bridge + REST + security: binary protocol, session endpoints, loopback/Host/Origin enforcement
 - [ ] 02-04-PLAN.md — TerminalPane + socket hook: xterm config, resize/clipboard, reconnect backoff, exited/connection banners
 - [ ] 02-05-PLAN.md — /terminal dev route, end-to-end Go integration test, human verification of all five success criteria
