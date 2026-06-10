@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"kangent/internal/session"
 	"kangent/internal/store"
 )
 
@@ -277,6 +278,43 @@ func TestTaskDelete(t *testing.T) {
 	status, _ := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, id), nil)
 	if status != http.StatusNotFound {
 		t.Fatalf("after hard delete: GET status = %d, want 404", status)
+	}
+}
+
+// TestTaskDeleteStopsSessions closes research gap #1: DELETE /api/tasks/{id}
+// must stop ALL of the task's running sessions BEFORE deleting the row —
+// otherwise a deleted task's agent keeps running headless, holding the
+// worktree busy.
+func TestTaskDeleteStopsSessions(t *testing.T) {
+	srv, mgr, _ := newAgentServer(t)
+	id, _ := worktreeTask(t, srv, "Doomed With Agent")
+	spawnAgentFor(t, srv, id)
+
+	req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/api/tasks/%d", srv.URL, id), nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+
+	// StopAllForTask blocks through the grace BEFORE the DB delete, so by the
+	// time 204 arrives no session of the task may still be running.
+	for _, info := range mgr.ListByTask(id) {
+		if info.Status == session.StatusRunning {
+			t.Errorf("session %s (%s) still running after task delete — leaked headless", info.ID, info.Label)
+		}
+	}
+
+	// The 404 path is unchanged: deleting the already-deleted task.
+	status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/tasks/%d", srv.URL, id), nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("repeat delete: status = %d, want 404; body=%v", status, body)
 	}
 }
 

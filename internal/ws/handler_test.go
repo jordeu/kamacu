@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +90,81 @@ func testCtx(t *testing.T) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// writeFakeClaude writes an executable claude stand-in (spawned via
+// AgentConfig.ClaudeBin — WS tests never touch the real binary): bracketed
+// paste enable, TERM trap -> exit 143, then idle until stopped.
+func writeFakeClaude(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-claude")
+	script := `#!/usr/bin/env bash
+printf '\x1b[?2004h'
+echo "fake claude ready"
+trap 'exit 143' TERM
+sleep 300 & wait
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude stub: %v", err)
+	}
+	return path
+}
+
+// TestAttachClearsWaitingAgent proves D-45 server-side: attaching a client to
+// a WAITING agent session clears it to idle — opening the agent tab
+// acknowledges the prompt authoritatively, not just in the client cache.
+func TestAttachClearsWaitingAgent(t *testing.T) {
+	srv, mgr := newWSServer(t)
+	mgr.SetAgentConfig(session.AgentConfig{
+		BaseURL:   "http://127.0.0.1:7333",
+		Token:     "TOK",
+		ClaudeBin: writeFakeClaude(t),
+	})
+	sess, err := mgr.Spawn(session.SpawnOpts{Kind: session.KindAgent, Cwd: t.TempDir(), TaskID: 1})
+	if err != nil {
+		t.Fatalf("spawn agent: %v", err)
+	}
+	t.Cleanup(sess.Stop)
+
+	sess.SetWaiting()
+	if got := sess.Info().AgentStatus; got != "waiting" {
+		t.Fatalf("pre-attach AgentStatus = %q, want waiting", got)
+	}
+
+	ctx := testCtx(t)
+	conn := dial(t, ctx, srv, sess.Info().ID)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// The handler clears waiting right after Attach; the dial returning only
+	// guarantees the upgrade, so poll briefly.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := sess.Info().AgentStatus; got == "idle" {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("AgentStatus = %q after WS attach, want idle (D-45)", got)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestAttachBashNoAgentStatus: the attach-clears-waiting hook is a strict
+// no-op for bash sessions — they never carry an agent status.
+func TestAttachBashNoAgentStatus(t *testing.T) {
+	srv, mgr := newWSServer(t)
+	sess := spawn(t, mgr)
+	ctx := testCtx(t)
+
+	conn := dial(t, ctx, srv, sess.Info().ID)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// A full round trip proves the server-side attach path has completed.
+	sendFrame(t, ctx, conn, FrameData, "echo attach-MAR''KER\n")
+	collectUntil(t, ctx, conn, "attach-MARKER")
+
+	if got := sess.Info().AgentStatus; got != "" {
+		t.Errorf("bash AgentStatus = %q after attach, want empty", got)
+	}
 }
 
 // TestRoundTrip proves the full byte path: a '0' input frame reaches bash
