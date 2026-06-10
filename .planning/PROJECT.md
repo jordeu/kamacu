@@ -12,19 +12,18 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ Projects sidebar — create/list/rename/delete projects pointing at local git repos, with path validation — Phase 1
+- ✓ Kanban board per project with fixed columns (To Do / In Progress / In Review / Done), drag-and-drop with persisted manual order — Phase 1
+- ✓ Tasks with title, markdown description, status; full CRUD and full-page task view with extensible tab strip — Phase 1
+- ✓ All projects/tasks stored in local SQLite; single Go binary serves embedded SPA at localhost — Phase 1
 
 ### Active
 
-- [ ] Projects sidebar — create/list projects, each pointing at a local directory containing a git repo checkout
-- [ ] Kanban board per project with fixed columns: To Do / In Progress / In Review / Done
-- [ ] Tasks have title, markdown description, and status (column); tasks can be created, edited, moved between columns, and deleted
 - [ ] Creating a task automatically creates a new git worktree and branch for that task in the project repo
 - [ ] Task view with an explicit Start button that spawns a Claude Code CLI session in a PTY, working directory set to the task's worktree
 - [ ] Agent session rendered as an interactive terminal in the browser (full interactive CLI experience)
 - [ ] Optional bash session tabs in the task view, running in the task's worktree
 - [ ] Sessions keep running on the server when the browser tab closes; reopening the task reattaches to the live session
-- [ ] All projects/tasks stored in a local database (SQLite or similar) — no external services
 - [ ] Marking a task done offers to clean up its worktree (branch is kept)
 
 ### Out of Scope
@@ -81,4 +80,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-10 after initialization*
+*Last updated: 2026-06-10 after Phase 1 completion (Foundation — Projects & Board: single binary + SQLite + kanban CRUD shipped and human-verified)*
