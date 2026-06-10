@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"kangent/internal/api"
 	"kangent/internal/store"
 )
 
@@ -39,6 +40,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	api.Routes(mux, db)
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
