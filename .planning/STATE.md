@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-06-PLAN.md
-last_updated: "2026-06-10T07:06:37.930Z"
+status: verifying
+stopped_at: Completed 01-07-PLAN.md (Phase 1 complete)
+last_updated: "2026-06-10T07:41:45.271Z"
 last_activity: 2026-06-10
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 
 Phase: 1 (Foundation — Projects & Board) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-10
 
 Progress: [░░░░░░░░░░] 0%
@@ -58,6 +58,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P04 | 7 min | 2 tasks | 7 files |
 | Phase 01 P05 | 8 min | 3 tasks | 6 files |
 | Phase 01 P06 | 8 min | 2 tasks | 4 files |
+| Phase 01 P07 | 30 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,9 @@ Recent decisions affecting current work:
 - [Phase 01]: shadcn DialogContent width overrides need the responsive variant (sm:max-w-[560px]) since the component ships sm:max-w-sm
 - [Phase 01]: Accent blue-500 applied via explicit utility classes (tab indicator, prose links) instead of editing shared index.css — parallel wave-3 plans own no shared files
 - [Phase 01]: Task title edit commits through a single onBlur path (Enter/Esc funnel through blur with a cancel ref) to avoid double-mutate races
+- [Phase 01]: Committed placeholder web/dist/index.html (gitignore web/dist/* with !index.html) so go build never fails on fresh clone; real build output never committed
+- [Phase 01]: AppLayout wrapped once in TooltipProvider delayDuration=0 — Radix tooltips without a provider throw on first render and blank the whole app
+- [Phase 01]: Collapsed-sidebar toggle gets a reserved pl-9 gutter on main instead of floating over page headers
 
 ### Pending Todos
 
@@ -97,6 +101,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-10T07:06:37.927Z
-Stopped at: Completed 01-06-PLAN.md
+Last session: 2026-06-10T07:41:45.268Z
+Stopped at: Completed 01-07-PLAN.md (Phase 1 complete)
 Resume file: None
