@@ -617,3 +617,60 @@ func TestListByTask(t *testing.T) {
 		t.Errorf("ListByTask(99) len = %d, want 0", len(got))
 	}
 }
+
+// TestStopAllForTask: stops every running session of exactly the given task,
+// blocking until all have exited; other tasks' sessions are untouched.
+// Repeated calls are safe (Stop is idempotent).
+func TestStopAllForTask(t *testing.T) {
+	m := NewManager()
+	a := spawnForTestOpts(t, m, SpawnOpts{TaskID: 5})
+	b := spawnForTestOpts(t, m, SpawnOpts{TaskID: 5})
+	other := spawnForTestOpts(t, m, SpawnOpts{TaskID: 6})
+	// Interactive bash ignores SIGTERM, so each Stop consumes the full grace
+	// window — shorten it to keep the test fast (Phase 2 convention).
+	setTestGrace(a, 200*time.Millisecond)
+	setTestGrace(b, 200*time.Millisecond)
+
+	m.StopAllForTask(5)
+
+	// StopAllForTask blocks until done: statuses must be final on return.
+	if got := a.Info().Status; got != StatusExited {
+		t.Errorf("task-5 session a Status = %q after StopAllForTask, want %q", got, StatusExited)
+	}
+	if got := b.Info().Status; got != StatusExited {
+		t.Errorf("task-5 session b Status = %q after StopAllForTask, want %q", got, StatusExited)
+	}
+	if got := other.Info().Status; got != StatusRunning {
+		t.Errorf("task-6 session Status = %q, want %q (non-matching task must be untouched)", got, StatusRunning)
+	}
+
+	// Calling again on the same (now fully exited) task is safe and fast.
+	done := make(chan struct{})
+	go func() {
+		m.StopAllForTask(5)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second StopAllForTask(5) did not return promptly")
+	}
+}
+
+// TestStopAllForTaskNoSessions: a task with no sessions returns immediately
+// with no panic and no block.
+func TestStopAllForTaskNoSessions(t *testing.T) {
+	m := NewManager()
+	_ = spawnForTestOpts(t, m, SpawnOpts{TaskID: 6}) // unrelated task
+
+	done := make(chan struct{})
+	go func() {
+		m.StopAllForTask(99)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("StopAllForTask on a session-less task did not return immediately")
+	}
+}
