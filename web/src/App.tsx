@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
 import BoardPage from "@/pages/BoardPage";
 import TaskPage from "@/pages/TaskPage";
+import TerminalPage from "@/pages/TerminalPage";
 
 function RedirectToFirstProject() {
   const { data: projects, isLoading } = useProjects();
@@ -42,6 +43,8 @@ export default function App() {
           path="/projects/:projectId/tasks/:taskId"
           element={<TaskPage />}
         />
+        {/* Dev/debug surface for the terminal engine (D-12) — reached by URL */}
+        <Route path="/terminal" element={<TerminalPage />} />
       </Route>
     </Routes>
   );
