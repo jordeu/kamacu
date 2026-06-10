@@ -100,6 +100,7 @@ func main() {
 	api.SessionRoutes(mux, mgr, db)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr)
 	api.HookRoutes(mux, mgr, hookToken)
+	api.AgentRoutes(mux, mgr, db)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

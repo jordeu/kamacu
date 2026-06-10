@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -48,20 +49,38 @@ func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, infos)
 }
 
-// create handles POST /api/sessions — spawns a bash session. An optional
-// {"task_id":N} body scopes the session to a task: it spawns in the task's
-// worktree (TERM-04) with the per-task "Bash N" label. An empty body (the
-// /terminal dev route sends none) spawns an unscoped dev session exactly as
-// before.
+// create handles POST /api/sessions — spawns a bash session, or with
+// {"kind":"agent"} the task's Claude Code agent session (TERM-01). An
+// optional {"task_id":N} body scopes the session to a task: it spawns in the
+// task's worktree (TERM-04) with the per-task "Bash N" label. An empty body
+// (the /terminal dev route sends none) spawns an unscoped dev session exactly
+// as before. Agents require a task worktree and are limited to ONE running
+// per task (D-38) — the API enforces both.
 func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TaskID int64 `json:"task_id"`
+		TaskID int64  `json:"task_id"`
+		Kind   string `json:"kind"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	opts := session.SpawnOpts{}
+	kind := session.KindBash
+	switch req.Kind {
+	case "", "bash":
+	case "agent":
+		kind = session.KindAgent
+	default:
+		writeError(w, http.StatusBadRequest, "invalid kind")
+		return
+	}
+	// Agents always run in a task worktree: no task means no worktree — the
+	// same gate (and copy) as a worktree-less task.
+	if kind == session.KindAgent && req.TaskID <= 0 {
+		writeError(w, http.StatusConflict, "task has no worktree")
+		return
+	}
+	opts := session.SpawnOpts{Kind: kind}
 	if req.TaskID > 0 {
 		var path sql.NullString
 		err := h.db.QueryRow(`SELECT worktree_path FROM tasks WHERE id = ?`, req.TaskID).Scan(&path)
@@ -77,13 +96,30 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "task has no worktree") // D-30 server side
 			return
 		}
-		opts = session.SpawnOpts{Cwd: path.String, TaskID: req.TaskID}
+		opts.Cwd, opts.TaskID = path.String, req.TaskID
+	}
+	// One-agent-per-task gate (D-38), checked BEFORE spawning. An EXITED
+	// agent never blocks — that is the "Start again" path (D-41).
+	if kind == session.KindAgent {
+		for _, info := range h.mgr.ListByTask(req.TaskID) {
+			if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
+				writeError(w, http.StatusConflict, "agent session already running")
+				return
+			}
+		}
 	}
 	// Spawn's stat pre-check covers a vanished worktree dir → same 500 path.
 	sess, err := h.mgr.Spawn(opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "couldn't start a session")
 		return
+	}
+	// Persist the Phase 5 --resume key BEFORE replying (latest spawn wins).
+	// A write failure degrades Phase 5 resume only — the session is usable.
+	if kind == session.KindAgent {
+		if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
+			slog.Warn("persisting claude_session_id", "task", req.TaskID, "error", err)
+		}
 	}
 	writeJSON(w, http.StatusCreated, sess.Info())
 }
