@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# testdata/fake-claude: enough to exercise spawn/status/teardown.
+printf '\x1b[?2004h'           # bracketed paste on (like real claude)
+echo "fake claude ready"
+trap 'exit 143' TERM            # mirrors verified SIGTERM behavior
+sleep 300 & wait                # idle until stopped
