@@ -42,8 +42,8 @@
 
 ### Recovery
 
-- [ ] **RCVR-01**: On server startup, sessions recorded as running but no longer alive are reconciled to an exited state (no ghost sessions)
-- [ ] **RCVR-02**: App persists each task's Claude session ID and, after a server restart, offers "Resume session" which relaunches via `claude --resume` in the worktree
+- [x] **RCVR-01**: On server startup, sessions recorded as running but no longer alive are reconciled to an exited state (no ghost sessions)
+- [x] **RCVR-02**: App persists each task's Claude session ID and, after a server restart, offers "Resume session" which relaunches via `claude --resume` in the worktree
 
 ### Review
 
@@ -114,8 +114,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TERM-01 | Phase 4 | Complete |
 | STAT-01 | Phase 4 | Complete |
 | STAT-02 | Phase 4 | Complete |
-| RCVR-01 | Phase 5 | Pending |
-| RCVR-02 | Phase 5 | Pending |
+| RCVR-01 | Phase 5 | Complete |
+| RCVR-02 | Phase 5 | Complete |
 | REVW-01 | Phase 5 | Complete |
 
 **Coverage:**

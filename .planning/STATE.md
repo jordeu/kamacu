@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-02-PLAN.md (diff service + endpoint)
-last_updated: "2026-06-11T09:17:39.856Z"
-last_activity: 2026-06-11 -- Phase 5 execution started
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-06-11T09:28:03.446Z"
+last_activity: 2026-06-11
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 28
-  completed_plans: 24
+  completed_plans: 25
   percent: 0
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 ## Current Position
 
 Phase: 5 (Recovery & Review) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 5
-Last activity: 2026-06-11 -- Phase 5 execution started
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-06-11
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -76,6 +76,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04-claude-code-agent-sessions P04 | 6 min | 3 tasks | 5 files |
 | Phase 04-claude-code-agent-sessions P05 | 25 min | 3 tasks | 8 files |
 | Phase 05 P02 | 7 min | 3 tasks | 7 files |
+| Phase 05-recovery-review P01 | 17 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -155,6 +156,9 @@ Recent decisions affecting current work:
 - [Phase 04-claude-code-agent-sessions]: Agent lifecycle locked in by 8-stage integration test on ClaudeBin fake-claude stub — real claude never spawned in CI
 - [Phase 05]: internal/diff owns a private git runner pair: exit-0 run() for normal git, runNoIndex() honoring git diff --no-index exit-1-as-success so untracked files render as full additions without git add -N (Pitfall 1)
 - [Phase 05]: Diff JSON is server-pre-structured per-file-hunks (Pattern 4); GET /api/tasks/{id}/diff re-resolves base via ResolveBase and excludes base movement via merge-base three-dot semantics (D-59)
+- [Phase 05-recovery-review]: RCVR-01 reconciled by architecture: DB never records 'running', so a fresh manager + DB-derived /api/agents/status entries is the whole reconciliation — no migration, no startup mutation pass
+- [Phase 05-recovery-review]: Resumability derived from transcript-glob existence (~/.claude/projects/*/<uuid>.jsonl), not a DB status column — matches claude's global lookup, self-heals D-56, claude_session_id never cleared
+- [Phase 05-recovery-review]: Resume is a body-flag variant of POST /api/sessions riding the existing one-per-task 409 gate (D-67); validated AFTER the gate with a 409 'no session to resume' server-side honest-failure guard
 
 ### Pending Todos
 
@@ -168,6 +172,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11T09:17:29.843Z
-Stopped at: Completed 05-02-PLAN.md (diff service + endpoint)
+Last session: 2026-06-11T09:27:51.086Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
