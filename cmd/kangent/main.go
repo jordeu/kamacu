@@ -16,6 +16,7 @@ import (
 
 	"kangent/internal/api"
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/store"
 	"kangent/internal/worktree"
 	"kangent/internal/ws"
@@ -39,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	dbPath, err := expandHome(*dbFlag)
+	dbPath, err := settings.ExpandHome(*dbFlag)
 	if err != nil {
 		slog.Error("resolving db path", "path", *dbFlag, "error", err)
 		os.Exit(1)
@@ -80,7 +81,7 @@ func main() {
 	originPatterns := append([]string{"127.0.0.1:" + port, "localhost:" + port}, devOrigins...)
 
 	// D-23: worktrees live centrally outside every repo tree.
-	wtRoot, err := expandHome("~/.kangent/worktrees")
+	wtRoot, err := settings.ExpandHome("~/.kangent/worktrees")
 	if err != nil {
 		slog.Error("resolving worktree root", "error", err)
 		os.Exit(1)
@@ -177,16 +178,4 @@ func hostCheck(next http.Handler) http.Handler {
 			_, _ = w.Write([]byte(`{"error":"forbidden host"}`))
 		}
 	})
-}
-
-// expandHome resolves a leading "~" or "~/" to the current user's home directory.
-func expandHome(p string) (string, error) {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, strings.TrimPrefix(p, "~")), nil
-	}
-	return p, nil
 }
