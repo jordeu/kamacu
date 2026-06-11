@@ -1,5 +1,18 @@
 # Milestones
 
+## v1.1 Settings & Polish (Shipped: 2026-06-11)
+
+**Phases completed:** 1 phases, 4 plans, 10 tasks
+
+**Key accomplishments:**
+
+- SQLite-backed settings KV store (migration 00004) with code defaults, per-key validation carrying the UI-SPEC canonical error copy, branch-template expansion + git ref validation, quote-aware extra-params tokenizer, and the GET/PUT REST surface
+- All four settings wired into their v1.0 call sites: tokenized claude extra-params append to every agent spawn (fresh + resume), bash tabs run the LookPath-resolved settings shell, and provisionWorktree builds template-driven branches under the settings worktree base with a create-time ref-format defense — all read-at-use, managers DB-free.
+- Full /settings page with per-field commit (blur/Enter, Esc revert, 2s Saved flash, Reset to default, verbatim inline server errors), sidebar gear with active state, API-driven shell select, and the UI-01 full-width task header
+- Phase 6 gate passed: release binary built clean with the settings page embedded, full Go suite green across 8 packages, 8/8 verbatim copy audit, restart-persistence smoke proven, and all seven v1.1 success criteria approved live by the user.
+
+---
+
 ## v1.0 MVP (Shipped: 2026-06-11)
 
 **Phases completed:** 5 phases, 28 plans, 74 tasks
