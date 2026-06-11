@@ -194,6 +194,101 @@ func TestSpawnAgentArgvAndIdentity(t *testing.T) {
 	}
 }
 
+// agentArgv spawns an agent against the argv-recording stub and returns the
+// recorded argv (split one-per-line). It polls for the args file (the stub
+// writes it after startup output) up to 2s, then leaves the session running —
+// the caller stops it.
+func agentArgv(t *testing.T, opts SpawnOpts) (*Session, []string) {
+	t.Helper()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	stub := writeFakeClaude(t, argsFile)
+
+	m := NewManager()
+	m.SetAgentConfig(testAgentConfig(stub))
+	s := spawnForTestOpts(t, m, opts)
+
+	eventually(t, 2*time.Second, "stub to record argv", func() bool {
+		b, err := os.ReadFile(argsFile)
+		return err == nil && len(b) > 0
+	})
+	b, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read argv file: %v", err)
+	}
+	return s, strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+}
+
+// TestSpawnAgentResumeArgv: with a non-empty ResumeSessionID the engine spawns
+// `claude --resume <that uuid> --settings <overlay>` — never --session-id,
+// never --fork-session — and reports the resume uuid as the claude session id.
+func TestSpawnAgentResumeArgv(t *testing.T) {
+	const resumeID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001"
+	s, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1, ResumeSessionID: resumeID})
+
+	if len(args) != 4 {
+		t.Fatalf("argv = %q, want exactly 4 args (--resume <uuid> --settings <json>)", args)
+	}
+	if args[0] != "--resume" {
+		t.Errorf("argv[0] = %q, want --resume", args[0])
+	}
+	if args[1] != resumeID {
+		t.Errorf("argv[1] = %q, want the resume uuid %q", args[1], resumeID)
+	}
+	if args[2] != "--settings" {
+		t.Errorf("argv[2] = %q, want --settings", args[2])
+	}
+	for _, a := range args {
+		if a == "--session-id" {
+			t.Errorf("argv contains --session-id on a resume spawn: %q", args)
+		}
+		if a == "--fork-session" {
+			t.Errorf("argv contains --fork-session (forks a new id, orphaning the task): %q", args)
+		}
+	}
+	if got := s.ClaudeSessionID(); got != resumeID {
+		t.Errorf("ClaudeSessionID() = %q, want the resume uuid %q", got, resumeID)
+	}
+}
+
+// TestSpawnAgentFreshArgv: with an empty ResumeSessionID the engine keeps the
+// existing fresh-spawn behavior — `--session-id <fresh uuid> --settings ...`.
+func TestSpawnAgentFreshArgv(t *testing.T) {
+	_, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1})
+
+	if len(args) != 4 {
+		t.Fatalf("argv = %q, want exactly 4 args (--session-id <uuid> --settings <json>)", args)
+	}
+	if args[0] != "--session-id" {
+		t.Errorf("argv[0] = %q, want --session-id", args[0])
+	}
+	if _, err := uuid.Parse(args[1]); err != nil {
+		t.Errorf("argv[1] = %q does not parse as a uuid: %v", args[1], err)
+	}
+	if args[2] != "--settings" {
+		t.Errorf("argv[2] = %q, want --settings", args[2])
+	}
+	for _, a := range args {
+		if a == "--resume" {
+			t.Errorf("fresh spawn must not carry --resume: %q", args)
+		}
+	}
+}
+
+// TestSpawnResumeRequiresAgent: a ResumeSessionID on a bash session is an
+// error — resume is agent-only — and registers no session.
+func TestSpawnResumeRequiresAgent(t *testing.T) {
+	m := NewManager()
+
+	before := len(m.List())
+	_, err := m.Spawn(SpawnOpts{Kind: KindBash, Cwd: t.TempDir(), TaskID: 1, ResumeSessionID: "x"})
+	if err == nil {
+		t.Fatal("Spawn(Kind=bash, ResumeSessionID set) = nil error, want failure")
+	}
+	if after := len(m.List()); after != before {
+		t.Errorf("List len changed %d -> %d: rejected resume must not register a session", before, after)
+	}
+}
+
 // TestSpawnKindDefaultsToBash: a zero-value Kind is a bash session,
 // byte-for-byte the Phase 2/3 behavior (label family, no claude identity).
 func TestSpawnKindDefaultsToBash(t *testing.T) {
