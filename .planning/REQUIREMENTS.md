@@ -8,34 +8,34 @@
 
 ### Settings Infrastructure
 
-- [ ] **SET-01**: User can open a global settings page via a gear control at the bottom of the projects sidebar, on a dedicated full-page route
+- [x] **SET-01**: User can open a global settings page via a gear control at the bottom of the projects sidebar, on a dedicated full-page route
 - [x] **SET-02**: Settings persist in a local SQLite settings table across restarts and are read/written over the API
 - [ ] **SET-03**: Settings changes take effect at the next session spawn or worktree creation — running sessions and existing worktrees are unaffected, with no server restart required
 - [x] **SET-04**: Every setting has a sensible default and can be restored to it; the page surfaces validation errors inline without losing other edits
 
 ### Claude Agent Parameters
 
-- [ ] **AGENT-01**: User can edit a free-text list of extra parameters appended to every `claude` agent spawn
+- [x] **AGENT-01**: User can edit a free-text list of extra parameters appended to every `claude` agent spawn
 - [x] **AGENT-02**: The extra-params field defaults to including `--dangerously-skip-permissions`, which the user can remove to restore interactive permission prompts
 
 ### Worktree Location
 
-- [ ] **WT-01**: User can configure the base directory under which new task worktrees are created (default `~/.kangent/worktrees/`)
+- [x] **WT-01**: User can configure the base directory under which new task worktrees are created (default `~/.kangent/worktrees/`)
 - [ ] **WT-02**: Changing the worktree location affects only worktrees created afterward; existing worktrees keep their stored absolute paths and remain fully usable
 
 ### Shell Selection
 
-- [ ] **SHELL-01**: User can select the shell command used for bash tabs from a dropdown (bash is the only option in v1.1)
+- [x] **SHELL-01**: User can select the shell command used for bash tabs from a dropdown (bash is the only option in v1.1)
 - [ ] **SHELL-02**: The bash-tab shell command is read from settings rather than hardcoded, so additional shells can be added later as data
 
 ### Branch Naming
 
-- [ ] **BRANCH-01**: User can edit the per-task branch-name template using tokens (`{slug}`, `{id}`, `{title}`), default `task/{slug}-{id}`
+- [x] **BRANCH-01**: User can edit the per-task branch-name template using tokens (`{slug}`, `{id}`, `{title}`), default `task/{slug}-{id}`
 - [x] **BRANCH-02**: The branch template is validated to always produce a legal, collision-safe git ref; an invalid template is rejected with a clear message and never used to create a branch
 
 ### Task View Polish
 
-- [ ] **UI-01**: The task-view header (title row plus the three-dots actions menu) spans the full page width so the menu trigger aligns flush to the right edge
+- [x] **UI-01**: The task-view header (title row plus the three-dots actions menu) spans the full page width so the menu trigger aligns flush to the right edge
 
 ## Future Requirements
 
@@ -65,19 +65,19 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SET-01 | Phase 6 | Pending |
+| SET-01 | Phase 6 | Complete |
 | SET-02 | Phase 6 | Complete |
 | SET-03 | Phase 6 | Pending |
 | SET-04 | Phase 6 | Complete |
-| AGENT-01 | Phase 6 | Pending |
+| AGENT-01 | Phase 6 | Complete |
 | AGENT-02 | Phase 6 | Complete |
-| WT-01 | Phase 6 | Pending |
+| WT-01 | Phase 6 | Complete |
 | WT-02 | Phase 6 | Pending |
-| SHELL-01 | Phase 6 | Pending |
+| SHELL-01 | Phase 6 | Complete |
 | SHELL-02 | Phase 6 | Pending |
-| BRANCH-01 | Phase 6 | Pending |
+| BRANCH-01 | Phase 6 | Complete |
 | BRANCH-02 | Phase 6 | Complete |
-| UI-01 | Phase 6 | Pending |
+| UI-01 | Phase 6 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 12 total

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Settings & Polish
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-06-11T15:13:14.730Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-06-11T15:24:43.916Z"
 last_activity: 2026-06-11
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 06 (settings-polish) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-06-11
 
@@ -81,6 +81,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P04 | 11 min | 3 tasks | 6 files |
 | Phase 05-recovery-review P05 | 55 min | 3 tasks | 1 files |
 | Phase 06 P01 | 11 min | 3 tasks | 14 files |
+| Phase 06-settings-polish P03 | 8 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -174,6 +175,9 @@ Recent decisions affecting current work:
 - [Phase 06]: Validate runs in the PUT handler (400) and inside Set (validate-before-write) so BRANCH-02 holds for any caller while validation vs storage errors stay distinct
 - [Phase 06]: {title} branch-template token sanitizer capped at 100 chars (research OQ3 resolved)
 - [Phase 06]: Tokenize is lenient on unclosed quotes (rest-of-string one token) — no UI-SPEC error copy exists for the pass-through extra-params field
+- [Phase 06-settings-polish]: Settings select options render inside SettingsField from entry.options (API-driven SHELL-02 seam); SettingsPage never holds a shell constant
+- [Phase 06-settings-polish]: withMono runtime wrapper keeps UI-SPEC contract strings as single grep-able template literals while rendering flags/tokens/examples in font-mono
+- [Phase 06-settings-polish]: Settings inline errors: verbatim server copy only for ApiError status <500; network/5xx renders the fixed Couldn't-save copy; Enter-then-blur double-send suppressed via save.isPending && save.variables === draft
 
 ### Pending Todos
 
@@ -186,7 +190,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11T15:13:14.724Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-06-11T15:24:43.911Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 6`
