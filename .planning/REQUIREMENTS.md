@@ -65,13 +65,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap) | | |
+| SET-01 | Phase 6 | Pending |
+| SET-02 | Phase 6 | Pending |
+| SET-03 | Phase 6 | Pending |
+| SET-04 | Phase 6 | Pending |
+| AGENT-01 | Phase 6 | Pending |
+| AGENT-02 | Phase 6 | Pending |
+| WT-01 | Phase 6 | Pending |
+| WT-02 | Phase 6 | Pending |
+| SHELL-01 | Phase 6 | Pending |
+| SHELL-02 | Phase 6 | Pending |
+| BRANCH-01 | Phase 6 | Pending |
+| BRANCH-02 | Phase 6 | Pending |
+| UI-01 | Phase 6 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12 ⚠️
+- Mapped to phases: 12 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-11*
-*Last updated: 2026-06-11 after initial definition*
+*Last updated: 2026-06-11 after roadmap creation (all 12 mapped to Phase 6)*

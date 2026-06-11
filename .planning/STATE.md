@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Settings & Polish
-status: defining_requirements
-stopped_at: Milestone v1.1 started
+status: roadmap_complete
+stopped_at: Roadmap created for v1.1 (Phase 6)
 last_updated: "2026-06-11T11:10:07.737Z"
 last_activity: 2026-06-11
 progress:
-  total_phases: 0
+  total_phases: 1
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-10)
+See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Milestone v1.1 — defining requirements
+**Current focus:** Milestone v1.1 — Phase 6 Settings & Polish (roadmap complete, ready to plan)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Phase 6 — Settings & Polish (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-11 — Milestone v1.1 Settings & Polish started
+Status: Roadmap complete — ready for `/gsd:plan-phase 6`
+Last activity: 2026-06-11 — v1.1 roadmap created (Phase 6, 12/12 requirements mapped)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -36,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 0 (this milestone)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -44,7 +44,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 6 | - | - | - |
 
 **Recent Trend:**
 
@@ -88,6 +88,11 @@ Progress: [░░░░░░░░░░] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- [v1.1 Roadmap]: Single Phase 6 for all of v1.1 — coarse granularity + cohesive settings plumbing into existing v1.0 call sites (agent spawn, worktree create, shell spawn, branch naming) means no compelling dependency reason to split
+- [v1.1 Roadmap]: AGENT-02 intentionally REVERSES D-51 — the claude extra-params field defaults to including `--dangerously-skip-permissions`, flipping v1.0's interactive-by-default posture; the user can remove the flag. Log the D-51 reversal in PROJECT.md Key Decisions at phase transition.
+- [v1.1 Roadmap]: Settings are global-only (per-project overrides deferred as SET-FUT-01), applied at next spawn/creation with no restart (SET-03), stored in a new SQLite settings table (SET-02)
+- [v1.1 Roadmap]: Worktree-location change affects new creations only (WT-02); existing worktrees keep stored absolute paths — never migrate live trees
+- [v1.1 Roadmap]: Shell dropdown is bash-only in v1.1 but the value still comes from settings, so additional shells (SHELL-FUT-01) are future data not code
 - [Roadmap]: Coarse granularity — research's 6 suggested phases compressed to 5 by merging foundation + kanban CRUD into Phase 1
 - [Roadmap]: Terminal engine (Phase 2) built and proven against plain bash before Claude Code enters the picture — highest-risk subsystem de-risked first
 - [Roadmap]: WS security (Origin/Host validation + per-instance token) bound to Phase 2, the phase that exposes the endpoint — not deferred hardening
@@ -172,12 +177,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 4]: Alt-screen replay strategy (headless VT emulator vs resize-jiggle) and exact Claude Code hook payloads / `--resume` flag semantics are version-dependent — flagged for deeper research during Phase 4 planning
-- [Phase 5]: `claude --continue`/`--resume` cwd-keyed semantics MEDIUM confidence — verify against installed version during Phase 5 planning
-- Plan-mode exit-plan approval → amber dot unconfirmed by user during 04-05 live verification — follow up in Phase 5 / milestone UAT (research OQ1)
+- [Phase 6 / D-51 reversal]: AGENT-02 defaults the extra-params field to `--dangerously-skip-permissions`, reversing v1.0's interactive-by-default D-51 — intentional; log the reversal in PROJECT.md Key Decisions at transition.
+- Plan-mode exit-plan approval → amber dot unconfirmed by user during 04-05 live verification — carried bug to confirm during v1.1 UAT (research OQ1)
 
 ## Session Continuity
 
-Last session: 2026-06-11T11:10:07.733Z
-Stopped at: Milestone v1.0 summary generated
-Resume file: .planning/reports/MILESTONE_SUMMARY-v1.0.md
+Last session: 2026-06-11 — v1.1 roadmap created
+Stopped at: Roadmap complete for Phase 6 (Settings & Polish), 12/12 requirements mapped
+Resume file: .planning/ROADMAP.md
+Next: `/gsd:plan-phase 6`
