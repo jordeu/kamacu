@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/store"
 	"kangent/internal/worktree"
 )
@@ -74,7 +75,10 @@ func newTaskSessionServer(t *testing.T) (*httptest.Server, *session.Manager) {
 		t.Fatalf("store.Migrate: %v", err)
 	}
 	wtDir := t.TempDir()
-	seedWorktreeBase(t, db, wtDir)
+	// Phase 6: provisioning reads worktree_base at use — seed the temp dir.
+	if err := settings.Set(db, settings.KeyWorktreeBase, wtDir); err != nil {
+		t.Fatalf("seed worktree_base: %v", err)
+	}
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
@@ -275,7 +279,10 @@ func newResumeServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB,
 		t.Fatalf("store.Migrate: %v", err)
 	}
 	wtDir := t.TempDir()
-	seedWorktreeBase(t, db, wtDir)
+	// Phase 6: provisioning reads worktree_base at use — seed the temp dir.
+	if err := settings.Set(db, settings.KeyWorktreeBase, wtDir); err != nil {
+		t.Fatalf("seed worktree_base: %v", err)
+	}
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{

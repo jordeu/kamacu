@@ -142,7 +142,9 @@ func TestTaskCreateWorktreeBaseChange(t *testing.T) {
 	}
 
 	newBase := t.TempDir()
-	seedWorktreeBase(t, db, newBase)
+	if err := settings.Set(db, settings.KeyWorktreeBase, newBase); err != nil {
+		t.Fatalf("set worktree_base: %v", err)
+	}
 
 	second := createTask(t, srv, pid, "New Base")
 	secondPath, _ := second["worktree_path"].(string)

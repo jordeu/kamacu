@@ -9,7 +9,12 @@ import (
 )
 
 func TestSettingsGetAllDefaults(t *testing.T) {
-	srv, _, _ := newTestServer(t)
+	srv, db, _ := newTestServer(t)
+	// This test asserts the pristine all-defaults shape and provisions no
+	// worktrees — drop the harness's safety seed (see seedWorktreeBase).
+	if _, err := db.Exec(`DELETE FROM settings WHERE key = ?`, settings.KeyWorktreeBase); err != nil {
+		t.Fatalf("clear worktree_base seed: %v", err)
+	}
 
 	status, body := doJSON(t, http.MethodGet, srv.URL+"/api/settings", nil)
 	if status != http.StatusOK {

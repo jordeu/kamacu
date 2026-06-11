@@ -30,7 +30,10 @@ func newWorktreeServer(t *testing.T) (*httptest.Server, *testWorktreeEnv) {
 		t.Fatalf("store.Migrate: %v", err)
 	}
 	wtDir := t.TempDir()
-	seedWorktreeBase(t, db, wtDir)
+	// Phase 6: provisioning reads worktree_base at use — seed the temp dir.
+	if err := settings.Set(db, settings.KeyWorktreeBase, wtDir); err != nil {
+		t.Fatalf("seed worktree_base: %v", err)
+	}
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()

@@ -89,8 +89,18 @@ func NewService(root string) *Service {
 
 // PathFor returns Root/<filepath.Base(repoPath)>/<slug>-<taskID>. Task IDs
 // are globally unique, so leaf dirs never collide even across projects.
+// Production placement moved to PathUnder in Phase 6 (settings-driven base);
+// PathFor remains as the pre-Phase-6 shape for tests.
 func (s *Service) PathFor(repoPath, slug string, taskID int64) string {
 	return filepath.Join(s.Root, filepath.Base(repoPath), slug+"-"+strconv.FormatInt(taskID, 10))
+}
+
+// PathUnder returns base/<filepath.Base(repoPath)>/<slug>-<taskID>.
+// Production placement is settings-driven (Phase 6, WT-01): callers pass the
+// ~-expanded worktree_base. Service.Root/PathFor remain for tests and as the
+// pre-Phase-6 shape; the creation path no longer consults Root.
+func PathUnder(base, repoPath, slug string, taskID int64) string {
+	return filepath.Join(base, filepath.Base(repoPath), slug+"-"+strconv.FormatInt(taskID, 10))
 }
 
 // ResolveBase returns a commit-ish to branch from, per D-24 (default branch

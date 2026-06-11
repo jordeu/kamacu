@@ -80,7 +80,10 @@ func main() {
 	_, port, _ := net.SplitHostPort(*addr)
 	originPatterns := append([]string{"127.0.0.1:" + port, "localhost:" + port}, devOrigins...)
 
-	// D-23: worktrees live centrally outside every repo tree.
+	// D-23: worktrees live centrally outside every repo tree. Since Phase 6
+	// placement is settings-driven per creation (worktree_base, WT-01) —
+	// provisionWorktree reads the setting at use, so this root is only the
+	// legacy Service field; the creation path no longer consults it.
 	wtRoot, err := settings.ExpandHome("~/.kangent/worktrees")
 	if err != nil {
 		slog.Error("resolving worktree root", "error", err)

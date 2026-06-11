@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/store"
 	"kangent/internal/worktree"
 )
@@ -31,7 +32,11 @@ func newAgentServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB) 
 		t.Fatalf("store.Migrate: %v", err)
 	}
 	wtDir := t.TempDir()
-	seedWorktreeBase(t, db, wtDir) // provisioning must never hit the real home default
+	// Provisioning must never hit the real ~/.kangent default (Phase 6 reads
+	// the worktree_base setting at use).
+	if err := settings.Set(db, settings.KeyWorktreeBase, wtDir); err != nil {
+		t.Fatalf("seed worktree_base: %v", err)
+	}
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{

@@ -7,11 +7,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/worktree"
 )
 
@@ -72,14 +72,52 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 // caller can populate the response without re-reading.
 func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, taskID int64, title, repoPath string) (branch, path string, provErr error) {
 	slug := worktree.Slug(title)
-	branch = "task/" + slug + "-" + strconv.FormatInt(taskID, 10)
-	path = wt.PathFor(repoPath, slug, taskID)
+
+	// fail routes settings/expansion errors through the SAME D-25 failure
+	// path as git errors: worktree_error records it, the HTTP request still
+	// succeeds.
+	fail := func(err error) (string, string, error) {
+		if _, dbErr := db.ExecContext(ctx,
+			`UPDATE tasks SET worktree_error = ? WHERE id = ?`, err.Error(), taskID); dbErr != nil {
+			slog.Error("recording worktree error on task", "task", taskID, "error", dbErr)
+		}
+		return "", "", err
+	}
+
+	// Phase 6 (BRANCH-01, WT-01): branch name and base dir come from settings,
+	// read from the DB at every creation (SET-03 — never cached). This is the
+	// single choke point for BOTH creation paths (task create and the
+	// POST /worktree Retry), so a template/base change applies to the very
+	// next provisioning. The base is stored raw (may carry "~") and expanded
+	// only at use (Pitfall 6); Create's MkdirAll makes a not-yet-existing base.
+	tpl, err := settings.Get(db, settings.KeyBranchTemplate)
+	if err != nil {
+		return fail(err)
+	}
+	branch = settings.ExpandTemplate(tpl, slug, taskID, title)
+	baseRaw, err := settings.Get(db, settings.KeyWorktreeBase)
+	if err != nil {
+		return fail(err)
+	}
+	baseDir, err := settings.ExpandHome(baseRaw)
+	if err != nil {
+		return fail(err)
+	}
+	path = worktree.PathUnder(baseDir, repoPath, slug, taskID)
 
 	wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	base, err := wt.ResolveBase(wctx, repoPath)
+	// Create-time defense (BRANCH-02 second half): an expanded name that
+	// escaped save-time validation (e.g. a hand-edited settings row) must
+	// never reach `git worktree add` — it lands in worktree_error below,
+	// never a crashed create.
+	err = settings.CheckRefFormat(wctx, branch)
 	if err == nil {
-		err = wt.Create(wctx, repoPath, branch, path, base)
+		var base string
+		base, err = wt.ResolveBase(wctx, repoPath)
+		if err == nil {
+			err = wt.Create(wctx, repoPath, branch, path, base)
+		}
 	}
 	if err == nil {
 		if subErr := wt.EnsureSubmodules(wctx, path); subErr != nil {
