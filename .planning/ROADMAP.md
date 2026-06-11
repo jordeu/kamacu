@@ -109,8 +109,15 @@ Plans:
   1. After a server restart, sessions recorded as running but no longer alive are reconciled to exited — no ghost sessions, and no session is ever auto-resumed into two PTYs
   2. For a task whose Claude session died with the server, user is offered "Resume session" which relaunches via `claude --resume` (persisted session ID) in the task's worktree
   3. User can open a read-only diff tab in the task view showing the worktree's changes vs the base branch
-**Plans**: TBD
+**Plans**: 5 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 05-01-PLAN.md — Backend recovery: SpawnOpts.ResumeSessionID (--resume flag switch), transcriptExists derivation, /api/agents/status resumable carrier + DB-derived entries, resume REST variant
+- [ ] 05-02-PLAN.md — Backend diff: internal/diff package (numstat/patch parsers, no-index exit-1 runner, merge-base pipeline), GET /api/tasks/{id}/diff
+- [ ] 05-03-PLAN.md — Frontend recovery: resumable contract + dotMeta gray null branch, useResumeAgent, TerminalPane exitedActions slot, AgentTab Resume/Reset pair in both placements
+- [ ] 05-04-PLAN.md — Frontend diff: shadcn collapsible, useTaskDiff, DiffTab + DiffFileSection renderers, disabled TabDef + Diff tab insertion (Agent, Description, Diff, Bash 1..N)
+- [ ] 05-05-PLAN.md — Restart-reconciliation + resume lifecycle integration test, build gates, human verification of Phase 5 + the full v1 walkthrough
 
 ## Progress
 
@@ -123,7 +130,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Terminal Engine | 0/5 | Complete    | 2026-06-10 |
 | 3. Worktree Isolation & Bash Tabs | 0/6 | Complete    | 2026-06-10 |
 | 4. Claude Code Agent Sessions | 5/5 | Complete    | 2026-06-11 |
-| 5. Recovery & Review | 0/TBD | Not started | - |
+| 5. Recovery & Review | 0/5 | Not started | - |
 
 ---
 *Roadmap created: 2026-06-10*
