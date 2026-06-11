@@ -47,7 +47,7 @@
 
 ### Review
 
-- [ ] **REVW-01**: User can open a read-only diff tab in the task view showing the worktree's changes vs the base branch
+- [x] **REVW-01**: User can open a read-only diff tab in the task view showing the worktree's changes vs the base branch
 
 ### Storage
 
@@ -116,7 +116,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STAT-02 | Phase 4 | Complete |
 | RCVR-01 | Phase 5 | Pending |
 | RCVR-02 | Phase 5 | Pending |
-| REVW-01 | Phase 5 | Pending |
+| REVW-01 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 25 total

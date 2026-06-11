@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Phase 5 UI-SPEC approved
-last_updated: "2026-06-11T05:46:44.925Z"
-last_activity: 2026-06-11
+status: executing
+stopped_at: Completed 05-02-PLAN.md (diff service + endpoint)
+last_updated: "2026-06-11T09:17:39.856Z"
+last_activity: 2026-06-11 -- Phase 5 execution started
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 23
-  completed_plans: 23
+  total_plans: 28
+  completed_plans: 24
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-10)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 4 — Claude Code Agent Sessions
+**Current focus:** Phase 5 — Recovery & Review
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-11
+Phase: 5 (Recovery & Review) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 5
+Last activity: 2026-06-11 -- Phase 5 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -75,6 +75,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P02 | 18 min | 3 tasks | 16 files |
 | Phase 04-claude-code-agent-sessions P04 | 6 min | 3 tasks | 5 files |
 | Phase 04-claude-code-agent-sessions P05 | 25 min | 3 tasks | 8 files |
+| Phase 05 P02 | 7 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -152,6 +153,8 @@ Recent decisions affecting current work:
 - [Phase 04-claude-code-agent-sessions]: Exited agent terminal renders dimmed; banner is code-free 'Agent session ended.'; primary action renamed 'Reset session' (D-41 revised after checkpoint feedback)
 - [Phase 04-claude-code-agent-sessions]: Phase 5 Resume design note (RCVR-02): exited banner gains 'Resume session' primary via claude --resume + persisted claude_session_id; 'Reset session' becomes secondary
 - [Phase 04-claude-code-agent-sessions]: Agent lifecycle locked in by 8-stage integration test on ClaudeBin fake-claude stub — real claude never spawned in CI
+- [Phase 05]: internal/diff owns a private git runner pair: exit-0 run() for normal git, runNoIndex() honoring git diff --no-index exit-1-as-success so untracked files render as full additions without git add -N (Pitfall 1)
+- [Phase 05]: Diff JSON is server-pre-structured per-file-hunks (Pattern 4); GET /api/tasks/{id}/diff re-resolves base via ResolveBase and excludes base movement via merge-base three-dot semantics (D-59)
 
 ### Pending Todos
 
@@ -165,6 +168,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11T05:46:44.922Z
-Stopped at: Phase 5 UI-SPEC approved
-Resume file: .planning/phases/05-recovery-review/05-UI-SPEC.md
+Last session: 2026-06-11T09:17:29.843Z
+Stopped at: Completed 05-02-PLAN.md (diff service + endpoint)
+Resume file: None

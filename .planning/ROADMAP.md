@@ -114,7 +114,7 @@ Plans:
 
 Plans:
 - [ ] 05-01-PLAN.md — Backend recovery: SpawnOpts.ResumeSessionID (--resume flag switch), transcriptExists derivation, /api/agents/status resumable carrier + DB-derived entries, resume REST variant
-- [ ] 05-02-PLAN.md — Backend diff: internal/diff package (numstat/patch parsers, no-index exit-1 runner, merge-base pipeline), GET /api/tasks/{id}/diff
+- [x] 05-02-PLAN.md — Backend diff: internal/diff package (numstat/patch parsers, no-index exit-1 runner, merge-base pipeline), GET /api/tasks/{id}/diff
 - [ ] 05-03-PLAN.md — Frontend recovery: resumable contract + dotMeta gray null branch, useResumeAgent, TerminalPane exitedActions slot, AgentTab Resume/Reset pair in both placements
 - [ ] 05-04-PLAN.md — Frontend diff: shadcn collapsible, useTaskDiff, DiffTab + DiffFileSection renderers, disabled TabDef + Diff tab insertion (Agent, Description, Diff, Bash 1..N)
 - [ ] 05-05-PLAN.md — Restart-reconciliation + resume lifecycle integration test, build gates, human verification of Phase 5 + the full v1 walkthrough
