@@ -1,382 +1,325 @@
 # Pitfalls Research
 
-**Domain:** Local web app running Claude Code CLI in server-side PTYs (Go backend, xterm.js frontend, git worktree per task, SQLite)
-**Researched:** 2026-06-10
-**Confidence:** HIGH (PTY/xterm.js/worktree/SQLite verified against official docs and GitHub issues), MEDIUM (some Claude Code internals are version-dependent and move fast)
+**Domain:** Adding (a) a Claude OAuth quota poller and (b) tmux-backed resumable shell tabs to an existing Go PTY/WS terminal app (Kangent v1.2)
+**Researched:** 2026-06-11
+**Confidence:** HIGH for tmux behaviors (empirically verified on tmux 3.4 on this machine) and credentials file layout (inspected locally); MEDIUM for the usage endpoint specifics (undocumented API, verified against multiple community sources and claude-code GitHub issues)
+
+## Empirical Findings (verified on this machine, 2026-06-11)
+
+These ground several pitfalls below; cited inline as [E1]–[E6].
+
+- **[E1]** `~/.claude/.credentials.json` exists on Linux (mode 0600). Top-level keys: `claudeAiOauth` (`accessToken`, `refreshToken`, `expiresAt` as **epoch milliseconds int**, `scopes`, `subscriptionType` — here `"team"` — and `rateLimitTier`) **plus** `mcpOAuth.*` entries containing third-party MCP server tokens/secrets. The file holds more secrets than just the Claude token.
+- **[E2]** `tmux attach` exits with **rc=0 in both cases** — server-side detach AND inner-shell exit. Exit code cannot distinguish them. `tmux has-session -t <name>` immediately after attach exits is the discriminator: rc=0 → detached (session alive), rc=1 → session gone. tmux prints `[detached (from session X)]` vs `[exited]` plus alt-screen/mouse-mode reset sequences (`?1049l`, `?1000l`…) into the PTY before exiting — these land in Kangent's ring buffer.
+- **[E3]** `has-session` against a socket with **no server running** also returns rc=1 with `no server running on /tmp/tmux-1000/<sock>` on stderr. With default `exit-empty on`, the server exits when the last session dies — "no server" is a *normal* state, not an error.
+- **[E4]** tmux 3.4 defaults on a `-f /dev/null` server: `window-size latest`, `aggressive-resize off`, `status on`, `exit-empty on`. The status-bar clock redraws periodically → an idle tmux pane still produces continuous PTY output.
+- **[E5]** The famous "sessions should be nested with care, unset $TMUX to force" refusal did **not** fire when attaching with `$TMUX` set in the environment: tmux only refuses when the attaching client's *tty is itself a pane of the same server* (`server_client_check_nested`). Kangent's creack/pty PTYs are never panes of the kangent tmux server, so attach works even if Kangent itself was launched inside the user's tmux. The leak is still harmful for other reasons (see Pitfall 8).
+- **[E6]** `TERM=tmux-256color` inside panes of a `-f /dev/null` server (not `xterm-256color` and not `screen-256color`).
 
 ## Critical Pitfalls
 
-### Pitfall 1: Zombie and orphaned processes from naive PTY lifecycle
+### Pitfall 1: Kangent refreshing the OAuth token itself
 
 **What goes wrong:**
-Killing the Claude Code process (or a bash tab) leaves children behind. `cmd.Process.Kill()` only signals the direct child — bash spawns subprocesses (and Claude Code spawns node, MCP servers, tool subprocesses) that get reparented to PID 1 and keep running, holding open file handles in worktrees you're about to delete. Separately, never calling `cmd.Wait()` after the process exits leaves zombies that accumulate over the app's lifetime.
+Kangent sees an expired `accessToken`, uses the `refreshToken` to mint a new one, and writes it back (or doesn't). Anthropic's OAuth flow rotates refresh tokens; a refresh performed outside claude can leave claude holding a stale refresh token → the user's claude CLI gets logged out mid-work, or two writers race on `.credentials.json`. On macOS the canonical store is the Keychain, so a file write doesn't even land where claude reads.
 
 **Why it happens:**
-Go's `os/exec` kills by PID, not by process group. PTY tutorials show `pty.Start()` but rarely show teardown.
+"Token expired → refresh it" is the textbook OAuth client behavior; developers reflexively implement it.
 
 **How to avoid:**
-- Set `cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}` (creack/pty needs the child to be the session leader with the PTY as controlling terminal — `pty.Start` does this for you).
-- To terminate: signal the *process group* with `syscall.Kill(-pgid, syscall.SIGTERM)`, wait with timeout, then SIGKILL the group. Because the child is a session leader, its PID is the PGID.
-- Always run a goroutine that calls `cmd.Wait()` and reaps exit status; this is also your "session died" event source for updating the DB and notifying the browser.
-- Prefer graceful first: closing the PTY master sends SIGHUP to the foreground process group — many TUIs (including Claude Code) shut down cleanly on SIGHUP, which lets it persist session state for `--resume`.
+Kangent is a *read-only passenger* on claude's credentials. Never call the token endpoint, never write the credentials file. On 401/expired token: mark the indicator "stale — open a claude session to refresh", because **running claude refreshes the token itself** as a side effect. Since Kangent's whole purpose is spawning claude sessions, the token is naturally fresh whenever quota matters. Re-read the credentials file before each poll (cheap, picks up claude's own refreshes); check `expiresAt` (epoch **ms**, not seconds [E1]) before calling and skip the request if already expired.
 
 **Warning signs:**
-`ps` shows `<defunct>` entries or stray `node`/`claude` processes after closing tasks; `git worktree remove` fails with "device or resource busy"; server FD count climbs over time.
+Any code path that constructs a request to an OAuth token endpoint; any `os.WriteFile` targeting `.credentials.json`; user reports "claude asked me to log in again after using Kangent".
 
 **Phase to address:**
-PTY session engine phase — make process-group teardown + `Wait()` reaping part of the very first spawn implementation, with a test that asserts zero surviving descendants after Stop.
+Quota indicator phase — encode "read-only, never refresh, never write" as a plan-level decision before any HTTP code exists.
 
 ---
 
-### Pitfall 2: UTF-8 and escape-sequence splitting in the PTY → WebSocket → xterm.js pipeline
+### Pitfall 2: Hammering `/api/oauth/usage` into a persistent 429
 
 **What goes wrong:**
-Terminal output renders mojibake (`�`) or glitches intermittently, especially with Claude Code's heavy use of box-drawing characters, spinners, and emoji. A `Read()` from the PTY master returns an arbitrary byte slice that can cut a multi-byte UTF-8 character — or an ANSI escape sequence — in half. If the server decodes chunks to Go strings, or sends WebSocket *text* frames, the split bytes become invalid and are replaced or dropped.
+The endpoint rate-limits aggressively. Two specific failure modes reported in claude-code issues: (1) requests **without `User-Agent: claude-code/<version>`** fall into a far stricter bucket and get *persistent* 429s (claude-code issue #31021); (2) naive 60s polling with retry-on-error and no backoff compounds into a 429 loop where the indicator never recovers.
 
 **Why it happens:**
-PTY reads are byte streams with no message boundaries; developers treat each read as a complete string.
+It's an undocumented endpoint; nothing tells you the UA header is load-bearing. A fixed-interval poller with "retry immediately on failure" is the natural first implementation.
 
 **How to avoid:**
-- Treat PTY output as opaque bytes end to end: read `[]byte`, send **binary** WebSocket frames, feed `Uint8Array` directly to `term.write()` — xterm.js accepts `Uint8Array` and its parser handles partial UTF-8 and partial escape sequences across writes correctly.
-- Never `string(buf)`-convert, never split/merge chunks on the server based on string operations, never log-then-forward through a string path.
-- Same in reverse: keystrokes from xterm.js (`onData`) are strings; send them as-is and write raw to the PTY without transformation.
+- Send `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20`, and `User-Agent: claude-code/<installed version>` (read the version from `claude --version` once at startup, or pin a known-good string).
+- Poll at ~60s **with jitter** (e.g., 60s ± 10s) and only while at least one browser client is connected/visible — Kangent is a long-running server; don't poll an idle machine 24/7.
+- On 429/5xx: exponential backoff (respect `Retry-After` if present), serve the last cached result with its real "Updated Xm ago" timestamp. Manual refresh should be rate-limited client-side too (disable button for ~10s after a click) — a user mashing refresh during an outage is the classic 429 amplifier.
+- Single-flight: manual refresh and the background tick must coalesce, not stack.
 
 **Warning signs:**
-Occasional `�` characters; spinners or borders corrupt only under fast output; bugs that disappear when output is slow.
+429s in logs; indicator stuck on "error" for minutes; multiple in-flight requests visible when both the timer and a manual refresh fire.
 
 **Phase to address:**
-PTY session engine + terminal UI phase — define the wire protocol as binary-frames-for-output from day one; retrofitting is a protocol break.
+Quota indicator phase — the poller's backoff/caching design is the core of the feature, not a polish item.
 
 ---
 
-### Pitfall 3: Reattach/replay strategy that ignores the alternate screen buffer
+### Pitfall 3: Assuming one credentials layout across OS and claude versions
 
 **What goes wrong:**
-Claude Code is a full-screen TUI on the alternate screen buffer. Two naive replay strategies both fail:
-1. **Full-stream replay** (store every byte since session start, replay on reattach): replays hours of animation frames and redraws — multi-MB replays, seconds of flicker, and xterm.js choking (it discards beyond a 50MB write buffer).
-2. **Raw ring buffer** (last N KB): almost certainly starts mid-escape-sequence and mid-frame, producing a corrupted screen; and if the buffer boundary falls after the alt-screen-enter sequence was evicted, xterm.js never enters the alternate screen, so rendering is garbage.
+The quota feature works on the dev machine (Linux, file present) and silently breaks elsewhere: on macOS the token lives in the Keychain (`Claude Code-credentials` generic password) and `.credentials.json` may not exist at all; for API-key users (`ANTHROPIC_API_KEY` / `apiKeyHelper`) there is **no subscription quota** and no `claudeAiOauth` block; the file schema is unversioned and has already changed across claude releases (and claude-code issue #10039 documents claude-on-Mac *deleting* the file a Linux setup relied on, in shared-HOME scenarios).
 
 **Why it happens:**
-Replay strategies are designed against line-oriented output (build logs) and then meet a TUI.
+The dev machine is the only test environment; the file is right there and parses fine.
 
 **How to avoid:**
-Pick one of two proven approaches:
-- **Server-side terminal state (recommended):** run a headless VT100 emulator in Go (e.g., `hinshun/vt10x` or similar) that consumes the PTY stream and maintains the current screen grid + modes. On attach, serialize the current screen (or replay a compact snapshot) then stream live bytes. This is what tmux effectively does.
-- **Resize-jiggle redraw (pragmatic v1):** keep a bounded ring buffer for the scrollback portion, and on reattach force the TUI to repaint by resizing the PTY (cols−1 then cols, i.e., two `pty.Setsize` calls → kernel delivers SIGWINCH → Claude Code redraws the full screen). Cheap and works because well-behaved alt-screen TUIs repaint on SIGWINCH. Caveat: known Claude Code bug where resize storms duplicate banner content into scrollback (anthropics/claude-code#49086) — debounce to a single jiggle.
-- Either way, `term.reset()` on the client before replay/snapshot so stale state never mixes with the new stream.
+Treat "no quota available" as a first-class state, not an error:
+- Parse defensively: read only `claudeAiOauth.{accessToken,expiresAt,subscriptionType}`; if the key is missing, malformed, or the file is absent → indicator hides (or shows a muted "n/a" tooltip explaining why). Never crash, never log the parse failure with file contents.
+- On macOS, attempt the file first (claude has a documented file fallback), and if absent either shell out to `security find-generic-password -s "Claude Code-credentials" -w` or simply show "quota unavailable on this setup" for v1.2 — decide explicitly rather than discovering it post-ship. PROJECT.md says local Linux is the actual deployment; scoping macOS out is legitimate *if written down*.
+- API-key-only users: detect absence of `claudeAiOauth` and degrade to hidden indicator. Don't show 0% bars — that reads as "you have full quota".
 
 **Warning signs:**
-Reattach shows a blank screen until the next keypress; reattach shows interleaved garbage; reattach takes seconds on old sessions.
+Indicator shows an error state on a colleague's machine; any code doing `json.Unmarshal` into a struct mirroring the whole credentials file (it will break when claude adds fields — use targeted extraction).
 
 **Phase to address:**
-This is the hardest design decision in the project — decide in the session-engine phase *before* building reattach UX; flag for deeper phase-specific research.
+Quota indicator phase — the "degrade gracefully" matrix (file missing / key missing / token expired / endpoint error) should be in the plan's acceptance criteria.
 
 ---
 
-### Pitfall 4: No flow control — fast PTY output overwhelms WebSocket and browser
+### Pitfall 4: Leaking the OAuth token (and MCP secrets) into logs, errors, or the API
 
 **What goes wrong:**
-A command like `cat large.log` or a fast Claude Code tool-output burst produces output far faster than the browser renders. Without backpressure the server buffers unboundedly (memory blowup), the WebSocket queue grows (multi-second input latency — keystrokes feel dead), and xterm.js silently discards data past its 50MB internal buffer.
+The bearer token ends up in: a wrapped error string (`fmt.Errorf("usage request failed: %v", req)`), an slog of the HTTP request, the JSON the backend returns to the browser, or a debug dump of the parsed credentials. Worse than the Claude token: the same file contains `mcpOAuth.*` client secrets and access tokens for third-party services [E1] — a careless "log what we read" exposes those credentials too.
 
 **Why it happens:**
-WebSockets give no application-level flow control; reading the PTY in a tight loop and `ws.Write()`ing "works" in demos.
+Error wrapping and request logging are habitual; nobody thinks of the credentials *file* as multi-tenant.
 
 **How to avoid:**
-- Implement the xterm.js-documented watermark protocol: client tracks bytes pending in `term.write(chunk, callback)`; when pending > high water (~128KB) send a `pause` control message; server stops reading the PTY (the kernel PTY buffer then blocks the child — natural backpressure); on low water (~16KB) send `resume`.
-- Alternatively (simpler, weaker): client ACKs every N bytes processed; server caps unacknowledged bytes in flight.
-- Batch client writes per animation frame to keep `term.write` call counts sane.
-- Bound any server-side per-session output buffer; drop-oldest with an explicit marker rather than OOM.
+- Extract only the three needed fields and discard the rest of the parsed document immediately; never hold or log the raw file bytes.
+- The token must never cross the Kangent API: the **server** polls and the browser receives only the digested quota struct (utilization, resets_at, updated_at, status).
+- Construct errors from status codes and trimmed response bodies only; never include the request object in errors.
+- Note the ToS context: since Feb 2026 Anthropic's credential policy restricts consumer OAuth tokens to Claude Code/claude.ai. A local read-only usage display with the claude-code UA is what the whole ecosystem of usage monitors does, but it is formally gray-area and the endpoint can change or be restricted without notice. Build the feature as strictly best-effort and isolated, so removal/breakage costs nothing.
 
 **Warning signs:**
-Typing latency during heavy output; server RSS spikes when a session prints a lot; output truncated or frozen terminal after big bursts.
+`accessToken` greppable in any log file; the `/api/quota` response containing anything other than digested numbers; tests asserting on raw credential structures.
 
 **Phase to address:**
-Terminal streaming phase — design the WebSocket protocol with control messages (resize, pause/resume, stdin, stdout) from the start, not as raw byte pipes.
+Quota indicator phase — add "grep logs and API responses for `sk-ant-oat`" to the verification checklist.
 
 ---
 
-### Pitfall 5: Resize handling — fit-addon loops, hidden tabs, and size authority
+### Pitfall 5: Threading detach-vs-kill through the shared session Stop path (regression risk to existing tabs)
 
 **What goes wrong:**
-Several intertwined failures: (a) FitAddon on a hidden/`display:none` container computes 0/Infinity dimensions — known xterm.js issues where this crashes the tab or sets cols=1; (b) ResizeObserver + fit() + fractional pixel sizes create resize feedback loops; (c) the kanban task view has multiple terminal tabs — resizing every hidden terminal on every layout change wastes CPU and triggers Claude Code's redraw-duplication bug; (d) forgetting to propagate resize to the PTY (`pty.Setsize`) leaves the TUI rendering at the wrong size — Claude Code wraps/garbles lines.
+This is the highest regression-risk item of the milestone. The existing SessionManager has one lifecycle: spawn → PTY read loop → Stop = full-process-tree kill → reap → mark dead. tmux tabs need a *fork* in that lifecycle: closing the tab must end the **attach client** (detach) while the tmux session lives on; an explicit Stop must `tmux kill-session`. Three concrete failure modes:
+1. **Stop doesn't stop:** the existing process-tree kill only reaches Kangent's child — the `tmux attach` client. The shell and its processes live in the **tmux server's** tree, not Kangent's. User clicks Stop, sees the tab die, but a build/server keeps running invisibly inside tmux.
+2. **Close kills:** the close-tab path reuses the kill path unchanged, so tmux tabs die on close — the entire feature silently doesn't work, and may even pass shallow testing because the tab "reopens" (as a fresh session).
+3. **Collateral regression:** refactoring Stop into detach/kill variants accidentally changes semantics for agent sessions or plain bash tabs (e.g., the worktree-cleanup "running session" gate, exited-state UI, or restart reconciliation start treating sessions inconsistently).
 
 **Why it happens:**
-The DOM-side terminal size and PTY-side size are two systems that must be kept in sync, and React mount/unmount/tab-switch life cycles fight with them.
+The natural implementation is `if isTmux { ... }` branches sprinkled through the existing Stop/close/reap code, and the kill-vs-detach distinction is easy to conflate because *both* end with the PTY closing and the read loop exiting.
 
 **How to avoid:**
-- Client is the source of truth for size: on fit, send `{cols, rows}` over WS; server calls `pty.Setsize` (kernel delivers SIGWINCH automatically — no manual signaling needed).
-- Only call `fit()` when the terminal container is visible and has nonzero dimensions; guard `if (width > 0 && height > 0)`. Fit once on tab activation, debounce ResizeObserver (~50–100ms).
-- Keep one live xterm instance per session, but don't keep hidden ones in layout-affecting DOM; either unmount or freeze fitting while hidden, refit on show.
-- Debounce server-side `Setsize` during drag-resizes to avoid Claude Code's per-frame redraw scrollback flooding.
+- Make lifecycle strategy an explicit property of the session (e.g., `Terminator` interface or a `detachOnClose bool` + per-type `Kill()` implementation), decided at spawn time, instead of type-checks at stop time.
+- Define the three verbs precisely in the plan: **Close tab** = drop WS clients (existing behavior — server session persists for all types); **Detach** (tmux only) = end the attach PTY, session persists in tmux; **Stop/Kill** = plain sessions: process-tree kill (unchanged); tmux sessions: `tmux -L kangent kill-session -t <name>`, *then* reap the attach client.
+- After the attach process exits for any reason, run `has-session` to classify detach vs exit [E2] and set session state accordingly (detached → resumable; exited → dead, same UX as today's exited bash tab).
+- Regression-test the existing flows explicitly: plain bash tab Stop still kills the whole tree; agent session Stop unchanged; worktree cleanup gate counts a *detached* tmux session as "running".
 
 **Warning signs:**
-Browser tab freezes when switching kanban tasks; terminal shows 1-column output; duplicated Claude Code banners filling scrollback after window resize.
+`ps` shows shells alive after Stop on a tmux tab; closing a tmux tab and reopening yields a fresh prompt instead of your running program; any change to the signature/semantics of the shared kill function without an accompanying test for plain sessions.
 
 **Phase to address:**
-Terminal UI phase; include "resize while hidden tab" and "drag-resize window" as explicit test cases.
+tmux phase, first plan — this is the architectural decision; everything else in the feature hangs off it.
 
 ---
 
-### Pitfall 6: Spawned environment is wrong — TERM, PATH, HOME
+### Pitfall 6: Ring-buffer replay + tmux redraw = garbage on reattach
 
 **What goes wrong:**
-The Go server inherits a minimal environment (especially if started from a launcher, systemd, or a non-login shell). Consequences: `claude` binary not found (it's often in `~/.local/bin`, a node version manager shim, or npm global bin not on PATH); `TERM` unset or `dumb`, so Claude Code's TUI renders without colors/box-drawing or refuses fullscreen mode; missing `HOME` breaks `~/.claude` session storage, killing `--resume`.
+The existing reattach path replays the ring buffer, then nudges a resize. For tmux tabs the ring buffer contains: the *previous* attach's full alternate-screen session, mouse-mode enable/disable toggles, the alt-screen **exit** sequence (`?1049l`) and the literal `[detached (from session X)]` message that tmux printed when the last attach ended [E2]. Replaying that into xterm.js, then starting a **new** `tmux attach` (a brand-new process with its own full redraw), produces flicker, a stray `[detached]` line, briefly-toggled mouse modes, and a confusing double-paint. Worse: if the old attach PTY is still tracked when a new attach spawns (restart-resume bugs), two PTY read loops feed one ring buffer and the terminal garbles permanently.
 
 **Why it happens:**
-Devs test by running the server from their interactive shell where everything is inherited; it breaks the moment the server is launched any other way.
+Replay-then-stream is the correct pattern for plain PTYs (the process can't redraw on demand) and it's tempting to reuse it untouched. tmux inverts the assumption: the redraw capability lives server-side in tmux, so replay is redundant.
 
 **How to avoid:**
-- Explicitly construct the child env: set `TERM=xterm-256color`, `COLORTERM=truecolor`, pass through `HOME`, `PATH`, `LANG`/`LC_*`, and Claude-specific vars (`ANTHROPIC_*`, `CLAUDE_*`).
-- Resolve the `claude` binary at project/app config time (configurable path + `exec.LookPath` fallback) and surface a clear error in the UI if missing — don't fail silently inside the PTY.
-- Consider launching bash tabs as `bash -l` or interactive (`-i`) deliberately, understanding that rc files will run.
+- For tmux sessions, **skip ring-buffer replay across attach generations** (clear or reset the buffer when the attach client ends). Reattach = spawn a fresh `tmux -L kangent attach -t <name>` in a fresh PTY sized to the current xterm dims; tmux repaints the whole screen itself. The ring buffer still serves mid-attach browser-tab reconnects (same attach process still alive) — keep replay for that case only.
+- Ensure exactly one live attach process per Kangent tmux session: before spawning a new attach, confirm the old one is reaped (or `tmux detach-client` it first).
+- Scrollback expectations change: tmux runs in the alternate screen, so xterm.js's own scrollback stays empty — the wheel does nothing unless tmux mouse mode is on (wheel then enters copy-mode). Decide explicitly: `set -g mouse on` in the kangent server config gives wheel-scroll via copy-mode (closest to current bash-tab feel); document that select-to-copy then needs Shift (standard xterm.js + tmux-mouse caveat). Do not attempt the `smcup@/rmcup@` terminal-override hack to force xterm scrollback — it's notorious for corrupted displays on window/pane switches.
 
 **Warning signs:**
-"command not found: claude" in the terminal; monochrome/ASCII-art-broken TUI; `--resume` finds no sessions.
+`[detached]`/`[exited]` text visible after reopening a tab; screen drawn twice on reattach; mouse wheel behavior differing between first attach and reattach; garbled output when two browser tabs race to resume after a server restart.
 
 **Phase to address:**
-PTY session engine phase (env construction); app setup/onboarding phase (claude binary detection with user-visible diagnostics).
+tmux phase — the attach/replay decision belongs in the same plan as the lifecycle fork (Pitfall 5); restart-resume builds on it.
 
 ---
 
-### Pitfall 7: Worktree creation/cleanup that can damage the user's repo state
+### Pitfall 7: Sharing the user's tmux server / config instead of an isolated `-L kangent` socket
 
 **What goes wrong:**
-The app operates on the user's real repository. Failure modes:
-- **Branch collision:** `git worktree add -b <branch>` fails if the branch exists or is checked out in another worktree (including the user's main checkout). Task titles like `Fix bug #1: foo/bar` produce invalid ref names.
-- **Destructive cleanup:** `git worktree remove` refuses dirty worktrees; reaching for `--force` or `rm -rf` deletes uncommitted agent work. Deleting the directory without `git worktree remove` leaves stale admin entries in `.git/worktrees/`, causing later "already checked out" / "already exists" errors.
-- **Cleanup while sessions live:** removing a worktree whose PTY sessions still have it as cwd — processes end up in a deleted directory; subsequent git commands in those shells fail confusingly, and removal itself may fail with EBUSY.
-- **Submodules:** new worktrees don't init submodules; agent builds fail mysteriously. (`git worktree remove` also refuses worktrees containing submodules.)
-- **Worktree placement:** creating worktrees inside the repo tree pollutes `git status` for the user unless ignored.
+Spawning sessions on the default tmux server makes Kangent hostage to `~/.tmux.conf`: a user with `set -g destroy-unattached on` has every Kangent session **destroyed the instant the tab closes** (feature silently dead); custom prefix keys, status bars, plugins (tpm, resurrect), `default-command`, and hooks all alter behavior; Kangent sessions clutter the user's `tmux ls`; and `kill-server` from either side nukes the other's sessions. Session-name collisions with user sessions are possible too.
 
 **Why it happens:**
-git worktree semantics are subtle and the app automates them against a repo it doesn't own.
+`tmux new-session` "just works" against the default socket; isolation looks like extra ceremony.
 
 **How to avoid:**
-- Sanitize task titles into ref-safe slugs (`git check-ref-format --branch` rules); add a unique suffix (task ID) to guarantee no collision; verify branch nonexistence first and fail with a clear message.
-- Place worktrees in an app-owned directory *outside* the repo (e.g., `~/.kangent/worktrees/<project>/<task>/` or a sibling dir), never inside the checkout.
-- Cleanup flow: (1) stop all task sessions and wait for process-group exit, (2) check `git status --porcelain` in the worktree, (3) if dirty, show the user what's uncommitted and require explicit confirmation before `git worktree remove --force`, (4) keep the branch (per requirements). Run `git worktree prune` opportunistically on project open to self-heal stale entries.
-- Detect submodules (`.gitmodules`) and run `git submodule update --init --recursive` after add — or at minimum warn.
-- Treat every git invocation as fallible: parse exit codes/stderr and surface them in the UI; never assume success.
+- Always run with a dedicated socket: `tmux -L kangent` on **every** invocation (new-session, attach, has-session, list-sessions, kill-session). One missed `-L` and that command hits the user's server.
+- Start the server with `-f /dev/null` so user config never loads. Note `-f` only matters on the command that boots the server — with `exit-empty on` (default [E3,E4]) the server dies when the last session ends and the *next* command boots a fresh one, so `-f /dev/null` must be passed uniformly via a single helper, not just on a one-time "init".
+- Apply Kangent's own minimal config after server start via `set -g` commands (e.g., `mouse on`, possibly `status off`, a bounded `history-limit`), not via a config file the user might edit expectations into.
+- Deterministic, collision-proof session names derived from stable IDs: `kangent-<taskID>-<tabID>` (avoid colons/periods — tmux rewrites them). Use `has-session` before `new-session`, or `new-session -A -d` (attach-or-create, detached) to make spawn idempotent. Note `new-session` without `-d` in a non-tty context errors with `open terminal failed: not a terminal` — always create detached, then attach separately inside the PTY.
+- Decide the status bar question consciously [E4]: `status on` gives a visible "this is tmux" affordance but adds a clock that redraws continuously (constant PTY output into the ring buffer even when idle — harmless at this scale but surprising in debugging) and looks different from plain bash tabs. `set -g status off` makes tmux tabs visually identical to bash tabs — arguably better, with the tab UI itself carrying the "resumable" badge.
 
 **Warning signs:**
-"fatal: '<branch>' is already checked out at ..."; tasks whose worktree dir exists but git doesn't know about it (or vice versa); user reports lost uncommitted changes — this one is trust-destroying.
+Kangent sessions visible in plain `tmux ls`; behavior differing between machines with/without a `~/.tmux.conf`; sessions vanishing on detach (destroy-unattached); prefix key weirdness in Kangent terminals.
 
 **Phase to address:**
-Worktree management phase. The "dirty worktree confirmation" rule is non-negotiable and should be a phase success criterion.
+tmux phase — socket/config isolation is line one of the spawn implementation.
 
 ---
 
-### Pitfall 8: DB claims sessions are running after server restart (and lost Claude session identity)
+### Pitfall 8: Environment leakage into spawned PTYs (`$TMUX`, `TERM`)
 
 **What goes wrong:**
-PTY processes die with the server, but the DB still says `running`. On restart the UI shows live sessions that don't exist; clicking them errors or, worse, spawns duplicates. Additionally, if the app never captured Claude's session ID, `claude --resume` recovery requires the user to pick from an interactive picker inside a fresh PTY — fragile to automate, and resuming sessions is directory-scoped (sessions live under `~/.claude/projects/<encoded-cwd>/`), so resume must run with cwd = the same worktree.
+If Kangent itself is launched from inside a tmux session (very likely — dev servers commonly run in tmux), every PTY Kangent spawns inherits `TMUX`, `TMUX_PANE`, and `TERM=tmux-256color/screen-256color`. Consequences: shell prompts and tools in **plain bash tabs and agent sessions** believe they're inside tmux (prompt frameworks show tmux segments; scripts gate behavior on `$TMUX`); a user typing `tmux ls`/`tmux kill-server` in a Kangent bash tab unexpectedly operates in their *personal* server's context; and TERM mismatches cause subtle TUI rendering issues in claude. Empirically the feared hard failure — tmux refusing nested attach — does **not** occur here ([E5]: refusal requires the client tty to be a pane of the same server), so this bug is *silent*, which makes it worse.
 
 **Why it happens:**
-Process state is ephemeral; DB state is durable; nobody writes the reconciliation code until the first restart bites.
+`exec.Cmd` inherits the parent environment by default; nothing fails loudly, so it ships.
 
 **How to avoid:**
-- Startup reconciliation pass: mark every `running` session row as `exited(unclean)` before serving requests (the server owns all PTYs, so none can survive it). Optionally record server boot ID per session to detect this positively.
-- Capture Claude session identity at spawn: launch with `claude --session-id <uuid-you-generate>` so the resume command is fully deterministic (`claude --resume <uuid>` in the same worktree cwd). Verify this flag against the installed Claude Code version at runtime; fall back to parsing `~/.claude/projects/<encoded-cwd>/*.jsonl` mtimes if needed (MEDIUM confidence — flag surface changes between versions).
-- Never auto-resume the same Claude session into two PTYs concurrently — transcripts interleave (documented Claude behavior). Enforce one live PTY per task session row.
-- UI: show "session ended (server restarted) — Resume?" rather than silently restarting.
+In the PTY env-setup for all session types, explicitly remove `TMUX` and `TMUX_PANE`, and set `TERM=xterm-256color` for non-tmux PTYs (this may already happen for xterm.js compatibility — verify rather than assume). For the tmux attach PTY itself, also pass `TERM=xterm-256color` (that's the *outer* terminal type tmux renders for; inside panes tmux sets `TERM=tmux-256color` on its own [E6]). On hosts with old ncurses (notably macOS) the `tmux-256color` terminfo entry may be missing, breaking TUIs inside panes — if targeting macOS, set `default-terminal screen-256color` on the kangent server; on Linux it's a non-issue.
 
 **Warning signs:**
-After restart, task views show connected terminals with no output; duplicate `claude` processes for one task; resume starting a blank conversation instead of the old one.
+`echo $TMUX` non-empty in a plain Kangent bash tab; rendering differences depending on how Kangent was launched; "missing or unsuitable terminal: tmux-256color" from TUIs inside tmux tabs on macOS.
 
 **Phase to address:**
-Persistence/reconciliation phase — should land in the same phase as session spawn, not later; recovery UX (resume button) can follow in a later phase.
+tmux phase — one env-scrubbing function applied at the existing single spawn seam, plus a check that current spawns already pin TERM.
 
 ---
 
-### Pitfall 9: SQLite concurrency misconfiguration in Go
+### Pitfall 9: Stale tmux sessions accumulating; reconciliation and cleanup gaps
 
 **What goes wrong:**
-Intermittent `database is locked` / `SQLITE_BUSY` errors under concurrent access — e.g., session-exit goroutines updating rows while HTTP handlers read. Worst with default journal mode, no busy_timeout, and Go's default connection pool opening many connections.
+tmux sessions now outlive everything: browser tabs, the Kangent server, even the task. Without explicit lifecycle hooks: deleting a task leaves its tmux session running forever (holding a cwd inside a worktree that cleanup then removes — the shell's cwd dangles); restart reconciliation, which today marks all sessions dead, marks live tmux sessions dead too and never offers Resume (or worse, offers Resume for sessions whose tmux side actually died while Kangent was down); uninstalling Kangent leaves an invisible `tmux -L kangent` server with orphan shells consuming memory indefinitely.
 
 **Why it happens:**
-`database/sql` pools connections; SQLite allows one writer; deferred transactions that upgrade read→write return SQLITE_BUSY immediately regardless of busy_timeout.
+v1.0's reconciliation logic was built on the invariant "server restart ⇒ all child processes are gone", which tmux deliberately breaks. Task-deletion cleanup was built when sessions could not outlive their PTY.
 
 **How to avoid:**
-- Open with `PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`, `PRAGMA foreign_keys=ON`, `PRAGMA synchronous=NORMAL`.
-- Either `db.SetMaxOpenConns(1)` (simplest, fine for this app's tiny write volume), or two pools: a single-connection write pool using `BEGIN IMMEDIATE` transactions + a multi-connection read pool.
-- Prefer `modernc.org/sqlite` (pure Go, no CGO) for the single-binary goal unless you need a CGO extension; cross-compilation stays trivial.
-- Keep transactions short; never hold a transaction across PTY I/O or git operations.
+- **Startup reconciliation:** `tmux -L kangent list-sessions -F '#{session_name}'` (tolerating "no server running" as empty [E3]), diff against DB session rows: DB-says-tmux + tmux-has-it → resumable (Resume affordance, mirroring the claude `--resume` UX); DB-has-it + tmux-doesn't → dead (existing path); tmux-has-it + DB-doesn't → orphan → `kill-session` (the `kangent-` name prefix on the dedicated socket makes this safe).
+- **Task deletion / worktree cleanup:** kill the task's tmux sessions *before* removing the worktree; extend the existing running-session gate so a **detached** tmux session counts as running (it's invisible in the UI — the gate is the only thing standing between the user and silently orphaning their running processes).
+- **Uninstall/cleanup story:** at minimum document `tmux -L kangent kill-server`; ideally a settings-page "kill all detached shells" action covers both stale accumulation and pre-uninstall cleanup.
 
 **Warning signs:**
-Sporadic 500s mentioning "locked"; hangs when a task is moved while sessions are exiting.
+`tmux -L kangent ls` showing sessions for deleted tasks; Resume offered but attach lands on "no sessions"; worktree removal succeeding while a detached shell still has its cwd there.
 
 **Phase to address:**
-Foundation/data-layer phase — pragmas and pool settings are 10 lines if done first, a debugging week if done later.
-
----
-
-### Pitfall 10: "It's localhost, so it's safe" — CSWSH and DNS rebinding give remote pages a terminal
-
-**What goes wrong:**
-This app's WebSocket is a shell. Any web page you visit can attempt `new WebSocket("ws://localhost:PORT/...")` — browsers do not enforce same-origin on WebSockets. Without Origin validation, a malicious page gets full keystroke access to a PTY running in your repos = arbitrary code execution. DNS rebinding similarly defeats "we only bind 127.0.0.1" for plain HTTP endpoints (Host header points at attacker domain resolving to 127.0.0.1). This exact class hit webpack-dev-server and Vite (CVE'd advisories).
-
-**Why it happens:**
-"Single user at localhost" reads like a non-security context. The PTY makes it the highest-stakes localhost app possible.
-
-**How to avoid:**
-- Bind to `127.0.0.1` only (not `0.0.0.0`).
-- Strictly validate `Origin` on every WebSocket upgrade (exact match against `http://localhost:PORT` / `http://127.0.0.1:PORT`); reject missing/other origins. Note gorilla/websocket rejects cross-origin by default but `nhooyr.io/websocket` and some setups require explicit `CheckOrigin` — never set the permissive `return true` found in every tutorial.
-- Validate `Host` header on all HTTP routes (blocks DNS rebinding).
-- Add a per-instance bearer token: generated at startup, embedded in the served frontend, required on API + WS connect. Cheap, and makes both attacks moot even if a check regresses.
-
-**Warning signs:**
-`CheckOrigin: func(...) bool { return true }` anywhere in the codebase; WS connects succeeding from a page served on another port during testing.
-
-**Phase to address:**
-Must be in the first phase that exposes the WebSocket endpoint — not a hardening afterthought. Verification: an integration test that a cross-origin upgrade is rejected.
-
----
-
-### Pitfall 11: Claude Code TUI-specific surprises
-
-**What goes wrong:**
-A cluster of behaviors that break assumptions:
-- Alternate-screen TUI keeps only ~2000 lines of internal scrollback (not configurable); users expect browser-terminal scrollback of the whole conversation and won't get it.
-- Interactive permission prompts and plan mode require real keystroke round-trips — anything that buffers, drops, or reorders stdin (e.g., during reattach) leaves the agent stuck waiting on an invisible prompt.
-- Mouse reporting: Claude Code enables mouse mode; xterm.js forwards mouse events, which means browser text selection/copy behaves differently inside the TUI (users must use the TUI's own selection or you intercept with a modifier key).
-- Bracketed paste: multi-line pastes into the prompt rely on bracketed paste mode passing through intact; mangling it submits each line as a separate message.
-- `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` exists as an escape hatch to line-oriented output — a legitimate v1 simplification lever for the replay problem, at the cost of the fullscreen UX (MEDIUM confidence: env var behavior is version-dependent; verify against installed version).
-
-**Why it happens:**
-Claude Code is a fast-moving TUI; its terminal contract is richer than a typical CLI.
-
-**How to avoid:**
-Test the real `claude` binary inside the app early (week 1 spike), specifically: permission prompt flow, paste of multi-line text, mouse selection, detach during a pending prompt, and reattach mid-conversation. Treat "bash in a PTY works" as proving ~60% of the problem.
-
-**Warning signs:**
-Agent appears hung after reattach (pending prompt not visible); pasted code arrives as multiple messages; users complain they can't copy text.
-
-**Phase to address:**
-A dedicated "Claude Code integration" spike/phase after the generic PTY engine works with plain bash.
-
----
+Split: kill-on-delete + gate extension in the tmux phase; restart reconciliation + Resume in the resume/persistence plan of that phase (mirrors how v1.0 split Phase 2 attach from Phase 5 restart-resume).
 
 ## Technical Debt Patterns
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Full raw-stream recording for replay (no headless emulator) | No VT-state code | Multi-MB replays, broken alt-screen reattach | Never for TUI sessions; fine for bash-tab logs |
-| `CheckOrigin: return true` "to make it work in dev" | WS connects from Vite dev server | Remote code execution via CSWSH | Never — fix dev origin allowlist instead |
-| `rm -rf` worktrees instead of `git worktree remove` | One less git invocation | Stale `.git/worktrees` metadata, "already checked out" errors | Never |
-| Storing terminal output in SQLite per chunk | Durable scrollback | Write amplification, DB bloat, lock contention | Never per-chunk; periodic snapshot to file is fine |
-| Skipping `--session-id` capture at spawn | Less version-coupling to claude flags | Resume after restart requires interactive picker automation | MVP only if resume is manual-in-terminal |
-| Text WebSocket frames with JSON-base64 output | Easy debugging | ~33% bandwidth overhead, encode/decode CPU on hot path | Acceptable for v1 if binary path is awkward; keep protocol versioned |
-| One global SQLite connection, no migrations framework | Fast start | Fine, honestly, at this scale | Acceptable for v1 (single user) |
+| `if isTmux {}` branches in shared Stop/close/reap code | Fast to write | Every future shell type multiplies branches; kill/detach semantics drift apart silently | Never — use a per-session lifecycle strategy (Pitfall 5) |
+| Polling quota even with no browser connected | Simpler poller loop | 24/7 background hits on an undocumented rate-limited endpoint from an always-on server | Acceptable first iteration only with ≥60s jittered interval and backoff; fix before milestone close |
+| Skipping macOS Keychain support (file-only credentials) | Ships the Linux case now | macOS users see no indicator | Acceptable if explicitly documented as Linux-first |
+| Reusing ring-buffer replay unchanged for tmux | No replay-path changes | `[detached]` artifacts, double-paint, garbled reattach | Never — skip cross-generation replay for tmux (Pitfall 6) |
+| Hardcoding the `User-Agent: claude-code/x.y` string | No version probing | Anthropic may bucket stale UA strings into stricter limits later | Acceptable v1.2; prefer probing `claude --version` at startup |
+| No "kill all detached shells" affordance | Less UI | Orphan accumulation only fixable via CLI | Acceptable for v1.2 if README documents `tmux -L kangent kill-server` |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| creack/pty | Manually plumbing SIGWINCH from somewhere | Client sends cols/rows over WS → `pty.Setsize(f, &pty.Winsize{...})`; kernel delivers SIGWINCH to the child automatically |
-| creack/pty | Treating PTY master `Read` EOF as the only exit signal | Use `cmd.Wait()` goroutine as authoritative exit event; on some platforms read errors with EIO instead of EOF when child dies |
-| xterm.js | `new Terminal()` defaults + DOM renderer | Use `@xterm/addon-webgl` (fallback canvas), `scrollback` sized deliberately, `term.write(Uint8Array)` |
-| xterm.js FitAddon | `fit()` on hidden/zero-size container | Guard on visibility + nonzero dims; fit on tab activation; debounce ResizeObserver |
-| Claude Code CLI | Spawning with server's bare env | Explicit env: TERM=xterm-256color, HOME, PATH, LANG; resolve binary path with LookPath + config override |
-| Claude Code CLI | Assuming flags (`--resume`, `--session-id`) are stable | Version-check `claude --version` at startup; gate features on detected version |
-| git worktree | Deriving branch directly from task title | Slug + task-ID suffix; validate with check-ref-format rules; handle "branch exists" as expected error |
-| git worktree | Cleanup without checking dirty state / live processes | Stop sessions → porcelain status check → user confirmation → `worktree remove` → keep branch |
-| SQLite (modernc/mattn) | Default pool + default journal mode | WAL + busy_timeout=5000 + MaxOpenConns(1) (or split read/write pools with BEGIN IMMEDIATE) |
-| WebSocket (gorilla/nhooyr) | No ping/pong keepalive | Heartbeat both directions; detect dead clients to release flow-control pauses (a paused PTY with a dead client = hung session) |
+| `/api/oauth/usage` | Omitting `User-Agent: claude-code/<ver>` → persistent 429 bucket | Send Bearer + `anthropic-beta: oauth-2025-04-20` + claude-code UA; treat the endpoint as undocumented/best-effort |
+| `/api/oauth/usage` | Assuming all quota fields exist | `seven_day_opus`/`seven_day_sonnet`/`extra_usage` are nullable; render only present windows |
+| `.credentials.json` | Unmarshal whole file into a rigid struct | Extract only `claudeAiOauth.{accessToken,expiresAt}`; tolerate unknown/missing fields; file also contains unrelated `mcpOAuth` secrets [E1] |
+| `.credentials.json` | Caching the token for the process lifetime | Re-read before each poll — claude rotates it underneath you |
+| tmux CLI | Forgetting `-L kangent -f /dev/null` on one of the invocation sites | One helper that always injects both; never call tmux directly |
+| tmux attach | Using attach exit code to detect shell exit | rc=0 either way [E2]; classify with `has-session` after exit |
+| tmux has-session | Treating "no server running" stderr as a failure | rc=1 + that message simply means zero sessions [E3] |
+| tmux new-session | Spawning attached in a non-tty context | `new-session -d` (or `-A -d`), then a separate `attach` inside the PTY |
+| tmux resize | Worrying about smallest-client clamping | `window-size latest` is the 3.x default [E4]; only matters if the user co-attaches externally, where last-resize-wins flapping is expected and acceptable |
+| Existing settings seam | Validating tmux only at settings-save | Also `LookPath` at spawn time (tmux can disappear after the setting was saved), mirroring v1.1 shell validation |
 
 ## Performance Traps
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| One `term.write()` per WS message | Jank during fast output | Coalesce into per-animation-frame flushes | Any `cat bigfile` / verbose agent tool output |
-| Unbounded server output buffering per session | RSS climbs with detached sessions producing output | Bounded ring buffer per session; pause PTY reads when no client and buffer full | First long-running detached noisy session |
-| DOM renderer instead of WebGL | High CPU at 100% during TUI animation (Claude Code spinners redraw constantly) | WebGL addon | Immediately, with any animated TUI |
-| Mounting every task's terminal in the kanban DOM | Page slows as task count grows | Mount terminals lazily on task open; dispose on close (server keeps the session) | ~10+ tasks with sessions |
-| Replaying full session history on each reattach | Reattach latency grows with session age | Snapshot/ring-buffer replay (see Pitfall 3) | Hours-old sessions |
-| Per-output-chunk DB writes | SQLITE_BUSY storms, disk churn | Don't persist output to DB; in-memory ring + optional file snapshot | First chatty session |
+| Quota poll retry-without-backoff | 429 loop, indicator permanently "error" | Exponential backoff + serve-stale + single-flight | First endpoint hiccup |
+| tmux status-bar clock churning the ring buffer | Idle tmux tabs continuously writing to the ring buffer; "activity" never quiesces | `status off` on the kangent server, or accept the churn knowingly [E4] | Cosmetic/debugging nuisance only at this scale |
+| Per-component quota fetching in the frontend | N components × interval requests | One server-side poller; browser reads cached `/api/quota` (TanStack Query, staleTime ≈ poll interval) | A few open browser tabs |
+| Unbounded tmux `history-limit` on long-lived detached sessions | tmux server memory grows for weeks | Set a sane `history-limit` (e.g., 10000) in kangent server options | Weeks of detached uptime |
 
 ## Security Mistakes
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| No Origin check on WS upgrade | Any website gets keystroke access to a shell (RCE) | Strict Origin allowlist; per-instance auth token |
-| No Host header validation | DNS rebinding reaches HTTP API from remote pages | Reject Host ∉ {localhost:PORT, 127.0.0.1:PORT} |
-| Binding 0.0.0.0 "to test from phone" | LAN-wide unauthenticated shell | Hard-default 127.0.0.1; require explicit flag + token to widen |
-| Passing task title/description into shell commands | Command injection via task fields into git calls | Always `exec.Command` with arg arrays, never `sh -c` with interpolation; sanitize ref names separately |
-| Serving the repo browser/API without path normalization | Path traversal from project "directory" field into arbitrary FS | Clean + absolutize paths; require the dir to contain `.git`; no symlink-following surprises |
-| Auto-answering Claude permission prompts or defaulting `--dangerously-skip-permissions` | Agent executes destructive actions without the human gate the CLI was chosen for | Keep prompts interactive; if a yolo-mode toggle exists, make it explicit per-task UI |
+| Token in logs/error strings | `sk-ant-oat01-…` greppable on disk | Redact; never log raw credentials file or request objects; grep-check in verification |
+| Token forwarded to the browser | Any localhost page or extension reading it via the Kangent API | Server-side poll only; API returns digested quota numbers exclusively |
+| Logging the parsed credentials file | Leaks third-party MCP tokens/secrets too [E1] | Targeted field extraction; discard the rest immediately |
+| New quota route skipping existing protections | Origin/loopback discipline bypassed for the new endpoint | `/api/quota` goes through the same Origin/Host validation as existing routes |
+| Writing/chmodding the credentials file | Corrupting claude's auth state; loosening perms | Never write; open read-only |
 
 ## UX Pitfalls
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-----------------|
-| No visual distinction between "attached to live session" and "showing stale snapshot" | User types into a dead terminal | Connection state badge; disable input until attached; auto-reconnect with backoff |
-| Reattach lands on a blank alt-screen until keypress | Looks broken | Resize-jiggle redraw or screen snapshot on attach (Pitfall 3) |
-| Marking task Done silently force-removes a dirty worktree | Lost uncommitted agent work; trust destroyed | Show porcelain diff summary; require confirmation; default to keep |
-| Killing sessions when browser tab closes (accidental coupling) | Work lost on tab close, violating core promise | Server lifecycle fully decoupled from WS lifecycle; only explicit Stop kills |
-| Browser keybindings swallow terminal keys (Ctrl+W, Ctrl+T, Ctrl+R, Cmd+K) | Closes tab instead of sending to TUI | `attachCustomKeyEventHandler`; document unfixable ones (Ctrl+W can't be intercepted in most browsers) — consider alternative bindings note in UI |
-| Copy/paste mismatch (TUI mouse mode owns the mouse) | "I can't select text" | Shift+drag for native selection (xterm.js default), visible hint; Ctrl/Cmd+V paste path tested with multi-line bracketed paste |
-| Claude's ~2000-line internal scrollback vs. user expectation of full history | "Where did the conversation go?" | Document Ctrl+O transcript mode in-app; don't promise scrollback the TUI can't give |
+| Showing 0%/empty bars for API-key users | Reads as "full quota available" — user starts agents expecting limits that don't exist | Hide indicator (or muted "n/a — API key auth") when `claudeAiOauth` absent |
+| Stale quota shown as current | User starts an agent believing quota is free | "Updated Xm ago" from last *success*; visually distinguish stale (>5m) data |
+| Error state on every transient 429 | Indicator cries wolf, gets ignored | Serve cached values through transient errors; only surface error after sustained failure |
+| tmux tab looks identical to bash tab | User doesn't know close≠kill; surprised either way | Badge tmux tabs (e.g., "persistent"); distinct Detach-close vs Stop affordances |
+| Mouse wheel dead in tmux tabs | "Scrollback is broken" reports | `mouse on` in kangent tmux config (wheel → copy-mode); note Shift-select for copy |
+| Resume offered for a dead tmux session | Click → "no sessions" error flash | Reconcile with `has-session` before rendering Resume, not at click time |
+| Stop on tmux tab leaves processes running (Pitfall 5) | User believes work stopped; build/server still running invisibly | Stop = `kill-session`; verify via `has-session` post-kill |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Session spawn:** Works from your dev shell — verify it works when the server starts from a clean env (`env -i ./kangent`) with TERM/PATH/HOME constructed explicitly
-- [ ] **Session stop:** Claude exits — verify zero descendant processes remain (`pgrep -g <pgid>`) including MCP servers and bash children
-- [ ] **Reattach:** Works after 1 minute — verify after hours of output, after a pending permission prompt, and after server-side flow-control pause
-- [ ] **Resize:** Works on window drag — verify with hidden tab → activate, browser zoom ≠ 100%, and rapid drag (no scrollback duplication storm)
-- [ ] **Worktree create:** Works on toy repo — verify on a repo with submodules, with the task branch name already existing, and when the project dir is itself a worktree
-- [ ] **Worktree cleanup:** Works on clean tree — verify dirty tree prompts, running session blocks/stops first, and `.git/worktrees` has no stale entries after
-- [ ] **Restart recovery:** DB rows reconciled — verify UI offers resume and `claude --resume <id>` actually restores the conversation in the worktree cwd
-- [ ] **Security:** WS connects from app — verify cross-origin upgrade is rejected (test from a page on another port) and Host-header spoof is rejected
-- [ ] **Paste:** Single line works — verify 200-line paste arrives as one bracketed paste, not 200 submissions
-- [ ] **Unicode:** ASCII output fine — verify emoji/CJK/box-drawing under fast output (stress: `yes 'こんにちは🎉│'`)
+- [ ] **Quota indicator:** works with file present — verify behavior with file *absent*, `claudeAiOauth` key absent, token expired, endpoint 429, endpoint 5xx, and malformed JSON (six distinct states)
+- [ ] **Quota poller:** 60s tick works — verify manual refresh + tick coalesce (single-flight) and polling pauses with no connected browser
+- [ ] **Quota security:** numbers render — grep logs and `/api/quota` payloads for `sk-ant-oat`
+- [ ] **tmux close/reopen:** reattach works — verify a *running* process (e.g., `top`) is still live and cleanly repainted after close→reopen, not just a fresh prompt
+- [ ] **tmux Stop:** tab closes — verify `tmux -L kangent has-session` fails afterward and the inner process tree is gone (`ps`)
+- [ ] **tmux + restart:** Resume appears — also verify the case where the tmux session *died* while Kangent was down (must show dead, not Resume)
+- [ ] **Inner exit:** typing `exit` in a tmux tab — verify the tab shows exited state (not "detached/resumable") via the has-session classification [E2]
+- [ ] **Plain tabs regression:** tmux feature merged — verify plain bash tab Stop still kills the full process tree and agent session lifecycle is untouched
+- [ ] **Worktree cleanup gate:** counts attached sessions — verify a *detached* tmux session also blocks/warns on cleanup, and task deletion kills its tmux sessions
+- [ ] **Env hygiene:** works from a plain shell — launch Kangent from *inside* the user's tmux and verify `$TMUX` is empty in spawned tabs and claude renders correctly
+- [ ] **tmux missing:** dropdown hides/disables tmux when not installed — verify the spawn-time failure path if tmux is removed after the setting was saved
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Orphaned processes accumulated | LOW | Add pgroup kill + Wait reaping; one-off `pkill` cleanup; add descendant-count test |
-| Stale worktree metadata | LOW | `git worktree prune` + re-add; add prune-on-project-open |
-| DB says running after crash | LOW | Startup reconciliation migration; mark rows exited |
-| Wrong replay architecture (raw stream) shipped | HIGH | Requires session-engine rework: introduce headless VT state or snapshot protocol; protocol version bump for clients |
-| Text-frame/UTF-8 protocol shipped | MEDIUM | Add binary frame type behind protocol version; migrate client write path |
-| Dirty worktree force-deleted user work | HIGH (trust) | `git reflog`/`git fsck --lost-found` may recover committed-but-unreferenced objects; uncommitted changes are gone — prevention is the only real strategy |
-| CSWSH discovered post-ship | MEDIUM | Add Origin/Host checks + token; force-update; audit for abuse is impossible locally — assume compromise messaging |
+| Persistent 429 (bad UA / hammering) | LOW | Fix headers, add backoff; bucket resets after cooldown |
+| Token invalidated by accidental refresh attempt | MEDIUM | User runs `claude` → `/login`; delete the refresh code path entirely |
+| Stop-doesn't-kill shipped (Pitfall 5) | MEDIUM | Hotfix Stop to `kill-session`; meanwhile `tmux -L kangent ls` + `kill-session` clears strays |
+| Orphaned kangent tmux server post-uninstall | LOW | `tmux -L kangent kill-server`; document in README |
+| Garbled reattach (replay + redraw) | LOW | Disable cross-generation replay for tmux sessions; users hard-refresh meanwhile |
+| Credentials schema change in a claude release | LOW | Defensive parser already degrades to "n/a"; ship updated field mapping |
+| Reconciliation marks live tmux sessions dead | MEDIUM | Sessions are still alive in tmux — add the list-sessions diff; deterministic `kangent-<task>-<tab>` names make re-linking possible after the fact |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Zombie/orphan processes (1) | PTY session engine | Test: zero descendants after Stop; no `<defunct>` after 50 spawn/stop cycles |
-| UTF-8/escape splitting (2) | PTY engine + WS protocol design | Stress test with multi-byte output under load |
-| Alt-screen replay (3) | Session engine design (flag: needs deeper research) | Reattach to hours-old Claude session renders correct screen <1s |
-| Flow control (4) | WS streaming protocol | `cat` 500MB file: bounded memory, responsive input, no data loss markers wrong |
-| Resize loops/authority (5) | Terminal UI | Hidden-tab activation, zoomed browser, drag-resize all stable |
-| Env construction (6) | PTY engine + onboarding | App works launched via `env -i`; claude-not-found shows actionable UI error |
-| Worktree safety (7) | Worktree management | Dirty-tree confirmation flow; submodule repo test; no stale metadata |
-| Restart reconciliation (8) | Persistence layer (same phase as spawn) | Kill -9 server mid-session → restart → correct states + working resume |
-| SQLite config (9) | Foundation/data layer | Concurrent write test passes without SQLITE_BUSY surfacing to handlers |
-| CSWSH/DNS rebinding (10) | First phase exposing WS endpoint | Automated test: cross-origin upgrade rejected; bad Host rejected |
-| Claude TUI specifics (11) | Dedicated Claude integration spike (flag: needs phase research) | Manual checklist: prompts, paste, mouse, detach-during-prompt |
+| 1. Self-refresh of OAuth token | Quota phase | No token-endpoint calls or credential writes anywhere in the diff |
+| 2. 429 hammering | Quota phase | Headers include claude-code UA; kill network mid-poll → indicator serves stale gracefully, recovers with backoff |
+| 3. Credentials layout assumptions | Quota phase | Six-state matrix passes; `mv .credentials.json` away → indicator hides cleanly |
+| 4. Token leakage | Quota phase | grep audit of logs + API payloads |
+| 5. Detach-vs-kill in shared Stop path | tmux phase (first plan) | Lifecycle-strategy seam exists; regression tests for plain bash + agent Stop pass |
+| 6. Replay/redraw garbage | tmux phase | Close→reopen with `top` running: clean single repaint, no `[detached]` artifact |
+| 7. Socket/config isolation | tmux phase | All tmux calls go through one `-L kangent -f /dev/null` helper; sessions invisible to plain `tmux ls`; survives a hostile `~/.tmux.conf` (`destroy-unattached on`) |
+| 8. Env leakage | tmux phase | Launch Kangent inside tmux; `$TMUX` empty in all spawned PTYs |
+| 9. Stale sessions / reconciliation | tmux phase (resume plan) | Restart with live + dead tmux sessions → Resume only for live; task deletion leaves zero kangent sessions |
 
 ## Sources
 
-- xterm.js flow control guide (watermark pause/resume protocol, 50MB buffer): https://xtermjs.org/docs/guides/flowcontrol/ — HIGH
-- xterm.js flow control discussion: https://github.com/xtermjs/xterm.js/issues/2077 — HIGH
-- xterm.js FitAddon Infinity/zero-dimension crashes: https://github.com/xtermjs/xterm.js/issues/1416, https://github.com/xtermjs/xterm.js/issues/5320, https://github.com/xtermjs/xterm.js/issues/3584 — HIGH
-- creack/pty docs (Setsize, StartWithSize, InheritSize): https://pkg.go.dev/github.com/creack/pty — HIGH
-- Killing Go child process trees (Setpgid, negative PGID): https://medium.com/@felixge/killing-a-child-process-and-all-of-its-children-in-go-54079af94773, https://www.sobyte.net/post/2021-08/avoid-go-command-orphan-processes/ — HIGH
-- Claude Code sessions docs (`--resume`, session IDs, interleaving warning, per-directory storage): https://code.claude.com/docs/en/sessions — HIGH
-- Claude Code alt-screen scrollback issues: https://github.com/anthropics/claude-code/issues/42670, https://github.com/anthropics/claude-code/issues/38283, https://github.com/anthropics/claude-code/issues/42002 — HIGH
-- Claude Code resize redraw-duplication bug: https://github.com/anthropics/claude-code/issues/49086 — HIGH
-- Claude Code resume directory-scoping: https://github.com/anthropics/claude-code/issues/5768 — MEDIUM (older issue; current docs say names resolve across worktrees)
-- git-worktree official docs (remove/prune/lock, checked-out refusal): https://git-scm.com/docs/git-worktree — HIGH
-- Worktrees + submodules guide: https://gist.github.com/ashwch/946ad983977c9107db7ee9abafeb95bd — MEDIUM
-- SQLITE_BUSY despite busy_timeout (deferred→write upgrade): https://berthub.eu/articles/posts/a-brief-post-on-sqlite3-database-locked-despite-timeout/ and https://sqlite.org/forum/info/a15478046be7db2a106ae66de00fb97cb9acdb73e5cb5a2c02fc45fa642e8f82 — HIGH
-- Go+SQLite practices (WAL, MaxOpenConns(1), modernc vs mattn): https://oneuptime.com/blog/post/2026-02-02-sqlite-go/view, https://github.com/mattn/go-sqlite3/issues/274 — MEDIUM
-- CSWSH explainer: https://portswigger.net/web-security/websockets/cross-site-websocket-hijacking — HIGH
-- Localhost CORS/DNS rebinding dangers: https://github.blog/security/application-security/localhost-dangers-cors-and-dns-rebinding/ — HIGH
-- Real-world dev-server precedents: webpack-dev-server advisory https://github.com/webpack/webpack-dev-server/security/advisories/GHSA-9jgg-88mc-972h, Vite advisory https://github.com/vitejs/vite/security/advisories/GHSA-vg6x-rcgg-rjx6 — HIGH
+- Local empirical verification (tmux 3.4, Linux, 2026-06-11): attach exit codes, has-session semantics, nesting-refusal conditions, defaults (`window-size latest`, `exit-empty on`, `status on`), in-pane `TERM`, credentials file structure — HIGH
+- [claude-code issue #31021 — /api/oauth/usage persistent 429 without claude-code User-Agent](https://github.com/anthropics/claude-code/issues/31021) — HIGH (official repo issue)
+- [Claude-Code-Usage-Monitor issue #202 — OAuth usage API response schema (five_hour/seven_day/model windows, nullable fields)](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor/issues/202) — MEDIUM (community, corroborated by multiple monitors)
+- [Claude Code docs — Authentication (credential storage, Keychain on macOS, refresh behavior)](https://code.claude.com/docs/en/authentication) — HIGH
+- [claude-code issue #10039 — claude on Mac deletes .credentials.json used by Linux](https://github.com/anthropics/claude-code/issues/10039) — HIGH
+- [Medium: Claude Code OAuth vs API key auth in 2026 (Feb 2026 credential-use policy restricting OAuth tokens to Claude Code/claude.ai)](https://lalatenduswain.medium.com/claude-code-on-claude-max-plan-understanding-oauth-token-vs-api-key-authentication-in-2026-96a6213d2cde) — MEDIUM
+- [oldeucryptoboi — macOS Keychain `Claude Code-credentials` extraction and file fallback](https://oldeucryptoboi.com/blog/claude-code-ssh-keychain-fix/) — MEDIUM
+- [tmux(1) manual — -L sockets, has-session, window-size, exit-empty, destroy-unattached](https://man7.org/linux/man-pages/man1/tmux.1.html) — HIGH
+- [xterm.js issue #802](https://github.com/xtermjs/xterm.js/issues/802) / [#3184](https://github.com/xtermjs/xterm.js/issues/3184) — alternate-screen scrollback behavior — MEDIUM
+- [tmux issue #1302 — alternateScroll / mouse wheel in tmux under xterm-like emulators](https://github.com/tmux/tmux/issues/1302) — MEDIUM
+- tmux source behavior (`server_client_check_nested`: nesting refusal requires client tty to be a pane of the same server) — confirmed empirically [E5] — HIGH
 
 ---
-*Pitfalls research for: local PTY-backed Claude Code session manager (Go + React + SQLite)*
-*Researched: 2026-06-10*
+*Pitfalls research for: Kangent v1.2 — Claude quota indicator + tmux-backed resumable shell tabs*
+*Researched: 2026-06-11*

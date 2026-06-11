@@ -1,184 +1,212 @@
-# Stack Research
+# Stack Research — v1.2: Claude Quota Indicator + tmux-Backed Resumable Shells
 
-**Domain:** Local-only web app orchestrating Claude Code agent sessions (Go backend, React frontend, PTY terminals over WebSocket, kanban UI, worktree-per-task)
-**Researched:** 2026-06-10
-**Confidence:** HIGH (all versions verified against npm registry, pkg.go.dev, and GitHub releases on research date)
+**Domain:** Claude Code quota/usage API integration + tmux session persistence for an existing Go+React PTY app
+**Researched:** 2026-06-11
+**Confidence:** HIGH (everything below verified empirically on this machine or read from current source, not training data)
+
+> Supersedes the v1.0 stack research at this path (2026-06-10), which is fully mirrored into CLAUDE.md. This file covers only the v1.2 additions.
+
+## Headline
+
+**Zero new dependencies.** Both features are built entirely on the existing stack:
+
+- **Quota indicator:** `net/http` GET against an undocumented-but-stable Anthropic OAuth endpoint, bearer token read from `~/.claude/.credentials.json` with `os.ReadFile` + `encoding/json`. Frontend is TanStack Query (`refetchInterval`) + shadcn components already in the copy-in workflow.
+- **tmux shells:** pure `os/exec` argument construction — the *command spawned inside the existing creack/pty session* becomes `tmux ... new-session -A ...` instead of `bash`. tmux is a host prerequisite detected via `exec.LookPath` (same pattern as v1.1 shell validation), never a Go module.
+
+## Part A — Claude Quota/Usage Data (verified end-to-end)
+
+### How SlayZone does it (read from current source, 2026-06-11)
+
+SlayZone's entire quota feature lives in `packages/domains/terminal/src/electron/usage.ts`. Verbatim findings:
+
+1. **Token source (Linux):** `~/.claude/.credentials.json` → JSON path `claudeAiOauth.accessToken`. (macOS: keychain generic password, service `Claude Code-credentials`, same JSON inside.)
+2. **Endpoint:** `GET https://api.anthropic.com/api/oauth/usage`
+3. **Headers:**
+   - `Authorization: Bearer <accessToken>`
+   - `anthropic-beta: oauth-2025-04-20`
+   - `Content-Type: application/json`
+   - `User-Agent: claude-code/<installed claude version>` (SlayZone runs `claude --version` once and caches it; falls back to a hardcoded version string)
+4. **Caching/backoff:** 60s auto-poll TTL, **10s hard floor** even on manual refresh (anti spam-click), in-flight dedup, on 429 honor `Retry-After` with a **30s minimum backoff**, keep last good data marked stale on failure, drop stale windows after 3 consecutive failures.
+
+### Verified on this machine (2026-06-11, claude 2.1.173)
+
+`~/.claude/.credentials.json` exists (mode 0600) with this shape (values redacted):
+
+```json
+{
+  "claudeAiOauth": {
+    "accessToken": "sk-ant-oat01-…",   // 108 chars
+    "refreshToken": "sk-ant-ort01-…",  // 108 chars
+    "expiresAt": 1781209313478,        // epoch ms — ~8h lifetime observed
+    "scopes": ["user:file_upload"],
+    "subscriptionType": "team",
+    "rateLimitTier": "default_clau…"
+  },
+  "mcpOAuth": { … }                    // unrelated; ignore
+}
+```
+
+Live request returned **HTTP 200** with exactly this body:
+
+```json
+{
+  "five_hour":   { "utilization": 12.0, "resets_at": "2026-06-12T00:00:00.069303+00:00" },
+  "seven_day":   { "utilization": 68.0, "resets_at": "2026-06-13T21:00:00.069327+00:00" },
+  "seven_day_oauth_apps": null,
+  "seven_day_opus": null,
+  "seven_day_sonnet": { "utilization": 0.0, "resets_at": null },
+  "seven_day_cowork": null,
+  "seven_day_omelette": null,
+  "tangelo": null,
+  "iguana_necktie": null,
+  "omelette_promotional": null,
+  "cinder_cove": null,
+  "extra_usage": {
+    "is_enabled": true, "monthly_limit": null, "used_credits": 240.0,
+    "utilization": null, "currency": "EUR", "disabled_reason": null
+  }
+}
+```
+
+**Response-shape gotchas (all observed, not theoretical):**
+- `utilization` is a percent float 0–100, already computed server-side.
+- `resets_at` is ISO 8601 with sub-second precision + offset — **and can be `null` even when the window object exists** (`seven_day_sonnet` above). Render "—" for null resets.
+- Whole window objects can be `null` per plan (`seven_day_opus` is null on this team plan). Only render non-null windows — exactly what SlayZone's `filter` does.
+- The payload contains rotating experimental fields (`tangelo`, `iguana_necktie`, `seven_day_cowork`, …). **Decode into a Go struct with only the known fields** — `encoding/json` ignores unknowns natively. Never fail on unrecognized keys.
+- `extra_usage` (pay-per-use overflow credits) exists; optional to surface, but it's there if the popup wants it.
+
+### Token lifecycle (the one real risk)
+
+- The access token is **short-lived (~8h observed)**. The claude CLI refreshes it whenever it runs and rewrites `.credentials.json`.
+- **Re-read the credentials file on every poll.** Never cache the token in memory beyond one request. File is 2.5KB; cost is nil.
+- **Do NOT implement token refresh in Kangent.** The refresh token is in the file and the OAuth flow is known in the ecosystem, but refresh-token rotation means a Kangent-initiated refresh could invalidate the CLI's stored token and break the user's `claude` login. On 401, show "Token expired — run claude to re-authenticate" (SlayZone's exact UX). In practice any running agent session keeps the token fresh.
+
+### Polling etiquette (corroborated externally)
+
+The Claude-Code-Usage-Monitor project (issue #202) independently confirms this endpoint and adds a critical detail: **without the `claude-code/<version>` User-Agent you land in an aggressively rate-limited bucket and get persistent 429s**; with it, polling at sub-minute intervals is safe. Kangent's plan:
+
+- ~60s auto-poll, manual refresh with a 10s server-side hard floor (copy SlayZone's numbers — they're production-tested).
+- On 429: parse `Retry-After` (seconds or HTTP-date), back off `max(retryAfter, 30s)`, serve cached data meanwhile.
+- Server-side cache + in-flight dedup so N open browser tabs ≠ N upstream requests.
+
+### Architecture: backend proxy, not browser fetch
+
+The browser must **not** call `api.anthropic.com` directly: CORS would block it, and the OAuth token must never reach the frontend. Add one endpoint, e.g. `GET /api/quota` (with `?refresh=1` for manual refresh), returning normalized windows `{key, label, utilization, resetsAt}` + `fetchedAt`. This mirrors the existing settings API pattern.
 
 ## Recommended Stack
 
-### Core Technologies — Backend (Go)
+### Core Technologies (all existing — no additions)
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| Go | 1.26.x (1.26.4 current) | Backend language | Current stable line (1.26.0 released 2026-02). Use 1.26 in go.mod; nothing in this project needs bleeding-edge features beyond 1.22's ServeMux patterns. |
-| `net/http` stdlib ServeMux | stdlib | HTTP routing | Since Go 1.22, ServeMux supports method matching and path wildcards (`GET /api/projects/{id}`). For ~15 REST endpoints + 1 WS endpoint on localhost, a third-party router adds nothing. Zero dependencies, no framework lock-in. |
-| `github.com/coder/websocket` | v1.8.14 | WebSocket (terminal attach) | The 2025/2026 default for new Go projects: concurrent-write safe (gorilla panics on concurrent `WriteMessage` — the classic production bug), `context.Context` throughout, zero deps, actively maintained by Coder (who run terminals-over-WS in production at scale). Formerly nhooyr/websocket. |
-| `github.com/creack/pty` | v1.1.24 | PTY allocation | The de-facto standard Go PTY library (1,263 importers, used by gotty and most Go terminal tools). `pty.Start(cmd)` handles setsid + controlling TTY; `pty.Setsize` handles resize + SIGWINCH. **Import the v1 path** — see "What NOT to Use" re: the orphaned v2 tags. |
-| `modernc.org/sqlite` | v1.52.0 | SQLite driver (pure Go) | CGO-free (C-to-Go transpiled), implements `database/sql`, tracks SQLite 3.53.2. Pure Go keeps the single-binary build trivial (`CGO_ENABLED=0`, easy cross-compile, no gcc in CI). Performance gap vs mattn is irrelevant at single-user localhost load. |
-| `embed` + `http.FileServerFS` | stdlib | Ship React build in the binary | `//go:embed dist` of the Vite output, served via `http.FileServerFS` with an SPA fallback handler (unknown paths → `index.html`). This is the standard single-binary Go+SPA pattern; no library needed. |
-| `os/exec` + git CLI | system git | Worktree management | Shell out to `git worktree add/remove/list --porcelain`. See dedicated section below — go-git is not viable for linked worktrees today. |
-
-### Core Technologies — Frontend (React)
-
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| React | 19.2.7 | UI framework | User-decided. React 19 is the current stable line; shadcn/ui and TanStack Query fully support it. |
-| Vite | 8.0.16 | Build tool / dev server | The unambiguous standard for React SPAs in 2026. Dev-server proxy (`/api`, `/ws` → Go backend) makes local dev clean. Requires Node 20.19+ or 22.12+. |
-| `@vitejs/plugin-react` | 6.0.2 | React fast-refresh | Standard companion plugin. |
-| TypeScript | 6.0.3 | Type safety | Default for any new React codebase. |
-| `@xterm/xterm` | 6.0.0 | Browser terminal | The only serious choice (VS Code's terminal). 6.0 (Dec 2024) removed the canvas renderer — use WebGL with DOM fallback. Note the scoped `@xterm/*` packages; the old unscoped `xterm` package is dead. |
-| `@xterm/addon-fit` | 0.11.0 | Resize terminal to container | Required; on fit, send cols/rows over WS so the server calls `pty.Setsize`. |
-| `@xterm/addon-webgl` | 0.19.0 | GPU rendering | Default renderer since canvas was removed in xterm 6.0. Listen for `onContextLoss` and fall back to the DOM renderer. |
-| `@tanstack/react-query` | 5.101.0 | Server state (projects/tasks CRUD) | Standard data-fetching layer: cache, invalidation after mutations (move card → PATCH → invalidate board query), optimistic updates for drag-and-drop. |
-| `@dnd-kit/core` + `@dnd-kit/sortable` | 6.3.1 / 10.0.0 | Kanban drag-and-drop | The 2026 default for React DnD: actively maintained, accessible, the documented multi-container/sortable pattern is exactly a kanban board. react-beautiful-dnd is dead. |
-| Tailwind CSS | 4.3.0 | Styling | v4 (CSS-first config, `@theme`) is current; pairs with the Vite plugin (`@tailwindcss/vite`). |
-| shadcn/ui | CLI latest | Component primitives | Fully supports Tailwind v4 + React 19 (components are copied in, not a dependency — no version pin to track). Gives dialog/dropdown/card/tabs for the task view without building primitives. |
+| Technology | Version | Purpose (new use) | Why |
+|------------|---------|-------------------|-----|
+| `net/http` (stdlib) | Go 1.26 stdlib | GET `https://api.anthropic.com/api/oauth/usage` | One authenticated GET with 4 headers; an HTTP client library would be absurd. Use `http.Client{Timeout: 10 * time.Second}` (SlayZone uses 10s). |
+| `encoding/json` + `os.ReadFile` (stdlib) | stdlib | Read `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`; decode usage response | Known fixed paths/shapes, verified above. Unknown response fields ignored for free. |
+| `os/exec` + system `tmux` | tmux ≥ 2.1 (3.4 on this machine) | tmux session lifecycle | Same shell-out discipline as git worktrees. tmux's CLI is its API; no Go tmux library is worth a dependency (see What NOT to Use). |
+| `exec.LookPath("tmux")` (stdlib) | stdlib | Gate the "tmux" option in `AllowedShells` | Mirrors v1.1's shell validation exactly. Only offer tmux in the dropdown when it resolves. |
+| creack/pty v1.1.24 (existing) | existing | The PTY now runs `tmux` instead of `bash` | Nothing changes in the PTY/WS/ring-buffer layer. tmux is just a different full-screen child process. |
+| TanStack Query 5 (existing) | existing | Quota auto-poll | `useQuery({ queryKey: ['quota'], refetchInterval: 60_000, refetchIntervalInBackground: false })` + invalidation for manual refresh. Built for exactly this. |
+| shadcn/ui (existing copy-in) | CLI latest | Popup + bars | `npx shadcn add hover-card progress` (copied in, not deps — consistent with project convention). `Popover` if click-to-pin is preferred over hover. |
 
 ### Supporting Libraries
 
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `github.com/pressly/goose/v3` | v3.27.1 | SQL migrations | Embed migration files via `embed.FS`, run `goose.Up` at startup. Schema is small but will evolve; migrations from day one are cheap. |
-| `sqlc` | v1.31.1 | Type-safe query codegen | Optional. With ~3 tables (projects, tasks, sessions), hand-written `database/sql` is fine; adopt sqlc if the query surface grows. Works with the modernc driver. |
-| `zustand` | 5.0.14 | Ephemeral client state | Only if needed — e.g., which task panel/tab is open, terminal attach status. Do NOT put server data here; that's TanStack Query's job. |
-| `@xterm/addon-web-links` | 0.12.0 | Clickable URLs in terminal | Nice-to-have; Claude Code prints URLs (auth, docs). |
-| `@xterm/addon-search` | 0.16.0 | Scrollback search | Nice-to-have, defer. |
-| `log/slog` | stdlib | Structured logging | No logging library needed. |
+None needed. Explicitly considered and rejected:
+
+| Candidate | Verdict | Why |
+|-----------|---------|-----|
+| Any Go OAuth lib (`golang.org/x/oauth2`) | **No** | We consume an existing token from disk; we never run an OAuth flow. |
+| Go tmux wrappers (`github.com/jubnzv/go-tmux`, etc.) | **No** | Thin `exec` wrappers around the same CLI calls; low adoption; a dep for ~6 one-line commands violates zero-new-dependency discipline for zero gain. |
+| `ccusage` / `claude-monitor` as subprocess | **No** | They focus on cost analytics from local JSONL transcripts; the quota windows come from the OAuth endpoint, which we call directly. Spawning a Node/Python tool to make one HTTP GET is strictly worse. |
+| Parsing `claude /usage` TUI output | **No** | `/usage` is an interactive TUI screen, not a scriptable command; scraping ANSI output of a full-screen app is the most fragile possible source for data the endpoint serves as JSON. |
 
 ### Development Tools
 
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| Makefile / Taskfile | Build orchestration | `vite build` → `web/dist` → `go build` with embed. One `make build` produces the single binary. |
-| Vite dev proxy | Local dev | Proxy `/api` and `/ws` to the Go server (`ws: true` for the WebSocket route) so dev runs frontend HMR + real backend. |
-| `golangci-lint` | Go linting | Standard. |
-| `air` or `wgo` | Go hot reload in dev | Optional convenience. |
+No changes. tmux 3.4 is already installed at `/bin/tmux`; CI/dev needs nothing new (tmux is runtime-gated by LookPath).
 
-## Key Design Patterns the Stack Must Support
+## Part B — tmux Integration Details (verified on tmux 3.4)
 
-These are stack-level decisions, verified against how ttyd/gotty/SlayZone do it:
+### The tmux CLI surface Kangent needs
 
-**1. Session manager (no library exists — build it, ~200-400 lines).**
-There is no off-the-shelf Go "persistent PTY session" library worth adopting. The proven pattern (gotty, Coder's agent, wush):
-- `SessionManager` holding `map[sessionID]*Session` behind a mutex.
-- Each `Session` owns the `*exec.Cmd`, the PTY `*os.File`, a fixed-size **ring buffer of raw output bytes** (256KB–1MB) for scrollback replay, and a set of attached WebSocket clients.
-- One goroutine per session reads the PTY and fans out to attached clients + ring buffer. Sessions live independently of WS connections — that *is* the detach/reattach feature.
-- On reattach: send ring buffer contents, then live stream. Claude Code is a full-screen TUI that redraws on resize, so a resize nudge after replay cleans up any artifacts.
-- On exit: `cmd.Wait()` in a goroutine to reap; mark session dead, notify clients; recovery is `claude --resume` (per PROJECT.md).
+All commands verified working on this machine. **Use a dedicated socket namespace `-L kangent`** on every invocation so Kangent's sessions never collide with (or appear in) the user's personal tmux server, and `list-sessions` reconciliation only sees Kangent's own sessions.
 
-**2. WebSocket wire protocol (ttyd-style, do not use `@xterm/addon-attach`).**
-Binary frames for raw PTY bytes (terminal output is not UTF-8-safe mid-stream — text frames will corrupt it); a one-byte command prefix or separate JSON text frames for control messages (`resize {cols, rows}`, `ping`, session status). `addon-attach` assumes a bare socket with no control channel — write the ~50 lines of attach glue yourself.
+| Command | Purpose | Notes (verified) |
+|---------|---------|------------------|
+| `tmux -L kangent new-session -A -s <name> -c <worktree-dir>` | Spawn-or-reattach — **this is the command run inside the PTY** | `-A` attaches if `<name>` exists, creates otherwise; idempotent, so spawn and resume are the same code path. `-c` sets cwd on create, ignored on attach (session keeps its dir). Requires tmux ≥ 1.8. |
+| `tmux -L kangent has-session -t =<name>` | Existence check (restart reconciliation, Resume affordance) | Exit 0/1. The `=` prefix forces exact match (without it, `-t foo` prefix-matches `foo-2`). Exit 1 + "no server running" stderr when no server at all — treat as "not found". |
+| `tmux -L kangent list-sessions -F '#{session_name} #{session_created} #{session_attached}'` | Startup reconciliation: enumerate surviving sessions | Exits 1 with "no server running on …" when the server is down — treat as empty list, not an error. `session_attached` is a client count (useful for "attached elsewhere" states). |
+| `tmux -L kangent kill-session -t =<name>` | Explicit destroy (kill intent, task cleanup) | Server auto-exits when the last session dies; next `new-session` auto-starts it. No server lifecycle management needed, ever. |
+| `tmux -L kangent set-option -t <name> status off` | Hide the green status bar so tmux tabs look like plain bash tabs | Verified: session-scoped, overrides user config. Run right after create (or keep the bar as a visual "durable" cue — UX decision). |
+| `tmux -L kangent detach-client -s <name>` | Detach from outside (rarely needed) | Usually unnecessary: killing the attach client / closing the PTY detaches automatically (client gets SIGHUP, session survives — that **is** the feature). |
 
-**3. SQLite configuration.**
-Open with `?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)` and set `db.SetMaxOpenConns(1)` (or a small pool with `_txlock=immediate`) — single-writer SQLite discipline eliminates `SQLITE_BUSY` entirely at this scale.
+### Detach/reattach mechanics with the existing session layer
 
-## Git Worktrees: Shell Out, Don't Use go-git
+- **Detach on tab close:** kill the PTY child (the `tmux … new-session -A` *client* process) exactly as bash tabs are killed today. The tmux client dies; the tmux *server* and session keep running. No new transport code — only the "session exited" semantics differ (process exit ≠ work lost).
+- **Reattach:** spawn a fresh PTY running the same `new-session -A -s <name>` command. tmux fully redraws on attach, so the existing ring-buffer + resize-nudge replay machinery works unchanged (the redraw makes replay artifacts moot).
+- **Server restart:** Kangent's PTYs die, the tmux server survives (it's a daemon, not a Kangent child). On boot, reconcile persisted tab records against `list-sessions`; surviving names get the Resume affordance (mirror of v1.1's `claude --resume` UX).
+- **Session naming:** deterministic, e.g. `kangent-<taskID>-<tabID>`, **restricted to `[A-Za-z0-9_-]`**. Verified: tmux silently rewrites `.` and `:` in `-s` names to `_` (they're target-spec separators), so a name containing them won't round-trip — never derive names from raw slugs without sanitizing.
 
-**Verified status (June 2026):** go-git stable is **v5.19.1**, where the `Worktree` type means "the working tree of this repo" — it cannot create or manage *linked* worktrees (`git worktree add`). Linked-worktree support ("Improved linked worktree support") only exists in **v6.0.0-alpha.4**, in the experimental `x/plumbing/worktree` package, with known issues: slow checkout (decompresses every object instead of reusing materialized files, go-git#1956) and `commondir` resolution quirks when opening repos *from inside* a worktree.
+### Minimum tmux version
 
-**Recommendation: `os/exec` against the system `git` binary.** Rationale:
-- git is guaranteed present — the app's whole premise is local repo checkouts the user already works in.
-- The needed surface is tiny: `git worktree add -b <branch> <path> <base>`, `git worktree remove <path>`, `git worktree list --porcelain` (stable machine-readable output), `git worktree prune`, `git rev-parse --git-common-dir`.
-- This is what comparable tools do (vibe-kanban drives real git for worktrees; every CLI wrapper in this space shells out for worktree ops).
-- Set `cmd.Dir` to the repo root; parse `--porcelain` output; never parse human-readable git output.
-
-Revisit go-git only if go-git v6 stabilizes AND shelling out becomes a measured problem (it won't at single-user scale).
+Everything used here is ancient: `new-session -A` (1.8, 2013), `=` exact-match targets (2.1, 2015), `-L` sockets and `-F` format strings (older still). **Declare tmux ≥ 2.1, realistically expect ≥ 3.0** — Ubuntu 22.04 ships 3.2a, Debian 12 ships 3.3a, this machine has 3.4. A `tmux -V` parse is unnecessary; LookPath gating is sufficient.
 
 ## Installation
 
 ```bash
-# Backend (inside Go module)
-go get github.com/coder/websocket@v1.8.14
-go get github.com/creack/pty@v1.1.24
-go get modernc.org/sqlite@v1.52.0
-go get github.com/pressly/goose/v3@v3.27.1
+# Backend: nothing. Zero new Go modules.
 
-# Frontend
-npm create vite@latest web -- --template react-ts
-npm install react@19 react-dom@19 \
-  @xterm/xterm @xterm/addon-fit @xterm/addon-webgl @xterm/addon-web-links \
-  @tanstack/react-query \
-  @dnd-kit/core @dnd-kit/sortable @dnd-kit/utilities
-npm install -D tailwindcss @tailwindcss/vite typescript @vitejs/plugin-react
-npx shadcn@latest init
+# Frontend: nothing in package.json. Only shadcn copy-ins if not already present:
+npx shadcn@latest add hover-card progress
+# (popover likely already present via existing dropdowns; check components/ui/)
+
+# Host prerequisite (runtime-detected, not bundled):
+#   tmux >= 2.1 on PATH — feature-gated via exec.LookPath, like shells in v1.1
 ```
-
-## Alternatives Considered
-
-| Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| stdlib ServeMux | `go-chi/chi` v5.3.0 | If middleware stacks grow (request logging, panic recovery, compression composed per-route). chi is 100% net/http-compatible, zero-dep — the safe upgrade path if stdlib routing feels cramped. Echo/Gin/Fiber are overkill and pull you off net/http idioms. |
-| coder/websocket | `gorilla/websocket` v1.5.x | If you want the largest body of examples/tutorials. It was un-archived in 2023 and is maintained again, but its API predates context and you must serialize writes yourself — exactly the bug class a multi-client fan-out invites. |
-| modernc.org/sqlite | `mattn/go-sqlite3` (CGO) | If profiling ever shows the driver as a bottleneck (it won't here). Costs CGO: gcc required, slower builds, harder cross-compile. |
-| modernc.org/sqlite | `ncruces/go-sqlite3` (WASM-based) | Also pure-Go-ish and well-benchmarked; legitimate alternative if you hit a modernc bug. modernc has broader adoption and the simpler mental model. |
-| dnd-kit | `@atlaskit/pragmatic-drag-and-drop` 1.8.1 | If you need Jira/Trello-scale board performance (1000+ cards) or non-React surfaces. Lower-level: you implement collision/indicators yourself. Atlassian-backed and excellent, but more work for a fixed-4-column board. |
-| TanStack Query | SWR | Smaller, fine for read-heavy apps; TanStack's mutation + optimistic-update story is stronger, which kanban dragging needs. |
-| goose | `golang-migrate` | Equivalent capability; goose's library-mode + embed.FS integration is simpler for a run-at-startup design. |
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `github.com/creack/pty/v2` | Orphaned major: v2.0.1 tagged Oct 2023, then development continued on v1 (v1.1.24 shipped a year *later*, Oct 2024); the repo's main-branch go.mod is still module `github.com/creack/pty`, and the README documents v1. The entire ecosystem imports v1. | `github.com/creack/pty` v1.1.24 |
-| go-git for worktrees | Stable v5 cannot create linked worktrees at all; v6 support is alpha-only, in an `x/` experimental package, with known performance and commondir bugs. | `os/exec` + system git, `--porcelain` output |
-| `xterm` (unscoped npm package) | Abandoned name; stuck at 5.3.0. All current releases are under the `@xterm/` scope. | `@xterm/xterm` 6.0.0 |
-| `@xterm/addon-canvas` | Removed in xterm.js 6.0. | `@xterm/addon-webgl` with DOM-renderer fallback |
-| `@xterm/addon-attach` | Assumes a raw socket; no room for resize/control messages or replay-on-attach logic. | Hand-rolled WS glue (binary data frames + control messages) |
-| `react-beautiful-dnd` | Archived by Atlassian (superseded by pragmatic-drag-and-drop); incompatible with React 19-era rendering. | dnd-kit |
-| gorilla/websocket *for this app* | Concurrent-write panic foot-gun in fan-out scenarios (multiple browser tabs attached to one session). | coder/websocket |
-| WebSocket **text** frames for PTY output | PTY output is arbitrary bytes; UTF-8 validation on text frames corrupts/rejects split multi-byte sequences. | Binary frames |
-| SDK-driven chat UI (Agent SDK) | Already ruled out in PROJECT.md — loses plan mode, slash commands, permission prompts. | Real `claude` CLI in a PTY |
-| Electron/Tauri packaging | Out of scope per PROJECT.md. | Single Go binary + browser |
+| Browser-direct fetch of `api.anthropic.com/api/oauth/usage` | CORS-blocked; leaks OAuth token to frontend | Backend proxy `GET /api/quota` with server-side cache |
+| Calling the endpoint without `User-Agent: claude-code/<ver>` | Lands in an aggressively rate-limited bucket → persistent 429s (corroborated by Claude-Code-Usage-Monitor #202) | Run `claude --version` once at startup, cache, send `claude-code/<ver>`; hardcoded fallback like SlayZone's |
+| Implementing OAuth token refresh in Kangent | Refresh-token rotation can invalidate the claude CLI's stored credentials — you'd break the user's login to draw a progress bar | Re-read `.credentials.json` each poll; on 401 show "run claude to re-authenticate" |
+| Strict-decoding the usage response / assuming `resets_at` non-null | Payload carries rotating experimental fields (`tangelo`, `iguana_necktie`, …) and `resets_at: null` occurs in real responses | Lenient struct with only `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` (+ optionally `extra_usage`); pointer fields, null-safe rendering |
+| Scraping `claude /usage` TUI output | Interactive full-screen ANSI screen; maximally fragile; same data is JSON one GET away | The OAuth usage endpoint |
+| Go tmux libraries (go-tmux et al.) | exec wrappers around the same CLI; new dep for six one-liners | `os/exec` + `tmux -L kangent …` |
+| Default tmux socket (no `-L`) | Kangent sessions mix with the user's personal tmux server; reconciliation would enumerate (and could kill) the user's own sessions | Dedicated `-L kangent` socket on every invocation |
+| `tmux send-keys` / control mode (`-CC`) for I/O | The PTY layer already transports bytes; control mode is an iTerm2-style protocol Kangent doesn't need | Plain `new-session -A` as the PTY child |
+| Session names containing `.` or `:` | tmux silently rewrites them to `_` (verified) — stored name ≠ actual name, reconciliation breaks | `kangent-<taskID>-<tabID>` from `[A-Za-z0-9_-]` only |
 
 ## Stack Patterns by Variant
 
-**If dev experience matters (it does):**
-- Run Vite dev server with proxy → Go backend on another port; only embed `dist/` for release builds. Guard the embed with a build tag or always-build `dist` in CI so `go build` never fails on a missing directory (commit a placeholder or use `make build`).
+**Quota backend (`GET /api/quota`):**
+- In-memory cache struct `{payload, fetchedAt, backoffUntil, consecutiveFailures}` behind a mutex + in-flight dedup (a plain mutex/chan is fine; don't add `golang.org/x/sync/singleflight` for one call site).
+- Auto-poll path serves cache if `< 60s` old; `?refresh=1` bypasses TTL but never the 10s hard floor; 429 sets `backoffUntil = now + max(RetryAfter, 30s)`.
+- On fetch failure keep last good windows with a stale/error field so the UI shows "Updated 9m ago" + warning instead of blanking — drop after 3 consecutive failures (SlayZone's exact policy, production-tested).
+- Distinguish "no credentials file" (claude never logged in) from 401 (token expired) — different user messages.
+- macOS portability (if ever needed): token lives in the login keychain (`security find-generic-password -s "Claude Code-credentials" -w`), same JSON inside. Linux file path is the only target today.
 
-**If the server restarts with live sessions:**
-- Persist session metadata (task ID, worktree path, claude session ID if parseable) in SQLite; on restart mark sessions dead and surface a "Resume" affordance that starts `claude --resume` in the worktree. Don't attempt PTY process adoption — not feasible cleanly.
+**tmux scrollback UX (decide during planning, not stack):**
+- tmux is a full-screen alternate-screen app, so xterm.js's own scrollback won't accumulate for tmux tabs — scrolling happens via tmux copy-mode. Consider `set-option -t <name> mouse on` at create so wheel-scroll enters copy-mode naturally; otherwise document the difference. This is the one user-visible behavior change vs plain bash tabs.
 
-**If WebGL is unavailable (headless GPU, remote browser):**
-- xterm 6.0's DOM renderer is the built-in fallback; wire `webglAddon.onContextLoss(() => webglAddon.dispose())`.
+**Settings seam:**
+- Add `"tmux"` to the Go `AllowedShells` slice, gated by `exec.LookPath("tmux")` — the v1.1 seam (SHELL-FUT-01) was built for exactly this. The shell setting selects the PTY child command template, not a different session subsystem.
 
 ## Version Compatibility
 
-| Package A | Compatible With | Notes |
+| Component | Compatible With | Notes |
 |-----------|-----------------|-------|
-| `@xterm/xterm` 6.0.0 | `@xterm/addon-fit` 0.11.0, `@xterm/addon-webgl` 0.19.0, `@xterm/addon-web-links` 0.12.0, `@xterm/addon-search` 0.16.0 | Current addon releases target 6.x; pin the set together. Canvas addon gone in 6.0. |
-| Vite 8.0.16 | Node 20.19+ / 22.12+ | Hard requirement; CI must use a matching Node. |
-| Tailwind 4.3.0 | shadcn/ui (current CLI), `@tailwindcss/vite` | shadcn fully migrated to Tailwind v4 + React 19; use the Vite plugin, not PostCSS config. |
-| `modernc.org/sqlite` v1.52.0 | `modernc.org/libc` (exact version from its go.mod) | Do not independently bump `modernc.org/libc`; mismatches break the driver (upstream issue #177). Let `go mod tidy` resolve it. |
-| `@dnd-kit/core` 6.3.1 | `@dnd-kit/sortable` 10.0.0, React 19 | Current pairing; the experimental `@dnd-kit/react` rewrite is not yet the stable recommendation. |
-| Go 1.26 | `creack/pty` v1.1.24, `coder/websocket` v1.8.14, `goose` v3.27.1 | All actively released within the past ~18 months; no known conflicts. |
-
-## Reference Implementations
-
-| Project | Stack | What to Learn From It | Status (verified 2026-06) |
-|---------|-------|----------------------|---------------------------|
-| [vibe-kanban](https://github.com/BloopAI/vibe-kanban) | Rust (axum, sqlx+**SQLite**) + React/TS | Closest architectural twin: worktree-per-task lifecycle (incl. orphan/expired worktree cleanup), task→executor→session data model, local-only single binary. **Note: project is sunsetting** — read it, don't depend on it. 26.9k stars. | Sunsetting |
-| [SlayZone](https://github.com/debuglebowski/SlayZone) | Electron + React + SQLite + node-pty + xterm.js | The UI/UX target per PROJECT.md: card → embedded terminal → agent model, worktree per card. Its node-pty/xterm wiring maps 1:1 to creack/pty + @xterm/xterm. | Active (v0.34.0, June 2026) |
-| [gotty (sorenisanerd fork)](https://github.com/sorenisanerd/gotty) | Go + creack/pty + xterm.js | The canonical Go terminal-over-WebSocket implementation: PTY read loop, WS relay, resize handling. The original yudai/gotty is dead — read the fork. | Active (v1.8.0, May 2026) |
-| [ttyd](https://github.com/tsl0922/ttyd) | C + libwebsockets + xterm.js | Best-in-class wire protocol design: one-byte command prefix on frames (INPUT, OUTPUT, RESIZE, PAUSE/RESUME), flow control. Copy the protocol shape, not the code. | Active |
+| Endpoint `api/oauth/usage` + `anthropic-beta: oauth-2025-04-20` | claude 2.1.173 credentials (verified 2026-06-11, HTTP 200) | Undocumented API: ship lenient parsing + a graceful "quota unavailable" state so an upstream change degrades, never breaks, the app |
+| tmux ≥ 2.1 (3.4 verified) | creack/pty v1.1.24, existing WS/ring-buffer layer | tmux is just another PTY child; zero transport changes |
+| shadcn `hover-card`/`progress` | Tailwind 4 + React 19 (existing) | Copy-in components; no dependency tracking |
+| TanStack Query 5.x (existing) | `refetchInterval` background polling | Already a dependency; no version change |
 
 ## Sources
 
-- [pkg.go.dev/github.com/coder/websocket](https://pkg.go.dev/github.com/coder/websocket) — v1.8.14, Sep 2025; feature set (HIGH)
-- [websocket.org Go guide](https://websocket.org/guides/languages/go/) + [Go Forum: WebSocket in 2025](https://forum.golangbridge.org/t/websocket-in-2025/38671) — coder vs gorilla consensus (MEDIUM)
-- [github.com/creack/pty](https://github.com/creack/pty) + [pkg.go.dev/github.com/creack/pty/v2](https://pkg.go.dev/github.com/creack/pty/v2) + raw go.mod — v1.1.24 current, v2 orphaned (HIGH)
-- [pkg.go.dev/modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) — v1.52.0 (Jun 2026), SQLite 3.53.2, libc pinning caveat (HIGH)
-- [go-sqlite-bench](https://github.com/cvilsmeier/go-sqlite-bench) — driver benchmark landscape (MEDIUM)
-- [go-git releases](https://github.com/go-git/go-git/releases) + [x/plumbing/worktree docs](https://pkg.go.dev/github.com/go-git/go-git/v6/x/plumbing/worktree) + [go-git#1956](https://github.com/go-git/go-git/issues/1956) — v5.19.1 stable, v6.0.0-alpha.4 worktree support experimental (HIGH)
-- [xterm.js releases](https://github.com/xtermjs/xterm.js/releases) — 6.0.0 breaking changes, canvas removal, addon matrix (HIGH)
-- npm registry (direct API queries, 2026-06-10) — all frontend versions (HIGH)
-- GitHub releases API (2026-06-10) — goose v3.27.1, sqlc v1.31.1, chi v5.3.0 (HIGH)
-- [go.dev/doc/devel/release](https://go.dev/doc/devel/release) — Go 1.26.4 current (HIGH)
-- [ui.shadcn.com/docs/tailwind-v4](https://ui.shadcn.com/docs/tailwind-v4) — Tailwind v4 + React 19 support (HIGH)
-- [pkgpulse dnd comparison](https://www.pkgpulse.com/guides/dnd-kit-vs-react-beautiful-dnd-vs-pragmatic-drag-drop-2026) + [HN discussion](https://news.ycombinator.com/item?id=40149120) — dnd-kit as 2026 default (MEDIUM)
-- [github.com/BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban) + crates/db/Cargo.toml — Rust+SQLite confirmed; sunsetting notice (HIGH)
-- [github.com/debuglebowski/SlayZone](https://github.com/debuglebowski/SlayZone) — Electron/node-pty/xterm stack, active (HIGH)
-- [github.com/sorenisanerd/gotty](https://github.com/sorenisanerd/gotty) — maintained Go reference, v1.8.0 May 2026 (HIGH)
+- [SlayZone `usage.ts`](https://github.com/debuglebowski/SlayZone/blob/main/packages/domains/terminal/src/electron/usage.ts) — full quota implementation read 2026-06-11: endpoint, headers, token paths, cache/backoff policy (HIGH)
+- **Empirical, this machine, 2026-06-11:** `~/.claude/.credentials.json` structure (claude 2.1.173); live `GET https://api.anthropic.com/api/oauth/usage` → HTTP 200 with full response body captured above; token `expiresAt` ≈ 8h lifetime (HIGH)
+- **Empirical, this machine:** tmux 3.4 — `new-session -A`/`-d`, `has-session -t =`, `list-sessions -F`, `set-option status off`, `kill-session`, `.`/`:` name-sanitization behavior all executed and verified on a throwaway `-L` socket (HIGH)
+- [Claude-Code-Usage-Monitor issue #202](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor/issues/202) — independent confirmation of endpoint + User-Agent rate-limit-bucket behavior (MEDIUM, corroborates HIGH empirical result)
+- tmux changelog knowledge (`new-session -A` in 1.8; `=` exact-match in 2.1) — version floor only; all commands verified live on 3.4 regardless (MEDIUM)
 
 ---
-*Stack research for: Kangent — local Claude Code agent orchestration web app*
-*Researched: 2026-06-10*
+*Stack research for: Kangent v1.2 — Claude quota indicator + tmux-backed resumable shells*
+*Researched: 2026-06-11*

@@ -1,310 +1,310 @@
 # Architecture Research
 
-**Domain:** Local-only, single-user web app orchestrating Claude Code agent sessions (Go backend, React frontend, PTY-over-WebSocket terminals, git worktree per task, SQLite)
-**Researched:** 2026-06-10
-**Confidence:** HIGH (terminal bridge / persistence patterns verified against ttyd, gotty, and Coder source; vibe-kanban structure verified via multiple sources)
+**Domain:** v1.2 integration — Claude quota indicator + tmux-backed resumable shell tabs into the existing Kangent Go+React codebase
+**Researched:** 2026-06-11
+**Confidence:** HIGH for codebase integration points (every claim verified against the actual source at line level); MEDIUM for tmux behavioral specifics (stable, man-page-documented behavior, from training data); quota fetch mechanism deliberately abstracted behind a seam (parallel research owns it)
 
 ## Standard Architecture
 
-This product is the intersection of two well-trodden architectures:
-
-1. **Kanban-of-agents** (vibe-kanban): REST API + SQLite for workflow state, git worktrees for code state, spawned child processes for agents, streaming channel for live updates.
-2. **Web terminal** (ttyd/gotty/Coder): long-lived server owns PTYs; a thin WebSocket bridge with single-byte message-type framing connects each PTY to xterm.js; a ring buffer provides scrollback replay on reattach.
-
-The single most important architectural rule, proven by all reference systems: **the PTY's lifetime is owned by the session manager, never by the WebSocket connection.** The browser is a detachable view.
-
 ### System Overview
 
-```
-┌────────────────────────────── Browser (React SPA) ──────────────────────────────┐
-│  ┌──────────────┐  ┌─────────────────┐  ┌──────────────────────────────────┐    │
-│  │ Project      │  │ Kanban Board    │  │ Task Detail View                 │    │
-│  │ Sidebar      │  │ (4 fixed cols)  │  │  ┌─────────┐ ┌──────┐ ┌──────┐   │    │
-│  └──────┬───────┘  └────────┬────────┘  │  │ Agent   │ │ bash │ │ bash │   │    │
-│         │                   │           │  │ term    │ │ term │ │ term │   │    │
-│         │   TanStack Query  │           │  └────┬────┘ └──┬───┘ └──┬───┘   │    │
-│         │   (REST, JSON)    │           │   xterm.js per tab               │    │
-└─────────┼───────────────────┼───────────┴───────┼──────────┼──────┼────────┘    │
-          │                   │                   │ WS (binary, 1 per terminal)
-══════════╪═══════════════════╪═══════════════════╪══════════╪══════╪═════ localhost
-┌─────────▼───────────────────▼─────────┐ ┌───────▼──────────▼──────▼────────────┐
-│  HTTP API (REST)                      │ │  WebSocket Terminal Bridge           │
-│  /api/projects /api/tasks             │ │  /api/sessions/{id}/ws               │
-│  /api/tasks/{id}/sessions             │ │  framing: input/output/resize        │
-└───────┬───────────────┬───────────────┘ └──────────────────┬───────────────────┘
-        │               │                                    │ attach/detach
-┌───────▼───────┐ ┌─────▼──────────┐ ┌──────────────────────▼───────────────────┐
-│ Git/Worktree  │ │ SQLite Store   │ │ Session Manager (in-memory registry)     │
-│ Service       │ │ projects/tasks │ │  per session:                            │
-│ (exec git CLI)│ │ /sessions meta │ │   PTY master ── ring buffer (scrollback) │
-└───────┬───────┘ └────────────────┘ │            └── activeConns fan-out       │
-        │                            └──────────────────────┬───────────────────┘
-        │  git worktree add/remove                          │ spawn in worktree cwd
-┌───────▼────────────────────────────────────────────────── ▼ ──────────────────┐
-│ Host filesystem: project repos + .../worktrees/<task>/   claude / bash (PTYs) │
-└────────────────────────────────────────────────────────────────────────────────┘
-```
+Both features slot into existing seams. Nothing restructures; the architecture question is *which side of each existing boundary* the new logic lives on.
 
-One Go process serves everything: the REST API, the WebSocket endpoints, and the embedded React build (`go:embed`). Single binary, matching the deployment constraint.
+```
+┌────────────────────────── Browser (React) ───────────────────────────────┐
+│  BoardPage header ──┐                      TaskPage header ──┐            │
+│                     ├─ QuotaIndicator (NEW, shared component)┘            │
+│                     │    └─ useQuota() 60s poll + manual refresh          │
+│  TaskPage tab strip (TabDef seam, EXISTS)                                 │
+│    └─ tmux tabs: × → detach (not stop); detached ghosts; Resume          │
+└───────────┬──────────────────────────────────┬───────────────────────────┘
+            │ GET /api/usage (NEW)             │ /api/sessions (EXTENDED)
+┌───────────▼──────────────────────────────────▼───────────────────────────┐
+│                         Go server (internal/api)                          │
+│  usage.go (NEW)          sessions.go (MOD)        worktrees.go/tasks.go   │
+│   └─ proxies + caches     ├─ shell=tmux → mint     (MOD: kill-session     │
+│      quota snapshot       │  name, persist row,     on cleanup/delete)    │
+│                           │  SpawnOpts.TmuxName                           │
+│                           └─ DB-derived detached-shell entries            │
+│                              (Phase 5 reconciliation pattern)             │
+├───────────────┬──────────────────────┬───────────────────────────────────┤
+│ internal/quota│  internal/session    │  internal/tmux (NEW, exec wrappers)│
+│ (NEW, DB-free │  (MOD: tmux command  │  HasSession / KillSession /        │
+│  fetch+cache) │  construction only;  │  DetachClient / NewSessionArgs     │
+│               │  stays DB-free)      │                                    │
+├───────────────┴──────────────────────┴───────────────────────────────────┤
+│  SQLite: migration 00005 tmux_sessions table (name persistence ONLY —    │
+│  never status); settings KV unchanged (tmux is a new AllowedShells value)│
+└───────────────────────────────────────────────────────────────────────────┘
+        │                                      │
+   ~/.claude credentials                  tmux server (daemon, own sid —
+   → Anthropic usage endpoint             survives Kangent restarts and
+   (mechanism: parallel research)         Session.Stop's /proc sweep)
+```
 
 ### Component Responsibilities
 
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| HTTP API | CRUD for projects/tasks; session start/stop/list endpoints; serves embedded SPA | Go 1.22+ `net/http` mux (or chi); JSON handlers calling store + services |
-| SQLite store | Durable workflow state only: projects, tasks, session *metadata*. Never terminal output | `modernc.org/sqlite` (CGO-free) or `mattn/go-sqlite3`; embedded migrations |
-| Git/worktree service | `worktree add` + branch on task create; `worktree remove` on cleanup; path conventions | Shell out to `git` CLI via `os/exec` (see Anti-Patterns — don't use go-git for this) |
-| Session manager | Owns all live PTYs. Registry `sessionID → *Session`. Spawn, kill, detach-safe lifecycle, exit reaping, startup sweep of stale DB rows | `creack/pty` + goroutine per session pumping PTY→{ring buffer, active conns} (Coder's pattern) |
-| Ring buffer (per session) | Fixed-size scrollback of raw output bytes; cloned and replayed to every newly attached connection | `armon/circbuf` (what Coder uses, 64 KiB default; 256 KiB–1 MiB is fine locally) |
-| WS terminal bridge | Upgrade, auth-free (localhost), framing (input/output/resize), fan-out writes, backpressure | `coder/websocket` or `gorilla/websocket`; binary frames; ttyd-style 1-byte type prefix |
-| Event channel (optional) | Push session status changes (started/exited) and task moves to the board | SSE endpoint or one lightweight WS; can be deferred — single user can refetch on mutation |
-| React SPA | Sidebar, board, task detail with terminal tabs | Vite + React; TanStack Query for REST state; xterm.js (`@xterm/xterm` + fit addon) per tab |
+| Component | Status | Responsibility | Implementation |
+|-----------|--------|----------------|----------------|
+| `internal/quota` | NEW | Read local claude credentials, fetch quota snapshot from Anthropic, cache with TTL + last-good fallback | DB-free service struct, `Fetch` behind an interface (parallel research plugs in the mechanism); mutex-guarded cache like `session.Manager` |
+| `internal/api/usage.go` | NEW | `GET /api/usage` — serve cached snapshot, `?force=1` bypasses cache | Thin handler over `quota.Service`, registered in `cmd/kangent/main.go` |
+| `internal/tmux` | NEW | Pure exec wrappers: `HasSession`, `KillSession`, `DetachClient`, `NewSessionArgs` | `os/exec` + arg arrays, `=name` exact-match targets; imported by BOTH `internal/session` and `internal/api` (no cycle: it imports neither) |
+| `internal/session` (manager.go) | MOD | tmux command construction in the existing `KindBash` Spawn branch; `SpawnOpts.TmuxName`/`Label`; `Session.tmuxName` in `Info` | `tmux new-session -A -s <name> -c <dir>` instead of plain shell exec; manager stays DB-free |
+| `internal/api/sessions.go` | MOD | Name minting + `tmux_sessions` row persistence at spawn (the `claude_session_id` precedent); reattach variant; detach endpoint; DB-derived detached entries in list | Handler owns ALL DB writes, exactly like the existing claude-session-id persist at sessions.go:166-170 |
+| `internal/settings` | MOD | `"tmux"` in `AllowedShells` gated by `LookPath`; save-time validation | `AvailableShells()` filtering `AllowedShells`; `Validate` rejects tmux when absent |
+| `internal/store` migration 00005 | NEW | `tmux_sessions(task_id, tmux_name UNIQUE, label, seq)` | Names/labels only — the DB NEVER records running/detached status (Phase 5 invariant) |
+| `web/src/components/quota/QuotaIndicator.tsx` | NEW | Compact label + 5h bar; HoverCard popup with all quotas, reset times, "Updated Xm ago", refresh button | Self-contained, owns its `useQuota()` call (the `useAgentStatuses` pattern — no prop drilling) |
+| `web/src/components/ui/hover-card.tsx` | NEW | shadcn primitive (NOT currently in `web/src/components/ui/` — only tooltip/dropdown/dialog/select/etc. exist) | `npx shadcn@latest add hover-card` (Radix HoverCard keeps content open while hovered, so the refresh button works) |
+| `web/src/pages/TaskPage.tsx` | MOD | tmux-aware tab close (detach vs stop), detached ghost tabs, Resume affordance | Extends `visibleSessions` / `tabIds` / `handleCloseTab` |
 
 ## Recommended Project Structure
 
+New and modified files only (everything else untouched):
+
 ```
-kangent/
-├── cmd/kangent/
-│   └── main.go             # flag parsing, wiring, embedded FS, ListenAndServe
-├── internal/
-│   ├── api/                # HTTP handlers (projects.go, tasks.go, sessions.go)
-│   ├── store/              # SQLite open/migrate + typed queries
-│   │   └── migrations/     # embedded .sql files
-│   ├── gitx/               # worktree/branch ops via exec git; path layout
-│   ├── session/            # Manager, Session, ring buffer, PTY spawn/kill,
-│   │   │                   #   attach/detach, exit watcher, startup sweep
-│   │   └── proto.go        # WS message-type bytes shared with bridge
-│   ├── ws/                 # WebSocket handler: upgrade, read/write pumps
-│   └── events/             # (optional) SSE hub for status updates
-├── web/                    # React app (Vite)
-│   ├── src/
-│   │   ├── api/            # fetch client + TanStack Query hooks
-│   │   ├── components/
-│   │   │   ├── sidebar/    # project list, create project
-│   │   │   ├── board/      # columns, cards, drag-and-drop
-│   │   │   ├── task/       # detail view, Start button, tab bar
-│   │   │   └── terminal/   # XtermPane: xterm.js + WS protocol hook
-│   │   └── App.tsx
-│   └── dist/               # build output, embedded via go:embed
-└── Makefile                # build web → embed → go build (single binary)
+internal/
+├── quota/                       # NEW package — DB-free, mirrors session.Manager's
+│   ├── quota.go                 #   "service struct + mutex + seam interface" shape
+│   └── quota_test.go            #   (fake Fetcher; cache TTL + last-good tests)
+├── tmux/                        # NEW package — exec wrappers only, zero state
+│   ├── tmux.go                  #   HasSession/KillSession/DetachClient/NewSessionArgs
+│   └── tmux_test.go
+├── session/
+│   ├── manager.go               # MOD: SpawnOpts{TmuxName, Label}; tmux cmd in KindBash branch
+│   └── session.go               # MOD: Session.tmuxName field; Info.TmuxName JSON
+├── api/
+│   ├── usage.go                 # NEW: GET /api/usage
+│   ├── sessions.go              # MOD: spawn mint/persist; detach handler; list merge
+│   ├── settings.go              # MOD: entryFor uses settings.AvailableShells()
+│   ├── worktrees.go             # MOD: kill-session in remove; detached count in get
+│   └── tasks.go                 # MOD: kill-session in delete
+├── settings/
+│   └── validate.go              # MOD: AllowedShells += "tmux"; LookPath gate
+└── store/migrations/
+    └── 00005_tmux_sessions.sql  # NEW
+web/src/
+├── api/
+│   ├── usage.ts                 # NEW: useQuota + useRefreshQuota
+│   └── sessions.ts              # MOD: TermSession.tmuxName; useDetachSession; reattach spawn
+├── components/
+│   ├── quota/QuotaIndicator.tsx # NEW (indicator + popup in one file)
+│   └── ui/hover-card.tsx        # NEW via shadcn CLI
+└── pages/
+    ├── BoardPage.tsx            # MOD: <QuotaIndicator/> in header right group
+    └── TaskPage.tsx             # MOD: header mount + tmux tab semantics
 ```
 
 ### Structure Rationale
 
-- **`internal/session/` is the heart of the system** and must not import `api/` or `ws/` — it exposes `Attach(sessionID) (replay []byte, conn io.ReadWriteCloser, err)`-style methods that the bridge consumes. This keeps the "PTY outlives the socket" invariant enforceable in one place.
-- **`internal/ws/` is deliberately thin**: framing translation only. gotty structures this identically (`webtty` package bridges a "master" — the WebSocket — and a "slave" — the PTY) and it stays under a few hundred lines.
-- **`gitx/` isolated** so worktree path conventions live in one file (e.g., worktrees under `<repo>/.kangent/worktrees/<task-slug>/` or a sibling dir — sibling dir avoids polluting the repo and accidental commits).
-- **Store holds metadata only.** Vibe-kanban's framing applies directly: *code state is managed by git; workflow state is managed by SQLite; live terminal state lives in process memory.* Three state domains, three owners.
+- **`internal/quota` as its own package:** keeps the Anthropic-facing code out of `internal/api` so the parallel-research mechanism (token refresh, endpoint shape) lands in one place; `usage.go` stays a thin HTTP adapter. DB-free by design — it needs nothing from SQLite.
+- **`internal/tmux` as its own package:** both `internal/session` (spawn command) and `internal/api` (kill/probe at cleanup, reconciliation) need tmux execs. `session` must not import `api` (enforced dependency direction, session.go:6-7), and duplicating exec details in both would drift. A leaf package imported by both resolves it.
+- **No new frontend route/page:** both features ride existing pages; the only new UI tree is the indicator component.
 
 ## Architectural Patterns
 
-### Pattern 1: ttyd-style framed WebSocket protocol (binary frames, 1-byte type prefix)
+### Pattern 1: Server-side quota proxy with TTL cache + client poll (feature a)
 
-**What:** Every WS message is a binary frame whose first byte is a command, rest is payload. Verified protocols:
-- **ttyd** — client→server: `'0'` INPUT, `'1'` RESIZE (JSON `{"columns":N,"rows":N}`), `'2'` PAUSE, `'3'` RESUME, `'{'` JSON init; server→client: `'0'` OUTPUT, `'1'` SET_WINDOW_TITLE, `'2'` SET_PREFERENCES.
-- **gotty** — same shape (Input/Ping/ResizeTerminal vs Output/Pong/SetWindowTitle/...), but base64-encodes output by default (legacy of text frames — don't copy that).
+**What:** The Go server fetches quota from Anthropic using the local `~/.claude` credentials and serves it at `GET /api/usage`; the frontend polls that endpoint every 60s with TanStack Query and renders server-reported staleness.
 
-**Recommended for kangent:** client→server `'0'+bytes` input, `'1'+JSON` resize; server→client `'0'+bytes` output, `'x'+JSON` exit notice (code). That's the whole protocol.
+**Why server-side is forced, not chosen:**
+1. Credentials live on the host (`~/.claude/.credentials.json` on Linux) — the browser cannot read them.
+2. Anthropic's endpoints don't serve CORS for `localhost:7333`; a browser fetch dies preflight.
+3. Precedent: the server already owns `~/.claude` access (`transcriptExists` globbing `~/.claude/projects`, internal/api/resume.go:16-25).
 
-**When to use:** Always for this app. Resize *must* travel on the same socket, which is why a typed protocol beats raw piping.
+**Endpoint shape (design for the parallel research's "server fetches quota JSON using local claude credentials"):**
 
-**Trade-offs:** You cannot use `@xterm/addon-attach` (it pipes raw socket data with no framing and has no resize support). The replacement is ~30 lines of glue — universally what real projects do:
+```
+GET /api/usage          → 200 always (degrade, never error the UI)
+GET /api/usage?force=1  → bypass server cache (manual refresh)
 
-```typescript
-// terminal/useTerminalSocket.ts (essence)
-ws.binaryType = "arraybuffer";
-ws.onmessage = (ev) => {
-  const data = new Uint8Array(ev.data);
-  if (data[0] === 0x30 /* '0' */) term.write(data.subarray(1));   // output
-};
-term.onData((s) => ws.send(concat([0x30], encoder.encode(s))));   // input
-const sendResize = () =>
-  ws.send(concat([0x31], encoder.encode(JSON.stringify(
-    { cols: term.cols, rows: term.rows }))));
-fitAddon.fit(); sendResize();           // on mount and on ResizeObserver
+{
+  "available": true,            // false ⇒ indicator renders muted "—" state
+  "reason": "",                 // "no credentials" / "fetch failed" when unavailable
+  "fetchedAt": "2026-06-11T..", // SERVER fetch time — drives "Updated Xm ago"
+  "quotas": [
+    { "id": "5h",      "label": "Current session", "utilization": 34, "resetsAt": "..." },
+    { "id": "7d",      "label": "Weekly",          "utilization": 12, "resetsAt": "..." },
+    { "id": "7d_opus", "label": "Weekly (Opus)",   "utilization": 5,  "resetsAt": "..." }
+  ]
+}
 ```
 
-Go side: on resize message call `pty.Setsize(f, &pty.Winsize{Rows, Cols})` (kernel delivers SIGWINCH to the child — Claude Code's TUI redraws itself).
-
-### Pattern 2: Reconnecting PTY with ring-buffer replay (Coder's pattern)
-
-**What:** The session manager, not the WS handler, owns the PTY. One goroutine reads PTY output in chunks and multiplexes it to (a) a fixed-size circular buffer and (b) every connection in an `activeConns` map. On attach: clone the ring buffer, write it to the new connection first, then add the connection to the map. On socket close: just remove from the map — the process keeps running.
-
-Verified against Coder's `agent/reconnectingpty/buffered.go`: `armon/circbuf` (64 KiB default), 1024-byte read chunks, replay-then-subscribe on attach, `activeConns` map keyed by connection ID.
-
-**When to use:** This is the core requirement ("sessions keep running when the tab closes; reopening reattaches"). Non-negotiable.
-
-**Trade-offs:** Replaying raw bytes into a *fresh* xterm instance can leave a TUI app (like Claude Code) visually stale or mid-escape-sequence. Two standard mitigations: (1) make the buffer comfortably larger than one screen of TUI redraw (256 KiB+ locally costs nothing); (2) after replay, force a repaint by sending a resize — the kernel's SIGWINCH makes full-screen TUIs redraw cleanly. Do both.
+`internal/quota.Service` seam:
 
 ```go
-// session/session.go (essence)
-type Session struct {
-    ptmx    *os.File              // PTY master (creack/pty)
-    cmd     *exec.Cmd             // claude or bash, Dir = worktree path
-    ring    *circbuf.Buffer       // scrollback
-    mu      sync.Mutex
-    conns   map[string]net.Conn   // active WS-backed conns
+// Fetcher is the parallel-research seam: whatever mechanism that research
+// lands (OAuth usage endpoint, token refresh) implements this.
+type Fetcher interface {
+    Fetch(ctx context.Context) (*Snapshot, error)
 }
-// pump goroutine: read ptmx → ring.Write(chunk) + write to each conn
-// Attach(): mu.Lock; replay := ring.Bytes(); conns[id] = c; mu.Unlock; return replay
-// Detach(): delete(conns, id)  // PTY untouched
+
+type Service struct {
+    mu      sync.Mutex
+    fetcher Fetcher
+    cached  *Snapshot     // last-good; served with stale fetchedAt on errors
+    ttl     time.Duration // ~30s — halves the 60s poll, absorbs multi-tab fan-in
+}
+func (s *Service) Get(ctx context.Context, force bool) (*Snapshot, error)
 ```
 
-### Pattern 3: Three state domains with explicit restart semantics
+**Caching split (server vs TanStack):** cache on the SERVER (TTL ~30s + last-good-on-error), poll on the CLIENT (plain `refetchInterval: 60_000`). Rationale: (1) multiple browser tabs each poll — server cache collapses them to one upstream call; (2) "Updated Xm ago" must be fetch-truth, not render-truth, so `fetchedAt` has to come from the server anyway; (3) rate behavior of the upstream endpoint is unverified — a server TTL is the safety valve. Manual refresh = mutation hitting `?force=1`, then `setQueryData` with the response (same shape as `useSpawnSession`'s write-then-invalidate, web/src/api/sessions.ts:38-48).
 
-**What:** Be explicit about what survives what:
+**Trade-offs:** a second cache layer to reason about; acceptable because both layers are trivially small and the failure mode (stale-but-labeled data) is exactly what the UI spec wants.
 
-| State | Owner | Survives tab close | Survives server restart |
-|-------|-------|--------------------|-------------------------|
-| Projects, tasks, board, session metadata | SQLite | yes | yes |
-| Branches, worktrees, uncommitted files | git / filesystem | yes | yes |
-| Live processes (claude, bash), PTYs, scrollback ring | server process memory | **yes** (the point of the design) | **no** |
+### Pattern 2: Handler-owns-persistence, manager-stays-DB-free (feature b — the `claude_session_id` precedent)
 
-**Restart protocol:** PTY children are killed when the server dies (master side of the PTY closes → SIGHUP). On boot, the session manager runs a **startup sweep**: every DB session row in status `running` is marked `dead`. The UI shows dead agent sessions with a "Resume" affordance that starts a fresh PTY running `claude --continue` with cwd = the task's worktree. Because each task has a unique worktree directory and Claude Code keys conversation history by cwd, `--continue` resumes that task's most recent conversation without the app ever having to capture a session ID from the PTY stream. (Capturing `--resume <id>` IDs from terminal output is brittle; cwd-keyed `--continue` is the clean recovery path. Confidence: MEDIUM on `--continue` cwd semantics — verify against current Claude Code docs during the relevant phase.)
+**What:** The tmux session name is minted and persisted by the HTTP handler; the session manager only receives it via `SpawnOpts` and constructs the command. This is byte-for-byte the Phase 4/5 pattern for `claude_session_id`: handler reads task row → spawns → `UPDATE tasks SET claude_session_id = ?` after spawn (internal/api/sessions.go:96-113, 164-170), while `Manager` (internal/session/manager.go:23-33) never touches `*sql.DB`.
 
-**When to use:** Bake into the data model from day one (`sessions.status`, startup sweep) — retrofitting restart semantics is painful.
+**Spawn flow (shell setting == "tmux"):**
 
-### Pattern 4: Worktree-per-task via the git CLI
-
-**What:** On task create: `git -C <repo> worktree add -b kangent/<task-slug> <worktrees-dir>/<task-slug>` (branch name + worktree path stored on the task row). On "mark done → clean up": `git -C <repo> worktree remove <path>` (add `--force` only with explicit user confirmation if the tree is dirty); branch is kept per requirements. This is exactly vibe-kanban's isolation model (one worktree per task attempt, automatic cleanup, `DISABLE_WORKTREE_CLEANUP` escape hatch for debugging — copy that flag idea).
-
-**Trade-offs:** Shelling out means parsing exit codes/stderr rather than typed errors — acceptable, and far more reliable than reimplementing worktree semantics (see Anti-Patterns).
-
-## Data Model
-
-```sql
-projects (
-  id          INTEGER PRIMARY KEY,
-  name        TEXT NOT NULL,
-  repo_path   TEXT NOT NULL UNIQUE,     -- absolute path to checkout
-  created_at  TEXT NOT NULL
-);
-
-tasks (
-  id            INTEGER PRIMARY KEY,
-  project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  title         TEXT NOT NULL,
-  description   TEXT NOT NULL DEFAULT '',          -- markdown
-  status        TEXT NOT NULL DEFAULT 'todo',      -- todo|in_progress|in_review|done
-  position      REAL NOT NULL,                     -- ordering within column
-  branch_name   TEXT,                              -- kangent/<slug>
-  worktree_path TEXT,                              -- NULL after cleanup
-  created_at    TEXT NOT NULL,
-  updated_at    TEXT NOT NULL
-);
-
-sessions (                                         -- metadata only; PTYs live in memory
-  id          INTEGER PRIMARY KEY,
-  task_id     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  kind        TEXT NOT NULL,                       -- 'agent' | 'bash'
-  status      TEXT NOT NULL,                       -- running|exited|dead (dead = lost to restart)
-  pid         INTEGER,
-  exit_code   INTEGER,
-  started_at  TEXT NOT NULL,
-  ended_at    TEXT
-);
+```go
+// sessions.go create, in the existing `else` settings branch (sessions.go:148-157):
+sh, _ := settings.Get(h.db, settings.KeyShell)   // read-at-use, EVERY spawn (SET-03)
+if sh == "tmux" {
+    // mint: seq = MAX(seq)+1 for task; name = fmt.Sprintf("kangent-task-%d-%d", taskID, seq)
+    // INSERT INTO tmux_sessions(task_id, tmux_name, label, seq) BEFORE Spawn
+    opts.TmuxName, opts.Label = name, fmt.Sprintf("Bash %d", seq)
+} else {
+    opts.Shell = sh                               // existing path, unchanged
+}
 ```
 
-Cardinality: task 1..N sessions — at most one `running` session of kind `agent` per task (enforce in the session manager, not just the DB), plus any number of `bash` sessions. Worktree/branch metadata lives on the task (not the session) because the worktree's lifetime is the task's, not any one process's.
+```go
+// manager.go Spawn, KindBash branch (manager.go:158-186):
+if opts.TmuxName != "" {
+    bin, err := exec.LookPath("tmux")            // early-fail posture, mirrors opts.Shell
+    if err != nil { return nil, fmt.Errorf("tmux not found") }
+    cmd = exec.Command(bin, tmux.NewSessionArgs(opts.TmuxName, dir)...)
+    // args: "new-session", "-A", "-s", name, "-c", dir   (-A = attach-or-create,
+    // which makes fresh-spawn and reattach the SAME command)
+    // env: the existing minimal bash env (manager.go:177-185) — critically it
+    // omits TMUX, so Kangent-inside-tmux can't trip the nesting guard, and
+    // SHELL stays the $SHELL fallback (tmux's default-shell derives from it).
+}
+```
+
+**Why the name is minted from a persisted per-task seq, not the in-memory `taskCounters`:** `Manager.taskCounters` (manager.go:30) is memory-only and resets on restart — a post-restart "Bash 1" would collide with a surviving `kangent-task-5-1` tmux session. The DB `MAX(seq)+1` is the restart-stable counter; the label is stored alongside so reattached tabs keep their name. (`SpawnOpts.Label` is a new field; the manager's label-minting switch at manager.go:203-214 uses it when non-empty.)
+
+**Trade-offs:** one more `SpawnOpts` field and a label override; the alternative (manager mints + persists) breaks the DB-free invariant the codebase explicitly documents (manager.go:23-25).
+
+### Pattern 3: DB-derived reconciliation with a liveness probe (feature b — the Phase 5 `resumable` pattern, probe swapped)
+
+**What:** Detached/surviving tmux sessions are discovered exactly the way post-restart resumable agents are: rows in the DB that have NO manager entry, filtered through an existence probe. For agents the probe is `transcriptExists` (glob `~/.claude/projects/*/<uuid>.jsonl`, resume.go:16-25); for tmux tabs it is `tmux has-session -t =<name>` (exit 0 ⇒ alive). The two-pass shape of `agents.go status` (manager-derived pass at agents.go:66-113, then DB-derived pass at agents.go:121-152) is the template.
+
+**Where it runs:** extend `sessionHandlers.list` (`GET /api/sessions?task_id=N`, sessions.go:36-52) — the query TaskPage already polls every 5s — to append synthetic entries after the manager snapshot:
+
+```go
+// For each tmux_sessions row of the task with no RUNNING manager session
+// carrying that tmuxName:
+//   tmux has-session -t =name  →  alive: append {id: "tmux:"+name, label,
+//                                  status: "detached", tmuxName, taskId}
+//                              →  dead:  DELETE the row (lazy self-heal — the
+//                                  inner shell exited; mirrors how a missing
+//                                  transcript silently drops resumable)
+```
+
+The DB never records "running" or "detached" — status is ALWAYS derived at read time (the migration-00001-through-00004 invariant called out at agents.go:117-121). Restart reconciliation therefore costs nothing: empty manager + rows + probe IS the whole story, no startup mutation pass.
+
+**Exit-vs-detach disambiguation (the subtle bit):** the tmux *client* process exits with status 0 in BOTH cases — user detaches (client prints `[detached]`) and inner shell exits (session destroyed, client prints `[exited]`). The kangent `Session` (which wraps the client PTY) cannot tell them apart from the exit code. `has-session` after exit is the only reliable discriminator, and the lazy probe in the list path handles it with zero new lifecycle machinery: detach ⇒ probe true ⇒ "detached" entry appears; inner exit ⇒ probe false ⇒ row deleted, the exited manager session renders the normal bash exit banner until closed.
+
+**Probe cost:** one `tmux has-session` exec per row per 5s poll, single-user localhost — negligible (same order as the transcript glob).
+
+### Pattern 4: Close = detach, Stop = kill (feature b — semantics mapping onto existing affordances)
+
+**What:** Today's two destruction affordances get distinct tmux meanings:
+
+- **Tab × (routine close)** — today: `handleCloseTab` (TaskPage.tsx:247-250) → `useStopSession` → `POST /api/sessions/{id}/stop` (sessions.go:178-186) → `Session.Stop()` SIGTERM/SIGKILL sweep (session.go:382-416). For tmux tabs: NEW `POST /api/sessions/{id}/detach` → `tmux detach-client -s =<name>` → the client exits 0 → `waitExit` reaps normally → existing closing-tab machinery (`closingIds` → `visibleSessions` filter → `removeTab` + `DELETE /api/sessions/{id}`) runs unchanged. Next 5s poll shows the "detached" entry. The frontend branches on `session.tmuxName` (now in `Info` JSON) — it has the data; no server-side guessing about client intent.
+- **Header Stop button (red, destructive, TerminalPane.tsx:313-323)** — keeps meaning "kill": the stop handler, when the session has a `tmuxName`, runs `tmux kill-session -t =<name>` first (destroys server-side session; client exits as a consequence), then deletes the `tmux_sessions` row. Without this, "Stop" would secretly leave the inner shell running forever.
+
+**A safety footnote that makes this design honest:** plain `Session.Stop()` cannot kill a tmux-backed shell anyway — the tmux *server* daemonizes (own `setsid`), so it is invisible to the `/proc` session sweep (`sessionPGIDs` scans for `sess == sid` of the *client*, session.go:443-484, and the documented escape hatch at session.go:378-381 names exactly this case). Every kill path for tmux tabs MUST go through `tmux kill-session`; relying on signals is silently wrong.
+
+**Reattach:** `POST /api/sessions` gains `{"task_id": N, "tmux_name": "kangent-task-5-1"}` — handler validates the row exists + `has-session` true + no RUNNING kangent session already holds that name (mirror of the one-agent-per-task 409 gate, sessions.go:117-124; two attached clients would fight over window size), then spawns with `SpawnOpts{TmuxName: name, Label: row.label, Cwd: worktree}` — `-A` attaches. Restart-resume is the same call; no separate endpoint.
 
 ## Data Flow
 
-### Request Flow (CRUD + side effects)
+### Quota flow
 
 ```
-Create task:
-  Board UI → POST /api/tasks → store.InsertTask (tx)
-                             → gitx.CreateWorktree(repo, branch, path)
-                             → update task row with branch/worktree → 201
-                             → TanStack Query invalidates board
-
-Start agent session:
-  Task view → POST /api/tasks/{id}/sessions {kind:"agent"}
-            → session.Manager.Start(taskID, kind, cwd=worktree)
-            → spawns `claude` in PTY, inserts sessions row → returns {sessionID}
-  Task view → opens WS /api/sessions/{sessionID}/ws
-            → bridge: Attach → replay ring buffer → live binary stream
+[60s useQuota poll / manual refresh click]
+    → GET /api/usage(?force=1)
+    → quota.Service.Get: cache fresh? serve : Fetcher.Fetch (creds from ~/.claude)
+         ├─ ok    → cache = snapshot, serve
+         └─ error → serve last-good (stale fetchedAt) or available:false
+    → QuotaIndicator: compact "Claude 5h ▓▓▓░" bar (board + task headers)
+    → HoverCard popup: all quotas, reset times, "Updated Xm ago" from fetchedAt,
+      refresh button → useRefreshQuota mutation → ?force=1 → setQueryData
 ```
 
-### Terminal Flow (per open terminal tab)
+### tmux tab lifecycle
 
 ```
-keystroke → xterm.onData → WS frame '0'+bytes → bridge → ptmx.Write
-ptmx.Read → pump goroutine → ring buffer  AND  every active conn → WS '0'+bytes → term.write
-container resize → fit addon → WS '1'+{cols,rows} → pty.Setsize → SIGWINCH → TUI redraws
-process exit → pump sees EOF → manager marks sessions row exited → WS 'x'+{code} → UI badge
-tab close → WS close → Detach (conn removed; PTY and ring keep running)
+SPAWN  (shell setting = "tmux", read-at-use in handler)
+  POST /api/sessions {task_id} → mint seq/name → INSERT tmux_sessions row
+  → Spawn{TmuxName} → tmux new-session -A -s =name -c <worktree> in PTY
+  → tab renders via existing useSessions/TerminalPane, byte-identical WS path
+
+CLOSE (×)                              INNER SHELL EXITS (`exit`)
+  POST /sessions/{id}/detach             tmux destroys session; client exits 0
+  → detach-client → client exits 0       → waitExit → exited banner (unchanged)
+  → tab removed (existing closing flow)  → next list poll: has-session FALSE
+  → next list poll: has-session TRUE       → row deleted (lazy self-heal)
+    → "detached" entry → ghost tab/Resume
+
+REOPEN / POST-RESTART RESUME           STOP (red button) & CLEANUP
+  POST /sessions {task_id, tmux_name}    stop handler / DELETE worktree /
+  → gate: row + has-session + no         DELETE task: tmux kill-session -t =name
+    running holder → Spawn -A attaches   BEFORE wt.Remove / row delete
+  → replay ring + resize jiggle           (StopAllForTask CANNOT reach the
+    repaints (existing reattach path)      daemonized tmux server — see Pattern 4)
 ```
 
-### Key Data Flows
+### Key data flows
 
-1. **REST for everything durable** (projects, tasks, session start/stop/list). Plain JSON; TanStack Query with invalidate-on-mutate. Single user at localhost means optimistic concurrency is unnecessary.
-2. **One WebSocket per terminal tab.** N tabs open = N sockets. Do not multiplex (see Anti-Patterns).
-3. **Board/status push is optional.** Vibe-kanban streams DB-change events over WS because multiple agents mutate state autonomously; in kangent the only async state change is *session exit* (and the exit already arrives on that session's own WS). A small SSE endpoint for session-status events is a nice phase-late addition, not a foundation.
-
-## Suggested Build Order
-
-Dependencies drive this order; the terminal bridge is pulled early because it is the highest-risk component and has no hard dependency on tasks/git (it can be proven against a plain `bash` in any directory).
-
-1. **Skeleton + foundation** — Go binary serving embedded Vite build; SQLite open + migrations; projects CRUD + sidebar. *Proves: single-binary deployment model end to end.*
-2. **Terminal vertical slice (de-risk)** — session manager (spawn bash PTY in a fixed dir), ring buffer, WS bridge with framing, xterm.js pane with fit + resize. Test: open, type, close tab, reopen, see replayed scrollback. *Everything else is conventional CRUD; this is the part worth spiking first.*
-3. **Tasks + kanban board** — tasks CRUD, fixed columns, drag between columns, detail view shell. No git yet.
-4. **Git/worktree integration** — worktree+branch on create; wire cleanup offer on done; task row gains branch/worktree metadata.
-5. **Agent sessions + tabs** — Start button spawns `claude` in the worktree; bash tabs; one-agent-per-task rule; exit handling; reattach UX.
-6. **Restart semantics + polish** — startup sweep, dead-session UI with `claude --continue` resume, worktree cleanup edge cases (dirty tree confirmation), SSE status events if wanted.
-
-Phases 2 and 3 are independent and could swap or parallelize; 4 depends on 3; 5 depends on 2+4; 6 depends on 5.
+1. **Quota:** server is the only Anthropic client; browser only ever talks to `/api/usage`. Staleness is server-truth.
+2. **tmux identity:** name minted in handler → persisted in `tmux_sessions` → carried in `SpawnOpts`/`Info` → probed by `has-session` at every read. The kangent session uuid stays ephemeral; the tmux name is the durable key (exactly the `claude_session_id` split: ephemeral session vs durable resume key).
+3. **Status:** never stored. Manager snapshot (running/exited) + probe (detached/gone) at read time.
 
 ## Scaling Considerations
 
-| Scale | Architecture Adjustments |
-|-------|--------------------------|
-| 1 user, ≤10 live sessions (the design point) | Everything above. ~2 goroutines per session, KBs of RAM each — no tuning needed |
-| 1 user, dozens of sessions | Add an idle-timeout reaper (Coder's heartbeat/timeout pattern) so forgotten bash sessions don't accumulate |
-| Multi-user / remote (explicitly out of scope) | Would require auth, origin checks beyond localhost, per-user PTY isolation, and flow control (ttyd's PAUSE/RESUME) — none of which should leak into v1 |
-
-### Scaling Priorities
-
-1. **First real bottleneck: slow/stalled WS writer.** A blocked connection write in the fan-out loop stalls output for all viewers of that session. Fix cheaply: per-conn buffered write channel, drop the conn if it falls behind (irrelevant-in-practice at localhost, but it keeps the pump loop non-blocking and is ~20 lines).
-2. **Second: ring buffer sizing vs TUI replay quality.** If reattached Claude Code screens look mangled, increase the buffer and always send the post-replay resize nudge before debugging anything else.
+Single-user localhost — scaling is not a concern. The only quantities that grow: one `has-session` exec per detached row per 5s poll (trivial), and one upstream quota fetch per 30s TTL window regardless of open tabs (the point of the server cache).
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Tying PTY lifetime to the WebSocket connection
+### Anti-Pattern 1: Fetching quota from the browser
 
-**What people do:** Spawn the process in the WS handler; `defer cmd.Process.Kill()` on socket close (every basic xterm.js tutorial does this — ttyd and gotty also behave this way by design).
-**Why it's wrong:** It silently violates the product's core promise. One accidental tab close kills an hour of agent work.
-**Do this instead:** Session manager owns PTYs in a registry; WS handlers only `Attach`/`Detach` (Coder's reconnectingpty model, Pattern 2).
+**What people do:** call the Anthropic usage endpoint directly from React with a token read from "somewhere".
+**Why it's wrong:** CORS blocks it; the browser can't read `~/.claude`; shipping credentials into JS widens the trust boundary the loopback-only design (main.go:38-41, 145-162) deliberately keeps narrow.
+**Do this instead:** server proxy (`internal/quota` + `GET /api/usage`), Pattern 1.
 
-### Anti-Pattern 2: Using go-git (or any library) for worktree operations
+### Anti-Pattern 2: Making the session Manager database-aware for tmux names
 
-**What people do:** Reach for `go-git` to keep things "pure Go."
-**Why it's wrong:** go-git does not implement linked-worktree management (`git worktree add/remove`); partial reimplementations corrupt `.git/worktrees` metadata. (Confidence: MEDIUM — verify go-git's current state in the git phase, but the CLI route is safe regardless.)
-**Do this instead:** `os/exec` the real `git` CLI. It's already a host requirement (the repos exist), and vibe-kanban's equivalent service is similarly a thin wrapper over real git operations.
+**What people do:** mint/persist the tmux name inside `Manager.Spawn` "since the counter lives there".
+**Why it's wrong:** breaks the explicitly documented invariant (manager.go:23-25, session.go:6-7) that the manager owns PTYs and nothing else; every existing persistence concern (`claude_session_id`) lives in handlers.
+**Do this instead:** handler mints + persists, `SpawnOpts.TmuxName` carries it in (Pattern 2).
 
-### Anti-Pattern 3: Text frames + base64 output (gotty 1.x legacy)
+### Anti-Pattern 3: A new `Kind` for tmux sessions
 
-**What people do:** Send terminal output as base64 inside text/JSON WS frames.
-**Why it's wrong:** 33% size overhead, encode/decode hops, and UTF-8 boundary bugs with partial escape sequences. gotty only did this for pre-binary-frame compatibility.
-**Do this instead:** Binary frames with a 1-byte type prefix (ttyd's protocol, Pattern 1).
+**What people do:** add `KindTmux` alongside `KindBash`/`KindAgent`.
+**Why it's wrong:** every Kind branch in the codebase (one-agent gate sessions.go:117-124, agent status filter agents.go:46, frontend `s.kind !== "agent"` TaskPage.tsx:115, label minting, env policy) would need auditing; tmux tabs ARE bash-family in every one of those decisions — they differ only in command construction and close semantics.
+**Do this instead:** `KindBash` + `tmuxName` field; behavior branches on `tmuxName != ""`.
 
-### Anti-Pattern 4: Multiplexing all terminals over one WebSocket
+### Anti-Pattern 4: Trusting signals to kill tmux-backed shells
 
-**What people do:** One "channel" socket carrying every terminal plus board events, with session-ID routing in every frame.
-**Why it's wrong:** Reinvents framing, complicates backpressure (one slow terminal stalls all), and buys nothing at localhost where sockets are free.
-**Do this instead:** One WS per terminal tab; URL carries the session ID. Optional separate SSE stream for status events.
+**What people do:** assume `StopAllForTask` before worktree removal covers tmux tabs like it covers bash tabs.
+**Why it's wrong:** the tmux server daemonizes into its own session — the `/proc` sweep can't see it (the documented setsid escape, session.go:378-381). Worktree removal would orphan live shells cwd'd inside a deleted directory — exactly the Pitfall-4 class the D-32 gate exists to prevent (worktrees.go:139-145, 192-199).
+**Do this instead:** `tmux kill-session -t =<name>` for every task row in BOTH cleanup paths (worktrees.go `remove`, tasks.go `delete` at tasks.go:487-503), before `wt.Remove`/row delete; surface detached shells in the `GET /worktree` dialog payload (worktrees.go:130-135) so Gate 1 stays honest.
 
-### Anti-Pattern 5: Persisting terminal output to SQLite
+### Anti-Pattern 5: Storing tmux/quota status in SQLite
 
-**What people do:** Log every output chunk to the DB so scrollback "survives restarts."
-**Why it's wrong:** High write volume for low value — the processes themselves don't survive restarts, so a byte-perfect replay of a dead TUI is mostly garbage on screen. Claude Code already persists conversation history; `--continue` is the durable record.
-**Do this instead:** In-memory ring buffer for live reattach; DB stores session metadata only; `claude --continue` for post-restart recovery.
+**What people do:** add a `status` column to `tmux_sessions`, or persist quota snapshots.
+**Why it's wrong:** the DB-never-records-"running" invariant is what makes restart reconciliation a pure read (agents.go:117-121 spells it out). Stored status WILL go stale (kill -9, host reboot wiping tmux); the probe never lies.
+**Do this instead:** rows store identity (name/label/seq) only; `has-session` is status. Quota stays in-memory (it's a cache of remote truth).
 
-### Anti-Pattern 6: Replacing the PTY with the Agent SDK / `--output-format stream-json`
+### Anti-Pattern 6: Prefix-ambiguous tmux targets
 
-**What people do:** Parse Claude Code's structured output and build a chat UI.
-**Why it's wrong (for this project):** Loses plan mode, permission prompts, slash commands, and every future CLI feature — exactly what PROJECT.md decided against. Vibe-kanban takes the structured-output route (its `StandardCodingAgentExecutor` normalizes agent streams) because it supports 10+ agents and a review-centric UI; kangent's value is the *unmodified* interactive CLI, which mandates the ttyd-style PTY architecture instead.
-**Do this instead:** Real `claude` in a real PTY; the browser renders bytes.
+**What people do:** `tmux kill-session -t kangent-task-5-1`.
+**Why it's wrong:** tmux target-session resolution falls back to prefix matching — `-t kangent-task-5-1` can match `kangent-task-5-12`. (MEDIUM confidence; man-page-documented `=` exact-match prefix.)
+**Do this instead:** always `-t =<name>` in `internal/tmux`; one wrapper package means one fix point.
 
 ## Integration Points
 
@@ -312,31 +312,65 @@ Phases 2 and 3 are independent and could swap or parallelize; 4 depends on 3; 5 
 
 | Service | Integration Pattern | Notes |
 |---------|---------------------|-------|
-| `git` CLI | `os/exec`, `-C <repo>` flag, parse exit code + stderr | Validate repo on project create (`git rev-parse --git-dir`); worktree dirs outside the repo tree |
-| `claude` CLI | Spawn in PTY via `creack/pty`, `cmd.Dir = worktree` | Check presence on startup (`exec.LookPath`); pass through user env (auth lives in `~/.claude`) |
-| `bash`/`$SHELL` | Same PTY path, `kind=bash` | Use `$SHELL` fallback bash; set `TERM=xterm-256color` |
+| Anthropic usage endpoint | `internal/quota.Fetcher` interface; creds from `~/.claude` | Mechanism (URL, auth, refresh) owned by parallel research — design ONLY against the interface. Degrade to `available:false`, never 5xx the indicator |
+| tmux binary | `internal/tmux` exec wrappers; `exec.LookPath` gates the settings option | Mirror the v1.1 LookPath posture (manager.go:159-174). Session names use only `[a-z0-9-]` (no `.`/`:` — tmux target separators) |
 
-### Internal Boundaries
+### Internal Boundaries (file-level integration map)
 
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| api ↔ store | Direct function calls, typed query layer | Handlers stay thin; transactions for task-create + worktree metadata |
-| api ↔ gitx | Direct calls; worktree create/remove invoked from task handlers | Failure on `worktree add` must roll back the task insert (or mark task degraded) |
-| api ↔ session manager | Direct calls: Start/Stop/List | API never touches PTY file handles |
-| ws ↔ session manager | `Attach(id)` returns replay bytes + read/write handles; `Detach(id, connID)` | The only consumer of PTY I/O; framing lives entirely in `ws/` |
-| session manager ↔ store | Manager writes session lifecycle rows (started/exited/dead) | One-way: store never reaches into the manager |
-| frontend ↔ backend | REST (TanStack Query) + per-terminal WS + optional SSE | No state shared between the WS protocol and REST payloads except session IDs |
+| Boundary / file | Change | Detail |
+|-----------------|--------|--------|
+| `cmd/kangent/main.go:103-115` | MOD | construct `quota.Service`, register `api.UsageRoutes(mux, qs)` next to `AgentRoutes` |
+| `internal/api/usage.go` | NEW | `GET /api/usage` handler |
+| `internal/settings/validate.go:16` | MOD | `AllowedShells = ["bash","tmux"]`; new `AvailableShells()` (LookPath filter); `Validate(KeyShell)` checks availability for tmux |
+| `internal/api/settings.go:22-29` | MOD | `entryFor` options ← `AvailableShells()` — the SHELL-FUT-01 seam means ZERO frontend dropdown changes (SettingsPage.tsx:98-106 already renders server options) |
+| `internal/store/migrations/00005_tmux_sessions.sql` | NEW | `task_id FK ON DELETE CASCADE, tmux_name TEXT UNIQUE, label, seq` |
+| `internal/session/manager.go:44-55, 158-186, 203-214` | MOD | `SpawnOpts.TmuxName`, `SpawnOpts.Label`; tmux command construction; label override |
+| `internal/session/session.go:65-96, 163-187` | MOD | `tmuxName` field; `Info.TmuxName` JSON |
+| `internal/api/sessions.go:61-172` | MOD | create: tmux mint/persist + reattach variant (`tmux_name` body field + gates); list: DB-derived detached entries + lazy row GC; stop: kill-session for tmux; NEW `POST /api/sessions/{id}/detach` |
+| `internal/api/worktrees.go:97-136, 143-212` | MOD | get: `detached_shells` count in dialog payload; remove: kill-session per row before `wt.Remove` |
+| `internal/api/tasks.go:487-503` | MOD | delete: kill-session per row before row delete (CASCADE removes rows) |
+| `web/src/api/usage.ts` | NEW | `useQuota` (refetchInterval 60s), `useRefreshQuota` |
+| `web/src/api/sessions.ts:5-15` | MOD | `TermSession.tmuxName?`, `status` union += `"detached"`; `useDetachSession`; spawn mutation accepts `tmux_name` |
+| `web/src/components/quota/QuotaIndicator.tsx` | NEW | indicator + HoverCard popup |
+| `web/src/components/ui/hover-card.tsx` | NEW | shadcn CLI (`ui/` currently has NO popover/hover-card — verified) |
+| `web/src/pages/BoardPage.tsx:46-50` | MOD | header right group: `<QuotaIndicator/>` beside New task |
+| `web/src/pages/TaskPage.tsx:383-450, 109-126, 247-250, 264-341` | MOD | header mount (beside ellipsis); detached entries into `visibleSessions`/`tabIds`/TabDef ghosts; × branches detach-vs-stop on `tmuxName`; click/Resume → reattach spawn |
+
+**Quota indicator mount decision:** there is NO shared app header — `AppLayout` (web/src/components/layout/AppLayout.tsx:51-71) renders only the sidebar + a bare `<main><Outlet/></main>`; each page builds its own header (BoardPage's title/New-task row, TaskPage's title/ellipsis row). An AppLayout absolute overlay (the `CollapsedSidebarTrigger` pattern, AppLayout.tsx:22-36) would collide with BoardPage's right-aligned New-task button. Recommendation: ONE shared `QuotaIndicator` component mounted in BOTH page headers' right groups (matches PROJECT.md's "board and task view" scope exactly); TanStack Query dedupes the poll across mounts — the established `useAgentStatuses` multi-consumer pattern (web/src/api/agents.ts:14-22).
+
+**Detached-tab UX (flag for roadmap/UX decision, two viable shapes):** (a) detached sessions render as muted ghost tabs in the strip (TabDef already supports `muted`, TaskTabs.tsx:27), click reattaches — most discoverable; or (b) the `+` button becomes a split control listing detached sessions + "New". Either way the data flow is identical (detached entries in the sessions list); recommend (a) for continuity with the existing muted-exited-tab idiom.
+
+### Suggested Build Order
+
+The two features are fully independent — they can be separate phases executed in either order or parallel.
+
+**Quota (blocked only by the parallel quota-mechanism research):**
+1. `internal/quota` service with fake-Fetcher tests + real Fetcher per research → `internal/api/usage.go` → `main.go` wiring.
+2. `shadcn add hover-card` → `web/src/api/usage.ts` → `QuotaIndicator` → mount in BoardPage + TaskPage.
+
+**tmux (strictly ordered by dependency):**
+1. Settings seam: `AllowedShells`/`AvailableShells` + validation + `entryFor` (smallest slice; dropdown shows tmux immediately, server-data-only).
+2. `internal/tmux` wrappers + migration 00005 (no behavior change yet).
+3. Spawn path: `SpawnOpts.TmuxName`/`Label` + manager command construction + `Info.TmuxName` (a tmux tab now works end-to-end through the untouched WS/terminal stack — verifiable milestone).
+4. Lifecycle: handler mint/persist, detach endpoint, tmux-aware stop, list-merge reconciliation + lazy GC, reattach spawn variant.
+5. Cleanup integration: worktree remove + task delete kill-sessions, dialog count.
+6. Frontend: types, ×-branching, ghost tabs/Resume, restart-resume verification.
+
+### What v1.2 Must NOT Touch
+
+- **`internal/ws`** — detach and inner-exit both ride the existing `Done()`/`'x'`-frame machinery (handler.go:78-130); zero protocol changes.
+- **Manager/DB separation** — no `*sql.DB` anywhere in `internal/session`; no settings reads in the manager (settings are read-at-use in handlers, sessions.go:138-157, and stay there).
+- **Agent paths** — `agent.go`, hooks, `agents.go` status, resume gates: tmux is bash-family only; the agent status model is untouched.
+- **Existing migrations / settings rows** — 00005 is append-only; `shell` stays the same KV key, "tmux" is just a new value (absent row still defaults to "bash").
+- **`TerminalPane` / `useTerminalSocket`** — a tmux client is just another full-screen PTY program; the replay ring + first-resize jiggle (session.go:339-359) already handles repaint-after-reattach.
 
 ## Sources
 
-- vibe-kanban repository and architecture — [github.com/BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban), [DeepWiki: BloopAI/vibe-kanban](https://deepwiki.com/BloopAI/vibe-kanban) (Axum + SQLx/SQLite, EventService WS streaming, executor processes, worktree lifecycle) — MEDIUM-HIGH
-- vibe-kanban analyses — [virtuslab.com/blog/ai/vibe-kanban](https://virtuslab.com/blog/ai/vibe-kanban), [starlog.is article](https://starlog.is/articles/developer-tools/bloopai-vibe-kanban/) (dual-process Rust/React, SQLite-for-workflow/git-for-code split) — MEDIUM
-- ttyd protocol — [github.com/tsl0922/ttyd](https://github.com/tsl0922/ttyd) `src/protocol.c` (1-byte prefixes, JSON resize, PAUSE/RESUME flow control) — HIGH
-- gotty webtty bridge — [gotty webtty/webtty.go](https://github.com/sorenisanerd/gotty/blob/master/webtty/webtty.go) (master/slave bridge abstraction, message bytes, base64 legacy) — HIGH
-- Coder reconnecting PTY — [coder/coder agent/reconnectingpty/buffered.go](https://github.com/coder/coder/blob/main/agent/reconnectingpty/buffered.go) (armon/circbuf 64 KiB, replay-then-subscribe, activeConns fan-out, timeout lifecycle) — HIGH
-- xterm.js attach addon limitations — [xtermjs/xterm.js addons/addon-attach](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-attach), [xterm-addon-attach (npm)](https://www.npmjs.com/package/xterm-addon-attach) — HIGH
-- Claude Code `--continue` cwd-keyed resume semantics — training data — MEDIUM (flag for verification in the agent-session phase)
+- Primary: the Kangent codebase at `/home/jordi/workspace/github/kangent` (all file:line citations above verified by direct read, 2026-06-11) — HIGH
+- `.planning/PROJECT.md` + `.planning/milestones/v1.1-ROADMAP.md` — milestone scope, v1.1 settings-wiring precedent — HIGH
+- tmux behavior (server daemonization/own sid; `new-session -A`; `detach-client`; `has-session`; client exit 0 on both detach and session-destroy; `=` exact-match target prefix; no `.`/`:` in session names; TMUX nesting guard): tmux(1) man page semantics, stable across 2.x–3.x — MEDIUM (training data; flag for a 5-minute empirical smoke test against the host's tmux during phase planning)
+- Quota fetch mechanism: deliberately NOT researched here — parallel research owns it; this document designs only the `quota.Fetcher` seam and HTTP contract around it
 
 ---
-*Architecture research for: kangent — local agent-session kanban (Go + React + PTY/WS)*
-*Researched: 2026-06-10*
+*Architecture research for: Kangent v1.2 — quota indicator + tmux-backed resumable shells*
+*Researched: 2026-06-11*
