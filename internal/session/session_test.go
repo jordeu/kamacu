@@ -527,7 +527,7 @@ func TestTaskScopedLabels(t *testing.T) {
 }
 
 // TestSpawnCwd proves the shell really starts in the requested directory.
-// The mar''ker quote-split means the echoed COMMAND can never satisfy the
+// The mar”ker quote-split means the echoed COMMAND can never satisfy the
 // assertion — only the shell's expansion of $PWD can.
 func TestSpawnCwd(t *testing.T) {
 	dir := t.TempDir()

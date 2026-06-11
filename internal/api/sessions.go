@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"kangent/internal/session"
+	"kangent/internal/settings"
 )
 
 // SessionRoutes registers terminal session endpoints on mux. Sessions remain
@@ -130,6 +131,29 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		opts.ResumeSessionID = csid.String
+	}
+	// SET-03 read-at-use: settings come from the DB at EVERY spawn — never
+	// cached — so edits apply at the next Start with no restart. A real DB
+	// error (absent rows read as defaults) is exceptional on local SQLite:
+	// fail the spawn rather than silently falling back.
+	if kind == session.KindAgent {
+		// One read covers BOTH the fresh and resume variants — opts is shared
+		// (AGENT-01: extras ride every claude spawn).
+		raw, err := settings.Get(h.db, settings.KeyAgentExtraParams)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "couldn't start a session")
+			return
+		}
+		opts.ExtraArgs = settings.Tokenize(raw)
+	} else {
+		// Covers task bash tabs AND the unscoped /terminal dev spawn — one
+		// code path (SHELL-02).
+		sh, err := settings.Get(h.db, settings.KeyShell)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "couldn't start a session")
+			return
+		}
+		opts.Shell = sh
 	}
 	// Spawn's stat pre-check covers a vanished worktree dir → same 500 path.
 	sess, err := h.mgr.Spawn(opts)

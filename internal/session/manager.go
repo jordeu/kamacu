@@ -46,6 +46,12 @@ type SpawnOpts struct {
 	TaskID          int64  // 0 -> unscoped dev session, label "bash #N" (global counter)
 	Kind            Kind   // zero value = KindBash (full Phase 2/3 backward compatibility)
 	ResumeSessionID string // agent-only: spawn `claude --resume <id>` instead of minting a new --session-id (RCVR-02, D-55)
+	// ExtraArgs is agent-only: tokenized settings extras, appended after the
+	// fixed flags (AGENT-01).
+	ExtraArgs []string
+	// Shell is bash-only: the settings shell; "" keeps the $SHELL fallback
+	// (back-compat for direct-Spawn tests).
+	Shell string
 }
 
 // SetAgentConfig installs the agent spawn configuration (hook receiver
@@ -58,7 +64,8 @@ func (m *Manager) SetAgentConfig(cfg AgentConfig) {
 }
 
 // Spawn starts a new session on its own PTY. KindBash (the zero value) runs
-// an interactive shell ($SHELL, fallback /bin/bash), cwd opts.Cwd (the user's
+// an interactive shell — opts.Shell (the settings value, LookPath-resolved)
+// when set, else the $SHELL/`/bin/bash` fallback — cwd opts.Cwd (the user's
 // home directory when empty), with an explicit minimal environment (never
 // inherited blindly). KindAgent runs the claude CLI in the task worktree with
 // inherit-all env (D-52), `--session-id <uuid>` for Phase 5 resume, and the
@@ -129,24 +136,41 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 				return nil, fmt.Errorf("claude binary not found on PATH: %w", err)
 			}
 		}
-		// D-51/D-53: no permission flags, no --add-dir, no --mcp-config —
-		// just the session identity and the inline hook overlay. The overlay
-		// is verified to apply on resume too (SessionStart fires with source
-		// "resume"), so the status machine needs zero changes: a resumed spawn
-		// starts "working" exactly like a fresh one.
-		cmd = exec.Command(bin,
-			idFlag, claudeSessionID,
-			"--settings", buildOverlayJSON(cfg.BaseURL, cfg.Token, id),
-		)
+		// D-53: just the session identity, the inline hook overlay, and the
+		// settings-driven extras. Since Phase 6 the extras come from the
+		// agent_extra_params setting (tokenized by the handler) and the
+		// DEFAULT includes --dangerously-skip-permissions — an intentional
+		// reversal of v1.0's interactive-by-default D-51 posture (AGENT-02);
+		// the user removes the flag in Settings to restore prompts. Extras
+		// append AFTER the fixed flags (composition verified on v2.1.173,
+		// fresh and resume alike). Known sharp edge: a user-supplied
+		// --settings in the extras would override the hook overlay
+		// (last-value-wins) and silently kill status hooks — the SessionStart
+		// canary catches that; policing the pass-through field is out of scope.
+		args := []string{idFlag, claudeSessionID, "--settings", buildOverlayJSON(cfg.BaseURL, cfg.Token, id)}
+		args = append(args, opts.ExtraArgs...)
+		cmd = exec.Command(bin, args...)
 		cmd.Dir = dir
 		// D-52: the agent inherits EVERYTHING the user's terminal would have
 		// (auth, MCP servers, node shims), then pins terminal identity. This
 		// deliberately differs from bash sessions' minimal explicit env.
 		cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
 	} else {
+		// SHELL-02: a non-empty opts.Shell (the settings value, e.g. "bash")
+		// is resolved via LookPath and fails BEFORE any PTY allocation —
+		// mirroring the cwd-validation early-error posture above. An empty
+		// Shell keeps the pre-Phase-6 $SHELL fallback byte-for-byte (direct-
+		// Spawn callers and Phase 2 tests).
 		shell := os.Getenv("SHELL")
 		if shell == "" {
 			shell = "/bin/bash"
+		}
+		if opts.Shell != "" {
+			resolved, err := exec.LookPath(opts.Shell)
+			if err != nil {
+				return nil, fmt.Errorf("shell not found: %s", opts.Shell)
+			}
+			shell = resolved
 		}
 		cmd = exec.Command(shell)
 		cmd.Dir = dir
