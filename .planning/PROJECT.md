@@ -19,9 +19,12 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ Real PTY-backed terminal in the browser: full interactive TUI, resize/scrollback/copy-paste, server-owned sessions that survive tab closes with replay on reattach, full-process-tree stop, Origin/Host-validated WebSocket with loopback-only binding — Phase 2
 - ✓ Worktree-per-task isolation: task creation auto-creates `task/<slug>-<id>` branch + worktree under `~/.kangent/worktrees/`; bash session tabs run inside the worktree; confirmed cleanup with dirty-tree and running-session gates, branch always kept — Phase 3
 - ✓ Claude Code agent sessions: explicit Start button spawns real `claude` in the worktree PTY (full TUI, inherits user settings, invisible additive status hooks, deterministic session IDs); live status dots (working/waiting/idle/exited) on cards, tab, and sidebar waiting chips; dimmed exited state with Reset session — Phase 4
+- ✓ Server-side session persistence: sessions keep running when the browser tab closes and reattach with replay (Phase 2); after a server restart, silent reconciliation leaves no ghosts and the agent offers Resume session via `claude --resume <uuid>` from the persisted session ID — Phase 5
+- ✓ Read-only diff tab: review everything a task changed vs the base branch merge-base (committed + uncommitted + untracked), collapsible unified diffs — Phase 5
 
 ### Active
-- [ ] Sessions keep running on the server when the browser tab closes; reopening the task reattaches to the live session
+
+(All v1 requirements validated — milestone complete)
 
 ### Out of Scope
 
@@ -77,4 +80,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 after Phase 4 completion (Claude Code Agent Sessions: Start button, full-fidelity claude TUI, dispatcher board — shipped and human-verified)*
+*Last updated: 2026-06-11 after Phase 5 completion — v1 milestone complete (Recovery & Review: restart reconciliation, claude --resume, read-only diff tab — shipped and human-verified)*
