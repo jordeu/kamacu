@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Settings & Polish
-status: roadmap_complete
-stopped_at: Roadmap created for v1.1 (Phase 6)
-last_updated: "2026-06-11T11:10:07.737Z"
-last_activity: 2026-06-11
+status: completed
+stopped_at: Phase 6 UI-SPEC approved
+last_updated: "2026-06-11T12:48:12.627Z"
+last_activity: 2026-06-11 — v1.1 roadmap created (Phase 6, 12/12 requirements mapped)
 progress:
   total_phases: 1
   completed_phases: 0
@@ -182,7 +182,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11 — v1.1 roadmap created
-Stopped at: Roadmap complete for Phase 6 (Settings & Polish), 12/12 requirements mapped
-Resume file: .planning/ROADMAP.md
+Last session: 2026-06-11T12:48:12.624Z
+Stopped at: Phase 6 UI-SPEC approved
+Resume file: .planning/phases/06-settings-polish/06-UI-SPEC.md
 Next: `/gsd:plan-phase 6`
