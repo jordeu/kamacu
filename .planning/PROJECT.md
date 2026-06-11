@@ -18,10 +18,9 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ All projects/tasks stored in local SQLite; single Go binary serves embedded SPA at localhost — Phase 1
 - ✓ Real PTY-backed terminal in the browser: full interactive TUI, resize/scrollback/copy-paste, server-owned sessions that survive tab closes with replay on reattach, full-process-tree stop, Origin/Host-validated WebSocket with loopback-only binding — Phase 2
 - ✓ Worktree-per-task isolation: task creation auto-creates `task/<slug>-<id>` branch + worktree under `~/.kangent/worktrees/`; bash session tabs run inside the worktree; confirmed cleanup with dirty-tree and running-session gates, branch always kept — Phase 3
+- ✓ Claude Code agent sessions: explicit Start button spawns real `claude` in the worktree PTY (full TUI, inherits user settings, invisible additive status hooks, deterministic session IDs); live status dots (working/waiting/idle/exited) on cards, tab, and sidebar waiting chips; dimmed exited state with Reset session — Phase 4
 
 ### Active
-- [ ] Task view with an explicit Start button that spawns a Claude Code CLI session in a PTY, working directory set to the task's worktree
-- [ ] Agent session rendered as an interactive terminal in the browser (full interactive CLI experience)
 - [ ] Sessions keep running on the server when the browser tab closes; reopening the task reattaches to the live session
 
 ### Out of Scope
@@ -78,4 +77,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-10 after Phase 3 completion (Worktree Isolation & Bash Tabs: worktree-per-task, bash tabs, gated cleanup — shipped and human-verified)*
+*Last updated: 2026-06-11 after Phase 4 completion (Claude Code Agent Sessions: Start button, full-fidelity claude TUI, dispatcher board — shipped and human-verified)*
