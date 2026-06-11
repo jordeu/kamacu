@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-06-10T19:22:26.335Z"
-last_activity: 2026-06-10
+status: verifying
+stopped_at: Completed 04-05-PLAN.md — Phase 4 complete, ready for verification
+last_updated: "2026-06-11T04:44:38.842Z"
+last_activity: 2026-06-11
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 23
-  completed_plans: 22
+  completed_plans: 23
   percent: 0
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-06-10)
 
 Phase: 4 (Claude Code Agent Sessions) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-06-10
+Status: Phase complete — ready for verification
+Last activity: 2026-06-11
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -74,6 +74,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P01 | 11 min | 2 tasks | 5 files |
 | Phase 04 P02 | 18 min | 3 tasks | 16 files |
 | Phase 04-claude-code-agent-sessions P04 | 6 min | 3 tasks | 5 files |
+| Phase 04-claude-code-agent-sessions P05 | 25 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,9 @@ Recent decisions affecting current work:
 - [Phase 04]: showExitedClose gates Close on both the exited and not-found banners — a permanent Agent tab never offers Close on any banner
 - [Phase 04]: TerminalPane onConnect fires in the existing conn-state effect via a ref so the D-45 optimistic clear re-fires on every reconnect, mirroring the server's per-attach clear
 - [Phase 04]: Agent tab is the universal dangling-tab fallback (Pitfall-7 effect and removeTab) since it can never disappear
+- [Phase 04-claude-code-agent-sessions]: Exited agent terminal renders dimmed; banner is code-free 'Agent session ended.'; primary action renamed 'Reset session' (D-41 revised after checkpoint feedback)
+- [Phase 04-claude-code-agent-sessions]: Phase 5 Resume design note (RCVR-02): exited banner gains 'Resume session' primary via claude --resume + persisted claude_session_id; 'Reset session' becomes secondary
+- [Phase 04-claude-code-agent-sessions]: Agent lifecycle locked in by 8-stage integration test on ClaudeBin fake-claude stub — real claude never spawned in CI
 
 ### Pending Todos
 
@@ -157,9 +161,10 @@ None yet.
 
 - [Phase 4]: Alt-screen replay strategy (headless VT emulator vs resize-jiggle) and exact Claude Code hook payloads / `--resume` flag semantics are version-dependent — flagged for deeper research during Phase 4 planning
 - [Phase 5]: `claude --continue`/`--resume` cwd-keyed semantics MEDIUM confidence — verify against installed version during Phase 5 planning
+- Plan-mode exit-plan approval → amber dot unconfirmed by user during 04-05 live verification — follow up in Phase 5 / milestone UAT (research OQ1)
 
 ## Session Continuity
 
-Last session: 2026-06-10T19:22:26.329Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-06-11T04:44:17.737Z
+Stopped at: Completed 04-05-PLAN.md — Phase 4 complete, ready for verification
 Resume file: None

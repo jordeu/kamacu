@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Foundation — Projects & Board** - Single binary, SQLite, projects sidebar, kanban board with task CRUD (completed 2026-06-10)
 - [x] **Phase 2: Terminal Engine** - Session manager + WebSocket bridge + browser terminal, proven against bash with detach/reattach (completed 2026-06-10)
 - [x] **Phase 3: Worktree Isolation & Bash Tabs** - Worktree + branch per task, safe confirmed cleanup, bash session tabs in the task view (completed 2026-06-10)
-- [ ] **Phase 4: Claude Code Agent Sessions** - Start button spawns `claude` in the worktree; live status badges via injected hooks
+- [x] **Phase 4: Claude Code Agent Sessions** - Start button spawns `claude` in the worktree; live status badges via injected hooks (completed 2026-06-11)
 - [ ] **Phase 5: Recovery & Review** - Restart reconciliation, `claude --resume` recovery, read-only diff tab
 
 ## Phase Details
@@ -99,7 +99,7 @@ Plans:
 - [x] 04-02-PLAN.md — Backend REST: migration 00003, token-gated hook receiver, agent spawn + 409, /api/agents/status, task-delete stop fix, D-45 WS attach clear
 - [x] 04-03-PLAN.md — Frontend status surfaces: useAgentStatuses poll, StatusDot, card dot + waiting border, sidebar waiting chip
 - [x] 04-04-PLAN.md — Agent tab: permanent first tab, pre-start/running/exited states, Insert description paste, tab dot
-- [ ] 04-05-PLAN.md — End-to-end agent lifecycle integration test, build gates, human verification with real claude
+- [x] 04-05-PLAN.md — End-to-end agent lifecycle integration test, build gates, human verification with real claude
 
 ### Phase 5: Recovery & Review
 **Goal**: Work survives server restarts and finished agent work can be reviewed without leaving the app
@@ -122,7 +122,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Foundation — Projects & Board | 0/7 | Complete    | 2026-06-10 |
 | 2. Terminal Engine | 0/5 | Complete    | 2026-06-10 |
 | 3. Worktree Isolation & Bash Tabs | 0/6 | Complete    | 2026-06-10 |
-| 4. Claude Code Agent Sessions | 0/5 | Planned | - |
+| 4. Claude Code Agent Sessions | 5/5 | Complete   | 2026-06-11 |
 | 5. Recovery & Review | 0/TBD | Not started | - |
 
 ---
