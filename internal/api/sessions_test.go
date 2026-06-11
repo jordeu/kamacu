@@ -325,7 +325,7 @@ func TestSessionAgentRestartAfterExit(t *testing.T) {
 	}
 	stopAndWait(t, mgr, body["id"].(string))
 
-	// "Start again" (D-41): a FRESH session after the first exited — 201, and
+	// "Reset session" (D-41, revised at checkpoint): a FRESH session after the first exited — 201, and
 	// the persisted claude_session_id is overwritten (latest wins).
 	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
 	if status != http.StatusCreated {

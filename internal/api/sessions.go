@@ -99,7 +99,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		opts.Cwd, opts.TaskID = path.String, req.TaskID
 	}
 	// One-agent-per-task gate (D-38), checked BEFORE spawning. An EXITED
-	// agent never blocks — that is the "Start again" path (D-41).
+	// agent never blocks — that is the "Reset session" path (D-41, revised at checkpoint).
 	if kind == session.KindAgent {
 		for _, info := range h.mgr.ListByTask(req.TaskID) {
 			if info.Kind == session.KindAgent && info.Status == session.StatusRunning {

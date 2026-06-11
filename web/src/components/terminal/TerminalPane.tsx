@@ -24,6 +24,8 @@ export interface TerminalPaneProps {
   headerActions?: ReactNode; // header right group, BEFORE Stop (D-36 slot)
   exitedPrimaryLabel?: string; // exited-banner primary action label; default "New terminal"
   showExitedClose?: boolean; // default true; false hides the banner's ghost Close (D-38)
+  exitedMessage?: string; // exited-banner copy override; default "Session exited (code {N})" (bash)
+  dimWhenExited?: boolean; // default false (bash unchanged); true dims the terminal area once exited (agent)
   onReady?: (api: { paste: (text: string) => void } | null) => void; // imperative paste handle
   onConnect?: () => void; // fires when conn state becomes "connected" (D-45 hook)
 }
@@ -43,6 +45,8 @@ export function TerminalPane({
   headerActions,
   exitedPrimaryLabel,
   showExitedClose,
+  exitedMessage,
+  dimWhenExited,
   onReady,
   onConnect,
 }: TerminalPaneProps) {
@@ -202,6 +206,10 @@ export function TerminalPane({
 
   const exited = conn.kind === "exited";
   const showStop = status === "running" && !exited && conn.kind !== "not-found";
+  // Agent panes render the dead terminal visually disabled (checkpoint
+  // revision); the REST status covers the pre-attach render of an already
+  // exited session. Bash panes (dimWhenExited unset) are unaffected.
+  const dimTerminal = Boolean(dimWhenExited) && (exited || status === "exited");
 
   // Header status text (12px muted) — only when not cleanly connected.
   const headerStatus =
@@ -216,8 +224,9 @@ export function TerminalPane({
             : null;
 
   // One banner at a time, docked under the header and above the viewport
-  // (zinc-900 surface, 1px zinc-800 bottom border). The terminal canvas is
-  // NEVER dimmed — exited history stays readable/copyable (D-15).
+  // (zinc-900 surface, 1px zinc-800 bottom border). Bash terminals are NEVER
+  // dimmed (D-15); agent panes opt into dimWhenExited (checkpoint revision) —
+  // exited history stays readable/copyable in both cases.
   let banner: ReactNode = null;
   if (conn.kind === "reconnecting") {
     banner = (
@@ -260,9 +269,10 @@ export function TerminalPane({
   } else if (conn.kind === "exited") {
     banner = (
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
-        {/* No special-casing for signal codes — render the server's number as-is */}
+        {/* Bash default: render the server's code as-is (no signal special-casing).
+            Agent panes override with code-free copy (checkpoint revision). */}
         <span className="text-sm font-medium">
-          Session exited (code {conn.code})
+          {exitedMessage ?? `Session exited (code ${conn.code})`}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" onClick={() => onNewTerminal?.()}>
@@ -307,10 +317,13 @@ export function TerminalPane({
       {banner}
 
       {/* Viewport — 8px inset painted in terminal background (never page
-          background); the canvas is NEVER dimmed (D-15). Clicking anywhere
-          in the viewport focuses xterm. */}
+          background). Bash canvases are never dimmed (D-15); agent panes dim
+          here when exited (banner stays full-contrast). Clicking anywhere in
+          the viewport focuses xterm. */}
       <div
-        className="relative min-h-0 flex-1 bg-[#09090b] p-2"
+        className={`relative min-h-0 flex-1 bg-[#09090b] p-2${
+          dimTerminal ? " opacity-50 brightness-75" : ""
+        }`}
         onClick={() => term?.focus()}
       >
         <div ref={viewportRef} className="h-full w-full" />

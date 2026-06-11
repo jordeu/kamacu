@@ -12,11 +12,13 @@ import {
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 
 /**
- * The permanent Agent tab's content (D-38..D-41): pre-start empty state,
- * running TerminalPane with the Insert-description header action, and the
- * exited banner whose single "Start again" action spawns a FRESH claude
- * session (Phase 5 owns recovery). The pane NEVER spawns — all spawning
- * happens here from click handlers (StrictMode double-spawn guard).
+ * The permanent Agent tab's content (D-38..D-41, revised at checkpoint
+ * 2026-06-11): pre-start empty state, running TerminalPane with the
+ * Insert-description header action, and the code-free exited banner
+ * ("Agent session ended.") over a dimmed terminal whose single
+ * "Reset session" action spawns a FRESH claude session (Phase 5 owns
+ * recovery/resume). The pane NEVER spawns — all spawning happens here
+ * from click handlers (StrictMode double-spawn guard).
  */
 export function AgentTab({
   task,
@@ -109,17 +111,20 @@ export function AgentTab({
   };
 
   // State B — session exists (running or exited). Exited output stays
-  // frozen, readable, copyable under the banner (D-15).
+  // frozen, readable, copyable under the banner (D-15) but renders dimmed
+  // so the dead agent looks disabled (checkpoint revision).
   return (
     <TerminalPane
-      key={agentSession.id} // fresh session ("Start again") remounts the pane
+      key={agentSession.id} // fresh session ("Reset session") remounts the pane
       sessionId={agentSession.id}
       label={`Agent`}
       status={agentSession.status}
       exitCode={agentSession.exitCode}
-      exitedPrimaryLabel={`Start again`} // D-41: always a fresh claude this phase
+      exitedPrimaryLabel={`Reset session`} // D-41 revised: "reset" wording, still a fresh claude
+      exitedMessage={`Agent session ended.`} // code-free — users don't know exit codes; codes still drive dot colors
+      dimWhenExited // exited agent terminal renders visually disabled; bash panes unchanged
       showExitedClose={false} // D-38: permanent tab, no Close
-      onNewTerminal={() => spawn.mutate()} // "Start again" — FRESH spawn
+      onNewTerminal={() => spawn.mutate()} // "Reset session" — FRESH spawn
       onSessionExit={() =>
         queryClient.invalidateQueries({ queryKey: ["sessions", task.id] })
       }
