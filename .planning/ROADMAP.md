@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Terminal Engine** - Session manager + WebSocket bridge + browser terminal, proven against bash with detach/reattach (completed 2026-06-10)
 - [x] **Phase 3: Worktree Isolation & Bash Tabs** - Worktree + branch per task, safe confirmed cleanup, bash session tabs in the task view (completed 2026-06-10)
 - [x] **Phase 4: Claude Code Agent Sessions** - Start button spawns `claude` in the worktree; live status badges via injected hooks (completed 2026-06-11)
-- [ ] **Phase 5: Recovery & Review** - Restart reconciliation, `claude --resume` recovery, read-only diff tab
+- [x] **Phase 5: Recovery & Review** - Restart reconciliation, `claude --resume` recovery, read-only diff tab (completed 2026-06-11)
 
 ## Phase Details
 
@@ -130,7 +130,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Terminal Engine | 0/5 | Complete    | 2026-06-10 |
 | 3. Worktree Isolation & Bash Tabs | 0/6 | Complete    | 2026-06-10 |
 | 4. Claude Code Agent Sessions | 5/5 | Complete    | 2026-06-11 |
-| 5. Recovery & Review | 0/5 | Not started | - |
+| 5. Recovery & Review | 0/5 | Complete    | 2026-06-11 |
 
 ---
 *Roadmap created: 2026-06-10*
