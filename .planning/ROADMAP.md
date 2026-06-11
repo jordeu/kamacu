@@ -122,7 +122,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Foundation — Projects & Board | 0/7 | Complete    | 2026-06-10 |
 | 2. Terminal Engine | 0/5 | Complete    | 2026-06-10 |
 | 3. Worktree Isolation & Bash Tabs | 0/6 | Complete    | 2026-06-10 |
-| 4. Claude Code Agent Sessions | 5/5 | Complete   | 2026-06-11 |
+| 4. Claude Code Agent Sessions | 5/5 | Complete    | 2026-06-11 |
 | 5. Recovery & Review | 0/TBD | Not started | - |
 
 ---
