@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Settings & Polish
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-06-11T15:24:43.916Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-06-11T15:42:19.120Z"
 last_activity: 2026-06-11
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 06 (settings-polish) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-06-11
 
@@ -82,6 +82,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05-recovery-review P05 | 55 min | 3 tasks | 1 files |
 | Phase 06 P01 | 11 min | 3 tasks | 14 files |
 | Phase 06-settings-polish P03 | 8 min | 3 tasks | 9 files |
+| Phase 06 P02 | 24 min | 2 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -178,6 +179,9 @@ Recent decisions affecting current work:
 - [Phase 06-settings-polish]: Settings select options render inside SettingsField from entry.options (API-driven SHELL-02 seam); SettingsPage never holds a shell constant
 - [Phase 06-settings-polish]: withMono runtime wrapper keeps UI-SPEC contract strings as single grep-able template literals while rendering flags/tokens/examples in font-mono
 - [Phase 06-settings-polish]: Settings inline errors: verbatim server copy only for ApiError status <500; network/5xx renders the fixed Couldn't-save copy; Enter-then-blur double-send suppressed via save.isPending && save.variables === draft
+- [Phase 06]: Settings read failure at spawn/creation is never a silent default fallback: spawn returns 500 'couldn't start a session'; provisionWorktree routes it into worktree_error (D-25)
+- [Phase 06]: worktree.Service.Root/PathFor kept as legacy test shape; production placement is the pure PathUnder(base,...) — creation path no longer consults Root
+- [Phase 06]: Every api test harness seeds worktree_base with its temp dir — the absent-row default would otherwise write worktrees into the real home during tests
 
 ### Pending Todos
 
@@ -190,7 +194,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11T15:24:43.911Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-06-11T15:42:19.115Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 6`

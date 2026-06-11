@@ -10,7 +10,7 @@
 
 - [x] **SET-01**: User can open a global settings page via a gear control at the bottom of the projects sidebar, on a dedicated full-page route
 - [x] **SET-02**: Settings persist in a local SQLite settings table across restarts and are read/written over the API
-- [ ] **SET-03**: Settings changes take effect at the next session spawn or worktree creation — running sessions and existing worktrees are unaffected, with no server restart required
+- [x] **SET-03**: Settings changes take effect at the next session spawn or worktree creation — running sessions and existing worktrees are unaffected, with no server restart required
 - [x] **SET-04**: Every setting has a sensible default and can be restored to it; the page surfaces validation errors inline without losing other edits
 
 ### Claude Agent Parameters
@@ -21,12 +21,12 @@
 ### Worktree Location
 
 - [x] **WT-01**: User can configure the base directory under which new task worktrees are created (default `~/.kangent/worktrees/`)
-- [ ] **WT-02**: Changing the worktree location affects only worktrees created afterward; existing worktrees keep their stored absolute paths and remain fully usable
+- [x] **WT-02**: Changing the worktree location affects only worktrees created afterward; existing worktrees keep their stored absolute paths and remain fully usable
 
 ### Shell Selection
 
 - [x] **SHELL-01**: User can select the shell command used for bash tabs from a dropdown (bash is the only option in v1.1)
-- [ ] **SHELL-02**: The bash-tab shell command is read from settings rather than hardcoded, so additional shells can be added later as data
+- [x] **SHELL-02**: The bash-tab shell command is read from settings rather than hardcoded, so additional shells can be added later as data
 
 ### Branch Naming
 
@@ -67,14 +67,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | SET-01 | Phase 6 | Complete |
 | SET-02 | Phase 6 | Complete |
-| SET-03 | Phase 6 | Pending |
+| SET-03 | Phase 6 | Complete |
 | SET-04 | Phase 6 | Complete |
 | AGENT-01 | Phase 6 | Complete |
 | AGENT-02 | Phase 6 | Complete |
 | WT-01 | Phase 6 | Complete |
-| WT-02 | Phase 6 | Pending |
+| WT-02 | Phase 6 | Complete |
 | SHELL-01 | Phase 6 | Complete |
-| SHELL-02 | Phase 6 | Pending |
+| SHELL-02 | Phase 6 | Complete |
 | BRANCH-01 | Phase 6 | Complete |
 | BRANCH-02 | Phase 6 | Complete |
 | UI-01 | Phase 6 | Complete |
