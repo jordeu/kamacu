@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Settings & Polish
-status: completed
-stopped_at: Phase 6 UI-SPEC approved
-last_updated: "2026-06-11T12:48:12.627Z"
-last_activity: 2026-06-11 — v1.1 roadmap created (Phase 6, 12/12 requirements mapped)
+status: executing
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-06-11T15:13:14.730Z"
+last_activity: 2026-06-11
 progress:
   total_phases: 1
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 4
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Milestone v1.1 — Phase 6 Settings & Polish (roadmap complete, ready to plan)
+**Current focus:** Phase 06 — settings-polish
 
 ## Current Position
 
-Phase: Phase 6 — Settings & Polish (not started)
-Plan: —
-Status: Roadmap complete — ready for `/gsd:plan-phase 6`
-Last activity: 2026-06-11 — v1.1 roadmap created (Phase 6, 12/12 requirements mapped)
+Phase: 06 (settings-polish) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-06-11
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -80,6 +80,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P03 | 4 min | 3 tasks | 5 files |
 | Phase 05 P04 | 11 min | 3 tasks | 6 files |
 | Phase 05-recovery-review P05 | 55 min | 3 tasks | 1 files |
+| Phase 06 P01 | 11 min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -170,6 +171,9 @@ Recent decisions affecting current work:
 - [Phase 05-recovery-review]: Frontend resumable is server-driven only: AgentTab reads the resumable flag from the deduped ['agent-statuses'] poll to pick which Reset/Resume pair renders — the UI never infers resumability client-side (no new props through TaskPage)
 - [Phase 05-recovery-review]: dotMeta null-exit-code branch (gray, code-free 'Exited' tooltip) ordered BEFORE the exitCode-0 ternary so DB-derived post-restart entries never render red (D-57 / Pitfall 3)
 - [Phase 05-recovery-review]: TerminalPane.exitedActions added to BOTH exited and not-found banner branches (a restart while attached surfaces as WS not-found); undefined default renders Phase 4 banner byte-for-byte so bash call sites are unaffected
+- [Phase 06]: Validate runs in the PUT handler (400) and inside Set (validate-before-write) so BRANCH-02 holds for any caller while validation vs storage errors stay distinct
+- [Phase 06]: {title} branch-template token sanitizer capped at 100 chars (research OQ3 resolved)
+- [Phase 06]: Tokenize is lenient on unclosed quotes (rest-of-string one token) — no UI-SPEC error copy exists for the pass-through extra-params field
 
 ### Pending Todos
 
@@ -182,7 +186,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11T12:48:12.624Z
-Stopped at: Phase 6 UI-SPEC approved
-Resume file: .planning/phases/06-settings-polish/06-UI-SPEC.md
+Last session: 2026-06-11T15:13:14.724Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 6`

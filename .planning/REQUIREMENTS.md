@@ -9,14 +9,14 @@
 ### Settings Infrastructure
 
 - [ ] **SET-01**: User can open a global settings page via a gear control at the bottom of the projects sidebar, on a dedicated full-page route
-- [ ] **SET-02**: Settings persist in a local SQLite settings table across restarts and are read/written over the API
+- [x] **SET-02**: Settings persist in a local SQLite settings table across restarts and are read/written over the API
 - [ ] **SET-03**: Settings changes take effect at the next session spawn or worktree creation — running sessions and existing worktrees are unaffected, with no server restart required
-- [ ] **SET-04**: Every setting has a sensible default and can be restored to it; the page surfaces validation errors inline without losing other edits
+- [x] **SET-04**: Every setting has a sensible default and can be restored to it; the page surfaces validation errors inline without losing other edits
 
 ### Claude Agent Parameters
 
 - [ ] **AGENT-01**: User can edit a free-text list of extra parameters appended to every `claude` agent spawn
-- [ ] **AGENT-02**: The extra-params field defaults to including `--dangerously-skip-permissions`, which the user can remove to restore interactive permission prompts
+- [x] **AGENT-02**: The extra-params field defaults to including `--dangerously-skip-permissions`, which the user can remove to restore interactive permission prompts
 
 ### Worktree Location
 
@@ -31,7 +31,7 @@
 ### Branch Naming
 
 - [ ] **BRANCH-01**: User can edit the per-task branch-name template using tokens (`{slug}`, `{id}`, `{title}`), default `task/{slug}-{id}`
-- [ ] **BRANCH-02**: The branch template is validated to always produce a legal, collision-safe git ref; an invalid template is rejected with a clear message and never used to create a branch
+- [x] **BRANCH-02**: The branch template is validated to always produce a legal, collision-safe git ref; an invalid template is rejected with a clear message and never used to create a branch
 
 ### Task View Polish
 
@@ -66,17 +66,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | SET-01 | Phase 6 | Pending |
-| SET-02 | Phase 6 | Pending |
+| SET-02 | Phase 6 | Complete |
 | SET-03 | Phase 6 | Pending |
-| SET-04 | Phase 6 | Pending |
+| SET-04 | Phase 6 | Complete |
 | AGENT-01 | Phase 6 | Pending |
-| AGENT-02 | Phase 6 | Pending |
+| AGENT-02 | Phase 6 | Complete |
 | WT-01 | Phase 6 | Pending |
 | WT-02 | Phase 6 | Pending |
 | SHELL-01 | Phase 6 | Pending |
 | SHELL-02 | Phase 6 | Pending |
 | BRANCH-01 | Phase 6 | Pending |
-| BRANCH-02 | Phase 6 | Pending |
+| BRANCH-02 | Phase 6 | Complete |
 | UI-01 | Phase 6 | Pending |
 
 **Coverage:**

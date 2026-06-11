@@ -41,7 +41,7 @@ Full details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 **Plans:** 4 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Settings foundation: migration 00004, internal/settings package (defaults, validation, template, tokenizer), GET/PUT /api/settings
+- [x] 06-01-PLAN.md — Settings foundation: migration 00004, internal/settings package (defaults, validation, template, tokenizer), GET/PUT /api/settings
 - [ ] 06-02-PLAN.md — Backend wiring: agent extra-params + shell into SpawnOpts, branch template + worktree base into provisionWorktree (create + Retry)
 - [ ] 06-03-PLAN.md — Frontend: /settings page + sidebar gear + per-field save model, UI-01 task-header width fix
 - [ ] 06-04-PLAN.md — Build + full-suite gate, then human-verify checkpoint across all seven success criteria
