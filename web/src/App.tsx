@@ -5,6 +5,7 @@ import { useProjects } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
 import BoardPage from "@/pages/BoardPage";
+import SettingsPage from "@/pages/SettingsPage";
 import TaskPage from "@/pages/TaskPage";
 import TerminalPage from "@/pages/TerminalPage";
 
@@ -43,6 +44,7 @@ export default function App() {
           path="/projects/:projectId/tasks/:taskId"
           element={<TaskPage />}
         />
+        <Route path="/settings" element={<SettingsPage />} />
         {/* Dev/debug surface for the terminal engine (D-12) — reached by URL */}
         <Route path="/terminal" element={<TerminalPage />} />
       </Route>
