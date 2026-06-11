@@ -23,6 +23,13 @@ export function dotMeta(
     case "idle":
       return { className: "bg-zinc-400", tooltip: "Idle" };
     case "exited":
+      if (entry.exitCode === null && !entry.stopRequested) {
+        // Post-restart DB-derived entry (D-57 / Pitfall 3): a resumable past
+        // session the manager no longer knows about. Muted exited gray with a
+        // code-free tooltip — never red, never "code null". No new dot states,
+        // no pulse, no badge.
+        return { className: "bg-zinc-600", tooltip: `Exited` };
+      }
       return {
         className:
           entry.exitCode === 0 || entry.stopRequested

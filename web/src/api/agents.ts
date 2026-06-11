@@ -8,6 +8,7 @@ export interface AgentStatusEntry {
   status: "working" | "idle" | "waiting" | "exited";
   exitCode: number | null;
   stopRequested: boolean;
+  resumable: boolean;
 }
 
 /** Single source of truth for card dots, the Agent tab dot, and sidebar

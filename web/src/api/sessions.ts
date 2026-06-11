@@ -67,6 +67,27 @@ export function useSpawnAgent(taskId: number) {
   });
 }
 
+export function useResumeAgent(taskId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      post<TermSession>("/api/sessions", {
+        task_id: taskId,
+        kind: "agent",
+        resume: true,
+      }),
+    onSuccess: (session) => {
+      // Same spawn-select race fix as useSpawnAgent: write the fresh session
+      // into the scoped cache so the pane attaches from the mutation result.
+      queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
+        old ? [session, ...old] : [session],
+      );
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
+    },
+  });
+}
+
 export function useStopSession() {
   const queryClient = useQueryClient();
   return useMutation<void, ApiError, string>({
