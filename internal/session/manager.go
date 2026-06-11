@@ -42,9 +42,10 @@ func NewManager() *Manager {
 
 // SpawnOpts configures a new session.
 type SpawnOpts struct {
-	Cwd    string // "" -> user home (preserves Phase 2 /terminal dev behavior)
-	TaskID int64  // 0 -> unscoped dev session, label "bash #N" (global counter)
-	Kind   Kind   // zero value = KindBash (full Phase 2/3 backward compatibility)
+	Cwd             string // "" -> user home (preserves Phase 2 /terminal dev behavior)
+	TaskID          int64  // 0 -> unscoped dev session, label "bash #N" (global counter)
+	Kind            Kind   // zero value = KindBash (full Phase 2/3 backward compatibility)
+	ResumeSessionID string // agent-only: spawn `claude --resume <id>` instead of minting a new --session-id (RCVR-02, D-55)
 }
 
 // SetAgentConfig installs the agent spawn configuration (hook receiver
@@ -84,6 +85,10 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	if kind == KindAgent && opts.Cwd == "" {
 		return nil, fmt.Errorf("agent sessions require a working directory")
 	}
+	// Resume is agent-only: only the claude CLI takes --resume.
+	if opts.ResumeSessionID != "" && kind != KindAgent {
+		return nil, fmt.Errorf("resume requires an agent session")
+	}
 	dir := home
 	if opts.Cwd != "" {
 		fi, err := os.Stat(opts.Cwd)
@@ -104,7 +109,19 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		cfg := m.agentCfg
 		m.mu.Unlock()
 
-		claudeSessionID = uuid.NewString() // deterministic Phase 5 --resume key
+		// Resume reuses the stored id (verified v2.1.173: --resume keeps the
+		// same session id, never forks); a fresh spawn mints a new one
+		// (D-55 newest-wins). NEVER pass --fork-session (it forks a new id,
+		// orphaning tasks.claude_session_id) and NEVER combine --resume with
+		// --session-id.
+		claudeSessionID = opts.ResumeSessionID
+		if claudeSessionID == "" {
+			claudeSessionID = uuid.NewString() // deterministic Phase 5 --resume key
+		}
+		idFlag := "--session-id"
+		if opts.ResumeSessionID != "" {
+			idFlag = "--resume"
+		}
 		bin := cfg.ClaudeBin
 		if bin == "" {
 			bin, err = exec.LookPath("claude")
@@ -113,9 +130,12 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			}
 		}
 		// D-51/D-53: no permission flags, no --add-dir, no --mcp-config —
-		// just the session identity and the inline hook overlay.
+		// just the session identity and the inline hook overlay. The overlay
+		// is verified to apply on resume too (SessionStart fires with source
+		// "resume"), so the status machine needs zero changes: a resumed spawn
+		// starts "working" exactly like a fresh one.
 		cmd = exec.Command(bin,
-			"--session-id", claudeSessionID,
+			idFlag, claudeSessionID,
 			"--settings", buildOverlayJSON(cfg.BaseURL, cfg.Token, id),
 		)
 		cmd.Dir = dir
