@@ -30,7 +30,14 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Active
 
-**Milestone v1.1: Settings & Polish** — all requirements validated in Phase 6; milestone ready for completion.
+**Milestone v1.2: Quota & Resumable Shells**
+
+- [ ] Claude quota indicator in the top-right of the main area (compact label + 5h usage bar, visible on board and task view)
+- [ ] Quota hover popup with all quotas (5h, 7d, model-specific): percentage bars, reset times, "Updated Xm ago", manual refresh
+- [ ] Background quota auto-poll (~60s) plus manual refresh
+- [ ] "tmux" added to the global shell setting dropdown (existing API-driven seam, SHELL-FUT-01)
+- [ ] tmux-backed tabs detach on close instead of dying; reopening reattaches
+- [ ] tmux-backed tabs survive a Kangent server restart with a Resume affordance that reattaches
 
 ### Out of Scope
 
@@ -48,21 +55,20 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 Kangent v1 does the whole loop: create a project on a local git repo → add a task (worktree + `task/<slug>-<id>` branch auto-created under `~/.kangent/worktrees/`) → Start a real `claude` session in the worktree PTY → watch the board as a dispatcher (status dots, amber when an agent needs you) → leave and reattach across tab closes and server restarts (`claude --resume`) → review the diff vs merge-base → mark Done with gated worktree cleanup. Stack: Go stdlib mux + modernc SQLite + creack/pty + coder/websocket; React 19 + Vite + Tailwind 4 + shadcn + xterm.js 6 + dnd-kit + TanStack Query.
 
-## Current Milestone: v1.1 Settings & Polish
+## Current Milestone: v1.2 Quota & Resumable Shells
 
-**Goal:** A global settings page for configuring how agent sessions, worktrees, branches, and shells are created — plus a task-view header layout fix.
+**Goal:** Make Kangent a better dispatcher cockpit: see Claude quota usage at a glance before starting agents, and make bash tabs durable via tmux-backed shells that survive tab closes and server restarts.
 
 **Target features:**
-- Global settings page (sidebar gear → full-page route, SQLite settings table behind the API)
-- Configurable claude extra-params, pre-filled with `--dangerously-skip-permissions` (removable) — reverses v1's D-51 interactive-by-default posture
-- Configurable worktree base location (default `~/.kangent/worktrees/`; new worktrees only)
-- Configurable bash-tab shell (dropdown, bash-only for now; bash de-hardcoded so more are later data)
-- Configurable branch-name token template (default `task/{slug}-{id}`, validated to a legal collision-safe ref)
-- Task-view header layout fix (title row + three-dots menu span full page width)
+- Claude quota indicator — compact "Claude 5h" label + usage bar in the top-right of the main area (board and task view); hover popup shows all quotas (5h, 7d, model-specific) with percentage bars, reset times, "Updated Xm ago", and manual refresh (SlayZone-style)
+- Background quota auto-poll (~60s) plus manual refresh
+- "tmux" shell type in the existing global shell setting dropdown (the API-driven seam built in v1.1 for SHELL-FUT-01)
+- tmux-backed tabs detach on close (not kill) and reattach on reopen; after a Kangent restart they offer Resume, reattaching to the still-running tmux session
 
-**Key context:** global-only (no per-project overrides); settings apply at next spawn/creation (no restart); stored in SQLite.
-
-**Status:** Phase 6 complete (2026-06-11) — all 13 requirement IDs verified (19/19 must-haves), seven success criteria human-verified live on the release binary. Milestone ready for `/gsd:complete-milestone`.
+**Key context:**
+- Quota data source needs empirical research: how SlayZone / `claude /usage` obtain quota data (likely the OAuth usage endpoint), auth, and rate behavior — verify against the installed claude version before planning
+- tmux availability must be detected gracefully (option valid only when `tmux` resolves), mirroring v1.1's LookPath shell validation
+- Both features ride existing seams: data-driven shell dropdown, v1.1 session lifecycle/resume UX patterns
 
 ## Deferred (post-v1.1)
 
@@ -113,4 +119,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 — Phase 6 (Settings & Polish) complete; v1.1 ready for milestone completion*
+*Last updated: 2026-06-11 — milestone v1.2 Quota & Resumable Shells started*

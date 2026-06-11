@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Settings & Polish
-status: milestone_complete
-stopped_at: v1.1 milestone archived (tag v1.1)
-last_updated: "2026-06-11T18:40:00.000Z"
+milestone: v1.2
+milestone_name: Quota & Resumable Shells
+status: defining_requirements
+stopped_at: Milestone v1.2 started — defining requirements
+last_updated: "2026-06-11T19:00:00.000Z"
 last_activity: 2026-06-11
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,15 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Planning next milestone
+**Current focus:** Milestone v1.2 Quota & Resumable Shells — defining requirements
 
 ## Current Position
 
-Milestone: v1.1 Settings & Polish — COMPLETE (shipped 2026-06-11, tagged v1.1)
-Phase: None active — between milestones
-Next: `/gsd:new-milestone` to start the next cycle
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-11 — Milestone v1.2 started
 
-Progress: [██████████] 100% (v1.1: 1 phase, 4 plans)
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -67,6 +68,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-06-11
-Stopped at: v1.1 milestone archived and tagged
+Stopped at: Milestone v1.2 started — defining requirements
 Resume file: None
-Next: `/gsd:new-milestone` — questioning → research → requirements → roadmap
+Next: requirements → roadmap, then `/gsd:plan-phase 7`
