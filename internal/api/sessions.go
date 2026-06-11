@@ -16,7 +16,7 @@ import (
 // memory-only this phase; db is consulted only to resolve a task's worktree
 // path when a spawn is task-scoped (TERM-04).
 func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB) {
-	s := &sessionHandlers{mgr: mgr, db: db}
+	s := &sessionHandlers{mgr: mgr, db: db, globRoot: defaultTranscriptGlobRoot()}
 	mux.HandleFunc("GET /api/sessions", s.list)
 	mux.HandleFunc("POST /api/sessions", s.create)
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
@@ -24,8 +24,9 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB) {
 }
 
 type sessionHandlers struct {
-	mgr *session.Manager
-	db  *sql.DB
+	mgr      *session.Manager
+	db       *sql.DB
+	globRoot string // ~/.claude/projects; tests inject a temp dir for resume validation
 }
 
 // list handles GET /api/sessions — newest first, JSON [] when empty.
@@ -60,6 +61,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TaskID int64  `json:"task_id"`
 		Kind   string `json:"kind"`
+		Resume bool   `json:"resume"` // RCVR-02: resume the task's stored claude session (agent-only)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -74,6 +76,11 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid kind")
 		return
 	}
+	// Resume is a variant of the agent spawn only — never a bash session.
+	if req.Resume && kind != session.KindAgent {
+		writeError(w, http.StatusBadRequest, "resume requires kind agent")
+		return
+	}
 	// Agents always run in a task worktree: no task means no worktree — the
 	// same gate (and copy) as a worktree-less task.
 	if kind == session.KindAgent && req.TaskID <= 0 {
@@ -81,9 +88,14 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := session.SpawnOpts{Kind: kind}
+	// csid holds the task's persisted claude session id, read fresh inside the
+	// handler (Pitfall 6: this in-handler read is the single source of truth at
+	// spawn time — a stale client Resume after a Reset minted a new id simply
+	// resumes the NEW id, which is correct newest-wins behavior).
+	var csid sql.NullString
 	if req.TaskID > 0 {
 		var path sql.NullString
-		err := h.db.QueryRow(`SELECT worktree_path FROM tasks WHERE id = ?`, req.TaskID).Scan(&path)
+		err := h.db.QueryRow(`SELECT worktree_path, claude_session_id FROM tasks WHERE id = ?`, req.TaskID).Scan(&path, &csid)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
@@ -100,6 +112,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	}
 	// One-agent-per-task gate (D-38), checked BEFORE spawning. An EXITED
 	// agent never blocks — that is the "Reset session" path (D-41, revised at checkpoint).
+	// Resume rides this gate unchanged — it IS D-67's never-two-PTYs guarantee.
 	if kind == session.KindAgent {
 		for _, info := range h.mgr.ListByTask(req.TaskID) {
 			if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
@@ -107,6 +120,16 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	// Resume validation, AFTER the one-per-task gate: the server never trusts
+	// the client's resumable snapshot. A NULL stored id or a missing transcript
+	// is an honest 409 (the transcript glob self-heals D-56's resumable:false).
+	if req.Resume {
+		if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
+			writeError(w, http.StatusConflict, "no session to resume")
+			return
+		}
+		opts.ResumeSessionID = csid.String
 	}
 	// Spawn's stat pre-check covers a vanished worktree dir → same 500 path.
 	sess, err := h.mgr.Spawn(opts)

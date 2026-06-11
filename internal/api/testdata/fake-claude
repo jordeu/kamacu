@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# testdata/fake-claude: enough to exercise spawn/status/teardown.
+# testdata/fake-claude: claude stand-in for CI (spawned via AgentConfig.ClaudeBin
+# — the real binary is never invoked). Records argv so tests assert --resume vs
+# --session-id; FAKE_CLAUDE_RESUME_FAIL mirrors the verified v2.1.173
+# missing-transcript failure (error text + exit 1). Preserves the 04-05
+# contract: bracketed-paste enable at startup and the SIGTERM -> exit 143 trap.
+printf '%s\n' "$@" > "${FAKE_CLAUDE_ARGS_FILE:-/dev/null}"
 printf '\x1b[?2004h'           # bracketed paste on (like real claude)
+if [[ "$1" == "--resume" && -n "$FAKE_CLAUDE_RESUME_FAIL" ]]; then
+  echo "No conversation found with session ID: $2"
+  exit 1
+fi
 echo "fake claude ready"
 trap 'exit 143' TERM            # mirrors verified SIGTERM behavior
 sleep 300 & wait                # idle until stopped
