@@ -54,13 +54,13 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Claude Code CLI in a PTY (not Agent SDK chat UI) | Full interactive CLI experience with zero reimplementation | — Pending |
-| Worktree + branch auto-created per task | Isolates concurrent agent sessions; vibe-kanban-proven model | — Pending |
-| Sessions persist server-side | Browser is a detachable view; work survives tab closes | — Pending |
-| Explicit Start button for agent sessions | Most control, least surprise; no accidental agent runs | — Pending |
-| Go backend + React frontend | User preference | — Pending |
-| Manual git workflow, app only cleans up worktrees | Keeps v1 scope lean; user merges/PRs in terminal | — Pending |
-| Fixed columns: To Do / In Progress / In Review / Done | In Review holds agent-finished work awaiting human check | — Pending |
+| Claude Code CLI in a PTY (not Agent SDK chat UI) | Full interactive CLI experience with zero reimplementation | ✓ Good — full TUI/plan-mode/hooks work unmodified (Phase 4) |
+| Worktree + branch auto-created per task | Isolates concurrent agent sessions; vibe-kanban-proven model | ✓ Good (Phase 3) |
+| Sessions persist server-side | Browser is a detachable view; work survives tab closes | ✓ Good — detach/reattach + restart resume (Phases 2, 5) |
+| Explicit Start button for agent sessions | Most control, least surprise; no accidental agent runs | ✓ Good (Phase 4) |
+| Go backend + React frontend | User preference | ✓ Good — single embedded binary |
+| Manual git workflow, app only cleans up worktrees | Keeps v1 scope lean; user merges/PRs in terminal | ✓ Good (Phase 3) |
+| Fixed columns: To Do / In Progress / In Review / Done | In Review holds agent-finished work awaiting human check | ✓ Good (Phase 1) |
 
 ## Evolution
 
