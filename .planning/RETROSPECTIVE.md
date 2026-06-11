@@ -46,6 +46,44 @@
 
 ---
 
+## Milestone: v1.1 — Settings & Polish
+
+**Shipped:** 2026-06-11
+**Phases:** 1 | **Plans:** 4
+
+### What Was Built
+- SQLite-backed settings KV store (migration 00004) with code defaults (absent row = default), per-key validation carrying the UI-SPEC canonical error copy, branch-template expansion with git ref validation, quote-aware extra-params tokenizer, and the GET/PUT `/api/settings` surface (06-01)
+- All four settings wired read-at-use into their existing v1.0 call sites — claude extra-params on every spawn (fresh + resume), LookPath-resolved bash-tab shell, template-driven branches under the settings worktree base — managers stayed DB-free, so "applies at next spawn, no restart" is structural (06-02)
+- Full `/settings` page with per-field commit (blur/Enter, Esc revert, 2s Saved flash, Reset to default, verbatim inline server errors), sidebar gear, API-driven shell select, and the UI-01 full-width task header (06-03)
+- Phase gate: clean release binary, full suite green across 8 packages, 8/8 verbatim copy audit, restart-persistence smoke, all seven success criteria approved live (06-04)
+
+### What Worked
+- **Coarse single-phase milestone.** Twelve requirements in one phase with 4 plans kept planning overhead proportionate to integration-only work — no artificial phase boundaries inside what was really one feature.
+- **Integration-over-net-new framing held.** Every setting landed in an existing v1.0 call site; zero new Go modules and zero new npm deps vs the v1.0 tag, verified by diffing manifests against the tag in the gate.
+- **Grep-able copy contract.** The UI-SPEC's canonical error strings were asserted verbatim by tests and re-audited at the gate (8/8) — copy fidelity stayed checkable, not aspirational.
+- **Backend/frontend wave parallelism again.** Disjoint file ownership let 06-02 and 06-03 run concurrently in the same checkout with interleaved commits and no conflicts.
+- **Checkpoint → continuation-agent flow.** The 06-04 gate ran its automated half, returned structured state, and a fresh continuation agent closed the plan after approval — no resume fragility.
+
+### What Was Inefficient
+- **One cross-plan test-harness clash.** 06-01's `TestSettingsGetAllDefaults` collided with 06-02's planned seed row; auto-fixed in-flight, but explicit harness/seed ownership in plan frontmatter would have prevented it.
+- **gsd-tools key-link checker false negatives.** 5 link checks failed on path-suffix parsing and a regex-escaping bug; each had to be manually re-verified with grep during verification.
+- **Checkpoint asked for two things, got one.** The gate requested approval *plus* the carried plan-mode-amber observation; the user replied only "approved", so the carried v1.0 UAT item (research OQ1) remains open. Observations should be separate, explicit questions.
+
+### Patterns Established
+- **Settings KV with absent-row-as-default.** No seeded rows; defaults live in code, so new settings need no migration and `Reset to default` is a row delete.
+- **Read-at-use settings reads in handlers.** Managers take values via `SpawnOpts`/locals and never import the store — next-spawn semantics by construction.
+
+### Key Lessons
+1. **Make checkpoint questions atomic** — a combined "approve + report observation" prompt yields partial answers; carried UAT items need their own explicit question.
+2. **Declare test-harness/seed ownership across plans** — parallel plans sharing a test DB schema need the same `files_modified`-style discipline for fixtures.
+3. **Diff dependency manifests against the previous tag at the gate** — cheap, mechanical proof of the zero-new-deps discipline.
+
+### Cost Observations
+- Single execution session (orchestrated on Fable 5, inherit profile): 6 subagents (~830k subagent tokens) across 3 waves + verifier; 19 commits.
+- Notable: wave 2 ran backend and frontend executors concurrently in the shared checkout (harness worktree isolation unavailable); zero conflicts thanks to disjoint ownership.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -53,14 +91,17 @@
 | Milestone | Phases | Plans | Key Change |
 |-----------|--------|-------|------------|
 | v1.0 | 5 | 28 | Established the discuss → ui-spec → research → plan → execute → verify loop with human checkpoints; risk-front-loaded roadmap; interface-first wave parallelism |
+| v1.1 | 1 | 4 | Coarse single-phase milestone for integration-only scope; checkpoint → fresh continuation-agent flow; manifest-diff-vs-tag as the zero-dep gate |
 
 ### Cumulative Quality
 
 | Milestone | Go packages tested | Frontend | Zero-Dep Discipline |
 |-----------|--------------------|----------|--------------------|
 | v1.0 | 6 (api, diff, session, store, worktree, ws) | tsc + vite build green | Held throughout — only sanctioned deps added (xterm set, dnd-kit, radix collapsible); no go.mod surprises |
+| v1.1 | 7 (+settings) | tsc + vite build green | Held — zero new Go modules and zero new npm deps, proven by manifest diff against the v1.0 tag |
 
 ### Top Lessons (Verified Across Milestones)
 
-1. *(to be confirmed by v1.1)* Empirical per-version tool research before planning.
-2. *(to be confirmed by v1.1)* Build the riskiest subsystem first against a stand-in.
+1. **Empirical per-version tool research before planning** — exercised lightly in v1.1 (integration-only scope; call sites verified against the actual v1.0 code rather than assumptions). Held.
+2. *(still to be re-tested — v1.1 had no novel-risk subsystem)* Build the riskiest subsystem first against a stand-in.
+3. **Interface-first wave parallelism with disjoint file ownership** — confirmed across both milestones; zero merge conflicts in any parallel wave.
