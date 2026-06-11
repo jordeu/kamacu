@@ -1,7 +1,8 @@
 ---
 phase: 5
 slug: recovery-review
-status: draft
+status: approved
+reviewed_at: 2026-06-11
 shadcn_initialized: true
 preset: radix-nova / zinc dark (components.json present — initialized in Phase 1)
 created: 2026-06-11
@@ -121,7 +122,7 @@ Which pair renders is driven by a single server-reported `resumable` flag per ta
 | Binary file | Header shows path + muted 12px `Binary file changed` in place of ± stats; section is not expandable (D-62) |
 | Empty state (D-63) | Single muted body line, centered: `No changes yet. The worktree matches {base}.` (`{base}` in mono). No heading, no CTA — quiet |
 | Loading (first load, no data) | Centered muted body: `Loading diff…` — only shown if the fetch takes >150ms (Phase 2 no-flash rule) |
-| Error | Centered: `Couldn't load the diff.` (14px body) + optional muted 12px line with the server-reported git error verbatim + `Retry` button (outline, small) |
+| Error | Centered: `Couldn't load the diff.` (14px body) + optional muted 12px line with the server-reported git error verbatim + `Reload diff` button (outline, small) |
 
 ### Silence contract (D-58, D-65)
 
