@@ -100,6 +100,7 @@ func main() {
 	api.Routes(mux, db, wtSvc, mgr)
 	api.SessionRoutes(mux, mgr, db)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr)
+	api.DiffRoutes(mux, db, wtSvc)
 	api.HookRoutes(mux, mgr, hookToken)
 	api.AgentRoutes(mux, mgr, db)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
