@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router";
-import { Plus } from "lucide-react";
+import { Link, useLocation, useParams } from "react-router";
+import { Plus, Settings } from "lucide-react";
 import { useProjects } from "@/api/queries";
 import { useAgentStatuses } from "@/api/agents";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarContent,
@@ -26,6 +27,7 @@ export function ProjectSidebar() {
   const { data: projects } = useProjects();
   const { data: agentStatuses } = useAgentStatuses();
   const { projectId } = useParams();
+  const location = useLocation();
   const [addOpen, setAddOpen] = useState(false);
 
   // D-49: count agents (not tasks-with-sessions) waiting for input, per project.
@@ -90,16 +92,36 @@ export function ProjectSidebar() {
         </SidebarMenu>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="flex-row items-center gap-2">
         <Button
           variant="ghost"
           size="sm"
-          className="justify-start"
+          className="flex-1 justify-start"
           onClick={() => setAddOpen(true)}
         >
           <Plus />
           Add project
         </Button>
+        {/* SET-01: gear → dedicated full-page /settings route. Active state
+            reuses the selected-sidebar-item treatment from the project rows. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon-sm"
+              className={cn(
+                location.pathname === "/settings" &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground",
+              )}
+            >
+              <Link to="/settings" aria-label="Settings">
+                <Settings className="size-4" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
       </SidebarFooter>
 
       <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} />

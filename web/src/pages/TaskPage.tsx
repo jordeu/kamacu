@@ -376,9 +376,10 @@ export default function TaskPage() {
 
   return (
     // Full-width working surface (Layout Contract): terminals get the whole
-    // main area; header/meta and Description prose keep 860px islands.
+    // main area; header/meta span full width (UI-01) while Description prose
+    // keeps its 860px island.
     <div className="flex h-full w-full flex-col gap-6 p-4">
-      <div className="max-w-[860px] shrink-0 space-y-2">
+      <div className="w-full shrink-0 space-y-2">
         <header className="flex items-center gap-2">
           <Tooltip>
             <TooltipTrigger asChild>
