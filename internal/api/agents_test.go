@@ -2,9 +2,11 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -80,6 +82,193 @@ func spawnAgentFor(t *testing.T, srv *httptest.Server, taskID int64) string {
 		t.Fatalf("agent spawn: no session id in %v", body)
 	}
 	return id
+}
+
+// writeTranscriptFixture creates root/<projdir>/<csid>.jsonl so transcriptExists
+// hits for csid against globRoot=root.
+func writeTranscriptFixture(t *testing.T, root, csid string) {
+	t.Helper()
+	dir := filepath.Join(root, "-home-x-wt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, csid+".jsonl"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write transcript fixture: %v", err)
+	}
+}
+
+// setTaskClaudeSession stamps tasks.claude_session_id for a task (the
+// post-restart DB state recovery reads).
+func setTaskClaudeSession(t *testing.T, db *sql.DB, taskID int64, csid string) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, csid, taskID); err != nil {
+		t.Fatalf("set claude_session_id: %v", err)
+	}
+}
+
+// statusEntriesDirect invokes the status handler in-package with an injected
+// globRoot, returning the decoded entries. It simulates a fresh process by
+// taking an explicit (possibly empty) manager.
+func statusEntriesDirect(t *testing.T, mgr *session.Manager, db *sql.DB, globRoot string) []map[string]any {
+	t.Helper()
+	a := &agentHandlers{mgr: mgr, db: db, globRoot: globRoot}
+	req := httptest.NewRequest("GET", "/api/agents/status", nil)
+	rec := httptest.NewRecorder()
+	a.status(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status handler: code = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("decode status body %q: %v", rec.Body.String(), err)
+	}
+	return entries
+}
+
+// TestAgentStatusPostRestartResumable: an EMPTY manager (post-restart) plus a
+// task row carrying claude_session_id + worktree_path + a transcript fixture
+// yields exactly one DB-derived entry with the D-57 gray-dot shape and
+// resumable:true.
+func TestAgentStatusPostRestartResumable(t *testing.T) {
+	srv, _, db := newAgentServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	body := createTask(t, srv, pid, "Recovered")
+	id := taskID(t, body)
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("task provisioning failed: %v", body)
+	}
+
+	csid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0a01"
+	setTaskClaudeSession(t, db, id, csid)
+	globRoot := t.TempDir()
+	writeTranscriptFixture(t, globRoot, csid)
+
+	// Fresh manager == post-restart: nothing spawned.
+	entries := statusEntriesDirect(t, session.NewManager(), db, globRoot)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1 DB-derived resumable entry: %v", len(entries), entries)
+	}
+	e := entries[0]
+	if e["taskId"] != float64(id) {
+		t.Errorf("taskId = %v, want %d", e["taskId"], id)
+	}
+	if e["projectId"] != float64(pid) {
+		t.Errorf("projectId = %v, want %d", e["projectId"], pid)
+	}
+	if e["sessionId"] != "" {
+		t.Errorf("sessionId = %v, want \"\" (no live session post-restart)", e["sessionId"])
+	}
+	if e["status"] != "exited" {
+		t.Errorf("status = %v, want %q", e["status"], "exited")
+	}
+	if v, present := e["exitCode"]; !present || v != nil {
+		t.Errorf("exitCode = %v (present=%v), want explicit null (D-57 gray dot)", v, present)
+	}
+	if e["stopRequested"] != false {
+		t.Errorf("stopRequested = %v, want false", e["stopRequested"])
+	}
+	if e["resumable"] != true {
+		t.Errorf("resumable = %v, want true", e["resumable"])
+	}
+}
+
+// TestAgentStatusPostRestartNoTranscript: same post-restart shape but with NO
+// transcript fixture → empty array. Non-resumable past sessions get no dot
+// (D-57 only constrains resumable tasks).
+func TestAgentStatusPostRestartNoTranscript(t *testing.T) {
+	srv, _, db := newAgentServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	body := createTask(t, srv, pid, "Never Prompted")
+	id := taskID(t, body)
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("task provisioning failed: %v", body)
+	}
+
+	setTaskClaudeSession(t, db, id, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0a02")
+	globRoot := t.TempDir() // empty — no transcript
+
+	entries := statusEntriesDirect(t, session.NewManager(), db, globRoot)
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want 0 (no transcript -> not resumable -> no dot): %v", len(entries), entries)
+	}
+}
+
+// TestAgentStatusRunningNotResumable: a RUNNING agent reports resumable:false
+// and produces no duplicate DB-derived entry for the same task.
+func TestAgentStatusRunningNotResumable(t *testing.T) {
+	srv, mgr, db := newAgentServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	body := createTask(t, srv, pid, "Live Work")
+	id := taskID(t, body)
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("task provisioning failed: %v", body)
+	}
+	_ = pid
+
+	sid := spawnAgentFor(t, srv, id)
+	csid := claudeSessionIDFor(t, db, id)
+	if !csid.Valid {
+		t.Fatal("claude_session_id NULL after spawn")
+	}
+	globRoot := t.TempDir()
+	writeTranscriptFixture(t, globRoot, csid.String) // even WITH a transcript, a running agent is never resumable
+
+	entries := statusEntriesDirect(t, mgr, db, globRoot)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want exactly 1 (no DB-derived duplicate): %v", len(entries), entries)
+	}
+	e := entries[0]
+	if e["sessionId"] != sid {
+		t.Errorf("sessionId = %v, want the live session %q", e["sessionId"], sid)
+	}
+	if e["status"] != "working" {
+		t.Errorf("status = %v, want %q", e["status"], "working")
+	}
+	if e["resumable"] != false {
+		t.Errorf("resumable = %v, want false for a running agent", e["resumable"])
+	}
+}
+
+// TestAgentStatusExitedResumable: an EXITED agent still in the manager whose
+// task carries a stored id + transcript reports resumable:true with its real
+// sessionId/exitCode (the within-run banner needs this for the D-54a pair).
+func TestAgentStatusExitedResumable(t *testing.T) {
+	srv, mgr, db := newAgentServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	body := createTask(t, srv, pid, "Exited Work")
+	id := taskID(t, body)
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("task provisioning failed: %v", body)
+	}
+	_ = pid
+
+	sid := spawnAgentFor(t, srv, id)
+	csid := claudeSessionIDFor(t, db, id)
+	if !csid.Valid {
+		t.Fatal("claude_session_id NULL after spawn")
+	}
+	stopAndWait(t, mgr, sid)
+
+	globRoot := t.TempDir()
+	writeTranscriptFixture(t, globRoot, csid.String)
+
+	entries := statusEntriesDirect(t, mgr, db, globRoot)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (manager-derived exited entry): %v", len(entries), entries)
+	}
+	e := entries[0]
+	if e["sessionId"] != sid {
+		t.Errorf("sessionId = %v, want the exited session %q (real id)", e["sessionId"], sid)
+	}
+	if e["status"] != "exited" {
+		t.Errorf("status = %v, want %q", e["status"], "exited")
+	}
+	if e["exitCode"] != float64(143) {
+		t.Errorf("exitCode = %v, want 143 (real exit code, not null)", e["exitCode"])
+	}
+	if e["resumable"] != true {
+		t.Errorf("resumable = %v, want true for an exited agent with a transcript", e["resumable"])
+	}
 }
 
 // TestAgentStatusEmptyList: zero agents marshal as JSON [] — never null
