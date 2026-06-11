@@ -1,8 +1,12 @@
 import { useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Task } from "@/api/types";
-import type { AgentStatusEntry } from "@/api/agents";
-import { useSpawnAgent, type TermSession } from "@/api/sessions";
+import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
+import {
+  useResumeAgent,
+  useSpawnAgent,
+  type TermSession,
+} from "@/api/sessions";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -29,11 +33,51 @@ export function AgentTab({
   projectId: number;
 }) {
   const spawn = useSpawnAgent(task.id);
+  const resume = useResumeAgent(task.id);
   const queryClient = useQueryClient();
   const pasteApiRef = useRef<{ paste: (t: string) => void } | null>(null);
 
+  // The server's resumable flag is the SINGLE driver for which pair renders —
+  // the UI never infers resumability client-side (UI-SPEC). Read it from the
+  // already-polled shared query (Phase 4 dedupe pattern; no new props).
+  const resumable =
+    (useAgentStatuses().data ?? []).find((e) => e.taskId === task.id)
+      ?.resumable ?? false;
+  // Mutual exclusion: while either Resume or Reset is in flight both buttons
+  // disable, preventing a double-spawn racing the one-per-task 409 gate.
+  const busy = spawn.isPending || resume.isPending;
+
   // State A — pre-start (D-40): no agent session has ever run.
   if (!agentSession) {
+    // D-54b resumable pre-start: post-restart the manager has no session but
+    // the server reports a resumable transcript. Same envelope as the plain
+    // pre-start (centered block, py-8, gap-2; body max-w-[480px]) — offers the
+    // Reset/Resume pair instead of a single Start. The server only reports
+    // resumable when a worktree exists, so no worktree check is needed here.
+    if (resumable) {
+      return (
+        <div className="flex flex-col items-center gap-2 py-8 text-center">
+          <h2 className="text-xl font-medium">{`Agent session ended.`}</h2>
+          <p className="max-w-[480px] text-sm text-muted-foreground">
+            {`A previous conversation can be picked up where it left off. Reset starts a fresh session instead.`}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" disabled={busy} onClick={() => spawn.mutate()}>
+              {spawn.isPending ? `Resetting…` : `Reset session`}
+            </Button>
+            <Button disabled={busy} onClick={() => resume.mutate()}>
+              {resume.isPending ? `Resuming…` : `Resume session`}
+            </Button>
+          </div>
+          {(spawn.isError || resume.isError) && !busy && (
+            <span className="text-xs text-red-500">
+              {`Couldn't start a session. Try again.`}
+            </span>
+          )}
+        </div>
+      );
+    }
+
     const hasWorktree = Boolean(task.worktree_path);
     const cta = (
       <Button disabled={!hasWorktree || spawn.isPending} onClick={() => spawn.mutate()}>
@@ -113,15 +157,41 @@ export function AgentTab({
   // State B — session exists (running or exited). Exited output stays
   // frozen, readable, copyable under the banner (D-15) but renders dimmed
   // so the dead agent looks disabled (checkpoint revision).
+  //
+  // D-54a within-run exited banner: when resumable, replace the default
+  // single Reset action with the Reset (ghost, left) / Resume (primary,
+  // rightmost) pair — same two mutations as the pre-start variant. When NOT
+  // resumable, exitedActions stays undefined and the Phase 4 contract renders
+  // verbatim (single Reset via exitedPrimaryLabel below). D-56: a failed
+  // resume attaches normally, claude prints its error and exits — the next
+  // poll reports resumable:false and the banner returns Reset-only. No masking
+  // UI of any kind, no silent fallback to a fresh session.
+  const resumePair = resumable ? (
+    <>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => spawn.mutate()}>
+        {spawn.isPending ? `Resetting…` : `Reset session`}
+      </Button>
+      <Button size="sm" disabled={busy} onClick={() => resume.mutate()}>
+        {resume.isPending ? `Resuming…` : `Resume session`}
+      </Button>
+      {(spawn.isError || resume.isError) && !busy && (
+        <span className="text-xs text-red-500">
+          {`Couldn't start a session. Try again.`}
+        </span>
+      )}
+    </>
+  ) : undefined;
+
   return (
     <TerminalPane
-      key={agentSession.id} // fresh session ("Reset session") remounts the pane
+      key={agentSession.id} // a fresh session id (from Reset or Resume) remounts the pane
       sessionId={agentSession.id}
       label={`Agent`}
       status={agentSession.status}
       exitCode={agentSession.exitCode}
       exitedPrimaryLabel={`Reset session`} // D-41 revised: "reset" wording, still a fresh claude
       exitedMessage={`Agent session ended.`} // code-free — users don't know exit codes; codes still drive dot colors
+      exitedActions={resumePair} // D-54a: Reset/Resume pair when resumable; undefined → Phase 4 single-Reset contract
       dimWhenExited // exited agent terminal renders visually disabled; bash panes unchanged
       showExitedClose={false} // D-38: permanent tab, no Close
       onNewTerminal={() => spawn.mutate()} // "Reset session" — FRESH spawn
