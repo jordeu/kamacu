@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -253,6 +254,215 @@ func TestSessionListTaskFilter(t *testing.T) {
 	raw, _ := io.ReadAll(resp.Body)
 	if got := strings.TrimSpace(string(raw)); got != "[]" {
 		t.Errorf("empty filtered body = %q, want %q", got, "[]")
+	}
+}
+
+// newResumeServer wires the session routes (with an injected globRoot) +
+// task/worktree routes over one DB and a manager whose ClaudeBin points at the
+// committed testdata/fake-claude stub. FAKE_CLAUDE_ARGS_FILE is set so each
+// agent spawn records its argv (D-52 inherit-all env), and globRoot is a temp
+// dir the caller seeds with transcript fixtures. Returns the server, manager,
+// db, the injected globRoot, and the argv file path.
+func newResumeServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB, string, string) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+	wt := worktree.NewService(t.TempDir())
+	mgr := session.NewManager()
+	mgr.SetAgentConfig(session.AgentConfig{
+		BaseURL:   "http://127.0.0.1:7333",
+		Token:     testHookToken,
+		ClaudeBin: testdataFakeClaude(t),
+	})
+	globRoot := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	// Agents inherit the test process env (D-52) — point the stub's recorder
+	// at our file. t.Setenv restores it on cleanup.
+	t.Setenv("FAKE_CLAUDE_ARGS_FILE", argsFile)
+
+	mux := http.NewServeMux()
+	Routes(mux, db, wt, mgr)
+	// Session routes with the injected glob root (SessionRoutes signature is
+	// unchanged in production; tests construct the handler directly).
+	s := &sessionHandlers{mgr: mgr, db: db, globRoot: globRoot}
+	mux.HandleFunc("GET /api/sessions", s.list)
+	mux.HandleFunc("POST /api/sessions", s.create)
+	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
+	mux.HandleFunc("DELETE /api/sessions/{id}", s.delete)
+	AgentRoutes(mux, mgr, db)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		srv.Close()
+		for _, info := range mgr.List() {
+			if sess, ok := mgr.Get(info.ID); ok {
+				sess.Stop()
+			}
+		}
+		db.Close()
+	})
+	return srv, mgr, db, globRoot, argsFile
+}
+
+// seedTranscript writes globRoot/-home-x-wt/<csid>.jsonl so transcriptExists
+// hits.
+func seedTranscript(t *testing.T, globRoot, csid string) {
+	t.Helper()
+	dir := filepath.Join(globRoot, "-home-x-wt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, csid+".jsonl"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write transcript fixture: %v", err)
+	}
+}
+
+// readArgv polls the argv file (≤3s) and returns the recorded args.
+func readArgv(t *testing.T, argsFile string) []string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if b, err := os.ReadFile(argsFile); err == nil && len(b) > 0 {
+			return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stub never recorded argv at %s", argsFile)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestSessionResumeArgvAndPersistence: a resume request on a task with a
+// worktree + stored claude_session_id + transcript spawns claude --resume
+// <stored id> and leaves tasks.claude_session_id unchanged (the UPDATE
+// rewrites the same value).
+func TestSessionResumeArgvAndPersistence(t *testing.T) {
+	srv, _, db, globRoot, argsFile := newResumeServer(t)
+	id, _ := worktreeTask(t, srv, "Resume Me")
+
+	stored := uuid.NewString()
+	setTaskClaudeSession(t, db, id, stored)
+	seedTranscript(t, globRoot, stored)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent", "resume": true})
+	if status != http.StatusCreated {
+		t.Fatalf("resume: status = %d, want 201; body=%v", status, body)
+	}
+
+	args := readArgv(t, argsFile)
+	if len(args) < 2 || args[0] != "--resume" {
+		t.Fatalf("argv[0] = %v, want --resume; argv=%v", args, args)
+	}
+	if args[1] != stored {
+		t.Errorf("argv[1] = %q, want the STORED uuid %q", args[1], stored)
+	}
+
+	after := claudeSessionIDFor(t, db, id)
+	if !after.Valid || after.String != stored {
+		t.Errorf("claude_session_id = %v after resume, want unchanged %q", after, stored)
+	}
+}
+
+// TestSessionResumeNoSession: resume with a NULL claude_session_id, or a
+// stored id whose transcript is missing, both return 409 "no session to
+// resume".
+func TestSessionResumeNoSession(t *testing.T) {
+	srv, _, db, globRoot, _ := newResumeServer(t)
+
+	// (a) NULL claude_session_id.
+	id, _ := worktreeTask(t, srv, "No Stored Id")
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent", "resume": true})
+	if status != http.StatusConflict {
+		t.Fatalf("resume NULL id: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "no session to resume" {
+		t.Errorf("error = %q, want %q", body["error"], "no session to resume")
+	}
+
+	// (b) Stored id but NO transcript fixture.
+	id2, _ := worktreeTask(t, srv, "No Transcript")
+	setTaskClaudeSession(t, db, id2, uuid.NewString())
+	_ = globRoot // intentionally not seeded
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id2, "kind": "agent", "resume": true})
+	if status != http.StatusConflict {
+		t.Fatalf("resume no transcript: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "no session to resume" {
+		t.Errorf("error = %q, want %q", body["error"], "no session to resume")
+	}
+}
+
+// TestSessionResumeGoesThroughOnePerTaskGate: resume while an agent already
+// runs for the task hits the existing one-agent-per-task 409 BEFORE resume
+// validation (D-67 never-two-PTYs).
+func TestSessionResumeGoesThroughOnePerTaskGate(t *testing.T) {
+	srv, _, db, globRoot, _ := newResumeServer(t)
+	id, _ := worktreeTask(t, srv, "Already Running")
+
+	// Fresh spawn occupies the one-agent slot and persists a stored id.
+	if status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"}); status != http.StatusCreated {
+		t.Fatalf("first spawn: status = %d; body=%v", status, body)
+	}
+	stored := claudeSessionIDFor(t, db, id)
+	if !stored.Valid {
+		t.Fatal("claude_session_id NULL after first spawn")
+	}
+	seedTranscript(t, globRoot, stored.String) // resume would otherwise be valid — prove the gate fires first
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent", "resume": true})
+	if status != http.StatusConflict {
+		t.Fatalf("resume while running: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "agent session already running" {
+		t.Errorf("error = %q, want %q (gate before resume validation)", body["error"], "agent session already running")
+	}
+}
+
+// TestSessionResumeRequiresAgentKind: {"resume":true} with kind "" or "bash"
+// is a 400 "resume requires kind agent".
+func TestSessionResumeRequiresAgentKind(t *testing.T) {
+	srv, _, _, _, _ := newResumeServer(t)
+	id, _ := worktreeTask(t, srv, "Wrong Kind")
+
+	for _, kind := range []any{nil, "bash"} {
+		req := map[string]any{"task_id": id, "resume": true}
+		if kind != nil {
+			req["kind"] = kind
+		}
+		status, body := doJSON(t, "POST", srv.URL+"/api/sessions", req)
+		if status != http.StatusBadRequest {
+			t.Fatalf("resume kind=%v: status = %d, want 400; body=%v", kind, status, body)
+		}
+		if body["error"] != "resume requires kind agent" {
+			t.Errorf("kind=%v error = %q, want %q", kind, body["error"], "resume requires kind agent")
+		}
+	}
+}
+
+// TestSessionFreshSpawnUnchangedByResumeField: a fresh agent spawn (resume
+// absent) still 201s with a NEW uuid persisted — the regression guard.
+func TestSessionFreshSpawnUnchangedByResumeField(t *testing.T) {
+	srv, _, db, _, argsFile := newResumeServer(t)
+	id, _ := worktreeTask(t, srv, "Fresh Spawn")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("fresh spawn: status = %d, want 201; body=%v", status, body)
+	}
+	args := readArgv(t, argsFile)
+	if len(args) < 2 || args[0] != "--session-id" {
+		t.Fatalf("fresh argv[0] = %v, want --session-id; argv=%v", args, args)
+	}
+	if _, err := uuid.Parse(args[1]); err != nil {
+		t.Errorf("fresh argv[1] = %q is not a uuid: %v", args[1], err)
+	}
+	persisted := claudeSessionIDFor(t, db, id)
+	if !persisted.Valid || persisted.String != args[1] {
+		t.Errorf("persisted claude_session_id = %v, want the minted uuid %q", persisted, args[1])
 	}
 }
 
