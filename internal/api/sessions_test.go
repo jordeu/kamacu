@@ -286,7 +286,7 @@ func newResumeServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB,
 	t.Setenv("FAKE_CLAUDE_ARGS_FILE", argsFile)
 
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr)
+	Routes(mux, db, wt, mgr) // includes SettingsRoutes — spawn tests PUT settings
 	// Session routes with the injected glob root (SessionRoutes signature is
 	// unchanged in production; tests construct the handler directly).
 	s := &sessionHandlers{mgr: mgr, db: db, globRoot: globRoot}
@@ -463,6 +463,113 @@ func TestSessionFreshSpawnUnchangedByResumeField(t *testing.T) {
 	persisted := claudeSessionIDFor(t, db, id)
 	if !persisted.Valid || persisted.String != args[1] {
 		t.Errorf("persisted claude_session_id = %v, want the minted uuid %q", persisted, args[1])
+	}
+}
+
+// TestSessionAgentDefaultExtraParamsInArgv: with NO settings rows stored, an
+// agent spawn carries the default --dangerously-skip-permissions AFTER the
+// fixed flags (AGENT-01/02 default-on — the deliberate D-51 reversal).
+func TestSessionAgentDefaultExtraParamsInArgv(t *testing.T) {
+	srv, _, _, _, argsFile := newResumeServer(t)
+	id, _ := worktreeTask(t, srv, "Default Extras")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("agent spawn: status = %d, want 201; body=%v", status, body)
+	}
+
+	args := readArgv(t, argsFile)
+	if len(args) != 5 {
+		t.Fatalf("argv = %q, want 5 args (--session-id <uuid> --settings <json> --dangerously-skip-permissions)", args)
+	}
+	if args[2] != "--settings" {
+		t.Errorf("argv[2] = %q, want --settings", args[2])
+	}
+	if args[4] != "--dangerously-skip-permissions" {
+		t.Errorf("argv[4] = %q, want the default extra param after the fixed flags", args[4])
+	}
+}
+
+// TestSessionAgentExtraParamsRemovable: PUT "" for agent_extra_params, then
+// spawn — the NEXT spawn has zero extras with no restart (AGENT-02
+// removability + SET-03 next-spawn semantics; Pitfall 1: stored "" is a real
+// value, never re-defaulted).
+func TestSessionAgentExtraParamsRemovable(t *testing.T) {
+	srv, _, _, _, argsFile := newResumeServer(t)
+	id, _ := worktreeTask(t, srv, "No Extras")
+
+	status, body := doJSON(t, "PUT", srv.URL+"/api/settings/agent_extra_params", map[string]any{"value": ""})
+	if status != http.StatusOK {
+		t.Fatalf("PUT agent_extra_params \"\": status = %d, want 200; body=%v", status, body)
+	}
+
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("agent spawn: status = %d, want 201; body=%v", status, body)
+	}
+
+	args := readArgv(t, argsFile)
+	if len(args) != 4 {
+		t.Fatalf("argv = %q, want exactly 4 args — stored \"\" must yield zero extras", args)
+	}
+	for _, a := range args {
+		if a == "--dangerously-skip-permissions" {
+			t.Errorf("argv still carries --dangerously-skip-permissions after the flag was removed: %q", args)
+		}
+	}
+}
+
+// TestSessionAgentResumeCarriesExtraParams: a resume spawn appends the same
+// settings extras — AGENT-01 covers EVERY claude spawn, not just fresh ones.
+func TestSessionAgentResumeCarriesExtraParams(t *testing.T) {
+	srv, _, db, globRoot, argsFile := newResumeServer(t)
+	id, _ := worktreeTask(t, srv, "Resume Extras")
+
+	stored := uuid.NewString()
+	setTaskClaudeSession(t, db, id, stored)
+	seedTranscript(t, globRoot, stored)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent", "resume": true})
+	if status != http.StatusCreated {
+		t.Fatalf("resume spawn: status = %d, want 201; body=%v", status, body)
+	}
+
+	args := readArgv(t, argsFile)
+	if len(args) != 5 {
+		t.Fatalf("argv = %q, want 5 args (--resume <uuid> --settings <json> --dangerously-skip-permissions)", args)
+	}
+	if args[0] != "--resume" || args[1] != stored {
+		t.Errorf("argv[0:2] = %q, want [--resume %s]", args[:2], stored)
+	}
+	if args[4] != "--dangerously-skip-permissions" {
+		t.Errorf("argv[4] = %q, want the extra param on the resume spawn too", args[4])
+	}
+}
+
+// TestSessionBashShellReadAtUse: the handler reads the shell setting from the
+// DB at every spawn (SET-03). A hand-corrupted row (raw INSERT bypassing Set's
+// validation) fails the spawn cleanly; fixing the row makes the very next
+// spawn succeed — no restart, no caching.
+func TestSessionBashShellReadAtUse(t *testing.T) {
+	srv, _, db, _, _ := newResumeServer(t)
+
+	if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES('shell', 'no-such-shell-xyz')`); err != nil {
+		t.Fatalf("raw settings insert: %v", err)
+	}
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("bash spawn with broken shell: status = %d, want 500; body=%v", status, body)
+	}
+	if body["error"] != "couldn't start a session" {
+		t.Errorf("error = %q, want %q", body["error"], "couldn't start a session")
+	}
+
+	if _, err := db.Exec(`UPDATE settings SET value = 'bash' WHERE key = 'shell'`); err != nil {
+		t.Fatalf("settings update: %v", err)
+	}
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("bash spawn after fixing shell: status = %d, want 201 (read-at-use, no restart); body=%v", status, body)
 	}
 }
 

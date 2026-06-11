@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -890,6 +891,136 @@ func TestAgentQuietThresholdIdle(t *testing.T) {
 	setLastActivityForTest(s, time.Now().Add(-(agentQuietThreshold + time.Second)))
 	if got := agentStatus(s); got != "idle" {
 		t.Errorf("AgentStatus = %q after >10s quiet, want %q", got, "idle")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Settings-driven spawn (Phase 6): SpawnOpts.Shell + SpawnOpts.ExtraArgs
+// ---------------------------------------------------------------------------
+
+// shellEnvOf returns the value of the child's SHELL= env entry.
+func shellEnvOf(s *Session) string {
+	for _, e := range s.cmd.Env {
+		if strings.HasPrefix(e, "SHELL=") {
+			return strings.TrimPrefix(e, "SHELL=")
+		}
+	}
+	return ""
+}
+
+// TestSpawnBashShellFromSettings: a non-empty SpawnOpts.Shell is resolved via
+// LookPath; the resolved path is BOTH the exec'd binary and the SHELL env
+// entry (SHELL-02 — the settings value drives the spawn, not $SHELL).
+func TestSpawnBashShellFromSettings(t *testing.T) {
+	resolved, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skipf("bash not on PATH: %v", err)
+	}
+
+	m := NewManager()
+	s := spawnForTestOpts(t, m, SpawnOpts{Shell: "bash"})
+
+	if got := s.cmd.Path; got != resolved {
+		t.Errorf("exec path = %q, want LookPath-resolved %q", got, resolved)
+	}
+	if got := shellEnvOf(s); got != resolved {
+		t.Errorf("SHELL env = %q, want the resolved path %q", got, resolved)
+	}
+}
+
+// TestSpawnBashShellEmptyKeepsFallback: Shell == "" preserves the Phase 2
+// $SHELL-fallback path byte-for-byte (back-compat for direct-Spawn callers).
+func TestSpawnBashShellEmptyKeepsFallback(t *testing.T) {
+	want := os.Getenv("SHELL")
+	if want == "" {
+		want = "/bin/bash"
+	}
+
+	m := NewManager()
+	s := spawnForTest(t, m) // zero-value Shell
+
+	if got := shellEnvOf(s); got != want {
+		t.Errorf("SHELL env = %q, want the $SHELL fallback %q", got, want)
+	}
+}
+
+// TestSpawnBashShellNotFound: an unresolvable shell fails cleanly BEFORE any
+// PTY allocation and never registers a session (same posture as bad cwds).
+func TestSpawnBashShellNotFound(t *testing.T) {
+	m := NewManager()
+	_ = spawnForTest(t, m) // pre-existing session; List length must not change
+
+	before := len(m.List())
+	_, err := m.Spawn(SpawnOpts{Shell: "no-such-shell-xyz"})
+	if err == nil {
+		t.Fatal("Spawn(Shell=no-such-shell-xyz) = nil error, want failure")
+	}
+	if !strings.Contains(err.Error(), "no-such-shell-xyz") {
+		t.Errorf("error %q does not mention the shell name", err)
+	}
+	if after := len(m.List()); after != before {
+		t.Errorf("List len changed %d -> %d: failed spawn must not register a session", before, after)
+	}
+}
+
+// TestSpawnAgentExtraArgsAppendedAfterFixedFlags: ExtraArgs land strictly
+// AFTER the fixed --session-id/--settings flags, in order (AGENT-01; insertion
+// point verified composing on claude v2.1.173).
+func TestSpawnAgentExtraArgsAppendedAfterFixedFlags(t *testing.T) {
+	extras := []string{"--dangerously-skip-permissions", "--append-system-prompt", "be terse"}
+	_, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1, ExtraArgs: extras})
+
+	if len(args) != 4+len(extras) {
+		t.Fatalf("argv = %q, want %d args (4 fixed + %d extras)", args, 4+len(extras), len(extras))
+	}
+	if args[0] != "--session-id" {
+		t.Errorf("argv[0] = %q, want --session-id", args[0])
+	}
+	if args[2] != "--settings" {
+		t.Errorf("argv[2] = %q, want --settings", args[2])
+	}
+	for i, want := range extras {
+		if args[4+i] != want {
+			t.Errorf("argv[%d] = %q, want extra %q (extras must follow the fixed flags in order)", 4+i, args[4+i], want)
+		}
+	}
+}
+
+// TestSpawnAgentResumeExtraArgsAppended: the --resume variant carries the same
+// extras after its fixed flags — AGENT-01 says EVERY claude spawn.
+func TestSpawnAgentResumeExtraArgsAppended(t *testing.T) {
+	const resumeID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0002"
+	_, args := agentArgv(t, SpawnOpts{
+		Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1,
+		ResumeSessionID: resumeID,
+		ExtraArgs:       []string{"--dangerously-skip-permissions"},
+	})
+
+	if len(args) != 5 {
+		t.Fatalf("argv = %q, want 5 args (--resume <uuid> --settings <json> <extra>)", args)
+	}
+	if args[0] != "--resume" {
+		t.Errorf("argv[0] = %q, want --resume", args[0])
+	}
+	if args[1] != resumeID {
+		t.Errorf("argv[1] = %q, want the resume uuid %q", args[1], resumeID)
+	}
+	if args[2] != "--settings" {
+		t.Errorf("argv[2] = %q, want --settings", args[2])
+	}
+	if args[4] != "--dangerously-skip-permissions" {
+		t.Errorf("argv[4] = %q, want the extra after the fixed flags", args[4])
+	}
+}
+
+// TestSpawnAgentNoExtraArgsUnchanged: nil ExtraArgs keeps the exact 4-arg v1.0
+// argv — a stored empty settings value must restore interactive prompts
+// (AGENT-02 removability).
+func TestSpawnAgentNoExtraArgsUnchanged(t *testing.T) {
+	_, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1})
+
+	if len(args) != 4 {
+		t.Fatalf("argv = %q, want exactly 4 args with no extras", args)
 	}
 }
 
