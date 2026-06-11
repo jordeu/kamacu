@@ -26,7 +26,7 @@ Installed Claude Code on this host: v2.1.170 at `~/.local/bin/claude` — verify
 - **D-38:** The Agent tab is a permanent first tab. Tab order: **Agent, Description, Bash 1..N**. It cannot be closed — only stopped. Exactly one agent session per task.
 - **D-39:** Opening a task always lands on the first tab (Agent). No smart tab selection.
 - **D-40:** Pre-start state: the Agent tab shows a Start button (plus context: branch name, short explanation). Start is disabled with the same pattern as bash `+` when the task has no worktree (message points to Create worktree).
-- **D-41:** Stop = the standard Phase 2 teardown (SIGTERM→5s→SIGKILL on the session). After exit/stop the tab shows the exited banner with **"Start again"** which launches a FRESH `claude` session (no --continue/--resume in this phase — that's Phase 5 recovery scope).
+- **D-41:** Stop = the standard Phase 2 teardown (SIGTERM→5s→SIGKILL on the session). After exit/stop the tab shows the exited banner whose single action launches a FRESH `claude` session (no --continue/--resume in this phase — that's Phase 5 recovery scope). **Revised at checkpoint (2026-06-11), user feedback:** the action is labeled **"Reset session"** ("Start again" was misleading — it implied resuming the session); the banner copy is code-free — **`Agent session ended.`**, never `(code N)` (exit codes still drive dot colors); and the exited agent terminal renders **dimmed** (visually disabled) so the dead state is unmistakable. Bash panes keep the Phase 2 exited UX verbatim (codes shown, no dimming).
 - **D-42:** The agent session counts in the cleanup gate exactly like bash sessions: it appears in "N sessions running" and "Stop sessions and clean up" stops it too. One consistent rule.
 
 ### Status Badges & Attention
@@ -116,6 +116,7 @@ Installed Claude Code on this host: v2.1.170 at `~/.local/bin/claude` — verify
 - Browser notifications on waiting/finished (v2 NOTF-01 — detection built this phase makes it cheap later)
 - "Move to In Review?" suggestion on Stop hook (v2 NOTF-02 — explicitly do NOT auto-move cards)
 - `--continue`/`--resume` recovery (Phase 5 RCVR-02 — but capture session IDs now)
+- Phase 5: exited agent banner gains `Resume session` (`claude --resume` with the persisted `claude_session_id`) as the primary action; `Reset session` becomes secondary (checkpoint feedback 2026-06-11 — the user expected "start again" to resume; `claude_session_id` is already persisted for exactly this)
 - Per-session permission-mode picker (only if default posture proves annoying)
 
 </deferred>

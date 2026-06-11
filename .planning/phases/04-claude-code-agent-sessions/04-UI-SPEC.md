@@ -125,9 +125,12 @@ Tone inherited: terse, sentence case, no exclamation marks, no "please". Branch 
 
 ### Agent pane — exited (D-41)
 
+> **Revised at checkpoint (2026-06-11):** user verification feedback overrides the originally approved copy — code-free banner, `Reset session` label, dimmed exited terminal.
+
 | Element | Copy |
 |---------|------|
-| Exited banner | `Session exited (code {N})` (Phase 2 copy verbatim) + single action `Start again` (small primary) — launches a FRESH claude session. **No `Close` action** — the Agent tab is permanent (D-38). The banner's action label is the only permitted divergence from the Phase 2 banner (additive prop, default unchanged for bash panes) |
+| Exited banner | `Agent session ended.` — **exit codes are never shown in the agent exited banner** (users don't know exit codes); the code keeps flowing to drive dot colors (red on non-zero). Single action `Reset session` (small primary) — launches a FRESH claude session ("Start again" was rejected as misleading; it suggested resume). **No `Close` action** — the Agent tab is permanent (D-38). Bash panes keep the Phase 2 banner verbatim (`Session exited (code {N})` + `New terminal`); copy/label/dim are additive props with bash defaults unchanged |
+| Exited terminal treatment | The terminal area (xterm viewport, NOT the banner) renders visually disabled while exited: dimming via `opacity-50 brightness-75` on the viewport container. Output stays frozen, readable, copyable (D-15 readability bar still applies). Bash terminals are never dimmed |
 
 ### Status dots — tooltips (D-43)
 
@@ -166,7 +169,7 @@ States the executor must implement; the auditor will check these.
 | Landing tab (D-39) | Opening a task always activates the Agent tab — no smart selection. (Supersedes Phase 3's "default active tab is Description") |
 | Start (D-40) | Click `Start agent` → POST spawn (cwd = worktree, kind = agent, exactly one agent per task enforced server-side) → pane attaches in place (pre-start block swaps to TerminalPane). Button disabled `Starting…` while in flight |
 | Insert description (D-35/D-36) | Click `Insert description` → the task description is typed into the prompt via bracketed paste — **never submitted**, editable before sending, repeatable. Available whenever the session is running; hidden when the description is empty |
-| Stop / exit (D-41) | Standard Phase 2 teardown UX. On exit (stop or self-exit): exited banner with `Start again`; clicking it spawns a fresh claude session in the same pane (no --resume this phase). Terminal output stays frozen, readable, copyable (D-15) until the fresh session replaces it |
+| Stop / exit (D-41, revised at checkpoint 2026-06-11) | Standard Phase 2 teardown UX. On exit (stop or self-exit): code-free exited banner (`Agent session ended.`) with `Reset session`, terminal area dimmed (disabled look); clicking `Reset session` spawns a fresh claude session in the same pane (no --resume this phase). Terminal output stays frozen, readable, copyable (D-15) until the fresh session replaces it |
 | Reattach (TERM-05 / SC-4) | Reopening a task with a running agent reattaches with a correctly redrawn claude TUI — brief replay flicker acceptable, corrupted alt-screen is not (mechanism is backend discretion; this is the user-visible bar) |
 | Cleanup gate (D-42) | The agent session counts and is stopped exactly like bash sessions; after cleanup the Agent tab shows the pre-start no-worktree state |
 | Keep-mounted | The Agent tab content uses the existing `keepMounted` TabDef path — switching tabs never detaches the agent WS |
