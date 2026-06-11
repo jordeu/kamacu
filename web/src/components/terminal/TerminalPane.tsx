@@ -25,6 +25,7 @@ export interface TerminalPaneProps {
   exitedPrimaryLabel?: string; // exited-banner primary action label; default "New terminal"
   showExitedClose?: boolean; // default true; false hides the banner's ghost Close (D-38)
   exitedMessage?: string; // exited-banner copy override; default "Session exited (code {N})" (bash)
+  exitedActions?: ReactNode; // replaces the default exited/not-found banner action group (agent resume pair); bash defaults unchanged when undefined
   dimWhenExited?: boolean; // default false (bash unchanged); true dims the terminal area once exited (agent)
   onReady?: (api: { paste: (text: string) => void } | null) => void; // imperative paste handle
   onConnect?: () => void; // fires when conn state becomes "connected" (D-45 hook)
@@ -46,6 +47,7 @@ export function TerminalPane({
   exitedPrimaryLabel,
   showExitedClose,
   exitedMessage,
+  exitedActions,
   dimWhenExited,
   onReady,
   onConnect,
@@ -255,13 +257,17 @@ export function TerminalPane({
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
         <span className="text-sm font-medium">Session not found.</span>
         <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" onClick={() => onNewTerminal?.()}>
-            {exitedPrimaryLabel ?? "New terminal"}
-          </Button>
-          {showExitedClose !== false && (
-            <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
-              Close
-            </Button>
+          {exitedActions ?? (
+            <>
+              <Button size="sm" onClick={() => onNewTerminal?.()}>
+                {exitedPrimaryLabel ?? "New terminal"}
+              </Button>
+              {showExitedClose !== false && (
+                <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
+                  Close
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -275,13 +281,17 @@ export function TerminalPane({
           {exitedMessage ?? `Session exited (code ${conn.code})`}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" onClick={() => onNewTerminal?.()}>
-            {exitedPrimaryLabel ?? "New terminal"}
-          </Button>
-          {showExitedClose !== false && (
-            <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
-              Close
-            </Button>
+          {exitedActions ?? (
+            <>
+              <Button size="sm" onClick={() => onNewTerminal?.()}>
+                {exitedPrimaryLabel ?? "New terminal"}
+              </Button>
+              {showExitedClose !== false && (
+                <Button variant="ghost" size="sm" onClick={() => onClosed?.()}>
+                  Close
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
