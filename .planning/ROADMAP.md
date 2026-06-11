@@ -38,7 +38,13 @@ Full details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
   5. Editing the branch-name template (tokens `{slug}`, `{id}`, `{title}`; default `task/{slug}-{id}`) and then creating a task produces a branch matching the new template; an invalid template is rejected with a clear inline message and is never used to create a branch (BRANCH-01, BRANCH-02)
   6. Selecting the bash-tab shell from the dropdown (bash only in v1.1) and then opening a new bash tab spawns that shell — the shell command is read from settings, not hardcoded (SHELL-01, SHELL-02)
   7. The task-view header (title row plus the three-dots actions menu) spans the full page width, with the menu trigger flush to the right edge (UI-01)
-**Plans**: TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Settings foundation: migration 00004, internal/settings package (defaults, validation, template, tokenizer), GET/PUT /api/settings
+- [ ] 06-02-PLAN.md — Backend wiring: agent extra-params + shell into SpawnOpts, branch template + worktree base into provisionWorktree (create + Retry)
+- [ ] 06-03-PLAN.md — Frontend: /settings page + sidebar gear + per-field save model, UI-01 task-header width fix
+- [ ] 06-04-PLAN.md — Build + full-suite gate, then human-verify checkpoint across all seven success criteria
 **UI hint**: yes
 
 **Phase notes:**
@@ -65,7 +71,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Worktree Isolation & Bash Tabs | v1.0 | 6/6 | Complete | 2026-06-10 |
 | 4. Claude Code Agent Sessions | v1.0 | 5/5 | Complete | 2026-06-11 |
 | 5. Recovery & Review | v1.0 | 5/5 | Complete | 2026-06-11 |
-| 6. Settings & Polish | v1.1 | 0/TBD | Not started | - |
+| 6. Settings & Polish | v1.1 | 0/4 | Not started | - |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
