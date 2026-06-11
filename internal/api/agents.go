@@ -12,13 +12,14 @@ import (
 // frontend polls it every 5s and fans one response out to card dots, the
 // Agent-tab dot, and the sidebar waiting chips (04-RESEARCH.md Pattern 4).
 func AgentRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB) {
-	a := &agentHandlers{mgr: mgr, db: db}
+	a := &agentHandlers{mgr: mgr, db: db, globRoot: defaultTranscriptGlobRoot()}
 	mux.HandleFunc("GET /api/agents/status", a.status)
 }
 
 type agentHandlers struct {
-	mgr *session.Manager
-	db  *sql.DB
+	mgr      *session.Manager
+	db       *sql.DB
+	globRoot string // ~/.claude/projects; tests inject a temp dir
 }
 
 // agentStatusEntry is the exact JSON contract the 04-03 frontend consumes.
@@ -29,6 +30,7 @@ type agentStatusEntry struct {
 	Status        string `json:"status"` // working | idle | waiting | exited (Info.AgentStatus)
 	ExitCode      *int   `json:"exitCode"`
 	StopRequested bool   `json:"stopRequested"`
+	Resumable     bool   `json:"resumable"` // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
 }
 
 // status handles GET /api/agents/status — one entry per task, newest agent
@@ -51,49 +53,106 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		order = append(order, info.TaskID)
 	}
 
+	// taskMeta carries the per-task DB columns the resumable derivation needs.
+	type taskMeta struct {
+		projectID int64
+		csid      sql.NullString
+		wtp       sql.NullString
+	}
+
 	entries := []agentStatusEntry{} // [] when empty — never null
+
+	// Manager-derived pass: one entry per task with a live (running OR exited)
+	// agent session, newest wins. A running agent is never resumable; an
+	// exited one is resumable iff it has a stored id + worktree + transcript.
 	if len(order) > 0 {
-		// Resolve projectId for all tasks in ONE query; sessions whose task
-		// row vanished are skipped.
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(order)), ",")
 		args := make([]any, len(order))
 		for i, id := range order {
 			args[i] = id
 		}
-		rows, err := a.db.Query(`SELECT id, project_id FROM tasks WHERE id IN (`+placeholders+`)`, args...)
+		rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path FROM tasks WHERE id IN (`+placeholders+`)`, args...)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		defer rows.Close()
-		projects := make(map[int64]int64, len(order))
+		metas := make(map[int64]taskMeta, len(order))
 		for rows.Next() {
-			var id, pid int64
-			if err := rows.Scan(&id, &pid); err != nil {
+			var id int64
+			var m taskMeta
+			if err := rows.Scan(&id, &m.projectID, &m.csid, &m.wtp); err != nil {
+				rows.Close()
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			projects[id] = pid
+			metas[id] = m
 		}
 		if err := rows.Err(); err != nil {
+			rows.Close()
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		rows.Close()
 		for _, tid := range order {
-			pid, ok := projects[tid]
+			m, ok := metas[tid]
 			if !ok {
 				continue // task deleted under a still-tracked session
 			}
 			info := newest[tid]
+			resumable := info.AgentStatus == "exited" && m.csid.Valid && m.wtp.Valid && transcriptExists(a.globRoot, m.csid.String)
 			entries = append(entries, agentStatusEntry{
 				TaskID:        tid,
-				ProjectID:     pid,
+				ProjectID:     m.projectID,
 				SessionID:     info.ID,
 				Status:        info.AgentStatus,
 				ExitCode:      info.ExitCode,
 				StopRequested: info.StopRequested,
+				Resumable:     resumable,
 			})
 		}
+	}
+
+	// DB-derived pass (RCVR-01 reconciliation, research Pattern 2): tasks with
+	// a persisted session id + worktree but NO manager entry of any state —
+	// i.e. post-restart survivors. The DB never records "running" (verified
+	// across migrations 00001-00003), so an empty manager + these derived
+	// entries is the whole reconciliation story: no startup mutation pass, no
+	// migration. Emit ONLY when resumable (transcript exists) — non-resumable
+	// past sessions get no dot and the plain pre-start state (D-57 only
+	// constrains resumable tasks).
+	rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path FROM tasks
+		WHERE claude_session_id IS NOT NULL AND worktree_path IS NOT NULL`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, pid int64
+		var csid, wtp sql.NullString
+		if err := rows.Scan(&id, &pid, &csid, &wtp); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if _, hasManagerEntry := newest[id]; hasManagerEntry {
+			continue // already covered by the manager-derived pass
+		}
+		if !transcriptExists(a.globRoot, csid.String) {
+			continue
+		}
+		entries = append(entries, agentStatusEntry{
+			TaskID:        id,
+			ProjectID:     pid,
+			SessionID:     "",
+			Status:        "exited",
+			ExitCode:      nil,
+			StopRequested: false,
+			Resumable:     true,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, entries)
 }
