@@ -32,6 +32,7 @@ import { AgentTab } from "@/components/task/AgentTab";
 import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 import { DeleteTaskDialog } from "@/components/task/DeleteTaskDialog";
 import { DescriptionTab } from "@/components/task/DescriptionTab";
+import { DiffTab } from "@/components/task/DiffTab";
 import { TaskTabs, type TabDef } from "@/components/task/TaskTabs";
 import { WorktreeMetaLine } from "@/components/task/WorktreeMetaLine";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
@@ -124,9 +125,18 @@ export default function TaskPage() {
       );
   }, [sessions, keepExitedIds, closingIds]);
 
+  // "diff" joins tabIds ONLY when a worktree exists. The disabled Diff tab
+  // stays OUT of tabIds so the existing Pitfall-7 layout effect handles a
+  // mid-view worktree removal for free — "diff" drops out, the effect
+  // reactivates the Agent tab (the universal fallback) before paint.
   const tabIds = useMemo(
-    () => ["agent", "description", ...visibleSessions.map((s) => s.id)],
-    [visibleSessions],
+    () => [
+      "agent",
+      "description",
+      ...(task?.worktree_path ? ["diff"] : []),
+      ...visibleSessions.map((s) => s.id),
+    ],
+    [task?.worktree_path, visibleSessions],
   );
 
   // Pitfall 7: a Radix Tabs value pointing at a removed tab renders blank.
@@ -276,6 +286,22 @@ export default function TaskPage() {
       content: (
         <div className="h-full max-w-[860px] overflow-y-auto">
           <DescriptionTab task={task} projectId={projectId} />
+        </div>
+      ),
+    },
+    // D-64: Agent, Description, Diff, Bash 1..N. Disabled (zinc-600 label +
+    // tooltip) when the task has no worktree. NOT keepMounted — mounting on
+    // activation IS the D-61 fetch-on-open; re-activating remounts and
+    // refetches. Never gets onClose (no ×) or leading (no dot): the label and
+    // active indicator stay stock accent blue, explicitly NOT diff-colored.
+    {
+      id: "diff",
+      label: "Diff",
+      disabled: !task.worktree_path,
+      disabledTooltip: `The diff needs a worktree`,
+      content: (
+        <div className="flex h-full min-h-[320px] w-full flex-col">
+          <DiffTab taskId={task.id} />
         </div>
       ),
     },

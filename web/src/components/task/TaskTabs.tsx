@@ -29,6 +29,9 @@ export interface TabDef {
   keepMounted?: boolean;
   /** Rendered before the label (Agent tab status dot, D-50). */
   leading?: ReactNode;
+  /** Renders the trigger disabled (zinc-600 label) with an explanation tooltip. */
+  disabled?: boolean;
+  disabledTooltip?: string;
 }
 
 export function TaskTabs({
@@ -56,22 +59,46 @@ export function TaskTabs({
         variant="line"
         className="w-full shrink-0 justify-start overflow-x-auto border-b border-border"
       >
-        {tabs.map((tab) => (
-          <TabsTrigger
-            key={tab.id}
-            value={tab.id}
-            className="flex-none px-2 data-active:after:bg-blue-500"
-          >
-            {/* dot + 4px gap + label (UI-SPEC) — trigger height unchanged */}
-            <span className="flex items-center gap-1">
-              {tab.leading}
-              <span
-                className={tab.muted ? "text-muted-foreground" : undefined}
-              >
-                {tab.label}
+        {tabs.map((tab) =>
+          tab.disabled ? (
+            // Disabled tab (no worktree): the trigger swallows pointer events,
+            // so the explanation tooltip fires on a wrapping span — mirror of
+            // the bash `+` disabled pattern. Label goes zinc-600 (disabled).
+            <Tooltip key={tab.id}>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <TabsTrigger
+                    value={tab.id}
+                    disabled
+                    className="flex-none px-2 data-active:after:bg-blue-500"
+                  >
+                    <span className="flex items-center gap-1">
+                      {tab.leading}
+                      <span className="text-zinc-600">{tab.label}</span>
+                    </span>
+                  </TabsTrigger>
+                </span>
+              </TooltipTrigger>
+              {tab.disabledTooltip && (
+                <TooltipContent>{tab.disabledTooltip}</TooltipContent>
+              )}
+            </Tooltip>
+          ) : (
+            <TabsTrigger
+              key={tab.id}
+              value={tab.id}
+              className="flex-none px-2 data-active:after:bg-blue-500"
+            >
+              {/* dot + 4px gap + label (UI-SPEC) — trigger height unchanged */}
+              <span className="flex items-center gap-1">
+                {tab.leading}
+                <span
+                  className={tab.muted ? "text-muted-foreground" : undefined}
+                >
+                  {tab.label}
+                </span>
               </span>
-            </span>
-            {tab.onClose && (
+              {tab.onClose && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   {/* span[role=button], NOT <button> — button-in-button is
@@ -100,8 +127,9 @@ export function TaskTabs({
                 <TooltipContent>Stop and close</TooltipContent>
               </Tooltip>
             )}
-          </TabsTrigger>
-        ))}
+            </TabsTrigger>
+          ),
+        )}
         {trailing != null && (
           <div className="ml-2 flex items-center">{trailing}</div>
         )}
