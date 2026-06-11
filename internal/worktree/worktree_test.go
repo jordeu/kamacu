@@ -124,6 +124,40 @@ func TestSlug(t *testing.T) {
 	}
 }
 
+// TestPathUnder: the settings-driven placement function keeps the locked
+// repo-basename subdirectory structure under whatever base it is given
+// (WT-01; callers pass the ~-expanded worktree_base).
+func TestPathUnder(t *testing.T) {
+	cases := []struct {
+		name string
+		base string
+		repo string
+		slug string
+		id   int64
+		want string
+	}{
+		{"basic", "/base", "/repos/myapp", "fix-login", 42, "/base/myapp/fix-login-42"},
+		{"trailing slash on base neutralized", "/base/", "/repos/myapp", "fix-login", 42, "/base/myapp/fix-login-42"},
+		{"nested base", "/home/u/.kangent/worktrees", "/work/proj", "task", 7, "/home/u/.kangent/worktrees/proj/task-7"},
+		{"repo basename only", "/b", "/deep/nested/repo-dir", "s", 1, "/b/repo-dir/s-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PathUnder(tc.base, tc.repo, tc.slug, tc.id); got != tc.want {
+				t.Errorf("PathUnder(%q, %q, %q, %d) = %q, want %q", tc.base, tc.repo, tc.slug, tc.id, got, tc.want)
+			}
+		})
+	}
+
+	// PathUnder(root, ...) must agree with the legacy Service.PathFor shape —
+	// existing tests seed the harness base with the old Root, so path
+	// assertions keep working unchanged.
+	svc := NewService("/root")
+	if got, want := PathUnder("/root", "/r/app", "x", 3), svc.PathFor("/r/app", "x", 3); got != want {
+		t.Errorf("PathUnder = %q, PathFor = %q — must agree for the same base", got, want)
+	}
+}
+
 func TestResolveBaseOriginHeadWithLocalBranch(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(t.TempDir())

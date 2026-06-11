@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/store"
 	"kangent/internal/worktree"
 )
@@ -28,7 +29,9 @@ func newWorktreeServer(t *testing.T) (*httptest.Server, *testWorktreeEnv) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
-	wt := worktree.NewService(t.TempDir())
+	wtDir := t.TempDir()
+	seedWorktreeBase(t, db, wtDir)
+	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
@@ -114,6 +117,37 @@ func TestWorktreeCreateRetryAfterFailure(t *testing.T) {
 	}
 	if fi, err := os.Stat(wtPath); err != nil || !fi.IsDir() {
 		t.Errorf("worktree dir missing after retry: %s (%v)", wtPath, err)
+	}
+}
+
+// TestWorktreeRetryUsesCurrentTemplate (Pitfall 7): the Retry/lazy-create
+// endpoint flows through the same provisionWorktree choke point as task
+// create, so a branch_template change applies to a retried provisioning too —
+// never a stale task/<slug>-<id> name.
+func TestWorktreeRetryUsesCurrentTemplate(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, repo, _, _ := provisionedTask(t, srv, "Retry Template")
+
+	// Drop to the absent state (clean tree, no sessions), then change the
+	// template — the retried provisioning must use the CURRENT template.
+	status, body := doJSON(t, "DELETE", wtURL(srv, id), nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("worktree delete: status = %d, want 204; body=%v", status, body)
+	}
+	if err := settings.Set(env.db, settings.KeyBranchTemplate, "wip/{id}"); err != nil {
+		t.Fatalf("set branch_template: %v", err)
+	}
+
+	status, body = doJSON(t, "POST", wtURL(srv, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("retry status = %d, want 200; body=%v", status, body)
+	}
+	want := fmt.Sprintf("wip/%d", id)
+	if body["branch"] != want {
+		t.Errorf("branch = %v, want %q (Retry must build the current template's branch)", body["branch"], want)
+	}
+	if got := branchList(t, repo, want); got == "" {
+		t.Errorf("git branch --list %s is empty — templated branch not created on retry", want)
 	}
 }
 

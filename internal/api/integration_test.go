@@ -31,7 +31,9 @@ func newIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
-	wt := worktree.NewService(t.TempDir())
+	wtDir := t.TempDir()
+	seedWorktreeBase(t, db, wtDir)
+	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)

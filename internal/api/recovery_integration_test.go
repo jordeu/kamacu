@@ -113,7 +113,9 @@ func TestRecoveryLifecycle(t *testing.T) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
-	wt := worktree.NewService(t.TempDir())
+	wtDir := t.TempDir()
+	seedWorktreeBase(t, db, wtDir)
+	wt := worktree.NewService(wtDir)
 	globRoot := t.TempDir()
 
 	// Agents inherit the test process env (D-52); point the stub's argv

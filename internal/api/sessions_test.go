@@ -73,7 +73,9 @@ func newTaskSessionServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
-	wt := worktree.NewService(t.TempDir())
+	wtDir := t.TempDir()
+	seedWorktreeBase(t, db, wtDir)
+	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
@@ -272,7 +274,9 @@ func newResumeServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB,
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
-	wt := worktree.NewService(t.TempDir())
+	wtDir := t.TempDir()
+	seedWorktreeBase(t, db, wtDir)
+	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
 		BaseURL:   "http://127.0.0.1:7333",

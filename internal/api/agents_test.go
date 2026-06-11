@@ -30,7 +30,9 @@ func newAgentServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB) 
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
-	wt := worktree.NewService(t.TempDir())
+	wtDir := t.TempDir()
+	seedWorktreeBase(t, db, wtDir) // provisioning must never hit the real home default
+	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
 		BaseURL:   "http://127.0.0.1:7333",

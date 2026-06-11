@@ -14,9 +14,21 @@ import (
 	"testing"
 
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/store"
 	"kangent/internal/worktree"
 )
+
+// seedWorktreeBase stores dir as the worktree_base setting. Every api test
+// harness that provisions worktrees MUST seed its temp dir: since Phase 6 the
+// creation path reads the setting (absent row = the real ~/.kangent default),
+// so an unseeded harness would write into the developer's home.
+func seedWorktreeBase(t *testing.T, db *sql.DB, dir string) {
+	t.Helper()
+	if err := settings.Set(db, settings.KeyWorktreeBase, dir); err != nil {
+		t.Fatalf("seed worktree_base %q: %v", dir, err)
+	}
+}
 
 // newTestServer opens an isolated SQLite database in a temp dir, migrates it,
 // and returns an httptest server with all API routes registered, plus the DB
@@ -31,8 +43,10 @@ func newTestServer(t *testing.T) (*httptest.Server, *sql.DB, string) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
+	wtDir := t.TempDir()
+	seedWorktreeBase(t, db, wtDir)
 	mux := http.NewServeMux()
-	Routes(mux, db, worktree.NewService(t.TempDir()), session.NewManager())
+	Routes(mux, db, worktree.NewService(wtDir), session.NewManager())
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()

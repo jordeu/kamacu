@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/store"
 )
 
@@ -96,6 +97,105 @@ func TestTaskCreateProvisionsWorktree(t *testing.T) {
 	}
 	if got := branchList(t, repo, wantBranch); got == "" {
 		t.Errorf("git branch --list %s is empty — branch not created (GIT-01)", wantBranch)
+	}
+}
+
+// TestTaskCreateBranchTemplateChange: a task created AFTER changing
+// branch_template gets the template-driven branch (BRANCH-01) — settings are
+// read at use inside provisionWorktree, no restart (SET-03).
+func TestTaskCreateBranchTemplateChange(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	repo := gitRepoWithCommit(t)
+	pid := createProject(t, srv, repo)
+
+	if err := settings.Set(db, settings.KeyBranchTemplate, "wip/{id}"); err != nil {
+		t.Fatalf("set branch_template: %v", err)
+	}
+
+	body := createTask(t, srv, pid, "Templated Work")
+	id := taskID(t, body)
+	want := fmt.Sprintf("wip/%d", id)
+	if body["branch"] != want {
+		t.Errorf("branch = %v, want %q (current template must drive new branches)", body["branch"], want)
+	}
+	if body["worktree_error"] != nil {
+		t.Errorf("worktree_error = %v, want null", body["worktree_error"])
+	}
+	if got := branchList(t, repo, want); got == "" {
+		t.Errorf("git branch --list %s is empty — templated branch not created", want)
+	}
+}
+
+// TestTaskCreateWorktreeBaseChange (WT-01/02): changing worktree_base affects
+// only NEW worktrees; the previous task's stored absolute path is untouched
+// and its tree still exists on disk.
+func TestTaskCreateWorktreeBaseChange(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	repo := gitRepoWithCommit(t)
+	pid := createProject(t, srv, repo)
+
+	first := createTask(t, srv, pid, "Old Base")
+	firstID := taskID(t, first)
+	firstPath, _ := first["worktree_path"].(string)
+	if firstPath == "" {
+		t.Fatalf("first task provisioning failed: %v", first)
+	}
+
+	newBase := t.TempDir()
+	seedWorktreeBase(t, db, newBase)
+
+	second := createTask(t, srv, pid, "New Base")
+	secondPath, _ := second["worktree_path"].(string)
+	if secondPath == "" {
+		t.Fatalf("second task provisioning failed: %v", second)
+	}
+	wantPrefix := filepath.Join(newBase, filepath.Base(repo)) + string(os.PathSeparator)
+	if !strings.HasPrefix(secondPath, wantPrefix) {
+		t.Errorf("new worktree path = %q, want under %q (new base + repo-basename subdir)", secondPath, wantPrefix)
+	}
+	if fi, err := os.Stat(secondPath); err != nil || !fi.IsDir() {
+		t.Errorf("new worktree missing on disk: %s (err %v)", secondPath, err)
+	}
+
+	// WT-02: the old tree is untouched on disk and its stored path unchanged.
+	if fi, err := os.Stat(firstPath); err != nil || !fi.IsDir() {
+		t.Errorf("old worktree disturbed by base change: %s (err %v)", firstPath, err)
+	}
+	status, got := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, firstID), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET first task: status = %d, want 200", status)
+	}
+	if got["worktree_path"] != firstPath {
+		t.Errorf("stored worktree_path = %v, want unchanged %q", got["worktree_path"], firstPath)
+	}
+}
+
+// TestTaskCreateCorruptTemplateLandsInWorktreeError: a hand-corrupted template
+// (raw INSERT bypassing Set's validation) never crashes create — the
+// create-time CheckRefFormat defense routes it into worktree_error (D-25) and
+// the request still 201s.
+func TestTaskCreateCorruptTemplateLandsInWorktreeError(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+
+	if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES('branch_template', 'bad..name-{id}')`); err != nil {
+		t.Fatalf("raw settings insert: %v", err)
+	}
+
+	status, body := doJSON(t, "POST", fmt.Sprintf("%s/api/projects/%d/tasks", srv.URL, pid),
+		map[string]any{"title": "Corrupt Template"})
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 — settings problems must never block idea capture; body=%v", status, body)
+	}
+	if body["branch"] != nil {
+		t.Errorf("branch = %v, want null on failed provisioning", body["branch"])
+	}
+	if body["worktree_path"] != nil {
+		t.Errorf("worktree_path = %v, want null on failed provisioning", body["worktree_path"])
+	}
+	werr, _ := body["worktree_error"].(string)
+	if !strings.Contains(werr, "Not a valid git branch name.") {
+		t.Errorf("worktree_error = %q, want it to contain %q", werr, "Not a valid git branch name.")
 	}
 }
 
