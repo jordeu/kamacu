@@ -21,17 +21,16 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ Claude Code agent sessions: explicit Start button spawns real `claude` in the worktree PTY (full TUI, inherits user settings, invisible additive status hooks, deterministic session IDs); live status dots (working/waiting/idle/exited) on cards, tab, and sidebar waiting chips; dimmed exited state with Reset session — Phase 4
 - ✓ Server-side session persistence: sessions keep running when the browser tab closes and reattach with replay (Phase 2); after a server restart, silent reconciliation leaves no ghosts and the agent offers Resume session via `claude --resume <uuid>` from the persisted session ID — Phase 5
 - ✓ Read-only diff tab: review everything a task changed vs the base branch merge-base (committed + uncommitted + untracked), collapsible unified diffs — Phase 5
+- ✓ Global settings page (sidebar gear → full-page route, SQLite-backed, served over the API) with per-field commit, reset-to-default, and inline validation — Phase 6
+- ✓ Configurable claude extra-params, pre-filled with `--dangerously-skip-permissions` (removable; applies at next spawn, running sessions unaffected) — Phase 6
+- ✓ Configurable worktree base location (new worktrees only; existing stay put) — Phase 6
+- ✓ Configurable bash-tab shell (dropdown, bash-only for now; bash de-hardcoded) — Phase 6
+- ✓ Configurable branch-name token template (default `task/{slug}-{id}`, validated to a legal ref at save and create time) — Phase 6
+- ✓ Task-view header layout spans full page width (title row + three-dots actions menu) — Phase 6
 
 ### Active
 
-**Milestone v1.1: Settings & Polish**
-
-- [ ] Global settings page (sidebar gear → full-page route, SQLite-backed, served over the API)
-- [ ] Configurable claude extra-params, pre-filled with `--dangerously-skip-permissions` (removable)
-- [ ] Configurable worktree base location (new worktrees only; existing stay put)
-- [ ] Configurable bash-tab shell (dropdown, bash-only for now; bash de-hardcoded)
-- [ ] Configurable branch-name token template (default `task/{slug}-{id}`, validated to a legal ref)
-- [ ] Fix task-view header layout so the title row + three-dots actions menu span full page width
+**Milestone v1.1: Settings & Polish** — all requirements validated in Phase 6; milestone ready for completion.
 
 ### Out of Scope
 
@@ -63,9 +62,11 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 **Key context:** global-only (no per-project overrides); settings apply at next spawn/creation (no restart); stored in SQLite.
 
+**Status:** Phase 6 complete (2026-06-11) — all 13 requirement IDs verified (19/19 must-haves), seven success criteria human-verified live on the release binary. Milestone ready for `/gsd:complete-milestone`.
+
 ## Deferred (post-v1.1)
 
-Parked candidates: browser notifications on waiting/finished (NOTF-01), one-click "Move to In Review?" on the Stop hook (NOTF-02), stale-worktree purge list (MAINT-01), MCP server for agent board access (AGNT-01), multiple agent CLIs, per-project settings overrides. One carried bug to confirm: whether plan-mode exit-plan approval triggers the amber waiting dot (research OQ1).
+Parked candidates: browser notifications on waiting/finished (NOTF-01), one-click "Move to In Review?" on the Stop hook (NOTF-02), stale-worktree purge list (MAINT-01), MCP server for agent board access (AGNT-01), multiple agent CLIs, per-project settings overrides. One carried bug to confirm: whether plan-mode exit-plan approval triggers the amber waiting dot (research OQ1) — still unobserved as of Phase 6's gate (user approved without reporting it).
 
 ## Context
 
@@ -92,6 +93,7 @@ Parked candidates: browser notifications on waiting/finished (NOTF-01), one-clic
 | Go backend + React frontend | User preference | ✓ Good — single embedded binary |
 | Manual git workflow, app only cleans up worktrees | Keeps v1 scope lean; user merges/PRs in terminal | ✓ Good (Phase 3) |
 | Fixed columns: To Do / In Progress / In Review / Done | In Review holds agent-finished work awaiting human check | ✓ Good (Phase 1) |
+| D-51 reversed: `--dangerously-skip-permissions` on by default (Phase 6, AGENT-02) | Dispatcher workflow favors unattended agents; flag is a removable settings default, so interactive prompts are one edit away | ✓ Intentional — documented side effect: amber waiting dot rarely fires while the flag is active |
 
 ## Evolution
 
@@ -111,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 — milestone v1.1 Settings & Polish started*
+*Last updated: 2026-06-11 — Phase 6 (Settings & Polish) complete; v1.1 ready for milestone completion*
