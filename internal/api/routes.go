@@ -24,4 +24,5 @@ func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.M
 	mux.HandleFunc("PATCH /api/tasks/{id}", t.update)
 	mux.HandleFunc("POST /api/tasks/{id}/move", t.move)
 	mux.HandleFunc("DELETE /api/tasks/{id}", t.delete)
+	SettingsRoutes(mux, db)
 }
