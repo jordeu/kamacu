@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Settings & Polish
-status: executing
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-06-11T15:42:19.120Z"
+status: verifying
+stopped_at: Completed 06-04-PLAN.md (phase 6 complete, 4/4)
+last_updated: "2026-06-11T16:01:45.548Z"
 last_activity: 2026-06-11
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 Phase: 06 (settings-polish) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-11
 
 Progress: [░░░░░░░░░░] 0%
@@ -83,6 +83,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 06 P01 | 11 min | 3 tasks | 14 files |
 | Phase 06-settings-polish P03 | 8 min | 3 tasks | 9 files |
 | Phase 06 P02 | 24 min | 2 tasks | 17 files |
+| Phase 06-settings-polish P04 | 25 min | 2 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -190,11 +191,11 @@ None yet.
 ### Blockers/Concerns
 
 - [Phase 6 / D-51 reversal]: AGENT-02 defaults the extra-params field to `--dangerously-skip-permissions`, reversing v1.0's interactive-by-default D-51 — intentional; log the reversal in PROJECT.md Key Decisions at transition.
-- Plan-mode exit-plan approval → amber dot unconfirmed by user during 04-05 live verification — carried bug to confirm during v1.1 UAT (research OQ1)
+- Plan-mode exit-plan approval → amber dot (research OQ1): still unobserved — user approved all seven Phase 6 criteria during 06-04 live verification but did not report a plan-mode-amber observation; item remains open, carry to next UAT.
 
 ## Session Continuity
 
-Last session: 2026-06-11T15:42:19.115Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-06-11T16:01:45.545Z
+Stopped at: Completed 06-04-PLAN.md (phase 6 complete, 4/4)
 Resume file: None
-Next: `/gsd:plan-phase 6`
+Next: `/gsd:verify-work 6` then `/gsd:transition` (log D-51 reversal in PROJECT.md Key Decisions)
