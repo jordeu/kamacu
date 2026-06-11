@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-06-11T11:05:17.142Z"
+milestone: v1.1
+milestone_name: Settings & Polish
+status: defining_requirements
+stopped_at: Milestone v1.1 started
+last_updated: "2026-06-11T11:10:07.737Z"
 last_activity: 2026-06-11
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 28
-  completed_plans: 28
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-10)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 5 — Recovery & Review
+**Current focus:** Milestone v1.1 — defining requirements
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-11
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-11 — Milestone v1.1 Settings & Polish started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -178,6 +178,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11T10:36:02.161Z
-Stopped at: Completed 05-05-PLAN.md
-Resume file: None
+Last session: 2026-06-11T11:10:07.733Z
+Stopped at: Milestone v1.0 summary generated
+Resume file: .planning/reports/MILESTONE_SUMMARY-v1.0.md

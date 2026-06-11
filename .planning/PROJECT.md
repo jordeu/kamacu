@@ -24,7 +24,14 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Active
 
-(All v1 requirements validated — milestone complete)
+**Milestone v1.1: Settings & Polish**
+
+- [ ] Global settings page (sidebar gear → full-page route, SQLite-backed, served over the API)
+- [ ] Configurable claude extra-params, pre-filled with `--dangerously-skip-permissions` (removable)
+- [ ] Configurable worktree base location (new worktrees only; existing stay put)
+- [ ] Configurable bash-tab shell (dropdown, bash-only for now; bash de-hardcoded)
+- [ ] Configurable branch-name token template (default `task/{slug}-{id}`, validated to a legal ref)
+- [ ] Fix task-view header layout so the title row + three-dots actions menu span full page width
 
 ### Out of Scope
 
@@ -42,9 +49,23 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 Kangent v1 does the whole loop: create a project on a local git repo → add a task (worktree + `task/<slug>-<id>` branch auto-created under `~/.kangent/worktrees/`) → Start a real `claude` session in the worktree PTY → watch the board as a dispatcher (status dots, amber when an agent needs you) → leave and reattach across tab closes and server restarts (`claude --resume`) → review the diff vs merge-base → mark Done with gated worktree cleanup. Stack: Go stdlib mux + modernc SQLite + creack/pty + coder/websocket; React 19 + Vite + Tailwind 4 + shadcn + xterm.js 6 + dnd-kit + TanStack Query.
 
-## Next Milestone Goals
+## Current Milestone: v1.1 Settings & Polish
 
-Candidates parked for v1.1+ (run `/gsd:new-milestone` to scope): browser notifications on waiting/finished (NOTF-01), one-click "Move to In Review?" on the Stop hook (NOTF-02), stale-worktree purge list (MAINT-01), MCP server for agent board access (AGNT-01), multiple agent CLIs. One carried bug to confirm: whether plan-mode exit-plan approval triggers the amber waiting dot (research OQ1).
+**Goal:** A global settings page for configuring how agent sessions, worktrees, branches, and shells are created — plus a task-view header layout fix.
+
+**Target features:**
+- Global settings page (sidebar gear → full-page route, SQLite settings table behind the API)
+- Configurable claude extra-params, pre-filled with `--dangerously-skip-permissions` (removable) — reverses v1's D-51 interactive-by-default posture
+- Configurable worktree base location (default `~/.kangent/worktrees/`; new worktrees only)
+- Configurable bash-tab shell (dropdown, bash-only for now; bash de-hardcoded so more are later data)
+- Configurable branch-name token template (default `task/{slug}-{id}`, validated to a legal collision-safe ref)
+- Task-view header layout fix (title row + three-dots menu span full page width)
+
+**Key context:** global-only (no per-project overrides); settings apply at next spawn/creation (no restart); stored in SQLite.
+
+## Deferred (post-v1.1)
+
+Parked candidates: browser notifications on waiting/finished (NOTF-01), one-click "Move to In Review?" on the Stop hook (NOTF-02), stale-worktree purge list (MAINT-01), MCP server for agent board access (AGNT-01), multiple agent CLIs, per-project settings overrides. One carried bug to confirm: whether plan-mode exit-plan approval triggers the amber waiting dot (research OQ1).
 
 ## Context
 
@@ -90,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 after Phase 5 completion — v1 milestone complete (Recovery & Review: restart reconciliation, claude --resume, read-only diff tab — shipped and human-verified)*
+*Last updated: 2026-06-11 — milestone v1.1 Settings & Polish started*
