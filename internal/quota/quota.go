@@ -7,10 +7,23 @@
 package quota
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -128,4 +141,274 @@ func normalizeWindows(body []byte) ([]Window, error) {
 		emit(k)
 	}
 	return out, nil
+}
+
+// Config is the public construction seam. Zero values select production
+// defaults; tests inject a temp credentials path, an httptest base URL, and
+// a fixed UserAgent (never spawning claude).
+type Config struct {
+	CredentialsPath string // default: ~/.claude/.credentials.json
+	BaseURL         string // default: "https://api.anthropic.com"
+	UserAgent       string // if "" → probe via DetectVersion(ClaudeBin)
+	ClaudeBin       string // -claude-bin flag value; "" → exec.LookPath("claude")
+}
+
+// Service is the demand-driven, token-keyed quota cache. There is no ticker
+// goroutine: the browser's poll is the only trigger, so an idle server makes
+// zero upstream requests.
+type Service struct {
+	mu        sync.Mutex
+	credsPath string
+	baseURL   string
+	userAgent string
+	client    *http.Client
+	now       func() time.Time // time.Now; override in tests
+
+	// cache state (all guarded by mu)
+	cached       []Window
+	tokenFP      string    // hex sha256 of the current token (QUOTA-08)
+	fetchedAt    time.Time // zero until first success; drives 60s TTL and FetchedAt
+	lastAttempt  time.Time // set on EVERY upstream attempt; drives the 10s hard floor
+	backoffUntil time.Time // 429: now + max(Retry-After, 30s)
+	failures     int       // consecutive; >= 3 ⇒ drop cached (QUOTA-06)
+	lastErr      string    // "" | "auth_expired" | "error" — picks the dropped/stale state
+	inflight     bool      // in-flight dedup
+}
+
+// New builds a Service from cfg, applying production defaults for zero
+// values. The UA probe runs at most once per process, here.
+func New(cfg Config) *Service {
+	credsPath := cfg.CredentialsPath
+	if credsPath == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			credsPath = filepath.Join(home, ".claude", ".credentials.json")
+		}
+		// Unresolvable home leaves credsPath "" — os.ReadFile("") always
+		// errors, degrading every Get to no_credentials by design.
+	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	userAgent := cfg.UserAgent
+	if userAgent == "" {
+		userAgent = "claude-code/" + DetectVersion(cfg.ClaudeBin)
+	}
+	return &Service{
+		credsPath: credsPath,
+		baseURL:   baseURL,
+		userAgent: userAgent,
+		client:    &http.Client{Timeout: 10 * time.Second},
+		now:       time.Now,
+	}
+}
+
+const (
+	cacheTTL      = 60 * time.Second // gates re-fetch after a SUCCESS
+	attemptFloor  = 10 * time.Second // gates every attempt, even ?refresh=1
+	minBackoff429 = 30 * time.Second
+	maxFailures   = 3 // consecutive failures before cached windows drop
+)
+
+// Get returns the current quota Result, fetching upstream only when the
+// demand-driven cache rules allow it. force corresponds to ?refresh=1.
+func (s *Service) Get(ctx context.Context, force bool) Result {
+	s.mu.Lock()
+
+	// 1. Re-read credentials EVERY call — claude rewrites the file
+	// constantly and rotates the token (~8h). Never cached, never written.
+	token, expiresAt, err := readCredentials(s.credsPath)
+	if err != nil {
+		// errNoCredentials (and nothing else can come back): first-class
+		// state, no upstream call ever (D-71).
+		s.mu.Unlock()
+		return Result{State: "no_credentials"}
+	}
+
+	now := s.now()
+
+	// 2. Token change (QUOTA-08): never serve one account's windows under
+	// another account's token.
+	fp := sha256Hex(token)
+	if fp != s.tokenFP {
+		s.cached = nil
+		s.fetchedAt = time.Time{}
+		s.failures = 0
+		s.lastErr = ""
+		s.tokenFP = fp
+	}
+
+	// 3. Locally expired token: behave as a 401 WITHOUT burning an upstream
+	// request on a guaranteed failure (Pitfall 6).
+	if expiresAt.Before(now) {
+		s.recordFailureLocked("auth_expired")
+		res := s.resultLocked()
+		s.mu.Unlock()
+		return res
+	}
+
+	// 4. Serve the cache without fetching when any gate holds. The 10s
+	// floor binds lastAttempt (attempts); the 60s TTL binds fetchedAt
+	// (successes) — separate fields, or a failing upstream gets hammered
+	// by the 60s poll (Pitfall 3).
+	if (!force && s.cached != nil && now.Sub(s.fetchedAt) < cacheTTL) ||
+		now.Before(s.backoffUntil) ||
+		now.Sub(s.lastAttempt) < attemptFloor ||
+		s.inflight {
+		res := s.resultLocked()
+		s.mu.Unlock()
+		return res
+	}
+
+	// 5. Fetch. Release mu during the HTTP call; inflight dedups concurrent
+	// Gets onto the cache meanwhile.
+	s.inflight = true
+	s.lastAttempt = now
+	s.mu.Unlock()
+
+	status, body, retryAfter, fetchErr := s.fetchUpstream(ctx, token)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inflight = false
+
+	switch {
+	case fetchErr != nil:
+		s.recordFailureLocked("error")
+	case status == http.StatusOK:
+		windows, err := normalizeWindows(body)
+		if err != nil {
+			s.recordFailureLocked("error")
+			break
+		}
+		s.cached = windows
+		s.fetchedAt = s.now()
+		s.failures = 0
+		s.lastErr = ""
+	case status == http.StatusUnauthorized:
+		s.recordFailureLocked("auth_expired")
+	case status == http.StatusTooManyRequests:
+		s.backoffUntil = s.now().Add(retryAfter)
+		s.recordFailureLocked("error")
+	default:
+		s.recordFailureLocked("error")
+	}
+
+	return s.resultLocked()
+}
+
+// fetchUpstream performs the single authenticated GET. It returns the status
+// code, the body (200 only), and the 429 backoff duration (429 only). Error
+// values never contain the token or any request material — status codes only
+// (Pitfall 4).
+func (s *Service) fetchUpstream(ctx context.Context, token string) (int, []byte, time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/api/oauth/usage", nil)
+	if err != nil {
+		return 0, nil, 0, errors.New("building usage request failed")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", s.userAgent)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		slog.Debug("quota upstream request failed", "kind", "network")
+		return 0, nil, 0, errors.New("usage request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Truncate-and-discard: never read error bodies into memory beyond
+		// drain, never log them.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		slog.Debug("quota upstream non-200", "status", resp.StatusCode)
+		var retryAfter time.Duration
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
+		}
+		return resp.StatusCode, nil, retryAfter, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return 0, nil, 0, fmt.Errorf("reading usage response: status %d", resp.StatusCode)
+	}
+	return http.StatusOK, body, 0, nil
+}
+
+// parseRetryAfter maps a Retry-After header to a backoff duration of at
+// least 30s; missing/unparseable values fall back to the 30s minimum.
+func parseRetryAfter(h string) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(h))
+	if err != nil || time.Duration(secs)*time.Second < minBackoff429 {
+		return minBackoff429
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// recordFailureLocked increments the consecutive-failure counter, remembers
+// which degraded state to report, and drops the cached windows once
+// maxFailures is reached (QUOTA-06). Caller holds mu.
+func (s *Service) recordFailureLocked(state string) {
+	s.failures++
+	s.lastErr = state
+	slog.Debug("quota fetch degraded", "state", state, "failures", s.failures)
+	if s.failures >= maxFailures {
+		s.cached = nil
+	}
+}
+
+// resultLocked materializes the Result for the current cache state. Caller
+// holds mu.
+func (s *Service) resultLocked() Result {
+	state := "ok"
+	if s.lastErr != "" {
+		state = s.lastErr
+	}
+	res := Result{State: state, Stale: s.lastErr != "" && s.cached != nil}
+	if s.cached != nil {
+		res.Windows = s.cached
+		ft := s.fetchedAt
+		res.FetchedAt = &ft
+	}
+	return res
+}
+
+// sha256Hex fingerprints a token for cache keying without retaining it.
+func sha256Hex(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// fallbackClaudeVersion pins a known-good claude version for the User-Agent
+// when probing fails. claude --version output 2026-06-12; bump
+// opportunistically — the UA bucket is load-bearing for rate limits.
+const fallbackClaudeVersion = "2.1.174"
+
+var versionRe = regexp.MustCompile(`^\d+\.\d+\.\d+`)
+
+// DetectVersion probes `claude --version` (the -claude-bin flag value, or
+// "claude" on PATH) with a 5s timeout and returns the leading semver token
+// of its stdout. Any failure — missing binary, timeout, parse miss — yields
+// the pinned fallback. Called once per process from New.
+func DetectVersion(claudeBin string) string {
+	bin := claudeBin
+	if bin == "" {
+		p, err := exec.LookPath("claude")
+		if err != nil {
+			return fallbackClaudeVersion
+		}
+		bin = p
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "--version").Output()
+	if err != nil {
+		return fallbackClaudeVersion
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 || !versionRe.MatchString(fields[0]) {
+		return fallbackClaudeVersion
+	}
+	return fields[0]
 }
