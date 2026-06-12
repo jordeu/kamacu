@@ -28,6 +28,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/StatusDot";
+import { QuotaIndicator } from "@/components/quota/QuotaIndicator";
 import { AgentTab } from "@/components/task/AgentTab";
 import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 import { DeleteTaskDialog } from "@/components/task/DeleteTaskDialog";
@@ -421,6 +422,8 @@ export default function TaskPage() {
               }}
             />
           )}
+
+          <QuotaIndicator />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

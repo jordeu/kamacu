@@ -6,6 +6,7 @@ import { useProjects, useTasks } from "@/api/queries";
 import { STATUSES } from "@/api/types";
 import { Board } from "@/components/board/Board";
 import { NewTaskDialog } from "@/components/board/NewTaskDialog";
+import { QuotaIndicator } from "@/components/quota/QuotaIndicator";
 
 export default function BoardPage() {
   const params = useParams();
@@ -45,8 +46,11 @@ export default function BoardPage() {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between px-6 py-4">
         <h1 className="text-base font-medium">{project?.name ?? ""}</h1>
-        {/* The only inverted high-contrast element on the page (UI-SPEC focal point). */}
-        <Button onClick={() => setDialogOpen(true)}>New task</Button>
+        <div className="flex items-center gap-3">
+          <QuotaIndicator />
+          {/* The only inverted high-contrast element on the page (UI-SPEC focal point). */}
+          <Button onClick={() => setDialogOpen(true)}>New task</Button>
+        </div>
       </header>
       {isLoading ? (
         <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-6 pb-6">
