@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
 	"github.com/google/uuid"
+
+	"kangent/internal/tmux"
 )
 
 // ErrStillRunning is returned by Remove for sessions that have not exited.
@@ -19,6 +22,11 @@ var ErrStillRunning = errors.New("session still running")
 
 // ErrNotFound is returned by Remove for unknown session IDs.
 var ErrNotFound = errors.New("session not found")
+
+// ErrTmuxNotFound is returned by Spawn when a tmux-backed session is requested
+// but the tmux binary no longer resolves on PATH. The API layer maps it to the
+// honest D-84 error copy — never a silent fallback to plain bash.
+var ErrTmuxNotFound = errors.New("tmux not found")
 
 // Manager owns every live Session. Lifecycle transitions (spawn / exit /
 // remove) each live in a single method so Phase 4 can add DB writes inside
@@ -30,6 +38,7 @@ type Manager struct {
 	taskCounters map[int64]int // per-task "Bash N" label counters; never reused or reset
 	seq          int           // global spawn order, List sort tiebreak
 	agentCfg     AgentConfig   // set once at startup; read (copied) at agent spawn
+	tmuxClient   *tmux.Client  // set once at startup; socket/config for tmux-backed spawns
 }
 
 // NewManager returns an empty Manager.
@@ -52,6 +61,11 @@ type SpawnOpts struct {
 	// Shell is bash-only: the settings shell; "" keeps the $SHELL fallback
 	// (back-compat for direct-Spawn tests).
 	Shell string
+	// TmuxName is bash-only: when set, the session runs `tmux new-session -A`
+	// (attach-or-create) for this exact session name on the dedicated Kangent
+	// socket instead of a plain shell. Minted and persisted by the HTTP handler
+	// (kangent-<task>-<n>); "" = plain shell. Mutually exclusive with Shell.
+	TmuxName string
 }
 
 // SetAgentConfig installs the agent spawn configuration (hook receiver
@@ -61,6 +75,14 @@ func (m *Manager) SetAgentConfig(cfg AgentConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.agentCfg = cfg
+}
+
+// SetTmuxClient installs the tmux socket/config the Manager spawns tmux-backed
+// sessions against. Called once at startup, before any spawn.
+func (m *Manager) SetTmuxClient(c tmux.Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tmuxClient = &c
 }
 
 // Spawn starts a new session on its own PTY. KindBash (the zero value) runs
@@ -96,6 +118,10 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	if opts.ResumeSessionID != "" && kind != KindAgent {
 		return nil, fmt.Errorf("resume requires an agent session")
 	}
+	// tmux-backed sessions are bash tabs only — agents never run under tmux.
+	if opts.TmuxName != "" && kind != KindBash {
+		return nil, fmt.Errorf("tmux sessions are bash-only")
+	}
 	dir := home
 	if opts.Cwd != "" {
 		fi, err := os.Stat(opts.Cwd)
@@ -111,6 +137,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 
 	var cmd *exec.Cmd
 	var claudeSessionID string
+	var tc *tmux.Client // non-nil only on the tmux spawn branch
 	if kind == KindAgent {
 		m.mu.Lock()
 		cfg := m.agentCfg
@@ -155,12 +182,48 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		// (auth, MCP servers, node shims), then pins terminal identity. This
 		// deliberately differs from bash sessions' minimal explicit env.
 		cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+	} else if opts.TmuxName != "" {
+		// tmux-backed tab (TMUX-02): the attach client is just another
+		// full-screen PTY child. LookPath-before-PTY posture preserved (D-84
+		// honest error, never silent bash fallback).
+		m.mu.Lock()
+		tc = m.tmuxClient
+		m.mu.Unlock()
+		if tc == nil {
+			return nil, fmt.Errorf("tmux client not configured")
+		}
+		bin, err := exec.LookPath("tmux")
+		if err != nil {
+			return nil, ErrTmuxNotFound
+		}
+		cmd = exec.Command(bin, tc.NewSessionArgs(opts.TmuxName, dir)...)
+		cmd.Dir = dir
+		// Same explicit allow-list as the plain-shell arm. SHELL is the USER'S
+		// shell, which tmux's default-shell inherits for the inner shell —
+		// never the tmux binary path. The explicit list is also the env scrub:
+		// TMUX/TMUX_PANE can never leak in.
+		cmd.Env = []string{
+			"TERM=xterm-256color",
+			"COLORTERM=truecolor",
+			"HOME=" + home,
+			"PATH=" + os.Getenv("PATH"),
+			"LANG=" + os.Getenv("LANG"),
+			"USER=" + os.Getenv("USER"),
+			"SHELL=" + os.Getenv("SHELL"),
+		}
 	} else {
 		// SHELL-02: a non-empty opts.Shell (the settings value, e.g. "bash")
 		// is resolved via LookPath and fails BEFORE any PTY allocation —
 		// mirroring the cwd-validation early-error posture above. An empty
 		// Shell keeps the pre-Phase-6 $SHELL fallback byte-for-byte (direct-
 		// Spawn callers and Phase 2 tests).
+		//
+		// Belt-and-braces: a raw settings value of "tmux" must NEVER become
+		// `exec.Command("tmux")` on the user's default socket — tmux tabs go
+		// through TmuxName exclusively.
+		if opts.Shell == "tmux" {
+			return nil, fmt.Errorf("tmux requires a session name — use TmuxName")
+		}
 		shell := os.Getenv("SHELL")
 		if shell == "" {
 			shell = "/bin/bash"
@@ -219,6 +282,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		taskID:          opts.TaskID,
 		kind:            kind,
 		claudeSessionID: claudeSessionID,
+		tmuxName:        opts.TmuxName,
 		seq:             seq,
 		createdAt:       time.Now(),
 		cmd:             cmd,
@@ -232,6 +296,14 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	}
 	if kind == KindAgent {
 		s.lastActivity = time.Now() // spawn -> working: startup output flows immediately
+	}
+	if opts.TmuxName != "" {
+		// The per-session lifecycle strategy, assigned ONCE here (locked
+		// decision — never `if isTmux` branches at stop time). KillSession
+		// applies its own 5s timeout internally, so context.Background() is
+		// safe in Stop.
+		s.tmuxClient = tc
+		s.killer = func() error { return tc.KillSession(context.Background(), opts.TmuxName) }
 	}
 
 	go s.pump()

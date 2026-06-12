@@ -19,6 +19,8 @@ import (
 
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
+
+	"kangent/internal/tmux"
 )
 
 // Status is a session lifecycle state.
@@ -65,11 +67,16 @@ type Info struct {
 type Session struct {
 	id              string
 	label           string
-	taskID          int64 // 0 = unscoped dev session; immutable after Spawn
-	kind            Kind  // KindBash or KindAgent; immutable after Spawn
-	claudeSessionID string // agent only ("" for bash); the --session-id uuid, immutable after Spawn
-	seq             int
-	createdAt       time.Time
+	taskID          int64        // 0 = unscoped dev session; immutable after Spawn
+	kind            Kind         // KindBash or KindAgent; immutable after Spawn
+	claudeSessionID string       // agent only ("" for bash); the --session-id uuid, immutable after Spawn
+	tmuxName        string       // tmux-backed bash tab: the kangent-<task>-<n> session name ("" = not tmux)
+	tmuxClient      *tmux.Client // socket/config for lifecycle probes; nil unless tmuxName != ""
+	killer          func() error // non-nil: how Stop terminates the underlying work (assigned ONCE
+	//                              in Spawn — the per-session lifecycle property; nil = default
+	//                              signal path, byte-identical pre-Phase-8 behavior)
+	seq       int
+	createdAt time.Time
 
 	cmd  *exec.Cmd
 	ptmx *os.File
@@ -89,6 +96,8 @@ type Session struct {
 	stopHookAt    time.Time  // last Stop hook — settle window anchor (Pitfall 1)
 	stopRequested bool       // Stop() was called server-side (exit-143-is-gray)
 	bel           belScanner // OSC-aware bare-BEL scanner, state across chunks
+	detachedAlive bool       // tmux only: attach client exited but has-session said alive
+	//                          (manual Ctrl+B d) — recorded for Phase 9's resume reconcile
 
 	done      chan struct{} // closed after the exit watcher finishes
 	termGrace time.Duration // D-14 grace between SIGTERM and SIGKILL
@@ -190,6 +199,17 @@ func (s *Session) Info() Info {
 // (the Phase 5 --resume key). Empty for bash sessions.
 func (s *Session) ClaudeSessionID() string {
 	return s.claudeSessionID
+}
+
+// TmuxName returns the tmux session name for tmux-backed tabs ("" otherwise).
+func (s *Session) TmuxName() string { return s.tmuxName }
+
+// DetachedAlive reports whether the attach client exited while the tmux
+// session stayed alive (manual detach). Phase 9 reads this for resume.
+func (s *Session) DetachedAlive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.detachedAlive
 }
 
 // noteAgentOutputLocked applies an output chunk's agent-status effects:
