@@ -54,7 +54,7 @@ Full details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
 Plans:
 - [ ] 07-01-PLAN.md — Backend: `internal/quota` service + `GET /api/usage` (six-state matrix, token-keyed cache, UA probe) [wave 1]
-- [ ] 07-02-PLAN.md — Frontend: QuotaIndicator trigger + hover popup, usage hooks, both header mounts [wave 1]
+- [x] 07-02-PLAN.md — Frontend: QuotaIndicator trigger + hover popup, usage hooks, both header mounts [wave 1]
 - [ ] 07-03-PLAN.md — Integration verification: full-stack sweep, token-leak audit, live smoke, visual checkpoint [wave 2]
 
 **UI hint**: yes

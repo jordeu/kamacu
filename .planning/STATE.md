@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
-status: planning
-stopped_at: Phase 7 context gathered
-last_updated: "2026-06-12T03:28:01.398Z"
-last_activity: 2026-06-12 — v1.2 roadmap created (3 phases, 16/16 requirements mapped)
+status: executing
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-06-12T04:33:04.582Z"
+last_activity: 2026-06-12
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Milestone v1.2 Quota & Resumable Shells — roadmap created (Phases 7–9), next is planning Phase 7
+**Current focus:** Phase 07 — claude-quota-indicator
 
 ## Current Position
 
-Phase: 7 of 9 — Claude Quota Indicator (not started)
-Plan: —
-Status: Roadmap created, ready to plan
-Last activity: 2026-06-12 — v1.2 roadmap created (3 phases, 16/16 requirements mapped)
+Phase: 07 (claude-quota-indicator) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-06-12
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -44,6 +44,7 @@ Progress: [░░░░░░░░░░] 0%
 | 6 | 4/4 | P01 11 min / P02 24 min / P03 8 min / P04 25 min (incl. human gate) |
 
 Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` archives and git history.
+| Phase 07-claude-quota-indicator P02 | 5 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -65,6 +66,8 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - Lifecycle strategy (detach vs kill) is an explicit per-session property set at spawn time, not stop-time `if isTmux` branches — the milestone's main regression-risk control.
 - Kangent is a read-only passenger on `~/.claude/.credentials.json`: never refreshes or writes the OAuth token; 401 → "re-authenticate with claude".
 - Quota indicator is strictly best-effort: lenient decode, degrade-don't-break; the upstream endpoint is undocumented.
+- [Phase 07-claude-quota-indicator]: Quota trigger bar: width tracks the 5h window, color tracks max utilization across ALL windows (QUOTA-07/D-70)
+- [Phase 07-claude-quota-indicator]: D-72 warning chip resolved as TriangleAlert in text-amber-400 replacing the bar — same footprint, motion-free
 
 ### Pending Todos
 
@@ -77,7 +80,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12T03:28:01.392Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-claude-quota-indicator/07-CONTEXT.md
+Last session: 2026-06-12T04:33:04.579Z
+Stopped at: Completed 07-02-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 7`
