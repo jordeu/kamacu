@@ -27,14 +27,14 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ Configurable bash-tab shell (dropdown, bash-only for now; bash de-hardcoded) — Phase 6
 - ✓ Configurable branch-name token template (default `task/{slug}-{id}`, validated to a legal ref at save and create time) — Phase 6
 - ✓ Task-view header layout spans full page width (title row + three-dots actions menu) — Phase 6
+- ✓ Claude quota indicator: compact "Claude 5h" trigger + threshold-colored usage bar (zinc/amber/red, D-69) in the top-right of board and task views — Phase 7
+- ✓ Quota hover popup with one row per server-reported window (5h, 7d, per-model): equal-width bars, rounded %, compact ticking reset countdowns, "Updated Xs ago" footer with cache-bypassing manual refresh — Phase 7
+- ✓ Background quota auto-poll (60s, paused when tab hidden) backed by a cached, backoff-protected, token-keyed server proxy of the OAuth usage endpoint that never writes credentials and degrades without breaking — Phase 7
 
 ### Active
 
 **Milestone v1.2: Quota & Resumable Shells**
 
-- [ ] Claude quota indicator in the top-right of the main area (compact label + 5h usage bar, visible on board and task view)
-- [ ] Quota hover popup with all quotas (5h, 7d, model-specific): percentage bars, reset times, "Updated Xm ago", manual refresh
-- [ ] Background quota auto-poll (~60s) plus manual refresh
 - [ ] "tmux" added to the global shell setting dropdown (existing API-driven seam, SHELL-FUT-01)
 - [ ] tmux-backed tabs detach on close instead of dying; reopening reattaches
 - [ ] tmux-backed tabs survive a Kangent server restart with a Resume affordance that reattaches
@@ -54,6 +54,8 @@ One place to see and drive all agent work: every task gets its own isolated work
 **Shipped: v1.0 MVP (2026-06-11)** — 5 phases, 28 plans, 74 tasks. ~10,400 LOC Go + ~5,800 LOC TS/React. Single `make build` binary serving the embedded SPA at `127.0.0.1:7333`.
 
 Kangent v1 does the whole loop: create a project on a local git repo → add a task (worktree + `task/<slug>-<id>` branch auto-created under `~/.kangent/worktrees/`) → Start a real `claude` session in the worktree PTY → watch the board as a dispatcher (status dots, amber when an agent needs you) → leave and reattach across tab closes and server restarts (`claude --resume`) → review the diff vs merge-base → mark Done with gated worktree cleanup. Stack: Go stdlib mux + modernc SQLite + creack/pty + coder/websocket; React 19 + Vite + Tailwind 4 + shadcn + xterm.js 6 + dnd-kit + TanStack Query.
+
+**v1.2 progress:** Phase 7 complete (2026-06-12) — Claude quota indicator shipped: `internal/quota` server proxy (`GET /api/usage`) + QuotaIndicator in both headers, human-verified. Phases 8–9 (tmux shells) remain.
 
 ## Current Milestone: v1.2 Quota & Resumable Shells
 
@@ -119,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 — milestone v1.2 Quota & Resumable Shells started*
+*Last updated: 2026-06-12 — Phase 7 (Claude Quota Indicator) complete*
