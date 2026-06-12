@@ -19,6 +19,7 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 	"kangent/internal/ws"
 	"kangent/web"
@@ -63,6 +64,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Kangent-managed tmux config (D-79 status off, D-80 mouse on), regenerated
+	// at every start in the data dir next to the DB — a stable path that survives
+	// reboots, so a tmux server started by a previous Kangent run still references
+	// an existing file (research Open Q2).
+	tmuxConf := filepath.Join(filepath.Dir(dbPath), "kangent-tmux.conf")
+	if err := tmux.WriteConfig(tmuxConf); err != nil {
+		slog.Error("writing tmux config", "path", tmuxConf, "error", err)
+		os.Exit(1)
+	}
+
 	// Per-instance hook token (STAT-02 / research gap #2): generated fresh on
 	// every start, held in memory only — never logged, never persisted. It is
 	// embedded solely in the per-spawn settings overlay and checked by the
@@ -100,6 +111,7 @@ func main() {
 		Token:     hookToken,
 		ClaudeBin: *claudeBin,
 	})
+	mgr.SetTmuxClient(tmux.Client{Socket: tmux.DefaultSocket, ConfPath: tmuxConf})
 
 	mux := http.NewServeMux()
 	api.Routes(mux, db, wtSvc, mgr)

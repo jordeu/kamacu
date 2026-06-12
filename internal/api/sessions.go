@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -153,11 +154,50 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "couldn't start a session")
 			return
 		}
-		opts.Shell = sh
+		if sh == "tmux" {
+			// tmux shells are task-scoped: the name embeds the task id and the row
+			// references tasks(id). The unscoped /terminal dev route gets an honest
+			// 409 (D-56 posture) — NEVER a bare `tmux` exec, which would open an
+			// unnamed session on the user's DEFAULT socket.
+			if req.TaskID <= 0 {
+				writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
+				return
+			}
+			// n from the DB, NEVER the in-memory counter (it resets on restart; a
+			// collision would make new-session -A silently attach a second tab to a
+			// surviving shell — research Pitfall 4). Insert BEFORE Spawn reserves n
+			// under UNIQUE(task_id,n); single-user localhost makes the read-then-
+			// insert race window acceptable, with the constraint as backstop.
+			var n int64
+			if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE task_id = ?`, req.TaskID).Scan(&n); err != nil {
+				writeError(w, http.StatusInternalServerError, "couldn't start a session")
+				return
+			}
+			name := fmt.Sprintf("kangent-%d-%d", req.TaskID, n)
+			if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name) VALUES (?, ?, ?)`, req.TaskID, n, name); err != nil {
+				writeError(w, http.StatusInternalServerError, "couldn't start a session")
+				return
+			}
+			opts.TmuxName = name
+		} else {
+			opts.Shell = sh
+		}
 	}
 	// Spawn's stat pre-check covers a vanished worktree dir → same 500 path.
 	sess, err := h.mgr.Spawn(opts)
 	if err != nil {
+		if opts.TmuxName != "" {
+			// release the reserved n — the name was never used
+			if _, derr := h.db.Exec(`DELETE FROM tmux_sessions WHERE name = ?`, opts.TmuxName); derr != nil {
+				slog.Warn("releasing tmux session row", "name", opts.TmuxName, "error", derr)
+			}
+		}
+		if errors.Is(err, session.ErrTmuxNotFound) {
+			// D-84: honest error, never a silent bash fallback. 409 (not 500) so
+			// the frontend renders the message verbatim.
+			writeError(w, http.StatusConflict, "tmux not found — change the shell setting or reinstall")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "couldn't start a session")
 		return
 	}
@@ -166,6 +206,14 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if kind == session.KindAgent {
 		if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
 			slog.Warn("persisting claude_session_id", "task", req.TaskID, "error", err)
+		}
+	}
+	// tmux label back-fill, warn-only (same degradation posture as the agent
+	// claude_session_id persist above): a failed write costs only the Phase 9
+	// resume label, never the session.
+	if opts.TmuxName != "" {
+		if _, err := h.db.Exec(`UPDATE tmux_sessions SET label = ? WHERE name = ?`, sess.Info().Label, opts.TmuxName); err != nil {
+			slog.Warn("persisting tmux session label", "name", opts.TmuxName, "error", err)
 		}
 	}
 	writeJSON(w, http.StatusCreated, sess.Info())
