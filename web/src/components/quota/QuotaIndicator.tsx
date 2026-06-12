@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, TriangleAlert } from "lucide-react";
+import { Clock, RefreshCw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   HoverCard,
@@ -55,11 +55,31 @@ function formatReset(iso: string, now: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-/** Reset column copy: null → em dash (no prefix); past → "Resets now". */
-function resetCopy(resetsAt: string | null, now: number): string {
-  if (resetsAt === null) return "—";
-  if (Date.parse(resetsAt) <= now) return "Resets now";
-  return `Resets in ${formatReset(resetsAt, now)}`;
+/** Compact reset column: tiny clock + bare duration ("4h 12m"), "now" once
+ *  past, em dash when the server gives no reset (checkpoint feedback — the
+ *  "Resets in" label added bulk without value; the clock icon carries the
+ *  affordance, the title attribute keeps the full wording). */
+function ResetCell({
+  resetsAt,
+  now,
+}: {
+  resetsAt: string | null;
+  now: number;
+}) {
+  if (resetsAt === null) {
+    return <span className="shrink-0 text-muted-foreground">—</span>;
+  }
+  const duration =
+    Date.parse(resetsAt) <= now ? "now" : formatReset(resetsAt, now);
+  return (
+    <span
+      title={duration === "now" ? "Resets now" : `Resets in ${duration}`}
+      className="flex shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground"
+    >
+      <Clock aria-hidden className="size-3" />
+      {duration}
+    </span>
+  );
 }
 
 function QuotaRow({ w, now }: { w: UsageWindow; now: number }) {
@@ -80,9 +100,7 @@ function QuotaRow({ w, now }: { w: UsageWindow; now: number }) {
       <span className="w-9 shrink-0 text-right tabular-nums">
         {Math.round(w.utilization)}%
       </span>
-      <span className="shrink-0 text-right whitespace-nowrap text-muted-foreground">
-        {resetCopy(w.resetsAt, now)}
-      </span>
+      <ResetCell resetsAt={w.resetsAt} now={now} />
     </div>
   );
 }
@@ -193,7 +211,7 @@ export function QuotaIndicator() {
           </div>
         </div>
       </HoverCardTrigger>
-      <HoverCardContent align="end" className="w-80">
+      <HoverCardContent align="end" className="w-72">
         <QuotaPopup data={data} windows={windows} />
       </HoverCardContent>
     </HoverCard>
