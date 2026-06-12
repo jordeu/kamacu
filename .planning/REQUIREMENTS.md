@@ -1,0 +1,77 @@
+# Requirements: Kangent
+
+**Defined:** 2026-06-12
+**Milestone:** v1.2 Quota & Resumable Shells
+**Core Value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
+
+## v1.2 Requirements
+
+Requirements for this milestone. Each maps to roadmap phases.
+
+### Claude Quota Indicator
+
+- [ ] **QUOTA-01**: User sees a compact "Claude 5h" indicator with a threshold-colored usage bar (green <60 / yellow 60–84 / red ≥85) in the top-right of the main area, on both board and task view
+- [ ] **QUOTA-02**: Hovering the indicator opens a popup listing every quota window the API returns (5h, 7d, per-model — server-driven, never hardcoded) with a colored bar, rounded percentage, and "Resets in Xh Ym" countdown per row
+- [ ] **QUOTA-03**: Popup footer shows "Updated Xm ago" with a manual refresh button that forces a fresh fetch (bypasses cache)
+- [ ] **QUOTA-04**: Quota data auto-refreshes about every 60s while the browser tab is visible; no background polling when hidden
+- [ ] **QUOTA-05**: Server fetches quota from Anthropic's OAuth usage endpoint using the local claude credentials (`~/.claude/.credentials.json`) with the load-bearing `claude-code/<version>` User-Agent, a 60s cache TTL, 10s hard floor, in-flight dedup, and 429 Retry-After backoff (min 30s); Kangent never writes or refreshes the token
+- [ ] **QUOTA-06**: Errors degrade gracefully — not-logged-in / token-expired (401) / 403 / 5xx / network states show clear messages in the popup with a warning on the trigger; stale cached data stays visible marked "error · Xm old" and is dropped after 3 consecutive failures; API-key-only users (no OAuth credentials) see a neutral/hidden indicator, never fabricated 0% bars
+- [ ] **QUOTA-07**: When any quota window is ≥85%, the compact trigger shows red-zone emphasis (the "stop starting agents" glance signal)
+- [ ] **QUOTA-08**: The server quota cache is keyed by token, so switching Claude accounts never shows the previous account's data
+
+### Resumable tmux Shells
+
+- [ ] **TMUX-01**: User can select "tmux" in the global shell setting dropdown; the option is offered only when `tmux` resolves on PATH
+- [ ] **TMUX-02**: New bash tabs with tmux selected spawn attach-or-create tmux sessions (deterministic `kangent-<task>-<n>` names, `[A-Za-z0-9_-]` only) on the dedicated `-L kangent` socket, with the task worktree as cwd
+- [ ] **TMUX-03**: Closing a tmux-backed tab detaches — the tmux session keeps running; reopening the tab reattaches to the same session
+- [ ] **TMUX-04**: User has an explicit "Kill session" action, distinct from closing the tab, that actually terminates the tmux session
+- [ ] **TMUX-05**: After a Kangent server restart, tabs whose tmux sessions still exist offer Resume, which reattaches (mirrors the v1.1 agent-resume reconcile → `resumable` flag → Resume UX)
+- [ ] **TMUX-06**: When the shell exits inside tmux, the tab shows the existing exited state, not "resumable" — exit vs detach discriminated via `tmux has-session` after the attach PTY exits
+- [ ] **TMUX-07**: Plain-bash tabs and agent sessions keep their kill-on-stop behavior unchanged — the shared stop path is regression-guarded by tests
+- [ ] **TMUX-08**: Task/worktree cleanup gates count live detached tmux sessions as running work, and confirmed cleanup kills the task's tmux sessions (no orphaned shells in deleted directories)
+
+## Future Requirements (v2+)
+
+### Claude Quota Indicator
+
+- **QUOTA-FUT-01**: Extra-usage credits block rendered in the popup (endpoint exposes it; verify shape empirically first)
+- **QUOTA-FUT-02**: Pinnable inline bars — choose which windows show on the compact trigger (SlayZone parity)
+- **QUOTA-FUT-03**: Quota threshold notifications — blocked on NOTF-01 (no notification system yet)
+
+### Resumable tmux Shells
+
+- **TMUX-FUT-01**: Option to use the user's default tmux server instead of the dedicated socket (external `tmux attach` convenience)
+- **TMUX-FUT-02**: Multi-provider usage indicators (Codex etc.) — out of scope per PROJECT.md (Claude-only)
+
+## Out of Scope
+
+Explicitly excluded. Documented to prevent scope creep.
+
+| Feature | Reason |
+|---------|--------|
+| Scraping `claude /usage` TUI output via PTY | Brittle ANSI parsing, version-dependent; OAuth usage endpoint is the community-standard structured source |
+| Computing quota from local JSONL transcripts | Estimates drift from server truth; misses usage from other devices; the tool category converged on the endpoint |
+| Auto-refreshing the expired OAuth token | Token rotation races with Claude Code's own refresh and risks invalidating the CLI session; 401 → "re-authenticate with `claude`" |
+| Spend/cost analytics for API-key users | Different data model (dollars, no windows); `/cost` exists in the CLI |
+| Wrapping agent (claude) sessions in tmux | claude already has `--resume`; nesting a TUI in tmux adds redraw artifacts and double alternate-screen problems |
+| Injecting tmux config (status bar off, mouse mode, history size) | Overrides user expectations; run tmux vanilla on the dedicated socket |
+| Serializing xterm.js scrollback across restarts | tmux owns history; replaying a stale buffer over tmux's redraw garbles the screen |
+| `remain-on-exit` / auto-respawn of dead shells | A dead pane that eats keystrokes confuses more than a clean exited state |
+| macOS keychain credential support | Linux-first per PROJECT.md; written decision, not silent omission |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| (populated by roadmap) | | |
+
+**Coverage:**
+- v1.2 requirements: 16 total
+- Mapped to phases: 0
+- Unmapped: 16 ⚠️
+
+---
+*Requirements defined: 2026-06-12*
+*Last updated: 2026-06-12 after initial definition*
