@@ -35,8 +35,8 @@ Full details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 **Milestone Goal:** Make Kangent a better dispatcher cockpit: see Claude quota usage at a glance before starting agents, and make bash tabs durable via tmux-backed shells that detach on close and survive server restarts.
 
 - [ ] **Phase 7: Claude Quota Indicator** - Compact threshold-colored quota bar in the board/task headers with an all-windows hover popup, backed by a cached, backoff-protected server proxy of the OAuth usage endpoint
-- [ ] **Phase 8: tmux Shells — Spawn & Detach Lifecycle** - "tmux" shell option spawning attach-or-create sessions on a dedicated socket, with close-detaches / explicit-Kill / exit-vs-detach semantics and a regression-guarded shared stop path
-- [ ] **Phase 9: tmux Restart Resume & Cleanup Integration** - Detached tmux sessions survive Kangent restarts with a Resume affordance, and cleanup gates count and kill them so no shell is ever orphaned
+- [ ] **Phase 8: tmux Shells — Spawn & Detach Lifecycle** - "tmux" shell option spawning attach-or-create sessions on a dedicated socket — invisible-tmux tabs with kill-on-close parity, exit-vs-detach discrimination, and a regression-guarded shared stop path
+- [ ] **Phase 9: tmux Restart Resume & Cleanup Integration** - tmux sessions survive Kangent restarts with a Resume affordance, cleanup gates count and kill them so no shell is ever orphaned, and a Done-TTL reaper kills idle sessions on finished tasks
 
 ## Phase Details
 
@@ -65,14 +65,14 @@ Plans:
 - Verification should include the six-state degradation matrix (file absent / key absent / expired / 429 / 5xx / malformed) and a grep audit for `sk-ant-oat` in logs and API payloads.
 
 ### Phase 8: tmux Shells — Spawn & Detach Lifecycle
-**Goal**: User can pick tmux as the bash-tab shell and get durable shells: closing a tab detaches (the session keeps running), reopening reattaches, killing is explicit — and nothing about plain bash or agent sessions changes
+**Goal**: User can pick tmux as the bash-tab shell and get invisibly durable shells: tabs look and behave exactly like plain bash tabs (× kills), sessions survive leaving the task view — and (Phase 9) a server restart — and nothing about plain bash or agent sessions changes
 **Depends on**: Phase 6 (v1.1 `AllowedShells`/LookPath settings seam, SHELL-FUT-01); independent of Phase 7
 **Requirements**: TMUX-01, TMUX-02, TMUX-03, TMUX-04, TMUX-06, TMUX-07
 **Success Criteria** (what must be TRUE):
   1. With tmux on PATH, "tmux" appears in the global shell setting dropdown; without tmux installed, the option is absent (TMUX-01)
   2. With tmux selected, opening a new bash tab spawns an attach-or-create tmux session (deterministic `kangent-<task>-<n>` name, `[A-Za-z0-9_-]` only) on the dedicated `-L kangent` socket, with the task worktree as cwd (TMUX-02)
-  3. Closing a tmux-backed tab detaches — a process left running (e.g. `top`) is still alive when the user reopens the tab, which reattaches to the same session with a clean single repaint (no replayed garbage) (TMUX-03)
-  4. An explicit "Kill session" action, distinct from closing the tab, actually terminates the tmux session (TMUX-04)
+  3. With a process left running (e.g. `top`), leaving the task view and reopening it reattaches to the same still-running session with a clean single repaint (no replayed garbage); the tab is indistinguishable from a plain bash tab — no status bar, no badge (TMUX-03, amended 2026-06-12)
+  4. Closing a tmux-backed tab (×) kills the tmux session — kill-on-close parity with plain bash tabs; no separate kill affordance (TMUX-04, amended 2026-06-12)
   5. When the shell exits inside tmux, the tab shows the existing exited state — not "resumable" (exit vs detach discriminated via `tmux has-session` after the attach PTY exits); plain-bash tabs and agent sessions keep kill-on-stop behavior unchanged, locked in by regression tests on the shared stop path (TMUX-06, TMUX-07)
 **Plans**: TBD
 **UI hint**: yes
@@ -80,23 +80,26 @@ Plans:
 **Phase notes:**
 - **Highest regression risk in the milestone:** the tmux server daemonizes, so the existing /proc process-tree sweep can't reach it. Lifecycle strategy (detach vs kill) must be an explicit per-session property decided at spawn time — not `if isTmux` branches at stop time. Detach/kill/exit semantics must land together; shipping a subset produces "Stop doesn't stop" or "close kills".
 - Decided by research (treat as settled): dedicated socket `-L kangent` with `-f /dev/null` via one helper injecting both on every invocation; `=name` exact-match targets; no new session `Kind` (tmux tabs are `KindBash` + `tmuxName`); name minted and persisted by the HTTP handler (new `tmux_sessions` table, migration 00005, identity only — never status); env scrubbing (`TMUX`/`TMUX_PANE` removed, `TERM` pinned to `xterm-256color`) at the single spawn seam; cross-generation ring-buffer replay skipped for tmux tabs (tmux repaints itself).
+- Amended by Phase 8 discussion (2026-06-12, see 08-CONTEXT.md): **invisible tmux** — × kills (kill-on-close parity with bash, D-78), detach only via leaving the task view or server shutdown; Kangent-controlled socket config: `status off` (D-79) + `set -g mouse on` (D-80, scrollback via tmux history); Ctrl+B prefix left default (D-81); setting flips apply at next spawn (D-83); tmux gone from PATH → honest spawn error (D-84); externally-died sessions surface the existing exited banner (D-82).
 - New leaf package `internal/tmux` (`HasSession`/`KillSession`/`DetachClient`/`NewSessionArgs`) imported by both `internal/session` and `internal/api`. PTY/WS/ring-buffer transport untouched — a tmux client is just another full-screen PTY child.
 - Cheap planning-time task: 5-minute smoke test of `=` exact-match targets and `detach-client` flags on the host tmux (the only MEDIUM-confidence details).
 
 ### Phase 9: tmux Restart Resume & Cleanup Integration
-**Goal**: tmux shells complete the durability promise — they survive Kangent restarts with a Resume affordance, and task/worktree cleanup accounts for them so no shell is ever orphaned in a deleted directory
+**Goal**: tmux shells complete the durability promise — they survive Kangent restarts with a Resume affordance, task/worktree cleanup accounts for them so no shell is ever orphaned in a deleted directory, and a Done-TTL reaper keeps finished tasks from accumulating idle sessions
 **Depends on**: Phase 8 (needs working spawn + detach/kill/exit semantics to reconcile against)
-**Requirements**: TMUX-05, TMUX-08
+**Requirements**: TMUX-05, TMUX-08, REAP-01
 **Success Criteria** (what must be TRUE):
   1. After a Kangent server restart, tabs whose tmux sessions still exist offer Resume, and clicking it reattaches to the still-running session (mirrors the v1.1 agent reconcile → `resumable` flag → Resume UX) (TMUX-05)
   2. If a tmux session died while Kangent was down, the tab shows the exited/cleaned state — Resume is never offered for a dead session (TMUX-05, TMUX-06 boundary)
   3. Task/worktree cleanup gates count live detached tmux sessions as running work and surface them in the cleanup dialog; confirmed cleanup or task deletion kills the task's tmux sessions before worktree removal, leaving zero `kangent-*` sessions behind (TMUX-08)
+  4. Sessions of tasks in Done — bash, tmux, AND agent — are killed after a configurable TTL (global setting, default 24h, clocked from entering Done; leaving Done cancels; 0/never disables); worktrees are never auto-removed (REAP-01, added 2026-06-12)
 **Plans**: TBD
 
 **Phase notes:**
 - Reuses the Phase 5 (v1.0) `resumable` pattern with `tmux has-session` swapped in as the liveness probe; DB-derived detached entries in the sessions list with lazy row GC when the session died. Reattach = the same `new-session -A` spawn with the persisted name.
 - Kill-session runs in worktree-remove and task-delete paths *before* `wt.Remove`; add an orphan sweep (tmux-has-it + DB-doesn't → kill) and a README note on `tmux -L kangent kill-server`.
 - Frontend is thin wiring on existing patterns: ghost tabs + Resume button (v1.1 D-54 precedent), cleanup-gate dialog additions.
+- Done-TTL reaper (REAP-01, D-86/D-87 in 08-CONTEXT.md): periodic server-side check kills all sessions (bash, tmux, agent) of tasks that have been in Done longer than the configured TTL; new global setting (duration, default 24h, 0/never disables); timer anchored to the Done-entry timestamp and cancelled when the task leaves Done; never touches worktrees.
 
 ## Progress
 
