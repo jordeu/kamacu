@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -5,7 +6,12 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { useQuota, useRefreshQuota, type UsageWindow } from "@/api/usage";
+import {
+  useQuota,
+  useRefreshQuota,
+  type UsageResponse,
+  type UsageWindow,
+} from "@/api/usage";
 
 /** Threshold colors (D-69): muted zinc below 60, amber 60–84, red ≥85.
  *  The traffic-light low band never appears — status dots own that color;
@@ -16,18 +22,33 @@ function barColor(pct: number): string {
   return "bg-zinc-600";
 }
 
-/** Whole minutes since `iso` — "0m", "7m". Computed at render; the 60s
- *  query tick re-renders the component, so no extra timer is needed
- *  (minute granularity makes the poll cadence sufficient). */
-function formatAgo(iso: string | null): string {
-  if (iso === null) return "0m";
-  const mins = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60_000));
-  return `${mins}m`;
+/** Ticking clock: re-renders the consumer every `intervalMs`. Mounted ONLY
+ *  inside the popup body (Radix unmounts HoverCardContent children when
+ *  closed), so the timer runs only while the popup is open — the footer age
+ *  and reset countdowns stay visibly alive without an always-on interval. */
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+/** Age of `iso` relative to `now`: "12s", "7m", "1h 5m". Second granularity
+ *  under a minute so a watcher can see freshness being tracked. */
+function formatAgo(iso: string | null, now: number): string {
+  if (iso === null) return "0s";
+  const secs = Math.max(0, Math.floor((now - Date.parse(iso)) / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
 /** Delta until `iso`: <60m → "37m"; <24h → "4h 12m"; else "2d 5h". */
-function formatReset(iso: string): string {
-  const mins = Math.max(0, Math.floor((Date.parse(iso) - Date.now()) / 60_000));
+function formatReset(iso: string, now: number): string {
+  const mins = Math.max(0, Math.floor((Date.parse(iso) - now) / 60_000));
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ${mins % 60}m`;
@@ -35,21 +56,22 @@ function formatReset(iso: string): string {
 }
 
 /** Reset column copy: null → em dash (no prefix); past → "Resets now". */
-function resetCopy(resetsAt: string | null): string {
+function resetCopy(resetsAt: string | null, now: number): string {
   if (resetsAt === null) return "—";
-  if (Date.parse(resetsAt) <= Date.now()) return "Resets now";
-  return `Resets in ${formatReset(resetsAt)}`;
+  if (Date.parse(resetsAt) <= now) return "Resets now";
+  return `Resets in ${formatReset(resetsAt, now)}`;
 }
 
-function QuotaRow({ w }: { w: UsageWindow }) {
+function QuotaRow({ w, now }: { w: UsageWindow; now: number }) {
   const pct = Math.min(100, Math.max(0, w.utilization));
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="w-12 shrink-0 truncate text-muted-foreground">
         {w.label}
       </span>
-      {/* Row bar colored by this window's OWN utilization (D-69 scheme). */}
-      <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+      {/* Row bar colored by this window's OWN utilization (D-69 scheme).
+          The bar is the FLEXIBLE element so the reset text never truncates. */}
+      <div className="h-1.5 min-w-10 flex-1 overflow-hidden rounded-full bg-zinc-800">
         <div
           className={`h-full rounded-full ${barColor(w.utilization)}`}
           style={{ width: `${pct}%` }}
@@ -58,10 +80,55 @@ function QuotaRow({ w }: { w: UsageWindow }) {
       <span className="w-9 shrink-0 text-right tabular-nums">
         {Math.round(w.utilization)}%
       </span>
-      <span className="min-w-0 flex-1 truncate text-right text-muted-foreground">
-        {resetCopy(w.resetsAt)}
+      <span className="shrink-0 text-right whitespace-nowrap text-muted-foreground">
+        {resetCopy(w.resetsAt, now)}
       </span>
     </div>
+  );
+}
+
+/** Popup body: window rows + Updated/refresh footer. Lives in its own
+ *  component so the 10s useNow tick exists only while the popup is open. */
+function QuotaPopup({
+  data,
+  windows,
+}: {
+  data: UsageResponse;
+  windows: UsageWindow[];
+}) {
+  const now = useNow(10_000);
+  const refresh = useRefreshQuota();
+  return (
+    <>
+      {/* One row per server-returned window, in server order — the set,
+          labels, and order are never hardcoded here (QUOTA-02/D-74/D-75). */}
+      <div className="flex flex-col gap-2">
+        {windows.map((w) => (
+          <QuotaRow key={w.key} w={w} now={now} />
+        ))}
+      </div>
+      <div className="mt-2.5 flex items-center justify-between border-t border-foreground/10 pt-1.5">
+        {data.stale ? (
+          // Stale variant (D-73): amber footer text, trigger untouched.
+          <span className="text-xs text-amber-400">
+            error · {formatAgo(data.fetchedAt, now)} old
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            Updated {formatAgo(data.fetchedAt, now)} ago
+          </span>
+        )}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh quota"
+          onClick={() => refresh.mutate()}
+          disabled={refresh.isPending}
+        >
+          <RefreshCw className="size-3.5" />
+        </Button>
+      </div>
+    </>
   );
 }
 
@@ -71,7 +138,6 @@ function QuotaRow({ w }: { w: UsageWindow }) {
  *  auth_expired/error → motion-free warning chip. */
 export function QuotaIndicator() {
   const { data } = useQuota();
-  const refresh = useRefreshQuota();
 
   // Loading (first fetch unresolved) and credential-less users render
   // nothing in the header (D-71) — never a fabricated 0% bar.
@@ -127,35 +193,8 @@ export function QuotaIndicator() {
           </div>
         </div>
       </HoverCardTrigger>
-      <HoverCardContent align="end" className="w-72">
-        {/* One row per server-returned window, in server order — the set,
-            labels, and order are never hardcoded here (QUOTA-02/D-74/D-75). */}
-        <div className="flex flex-col gap-2">
-          {windows.map((w) => (
-            <QuotaRow key={w.key} w={w} />
-          ))}
-        </div>
-        <div className="mt-2.5 flex items-center justify-between border-t border-foreground/10 pt-1.5">
-          {data.stale ? (
-            // Stale variant (D-73): amber footer text, trigger untouched.
-            <span className="text-xs text-amber-400">
-              error · {formatAgo(data.fetchedAt)} old
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              Updated {formatAgo(data.fetchedAt)} ago
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Refresh quota"
-            onClick={() => refresh.mutate()}
-            disabled={refresh.isPending}
-          >
-            <RefreshCw className="size-3.5" />
-          </Button>
-        </div>
+      <HoverCardContent align="end" className="w-80">
+        <QuotaPopup data={data} windows={windows} />
       </HoverCardContent>
     </HoverCard>
   );
