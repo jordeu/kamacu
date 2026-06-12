@@ -4,7 +4,7 @@ milestone: v1.2
 milestone_name: Quota & Resumable Shells
 status: verifying
 stopped_at: Completed 07-03-PLAN.md — Phase 7 complete and human-verified
-last_updated: "2026-06-12T05:51:58.156Z"
+last_updated: "2026-06-12T06:00:51.806Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 3
@@ -25,8 +25,8 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 ## Current Position
 
-Phase: 07 (claude-quota-indicator) — EXECUTING
-Plan: 3 of 3
+Phase: 8
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-06-12
 
