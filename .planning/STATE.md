@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
-status: executing
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-06-12T04:42:07.221Z"
+status: verifying
+stopped_at: Completed 07-03-PLAN.md — Phase 7 complete and human-verified
+last_updated: "2026-06-12T05:51:58.156Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 Phase: 07 (claude-quota-indicator) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-12
 
 Progress: [░░░░░░░░░░] 0%
@@ -46,6 +46,7 @@ Progress: [░░░░░░░░░░] 0%
 Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` archives and git history.
 | Phase 07-claude-quota-indicator P02 | 5 min | 3 tasks | 5 files |
 | Phase 07 P01 | 14 min | 3 tasks | 5 files |
+| Phase 07-claude-quota-indicator P03 | 1h 8m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,8 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 07]: quota.Config gained an optional Now func() time.Time test seam (research-sanctioned) so api-package handler tests control TTL/floor without sleeps
 - [Phase 07]: 10s quota attempt floor binds ALL upstream attempts (not just ?refresh=1), protecting a failing upstream after the cache drops
 - [Phase 07]: Quota token fingerprint recorded on every Get so pre-success failures accumulate toward the 3-failure drop instead of resetting
+- [Phase 07]: Quota popup footer/reset countdowns tick on a 10s useNow interval mounted only while the popup is open — supersedes 07-02's no-extra-timer decision (live test showed 'Updated 0m ago' frozen against 60s TTL + 60s poll)
+- [Phase 07]: Quota popup reset column: bare duration text, no label/icon, fixed w-14 tabular-nums so all row bars share an identical track width (checkpoint feedback)
 
 ### Pending Todos
 
@@ -84,7 +87,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12T04:42:07.216Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-06-12T05:51:58.153Z
+Stopped at: Completed 07-03-PLAN.md — Phase 7 complete and human-verified
 Resume file: None
 Next: `/gsd:plan-phase 7`
