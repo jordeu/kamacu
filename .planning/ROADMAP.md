@@ -50,7 +50,13 @@ Full details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
   3. Quota data auto-refreshes about every 60s while the browser tab is visible and never polls when hidden; the server enforces a 60s cache TTL, 10s hard floor, in-flight dedup, and 429 Retry-After backoff (min 30s), sending the load-bearing `claude-code/<version>` User-Agent — and never writes or refreshes the OAuth token (QUOTA-04, QUOTA-05)
   4. Failure states degrade gracefully: not-logged-in / 401 token-expired / 403 / 5xx / network each show a clear popup message with a warning on the trigger; stale cached data stays visible marked "error · Xm old" and is dropped after 3 consecutive failures; API-key-only users see a neutral/hidden indicator — never fabricated 0% bars (QUOTA-06)
   5. When any quota window is ≥85%, the compact trigger shows red-zone emphasis (the "stop starting agents" glance signal); switching Claude accounts never shows the previous account's data because the server cache is keyed by token (QUOTA-07, QUOTA-08)
-**Plans**: TBD
+**Plans**: 3 plans (2 waves)
+
+Plans:
+- [ ] 07-01-PLAN.md — Backend: `internal/quota` service + `GET /api/usage` (six-state matrix, token-keyed cache, UA probe) [wave 1]
+- [ ] 07-02-PLAN.md — Frontend: QuotaIndicator trigger + hover popup, usage hooks, both header mounts [wave 1]
+- [ ] 07-03-PLAN.md — Integration verification: full-stack sweep, token-leak audit, live smoke, visual checkpoint [wave 2]
+
 **UI hint**: yes
 
 **Phase notes:**
@@ -105,7 +111,7 @@ Phases execute in numeric order: 7 → 8 → 9 (Phase 7 is independent of 8–9 
 | 4. Claude Code Agent Sessions | v1.0 | 5/5 | Complete | 2026-06-11 |
 | 5. Recovery & Review | v1.0 | 5/5 | Complete | 2026-06-11 |
 | 6. Settings & Polish | v1.1 | 4/4 | Complete | 2026-06-11 |
-| 7. Claude Quota Indicator | v1.2 | 0/? | Not started | - |
+| 7. Claude Quota Indicator | v1.2 | 0/3 | Not started | - |
 | 8. tmux Shells — Spawn & Detach Lifecycle | v1.2 | 0/? | Not started | - |
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 0/? | Not started | - |
 
