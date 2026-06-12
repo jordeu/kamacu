@@ -71,9 +71,10 @@ func TestValidateShell(t *testing.T) {
 		err := settings.Validate(settings.KeyShell, v)
 		checkErrString(t, err, "Unknown shell.")
 	}
-	// AllowedShells is the single source of truth shared with the API options.
-	if len(settings.AllowedShells) != 1 || settings.AllowedShells[0] != "bash" {
-		t.Errorf("AllowedShells = %v, want [bash]", settings.AllowedShells)
+	// AllowedShells is the single source of truth shared with the API options;
+	// "bash" is always present and first regardless of PATH state.
+	if shells := settings.AllowedShells(); len(shells) == 0 || shells[0] != "bash" {
+		t.Errorf("AllowedShells() = %v, want bash first", shells)
 	}
 }
 

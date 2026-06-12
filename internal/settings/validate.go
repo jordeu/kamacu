@@ -10,10 +10,18 @@ import (
 	"strings"
 )
 
-// AllowedShells is the curated shell set (SHELL-01). The SAME slice serves
-// save-time validation here and the GET /api/settings "options" array —
-// one source of truth, so future shells are data, not code (SHELL-02 seam).
-var AllowedShells = []string{"bash"}
+// AllowedShells returns the curated shell set (SHELL-01). "tmux" is offered
+// only while the binary resolves on PATH (TMUX-01) — checked at call time so
+// install/uninstall is reflected without a restart. LookPath on localhost is
+// microseconds; both call sites (save-time validation, GET options) share it,
+// so the dropdown offering and the save acceptance can never disagree.
+func AllowedShells() []string {
+	shells := []string{"bash"}
+	if _, err := exec.LookPath("tmux"); err == nil {
+		shells = append(shells, "tmux")
+	}
+	return shells
+}
 
 // tokenRe matches any {...} group in a branch template. Braces are GIT-LEGAL
 // (verified: `git check-ref-format refs/heads/{a}` passes), so unknown-token
@@ -30,7 +38,7 @@ func Validate(key, value string) error {
 	case KeyWorktreeBase:
 		return validateWorktreeBase(value)
 	case KeyShell:
-		for _, s := range AllowedShells {
+		for _, s := range AllowedShells() {
 			if value == s {
 				return nil
 			}

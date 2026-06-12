@@ -22,8 +22,8 @@ type settingEntry struct {
 func entryFor(key, value string) settingEntry {
 	e := settingEntry{Value: value, Default: settings.Defaults[key]}
 	if key == settings.KeyShell {
-		// Same slice as save-time validation — one source of truth.
-		e.Options = settings.AllowedShells
+		// Same function as save-time validation — one source of truth.
+		e.Options = settings.AllowedShells()
 	}
 	return e
 }
