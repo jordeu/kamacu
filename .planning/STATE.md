@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
-status: roadmap_created
-stopped_at: Roadmap created for v1.2 — Phases 7–9, ready to plan Phase 7
-last_updated: "2026-06-12T05:30:00.000Z"
-last_activity: 2026-06-12
+status: planning
+stopped_at: Phase 7 context gathered
+last_updated: "2026-06-12T03:28:01.398Z"
+last_activity: 2026-06-12 — v1.2 roadmap created (3 phases, 16/16 requirements mapped)
 progress:
   total_phases: 3
   completed_phases: 0
@@ -50,14 +50,17 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 ### Decisions
 
 Full decision log lives in PROJECT.md (Key Decisions) and the archived milestone files:
+
 - `.planning/milestones/v1.0-ROADMAP.md` / `v1.0-REQUIREMENTS.md`
 - `.planning/milestones/v1.1-ROADMAP.md` / `v1.1-REQUIREMENTS.md`
 
 Notable standing decisions for future work:
+
 - D-51 reversed in v1.1 (AGENT-02): `--dangerously-skip-permissions` is the default extra-param; removable per-settings. Documented side effect: amber waiting dot rarely fires while active.
 - Settings are global-only, read-at-use, absent-row-=-code-default; per-project overrides deferred (SET-FUT-01); additional shells are future data, not code (SHELL-FUT-01).
 
 v1.2 roadmap-time decisions (from research, treat as settled):
+
 - tmux runs on a dedicated `-L kangent` socket with `-f /dev/null` (never the user's default server/config); one helper injects both on every invocation.
 - Lifecycle strategy (detach vs kill) is an explicit per-session property set at spawn time, not stop-time `if isTmux` branches — the milestone's main regression-risk control.
 - Kangent is a read-only passenger on `~/.claude/.credentials.json`: never refreshes or writes the OAuth token; 401 → "re-authenticate with claude".
@@ -74,7 +77,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12
-Stopped at: v1.2 roadmap created — Phases 7–9 defined, 16/16 requirements mapped
-Resume file: None
+Last session: 2026-06-12T03:28:01.392Z
+Stopped at: Phase 7 context gathered
+Resume file: .planning/phases/07-claude-quota-indicator/07-CONTEXT.md
 Next: `/gsd:plan-phase 7`
