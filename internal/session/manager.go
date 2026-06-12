@@ -299,7 +299,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	}
 	if opts.TmuxName != "" {
 		// The per-session lifecycle strategy, assigned ONCE here (locked
-		// decision — never `if isTmux` branches at stop time). KillSession
+		// decision — never kind-branching at stop time). KillSession
 		// applies its own 5s timeout internally, so context.Background() is
 		// safe in Stop.
 		s.tmuxClient = tc

@@ -8,6 +8,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -145,6 +146,20 @@ func (s *Session) waitExit() {
 	code := s.cmd.ProcessState.ExitCode()
 	if ws, ok := s.cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 		code = 128 + int(ws.Signal())
+	}
+	if s.tmuxName != "" && s.tmuxClient != nil {
+		// Exit vs detach (TMUX-06): the attach client exits 0 in every case —
+		// inner exit, kill-session, AND detach — so has-session is the only
+		// discriminator. alive ⇒ manual detach (Ctrl+B d, D-81 keeps the
+		// prefix): record it for Phase 9's resume reconcile and fall through
+		// to the honest exited banner (Open Q1: no auto-reattach in Phase 8).
+		// A probe ERROR (tmux binary broken/hung) also falls through to
+		// exited — the documented Pitfall-6 choice, never a silent state.
+		if alive, err := s.tmuxClient.HasSession(context.Background(), s.tmuxName); err == nil && alive {
+			s.mu.Lock()
+			s.detachedAlive = true
+			s.mu.Unlock()
+		}
 	}
 	s.markExited(code)
 	_ = s.ptmx.Close() // AFTER Wait — the pump's Read already returned EIO
@@ -411,6 +426,22 @@ func (s *Session) Stop() {
 		s.mu.Lock()
 		s.stopRequested = true
 		s.mu.Unlock()
+		if s.killer != nil {
+			// Per-session stop strategy (assigned at Spawn): for tmux tabs this is
+			// kill-session, which ends the inner shell, the tmux session, and (when
+			// last) the server atomically — signals can only ever reach the attach
+			// client because the tmux server daemonizes out of the /proc session
+			// sweep's reach (the proven "Stop doesn't stop" trap).
+			if err := s.killer(); err == nil {
+				select {
+				case <-s.done: // server drops the client → attach client exits → waitExit fires
+					return
+				case <-time.After(s.termGrace):
+				}
+			}
+			// tmux CLI failed or the client didn't die: fall through to signals —
+			// at minimum the attach client dies and the tab shows exited.
+		}
 		s.signalSession(syscall.SIGTERM)
 		select {
 		case <-s.done:
