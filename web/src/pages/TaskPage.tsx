@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
+import { ApiError } from "@/api/client";
 import { useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
@@ -369,7 +370,11 @@ export default function TaskPage() {
       </Tooltip>
       {spawn.isError && !spawn.isPending && (
         <span className="text-xs whitespace-nowrap text-red-500">
-          Couldn't start a session. Try again.
+          {/* 409s are deliberate, human-readable conflict copy from the
+              server (D-84 et al.) — render verbatim; 500s stay generic. */}
+          {spawn.error instanceof ApiError && spawn.error.status === 409
+            ? spawn.error.message
+            : "Couldn't start a session. Try again."}
         </span>
       )}
     </div>
