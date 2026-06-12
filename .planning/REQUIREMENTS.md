@@ -65,13 +65,28 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap) | | |
+| QUOTA-01 | Phase 7 | Pending |
+| QUOTA-02 | Phase 7 | Pending |
+| QUOTA-03 | Phase 7 | Pending |
+| QUOTA-04 | Phase 7 | Pending |
+| QUOTA-05 | Phase 7 | Pending |
+| QUOTA-06 | Phase 7 | Pending |
+| QUOTA-07 | Phase 7 | Pending |
+| QUOTA-08 | Phase 7 | Pending |
+| TMUX-01 | Phase 8 | Pending |
+| TMUX-02 | Phase 8 | Pending |
+| TMUX-03 | Phase 8 | Pending |
+| TMUX-04 | Phase 8 | Pending |
+| TMUX-06 | Phase 8 | Pending |
+| TMUX-07 | Phase 8 | Pending |
+| TMUX-05 | Phase 9 | Pending |
+| TMUX-08 | Phase 9 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 16 total
-- Mapped to phases: 0
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-12*
-*Last updated: 2026-06-12 after initial definition*
+*Last updated: 2026-06-12 after roadmap creation (traceability mapped to Phases 7–9)*
