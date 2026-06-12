@@ -2,12 +2,15 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +21,7 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
@@ -581,6 +585,213 @@ func TestSessionBashShellReadAtUse(t *testing.T) {
 	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", nil)
 	if status != http.StatusCreated {
 		t.Fatalf("bash spawn after fixing shell: status = %d, want 201 (read-at-use, no restart); body=%v", status, body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// tmux-backed spawns (Phase 8, plan 04): TMUX-02 mint-and-persist names,
+// TMUX-04 ×-kill at the HTTP layer, D-77 wire audit, D-84 honest error,
+// dev-route rejection.
+// ---------------------------------------------------------------------------
+
+// newTmuxSessionServer wires task routes AND session routes over one DB +
+// worktree service + Manager with the given tmux client installed, returning
+// the db for tmux_sessions assertions. Mirrors newTaskSessionServer.
+func newTmuxSessionServer(t *testing.T, c tmux.Client) (*httptest.Server, *session.Manager, *sql.DB) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+	wtDir := t.TempDir()
+	if err := settings.Set(db, settings.KeyWorktreeBase, wtDir); err != nil {
+		t.Fatalf("seed worktree_base: %v", err)
+	}
+	wt := worktree.NewService(wtDir)
+	mgr := session.NewManager()
+	mgr.SetTmuxClient(c)
+	mux := http.NewServeMux()
+	Routes(mux, db, wt, mgr)
+	SessionRoutes(mux, mgr, db)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		srv.Close()
+		for _, info := range mgr.List() {
+			if s, ok := mgr.Get(info.ID); ok {
+				s.Stop()
+			}
+		}
+		db.Close()
+	})
+	return srv, mgr, db
+}
+
+// awaitHasSession polls the tmux client until the named session's liveness
+// matches want — new-session under the PTY needs a beat to start the server.
+func awaitHasSession(t *testing.T, c tmux.Client, name string, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		alive, err := c.HasSession(context.Background(), name)
+		if err == nil && alive == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("HasSession(%q) never became %v (last: alive=%v err=%v)", name, want, alive, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestSessionTmuxSpawnHappyPath is TMUX-02 + TMUX-04 at the HTTP layer: with
+// shell=tmux stored, task spawns mint kangent-<task>-<n> from tmux_sessions,
+// the wire payload stays tmux-free (D-77), stopping via the session kills the
+// tmux session end-to-end. Skips when tmux is not installed (the setting
+// itself could not have been stored without it).
+func TestSessionTmuxSpawnHappyPath(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	// Per-test socket + kill-server cleanup registered BEFORE any spawn, so
+	// the server dies after the harness session-stop cleanup runs (LIFO).
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-api-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, mgr, db := newTmuxSessionServer(t, c)
+	id, _ := worktreeTask(t, srv, "Durable Tab")
+
+	// Valid via Set because tmux IS on PATH (AllowedShells re-validates).
+	if err := settings.Set(db, settings.KeyShell, "tmux"); err != nil {
+		t.Fatalf("set shell=tmux: %v", err)
+	}
+
+	// Raw POST so the D-77 wire audit sees the exact bytes on the wire.
+	resp, err := http.Post(srv.URL+"/api/sessions", "application/json",
+		strings.NewReader(fmt.Sprintf(`{"task_id":%d}`, id)))
+	if err != nil {
+		t.Fatalf("POST /api/sessions: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", resp.StatusCode, raw)
+	}
+	if bytes.Contains(bytes.ToLower(raw), []byte("tmux")) {
+		t.Errorf("D-77 violation: response body mentions tmux: %s", raw)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, raw)
+	}
+	if body["kind"] != "bash" {
+		t.Errorf("kind = %q, want %q (indistinguishable from a plain bash tab)", body["kind"], "bash")
+	}
+	if body["label"] != "Bash 1" {
+		t.Errorf("label = %q, want %q", body["label"], "Bash 1")
+	}
+
+	// One persisted row: task_id=T, n=1, name=kangent-<T>-1, label back-filled.
+	name1 := fmt.Sprintf("kangent-%d-1", id)
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions`).Scan(&count); err != nil {
+		t.Fatalf("count tmux_sessions: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("tmux_sessions rows = %d, want 1", count)
+	}
+	var gotTask, gotN int64
+	var gotName, gotLabel string
+	if err := db.QueryRow(`SELECT task_id, n, name, label FROM tmux_sessions`).Scan(&gotTask, &gotN, &gotName, &gotLabel); err != nil {
+		t.Fatalf("read tmux_sessions row: %v", err)
+	}
+	if gotTask != id || gotN != 1 || gotName != name1 {
+		t.Errorf("row = (task_id=%d n=%d name=%q), want (task_id=%d n=1 name=%q)", gotTask, gotN, gotName, id, name1)
+	}
+	if gotLabel != "Bash 1" {
+		t.Errorf("label = %q, want %q (warn-only back-fill)", gotLabel, "Bash 1")
+	}
+	awaitHasSession(t, c, name1, true)
+
+	// A second POST mints n=2 from the DB.
+	status, body2 := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
+	if status != http.StatusCreated {
+		t.Fatalf("second spawn: status = %d, want 201; body=%v", status, body2)
+	}
+	if body2["label"] != "Bash 2" {
+		t.Errorf("second label = %q, want %q", body2["label"], "Bash 2")
+	}
+	name2 := fmt.Sprintf("kangent-%d-2", id)
+	var name2Count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions WHERE name = ?`, name2).Scan(&name2Count); err != nil {
+		t.Fatalf("count name2: %v", err)
+	}
+	if name2Count != 1 {
+		t.Errorf("tmux_sessions rows for %q = %d, want 1", name2, name2Count)
+	}
+	awaitHasSession(t, c, name2, true)
+
+	// TMUX-04 at the HTTP layer: stopping the sessions kills the tmux
+	// sessions themselves — has-session must say dead, not just the client.
+	for _, b := range []map[string]any{body, body2} {
+		sess, ok := mgr.Get(b["id"].(string))
+		if !ok {
+			t.Fatalf("session %v not in manager", b["id"])
+		}
+		sess.Stop()
+	}
+	awaitHasSession(t, c, name1, false)
+	awaitHasSession(t, c, name2, false)
+}
+
+// TestSessionTmuxSpawnMissingBinaryHTTP is D-84 end-to-end: the shell setting
+// stored as tmux (raw SQL — simulating "stored earlier, binary removed
+// later"; Set would re-validate and reject) and tmux gone from PATH yields an
+// honest 409 with the exact copy, never a silent bash fallback — and the
+// reserved tmux_sessions row is released.
+func TestSessionTmuxSpawnMissingBinaryHTTP(t *testing.T) {
+	srv, _, db := newTmuxSessionServer(t, tmux.Client{Socket: "ktest-unused", ConfPath: "/dev/null"})
+	id, _ := worktreeTask(t, srv, "Tmux Removed") // before the PATH scrub: git needs PATH
+
+	if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES('shell', 'tmux')`); err != nil {
+		t.Fatalf("raw settings insert: %v", err)
+	}
+	t.Setenv("PATH", t.TempDir()) // empty dir: LookPath("tmux") must fail
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "tmux not found — change the shell setting or reinstall" {
+		t.Errorf("error = %q, want %q", body["error"], "tmux not found — change the shell setting or reinstall")
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions`).Scan(&count); err != nil {
+		t.Fatalf("count tmux_sessions: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("tmux_sessions rows = %d after failed spawn, want 0 (reserved name released)", count)
+	}
+}
+
+// TestSessionTmuxDevRouteRejected: the unscoped /terminal dev spawn (no
+// task_id) with shell=tmux stored gets an honest 409 — NEVER a bare tmux exec
+// on the user's default socket. Raw insert keeps this test tmux-independent.
+func TestSessionTmuxDevRouteRejected(t *testing.T) {
+	srv, _, db := newTmuxSessionServer(t, tmux.Client{Socket: "ktest-unused", ConfPath: "/dev/null"})
+
+	if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES('shell', 'tmux')`); err != nil {
+		t.Fatalf("raw settings insert: %v", err)
+	}
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "tmux shells need a task — open a task's terminal" {
+		t.Errorf("error = %q, want %q", body["error"], "tmux shells need a task — open a task's terminal")
 	}
 }
 
