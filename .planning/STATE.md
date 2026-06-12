@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
 status: verifying
-stopped_at: Completed 07-03-PLAN.md — Phase 7 complete and human-verified
-last_updated: "2026-06-12T06:00:51.806Z"
+stopped_at: Phase 8 context gathered
+last_updated: "2026-06-12T17:15:04.272Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 3
@@ -87,7 +87,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12T05:51:58.153Z
-Stopped at: Completed 07-03-PLAN.md — Phase 7 complete and human-verified
-Resume file: None
+Last session: 2026-06-12T17:15:04.265Z
+Stopped at: Phase 8 context gathered
+Resume file: .planning/phases/08-tmux-shells-spawn-detach-lifecycle/08-CONTEXT.md
 Next: `/gsd:plan-phase 7`
