@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Clock, RefreshCw, TriangleAlert } from "lucide-react";
+import { RefreshCw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   HoverCard,
@@ -55,10 +55,11 @@ function formatReset(iso: string, now: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-/** Compact reset column: tiny clock + bare duration ("4h 12m"), "now" once
- *  past, em dash when the server gives no reset (checkpoint feedback — the
- *  "Resets in" label added bulk without value; the clock icon carries the
- *  affordance, the title attribute keeps the full wording). */
+/** Compact reset column: bare duration text ("4h 12m"), "now" once past,
+ *  em dash when the server gives no reset (checkpoint feedback — no label,
+ *  no icon; the title attribute keeps the full wording). FIXED w-14 so every
+ *  row's bar track gets identical width and fills stay visually comparable
+ *  regardless of how long the duration text is ("—", "now", "23h 59m"). */
 function ResetCell({
   resetsAt,
   now,
@@ -66,17 +67,23 @@ function ResetCell({
   resetsAt: string | null;
   now: number;
 }) {
-  if (resetsAt === null) {
-    return <span className="shrink-0 text-muted-foreground">—</span>;
-  }
   const duration =
-    Date.parse(resetsAt) <= now ? "now" : formatReset(resetsAt, now);
+    resetsAt === null
+      ? "—"
+      : Date.parse(resetsAt) <= now
+        ? "now"
+        : formatReset(resetsAt, now);
   return (
     <span
-      title={duration === "now" ? "Resets now" : `Resets in ${duration}`}
-      className="flex shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground"
+      title={
+        resetsAt === null
+          ? undefined
+          : duration === "now"
+            ? "Resets now"
+            : `Resets in ${duration}`
+      }
+      className="w-14 shrink-0 text-right whitespace-nowrap text-muted-foreground tabular-nums"
     >
-      <Clock aria-hidden className="size-3" />
       {duration}
     </span>
   );
@@ -90,7 +97,8 @@ function QuotaRow({ w, now }: { w: UsageWindow; now: number }) {
         {w.label}
       </span>
       {/* Row bar colored by this window's OWN utilization (D-69 scheme).
-          The bar is the FLEXIBLE element so the reset text never truncates. */}
+          The bar flexes while every other column is fixed-width, so all rows
+          get an IDENTICAL bar track and the fills are visually comparable. */}
       <div className="h-1.5 min-w-10 flex-1 overflow-hidden rounded-full bg-zinc-800">
         <div
           className={`h-full rounded-full ${barColor(w.utilization)}`}
