@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"kangent/internal/api"
+	"kangent/internal/quota"
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
@@ -107,6 +108,8 @@ func main() {
 	api.DiffRoutes(mux, db, wtSvc)
 	api.HookRoutes(mux, mgr, hookToken)
 	api.AgentRoutes(mux, mgr, db)
+	quotaSvc := quota.New(quota.Config{ClaudeBin: *claudeBin})
+	api.UsageRoutes(mux, quotaSvc)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

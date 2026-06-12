@@ -147,10 +147,11 @@ func normalizeWindows(body []byte) ([]Window, error) {
 // defaults; tests inject a temp credentials path, an httptest base URL, and
 // a fixed UserAgent (never spawning claude).
 type Config struct {
-	CredentialsPath string // default: ~/.claude/.credentials.json
-	BaseURL         string // default: "https://api.anthropic.com"
-	UserAgent       string // if "" → probe via DetectVersion(ClaudeBin)
-	ClaudeBin       string // -claude-bin flag value; "" → exec.LookPath("claude")
+	CredentialsPath string           // default: ~/.claude/.credentials.json
+	BaseURL         string           // default: "https://api.anthropic.com"
+	UserAgent       string           // if "" → probe via DetectVersion(ClaudeBin)
+	ClaudeBin       string           // -claude-bin flag value; "" → exec.LookPath("claude")
+	Now             func() time.Time // default: time.Now; test seam for TTL/floor control
 }
 
 // Service is the demand-driven, token-keyed quota cache. There is no ticker
@@ -194,12 +195,16 @@ func New(cfg Config) *Service {
 	if userAgent == "" {
 		userAgent = "claude-code/" + DetectVersion(cfg.ClaudeBin)
 	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Service{
 		credsPath: credsPath,
 		baseURL:   baseURL,
 		userAgent: userAgent,
 		client:    &http.Client{Timeout: 10 * time.Second},
-		now:       time.Now,
+		now:       now,
 	}
 }
 
