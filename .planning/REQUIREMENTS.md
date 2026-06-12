@@ -22,7 +22,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 ### Resumable tmux Shells
 
 - [ ] **TMUX-01**: User can select "tmux" in the global shell setting dropdown; the option is offered only when `tmux` resolves on PATH
-- [ ] **TMUX-02**: New bash tabs with tmux selected spawn attach-or-create tmux sessions (deterministic `kangent-<task>-<n>` names, `[A-Za-z0-9_-]` only) on the dedicated `-L kangent` socket, with the task worktree as cwd
+- [x] **TMUX-02**: New bash tabs with tmux selected spawn attach-or-create tmux sessions (deterministic `kangent-<task>-<n>` names, `[A-Za-z0-9_-]` only) on the dedicated `-L kangent` socket, with the task worktree as cwd
 - [ ] **TMUX-03**: tmux sessions detach implicitly — leaving the task view (or a server shutdown) leaves the session running; reopening the task reattaches to the same session *(amended 2026-06-12 during Phase 8 discussion: detach moved from tab-close to task-view-close)*
 - [ ] **TMUX-04**: Closing a tmux-backed tab (×) kills the tmux session — kill-on-close parity with plain bash tabs; tmux tabs are visually and behaviorally indistinguishable from bash tabs *(amended 2026-06-12: × IS the kill action; no separate affordance)*
 - [ ] **TMUX-05**: After a Kangent server restart, tabs whose tmux sessions still exist offer Resume, which reattaches (mirrors the v1.1 agent-resume reconcile → `resumable` flag → Resume UX)
@@ -75,7 +75,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QUOTA-07 | Phase 7 | Complete |
 | QUOTA-08 | Phase 7 | Complete |
 | TMUX-01 | Phase 8 | Pending |
-| TMUX-02 | Phase 8 | Pending |
+| TMUX-02 | Phase 8 | Complete |
 | TMUX-03 | Phase 8 | Pending |
 | TMUX-04 | Phase 8 | Pending |
 | TMUX-06 | Phase 8 | Pending |

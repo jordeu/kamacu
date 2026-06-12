@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
-status: verifying
-stopped_at: Phase 8 context gathered
-last_updated: "2026-06-12T17:15:04.272Z"
+status: executing
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-06-12T21:58:48.426Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 7
+  completed_plans: 4
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 07 — claude-quota-indicator
+**Current focus:** Phase 08 — tmux-shells-spawn-detach-lifecycle
 
 ## Current Position
 
-Phase: 8
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 08 (tmux-shells-spawn-detach-lifecycle) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-06-12
 
 Progress: [░░░░░░░░░░] 0%
@@ -47,6 +47,7 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 | Phase 07-claude-quota-indicator P02 | 5 min | 3 tasks | 5 files |
 | Phase 07 P01 | 14 min | 3 tasks | 5 files |
 | Phase 07-claude-quota-indicator P03 | 1h 8m | 2 tasks | 1 files |
+| Phase 08-tmux-shells-spawn-detach-lifecycle P01 | 6min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,9 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 07]: Quota token fingerprint recorded on every Get so pre-success failures accumulate toward the 3-failure drop instead of resetting
 - [Phase 07]: Quota popup footer/reset countdowns tick on a 10s useNow interval mounted only while the popup is open — supersedes 07-02's no-extra-timer decision (live test showed 'Updated 0m ago' frozen against 60s TTL + 60s poll)
 - [Phase 07]: Quota popup reset column: bare duration text, no label/icon, fixed w-14 tabular-nums so all row bars share an identical track width (checkpoint feedback)
+- [Phase 08-tmux-shells-spawn-detach-lifecycle]: Generated -f config file (status off, mouse on, history-limit 50000) over post-create set-option sequence — the latter raced empirically
+- [Phase 08-tmux-shells-spawn-detach-lifecycle]: tmux_sessions is identity-only (no status column); tmux itself is the status authority via has-session
+- [Phase 08-tmux-shells-spawn-detach-lifecycle]: KillSession/KillServer treat exit 1 as idempotent success (already dead / no server)
 
 ### Pending Todos
 
@@ -87,7 +91,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12T17:15:04.265Z
-Stopped at: Phase 8 context gathered
-Resume file: .planning/phases/08-tmux-shells-spawn-detach-lifecycle/08-CONTEXT.md
+Last session: 2026-06-12T21:58:48.422Z
+Stopped at: Completed 08-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 7`
