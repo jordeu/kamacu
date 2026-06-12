@@ -14,10 +14,10 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **QUOTA-02**: Hovering the indicator opens a popup listing every quota window the API returns (5h, 7d, per-model — server-driven, never hardcoded) with a colored bar, rounded percentage, and "Resets in Xh Ym" countdown per row
 - [x] **QUOTA-03**: Popup footer shows "Updated Xm ago" with a manual refresh button that forces a fresh fetch (bypasses cache)
 - [x] **QUOTA-04**: Quota data auto-refreshes about every 60s while the browser tab is visible; no background polling when hidden
-- [ ] **QUOTA-05**: Server fetches quota from Anthropic's OAuth usage endpoint using the local claude credentials (`~/.claude/.credentials.json`) with the load-bearing `claude-code/<version>` User-Agent, a 60s cache TTL, 10s hard floor, in-flight dedup, and 429 Retry-After backoff (min 30s); Kangent never writes or refreshes the token
-- [ ] **QUOTA-06**: Errors degrade gracefully — not-logged-in / token-expired (401) / 403 / 5xx / network states show clear messages in the popup with a warning on the trigger; stale cached data stays visible marked "error · Xm old" and is dropped after 3 consecutive failures; API-key-only users (no OAuth credentials) see a neutral/hidden indicator, never fabricated 0% bars
+- [x] **QUOTA-05**: Server fetches quota from Anthropic's OAuth usage endpoint using the local claude credentials (`~/.claude/.credentials.json`) with the load-bearing `claude-code/<version>` User-Agent, a 60s cache TTL, 10s hard floor, in-flight dedup, and 429 Retry-After backoff (min 30s); Kangent never writes or refreshes the token
+- [x] **QUOTA-06**: Errors degrade gracefully — not-logged-in / token-expired (401) / 403 / 5xx / network states show clear messages in the popup with a warning on the trigger; stale cached data stays visible marked "error · Xm old" and is dropped after 3 consecutive failures; API-key-only users (no OAuth credentials) see a neutral/hidden indicator, never fabricated 0% bars
 - [x] **QUOTA-07**: When any quota window is ≥85%, the compact trigger shows red-zone emphasis (the "stop starting agents" glance signal)
-- [ ] **QUOTA-08**: The server quota cache is keyed by token, so switching Claude accounts never shows the previous account's data
+- [x] **QUOTA-08**: The server quota cache is keyed by token, so switching Claude accounts never shows the previous account's data
 
 ### Resumable tmux Shells
 
@@ -69,10 +69,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QUOTA-02 | Phase 7 | Complete |
 | QUOTA-03 | Phase 7 | Complete |
 | QUOTA-04 | Phase 7 | Complete |
-| QUOTA-05 | Phase 7 | Pending |
-| QUOTA-06 | Phase 7 | Pending |
+| QUOTA-05 | Phase 7 | Complete |
+| QUOTA-06 | Phase 7 | Complete |
 | QUOTA-07 | Phase 7 | Complete |
-| QUOTA-08 | Phase 7 | Pending |
+| QUOTA-08 | Phase 7 | Complete |
 | TMUX-01 | Phase 8 | Pending |
 | TMUX-02 | Phase 8 | Pending |
 | TMUX-03 | Phase 8 | Pending |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
 status: executing
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-06-12T04:33:04.582Z"
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-06-12T04:42:07.221Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 07 (claude-quota-indicator) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-06-12
 
@@ -45,6 +45,7 @@ Progress: [░░░░░░░░░░] 0%
 
 Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` archives and git history.
 | Phase 07-claude-quota-indicator P02 | 5 min | 3 tasks | 5 files |
+| Phase 07 P01 | 14 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - Quota indicator is strictly best-effort: lenient decode, degrade-don't-break; the upstream endpoint is undocumented.
 - [Phase 07-claude-quota-indicator]: Quota trigger bar: width tracks the 5h window, color tracks max utilization across ALL windows (QUOTA-07/D-70)
 - [Phase 07-claude-quota-indicator]: D-72 warning chip resolved as TriangleAlert in text-amber-400 replacing the bar — same footprint, motion-free
+- [Phase 07]: quota.Config gained an optional Now func() time.Time test seam (research-sanctioned) so api-package handler tests control TTL/floor without sleeps
+- [Phase 07]: 10s quota attempt floor binds ALL upstream attempts (not just ?refresh=1), protecting a failing upstream after the cache drops
+- [Phase 07]: Quota token fingerprint recorded on every Get so pre-success failures accumulate toward the 3-failure drop instead of resetting
 
 ### Pending Todos
 
@@ -80,7 +84,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12T04:33:04.579Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-06-12T04:42:07.216Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 7`
