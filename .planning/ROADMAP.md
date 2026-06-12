@@ -74,7 +74,14 @@ Plans:
   3. With a process left running (e.g. `top`), leaving the task view and reopening it reattaches to the same still-running session with a clean single repaint (no replayed garbage); the tab is indistinguishable from a plain bash tab — no status bar, no badge (TMUX-03, amended 2026-06-12)
   4. Closing a tmux-backed tab (×) kills the tmux session — kill-on-close parity with plain bash tabs; no separate kill affordance (TMUX-04, amended 2026-06-12)
   5. When the shell exits inside tmux, the tab shows the existing exited state — not "resumable" (exit vs detach discriminated via `tmux has-session` after the attach PTY exits); plain-bash tabs and agent sessions keep kill-on-stop behavior unchanged, locked in by regression tests on the shared stop path (TMUX-06, TMUX-07)
-**Plans**: TBD
+**Plans**: 4 plans (3 waves)
+
+Plans:
+- [ ] 08-01-PLAN.md — internal/tmux leaf package (socket/config/has-session/kill-session) + migration 00005 tmux_sessions [wave 1]
+- [ ] 08-02-PLAN.md — TMUX-01: AllowedShells var → call-time LookPath function (conditional "tmux" dropdown option) [wave 1]
+- [ ] 08-03-PLAN.md — Session lifecycle: SpawnOpts.TmuxName, killer-first Stop, has-session exit-vs-detach, TMUX-07 regression guard [wave 2]
+- [ ] 08-04-PLAN.md — Wiring: main.go config + handler name minting + D-84 honest error + frontend 409 rendering + human checkpoint [wave 3]
+
 **UI hint**: yes
 
 **Phase notes:**
@@ -115,7 +122,7 @@ Phases execute in numeric order: 7 → 8 → 9 (Phase 7 is independent of 8–9 
 | 5. Recovery & Review | v1.0 | 5/5 | Complete | 2026-06-11 |
 | 6. Settings & Polish | v1.1 | 4/4 | Complete | 2026-06-11 |
 | 7. Claude Quota Indicator | v1.2 | 0/3 | Not started | - |
-| 8. tmux Shells — Spawn & Detach Lifecycle | v1.2 | 0/? | Not started | - |
+| 8. tmux Shells — Spawn & Detach Lifecycle | v1.2 | 0/4 | Not started | - |
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 0/? | Not started | - |
 
 ---
