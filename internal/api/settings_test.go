@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"net/http"
+	"os/exec"
+	"slices"
 	"testing"
 
 	"kangent/internal/settings"
@@ -32,11 +34,11 @@ func TestSettingsGetAllDefaults(t *testing.T) {
 			t.Errorf("%s default = %v, want %q", key, entry["default"], def)
 		}
 	}
-	// Shell entry additionally carries options ["bash"].
+	// Shell entry additionally carries options mirroring AllowedShells()
+	// (PATH truth at call time — exactly ["bash"] plus "tmux" when present).
 	shell := body["shell"].(map[string]any)
-	opts, ok := shell["options"].([]any)
-	if !ok || len(opts) != 1 || opts[0] != "bash" {
-		t.Errorf(`shell options = %v, want ["bash"]`, shell["options"])
+	if got, want := optionStrings(t, shell), settings.AllowedShells(); !slices.Equal(got, want) {
+		t.Errorf("shell options = %v, want %v (AllowedShells PATH truth)", got, want)
 	}
 	// Non-shell entries omit options.
 	if _, has := body["branch_template"].(map[string]any)["options"]; has {
@@ -153,10 +155,71 @@ func TestSettingsPutShellResponseIncludesOptions(t *testing.T) {
 	}
 	// The PUT response must include options so the frontend cache replace
 	// keeps the dropdown populated.
-	opts, ok := body["options"].([]any)
-	if !ok || len(opts) != 1 || opts[0] != "bash" {
-		t.Errorf(`PUT shell response options = %v, want ["bash"]`, body["options"])
+	if got, want := optionStrings(t, map[string]any(body)), settings.AllowedShells(); !slices.Equal(got, want) {
+		t.Errorf("PUT shell response options = %v, want %v (AllowedShells PATH truth)", got, want)
 	}
+}
+
+// TestSettingsShellOptionsTrackPath asserts TMUX-01 end-to-end at the HTTP
+// layer: the dropdown options array and the save acceptance both follow
+// exec.LookPath("tmux") at call time, from the same AllowedShells function.
+func TestSettingsShellOptionsTrackPath(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	if _, err := exec.LookPath("tmux"); err == nil {
+		// PATH-present: tmux is offered AND accepted.
+		status, body := doJSON(t, http.MethodGet, srv.URL+"/api/settings", nil)
+		if status != http.StatusOK {
+			t.Fatalf("GET /api/settings = %d, want 200", status)
+		}
+		opts := optionStrings(t, body["shell"].(map[string]any))
+		if !slices.Contains(opts, "tmux") {
+			t.Errorf("shell options with tmux on PATH = %v, want to contain tmux", opts)
+		}
+		status, putBody := doJSON(t, http.MethodPut, srv.URL+"/api/settings/shell",
+			map[string]string{"value": "tmux"})
+		if status != http.StatusOK {
+			t.Fatalf("PUT shell=tmux with tmux on PATH = %d, want 200 (body %v)", status, putBody)
+		}
+	}
+
+	// PATH-scrubbed: the option vanishes and re-saving tmux is honestly
+	// rejected — same LookPath truth on both sides. t.Setenv auto-restores.
+	t.Setenv("PATH", t.TempDir())
+	status, body := doJSON(t, http.MethodGet, srv.URL+"/api/settings", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/settings = %d, want 200", status)
+	}
+	opts := optionStrings(t, body["shell"].(map[string]any))
+	if !slices.Equal(opts, []string{"bash"}) {
+		t.Errorf(`shell options with scrubbed PATH = %v, want ["bash"]`, opts)
+	}
+	status, putBody := doJSON(t, http.MethodPut, srv.URL+"/api/settings/shell",
+		map[string]string{"value": "tmux"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("PUT shell=tmux with scrubbed PATH = %d, want 400 (body %v)", status, putBody)
+	}
+	if putBody["error"] != "Unknown shell." {
+		t.Errorf("error = %v, want %q", putBody["error"], "Unknown shell.")
+	}
+}
+
+// optionStrings extracts a settings entry's options array as []string.
+func optionStrings(t *testing.T, entry map[string]any) []string {
+	t.Helper()
+	raw, ok := entry["options"].([]any)
+	if !ok {
+		t.Fatalf("entry options missing or not an array: %v", entry["options"])
+	}
+	out := make([]string, len(raw))
+	for i, v := range raw {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("options[%d] = %v, want string", i, v)
+		}
+		out[i] = s
+	}
+	return out
 }
 
 func TestSettingsPutUnknownKey(t *testing.T) {

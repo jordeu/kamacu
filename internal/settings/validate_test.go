@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"kangent/internal/settings"
@@ -76,6 +78,40 @@ func TestValidateShell(t *testing.T) {
 	if shells := settings.AllowedShells(); len(shells) == 0 || shells[0] != "bash" {
 		t.Errorf("AllowedShells() = %v, want bash first", shells)
 	}
+}
+
+// TestAllowedShellsWithTmuxOnPath covers the PATH-present half of TMUX-01:
+// when tmux resolves, it is both offered and accepted. Skipped on hosts
+// without tmux so CI stays honest on tmux-less machines.
+func TestAllowedShellsWithTmuxOnPath(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH; PATH-present assertions not testable on this host")
+	}
+	if got := settings.AllowedShells(); !slices.Equal(got, []string{"bash", "tmux"}) {
+		t.Errorf("AllowedShells() = %v, want [bash tmux]", got)
+	}
+	if err := settings.Validate(settings.KeyShell, "tmux"); err != nil {
+		t.Errorf("Validate(shell, tmux) = %v, want nil (tmux on PATH)", err)
+	}
+	if err := settings.Validate(settings.KeyShell, "bash"); err != nil {
+		t.Errorf("Validate(shell, bash) = %v, want nil", err)
+	}
+	checkErrString(t, settings.Validate(settings.KeyShell, "zsh"), "Unknown shell.")
+}
+
+// TestAllowedShellsWithPathScrubbed covers the PATH-absent half of TMUX-01:
+// the option vanishes AND re-saving "tmux" is rejected — both track the same
+// call-time LookPath truth. t.Setenv auto-restores PATH (no t.Parallel here).
+func TestAllowedShellsWithPathScrubbed(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if got := settings.AllowedShells(); !slices.Equal(got, []string{"bash"}) {
+		t.Errorf("AllowedShells() with scrubbed PATH = %v, want [bash]", got)
+	}
+	checkErrString(t, settings.Validate(settings.KeyShell, "tmux"), "Unknown shell.")
+	if err := settings.Validate(settings.KeyShell, "bash"); err != nil {
+		t.Errorf("Validate(shell, bash) with scrubbed PATH = %v, want nil", err)
+	}
+	checkErrString(t, settings.Validate(settings.KeyShell, "zsh"), "Unknown shell.")
 }
 
 func TestValidateAgentExtraParamsIsPassThrough(t *testing.T) {
