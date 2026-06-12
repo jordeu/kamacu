@@ -23,11 +23,11 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 - [x] **TMUX-01**: User can select "tmux" in the global shell setting dropdown; the option is offered only when `tmux` resolves on PATH
 - [x] **TMUX-02**: New bash tabs with tmux selected spawn attach-or-create tmux sessions (deterministic `kangent-<task>-<n>` names, `[A-Za-z0-9_-]` only) on the dedicated `-L kangent` socket, with the task worktree as cwd
-- [ ] **TMUX-03**: tmux sessions detach implicitly — leaving the task view (or a server shutdown) leaves the session running; reopening the task reattaches to the same session *(amended 2026-06-12 during Phase 8 discussion: detach moved from tab-close to task-view-close)*
-- [ ] **TMUX-04**: Closing a tmux-backed tab (×) kills the tmux session — kill-on-close parity with plain bash tabs; tmux tabs are visually and behaviorally indistinguishable from bash tabs *(amended 2026-06-12: × IS the kill action; no separate affordance)*
+- [x] **TMUX-03**: tmux sessions detach implicitly — leaving the task view (or a server shutdown) leaves the session running; reopening the task reattaches to the same session *(amended 2026-06-12 during Phase 8 discussion: detach moved from tab-close to task-view-close)*
+- [x] **TMUX-04**: Closing a tmux-backed tab (×) kills the tmux session — kill-on-close parity with plain bash tabs; tmux tabs are visually and behaviorally indistinguishable from bash tabs *(amended 2026-06-12: × IS the kill action; no separate affordance)*
 - [ ] **TMUX-05**: After a Kangent server restart, tabs whose tmux sessions still exist offer Resume, which reattaches (mirrors the v1.1 agent-resume reconcile → `resumable` flag → Resume UX)
-- [ ] **TMUX-06**: When the shell exits inside tmux, the tab shows the existing exited state, not "resumable" — exit vs detach discriminated via `tmux has-session` after the attach PTY exits
-- [ ] **TMUX-07**: Plain-bash tabs and agent sessions keep their kill-on-stop behavior unchanged — the shared stop path is regression-guarded by tests
+- [x] **TMUX-06**: When the shell exits inside tmux, the tab shows the existing exited state, not "resumable" — exit vs detach discriminated via `tmux has-session` after the attach PTY exits
+- [x] **TMUX-07**: Plain-bash tabs and agent sessions keep their kill-on-stop behavior unchanged — the shared stop path is regression-guarded by tests
 - [ ] **TMUX-08**: Task/worktree cleanup gates count live detached tmux sessions as running work, and confirmed cleanup kills the task's tmux sessions (no orphaned shells in deleted directories)
 - [ ] **REAP-01**: Sessions of tasks in Done — bash, tmux, AND agent — are automatically killed after a configurable TTL (global setting, default 24h, clocked from entering Done; leaving Done cancels; 0/never disables). Worktrees are never auto-removed — worktree cleanup stays manual via the existing gated dialog *(added 2026-06-12 during Phase 8 discussion)*
 
@@ -76,10 +76,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QUOTA-08 | Phase 7 | Complete |
 | TMUX-01 | Phase 8 | Complete |
 | TMUX-02 | Phase 8 | Complete |
-| TMUX-03 | Phase 8 | Pending |
-| TMUX-04 | Phase 8 | Pending |
-| TMUX-06 | Phase 8 | Pending |
-| TMUX-07 | Phase 8 | Pending |
+| TMUX-03 | Phase 8 | Complete |
+| TMUX-04 | Phase 8 | Complete |
+| TMUX-06 | Phase 8 | Complete |
+| TMUX-07 | Phase 8 | Complete |
 | TMUX-05 | Phase 9 | Pending |
 | TMUX-08 | Phase 9 | Pending |
 | REAP-01 | Phase 9 | Pending |

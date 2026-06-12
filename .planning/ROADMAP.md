@@ -79,7 +79,7 @@ Plans:
 Plans:
 - [x] 08-01-PLAN.md — internal/tmux leaf package (socket/config/has-session/kill-session) + migration 00005 tmux_sessions [wave 1]
 - [x] 08-02-PLAN.md — TMUX-01: AllowedShells var → call-time LookPath function (conditional "tmux" dropdown option) [wave 1]
-- [ ] 08-03-PLAN.md — Session lifecycle: SpawnOpts.TmuxName, killer-first Stop, has-session exit-vs-detach, TMUX-07 regression guard [wave 2]
+- [x] 08-03-PLAN.md — Session lifecycle: SpawnOpts.TmuxName, killer-first Stop, has-session exit-vs-detach, TMUX-07 regression guard [wave 2]
 - [ ] 08-04-PLAN.md — Wiring: main.go config + handler name minting + D-84 honest error + frontend 409 rendering + human checkpoint [wave 3]
 
 **UI hint**: yes
