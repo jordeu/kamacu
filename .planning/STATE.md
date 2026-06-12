@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-06-12T21:58:48.426Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-06-12T22:04:09.883Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 08 (tmux-shells-spawn-detach-lifecycle) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-06-12
 
@@ -48,6 +48,7 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 | Phase 07 P01 | 14 min | 3 tasks | 5 files |
 | Phase 07-claude-quota-indicator P03 | 1h 8m | 2 tasks | 1 files |
 | Phase 08-tmux-shells-spawn-detach-lifecycle P01 | 6min | 3 tasks | 3 files |
+| Phase 08-tmux-shells-spawn-detach-lifecycle P02 | 8 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: Generated -f config file (status off, mouse on, history-limit 50000) over post-create set-option sequence — the latter raced empirically
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: tmux_sessions is identity-only (no status column); tmux itself is the status authority via has-session
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: KillSession/KillServer treat exit 1 as idempotent success (already dead / no server)
+- [Phase 08]: AllowedShells converted var->func with exec.LookPath('tmux') checked at call time — dropdown offering and save acceptance can never disagree, no restart needed (TMUX-01)
 
 ### Pending Todos
 
@@ -91,7 +93,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12T21:58:48.422Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-06-12T22:04:09.880Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 7`
