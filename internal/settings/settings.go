@@ -13,11 +13,12 @@ import (
 
 // Setting keys. The set of valid keys is exactly the Defaults map's keys.
 const (
-	KeyAgentExtraParams = "agent_extra_params"
-	KeyWorktreeBase     = "worktree_base"
-	KeyShell            = "shell"
-	KeyBranchTemplate   = "branch_template"
-	KeyDoneSessionTTL   = "done_session_ttl"
+	KeyAgentExtraParams  = "agent_extra_params"
+	KeyWorktreeBase      = "worktree_base"
+	KeyShell             = "shell"
+	KeyBranchTemplate    = "branch_template"
+	KeyDoneSessionTTL    = "done_session_ttl"
+	KeyGithubIntegration = "github_integration"
 )
 
 // Defaults maps each setting key to its code default. Absent row = default.
@@ -32,6 +33,8 @@ var Defaults = map[string]string{
 	// REAP-01/D-91: Done-TTL reaper window. Go-style duration; empty/"0"/
 	// "never" disable reaping (see ParseDoneSessionTTL). Read-at-use by 09-05.
 	KeyDoneSessionTTL: "24h",
+	// GHSET-01/D-01: global GitHub integration toggle; absent row = on
+	KeyGithubIntegration: "on",
 }
 
 // Get returns the stored value for key, or the code default when no row

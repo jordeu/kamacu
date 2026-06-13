@@ -54,6 +54,12 @@ func Validate(key, value string) error {
 			return errors.New("Enter a duration like 24h, 90m, or 'never' to disable.")
 		}
 		return nil
+	case KeyGithubIntegration:
+		// D-01: accept only the on/off literals.
+		if value == "on" || value == "off" {
+			return nil
+		}
+		return errors.New("Choose on or off.")
 	case KeyAgentExtraParams:
 		// Pass-through field: validating individual claude flags is explicitly
 		// out of scope (REQUIREMENTS Out of Scope).

@@ -25,11 +25,12 @@ func testDB(t *testing.T) *sql.DB {
 
 func TestDefaultsValues(t *testing.T) {
 	want := map[string]string{
-		settings.KeyAgentExtraParams: "--dangerously-skip-permissions",
-		settings.KeyWorktreeBase:     "~/.kangent/worktrees/",
-		settings.KeyShell:            "bash",
-		settings.KeyBranchTemplate:   "task/{slug}-{id}",
-		settings.KeyDoneSessionTTL:   "24h", // REAP-01/D-91
+		settings.KeyAgentExtraParams:  "--dangerously-skip-permissions",
+		settings.KeyWorktreeBase:      "~/.kangent/worktrees/",
+		settings.KeyShell:             "bash",
+		settings.KeyBranchTemplate:    "task/{slug}-{id}",
+		settings.KeyDoneSessionTTL:    "24h", // REAP-01/D-91
+		settings.KeyGithubIntegration: "on",  // GHSET-01/D-01: absent row = on
 	}
 	for k, v := range want {
 		if got := settings.Defaults[k]; got != v {
