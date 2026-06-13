@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
 status: verifying
-stopped_at: Completed 10-03-PLAN.md
-last_updated: "2026-06-13T14:40:42.024Z"
+stopped_at: Completed 10-04-PLAN.md
+last_updated: "2026-06-13T15:27:29.352Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 0
+  completed_phases: 0
+  total_plans: 5
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 ## Current Position
 
-Phase: 10 (github-foundations) — GAPS FOUND
-Plan: 3 of 3 executed; gap closure pending
-Status: UAT found 2 gaps (gh-gated enablement + toggle copy) — run /gsd:plan-phase 10 --gaps
-Last activity: 2026-06-13 — Phase 10 executed (3/3); UAT surfaced gh-gated-enablement + copy gaps
+Phase: 10 (github-foundations) — GAP CLOSURE in progress
+Plan: 4 of 5 executed (gap-closure 10-04 done; 10-05 remains)
+Status: 10-04 (Gap 1 backend half) complete — GET /api/github/status shipped; Plan 10-05 (frontend gate + copy) next
+Last activity: 2026-06-13 — executed gap-closure Plan 10-04
 
-Progress: [░░░░░░░░░░] 0% (0/4 phases)
+Progress: [████████░░] 80% (4/5 plans)
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 10-github-foundations P01 | 7 min | 2 tasks | 5 files |
 | Phase 10-github-foundations P02 | 9 min | 3 tasks | 5 files |
 | Phase 10-github-foundations P03 | 8 min | 3 tasks | 7 files |
+| Phase 10-github-foundations P04 | 4 min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 10-github-foundations]: shadcn ui/* primitives use the radix-ui umbrella import (Switch as SwitchPrimitive from 'radix-ui'), not @radix-ui/react-*; hand-authored switch.tsx to match select.tsx/label.tsx — no new dep
 - [Phase 10-github-foundations]: OFF cascade is a render gate on the shared useSettings() github_integration==='on' value; when off the ProjectSettingsDialog re-sends the existing github_repo so the hidden link is never clobbered
 - [Phase 10-github-foundations]: Soft-verify/gh-degraded muted advisories are wired but dormant (keyed on a future updated.verify_state); Plan 02's server returns plain 200, so success closes the dialog (UI-SPEC-sanctioned non-blocking)
+- [Phase 10-github-foundations]: Gap 1 backend half: GET /api/github/status is an always-200 endpoint returning {gh_available: bool} from github.Available() (call-time LookPath, reflects install/uninstall without restart); package-level handler (no DB), snake_case field Plan 10-05 reads; contract test compares to github.Available() so it is host-independent
 
 ### Pending Todos
 
@@ -112,7 +114,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-13T14:40:33.195Z
-Stopped at: Completed 10-03-PLAN.md
+Last session: 2026-06-13T15:27:29.349Z
+Stopped at: Completed 10-04-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 10`
