@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useSaveSetting, useSettings } from "@/api/settings";
+import { useGithubStatus } from "@/api/queries";
 import { SettingsField } from "@/components/settings/SettingsField";
 
 /**
@@ -39,20 +40,31 @@ const WORKTREE_HELP = `New task worktrees are created under this directory. Exis
 const SHELL_HELP = `Used when opening a new bash tab.`;
 const BRANCH_HELP = `Tokens: {slug}, {id}, {title}. Applied when a task is created — e.g. task/fix-login-42.`;
 const DONE_TTL_HELP = `Sessions of tasks left in Done are killed after this idle time. Use a duration like 24h or 90m; clear the field or enter never to disable. Worktrees are never removed.`;
-const GITHUB_INTEGRATION_HELP = `Show GitHub features across Kangent. Turn off to hide all GitHub UI — the app behaves exactly as it did before.`;
+const GITHUB_INTEGRATION_HELP = `Show GitHub features across Kangent. Turn off to hide all GitHub UI.`;
+const GITHUB_GH_MISSING_HELP = `Install the GitHub CLI (gh) before enabling GitHub integration.`;
 
 /**
- * The GitHub integration on/off Switch (GHSET-01). A Switch has no draft —
- * it commits immediately via the shared settings KV (PUT
+ * The GitHub integration on/off Switch (GHSET-01/GHSET-03). A Switch has no
+ * draft — it commits immediately via the shared settings KV (PUT
  * /api/settings/github_integration). The cache is replaced on success
  * (useSaveSetting), flipping `enabled`; on failure the cache is untouched so
  * `checked` falls back to the last saved value (never sticks mid-flip) and the
  * canonical error renders under the row. This section ALWAYS renders — it is
  * the control that hides everything else, so it cannot hide itself.
+ *
+ * The toggle is gh-aware: it reads useGithubStatus() (GET /api/github/status).
+ * When gh is unavailable on the host, the EFFECTIVE checked state is forced off
+ * (never shown on, even if a stale stored row says "on"), and an enable attempt
+ * is blocked — instead of flipping on, it surfaces install-gh guidance. A
+ * still-loading or errored status query is treated as "not available" so the
+ * toggle never falsely shows on before availability is known.
  */
 function GithubSection({ enabled }: { enabled: boolean }) {
   const save = useSaveSetting("github_integration");
   const [error, setError] = useState<string | null>(null);
+  const { data: ghStatus } = useGithubStatus();
+  const ghAvailable = ghStatus?.gh_available === true;
+  const effectiveEnabled = enabled && ghAvailable;
 
   return (
     <section className="flex flex-col gap-3">
@@ -61,13 +73,17 @@ function GithubSection({ enabled }: { enabled: boolean }) {
         <Switch
           id="github-integration"
           aria-label={`GitHub integration`}
-          checked={enabled}
-          onCheckedChange={(checked) =>
+          checked={effectiveEnabled}
+          onCheckedChange={(checked) => {
+            if (checked && !ghAvailable) {
+              setError(GITHUB_GH_MISSING_HELP);
+              return;
+            }
             save.mutate(checked ? "on" : "off", {
               onSuccess: () => setError(null),
               onError: () => setError(`Couldn't save. Try again.`),
-            })
-          }
+            });
+          }}
         />
         <Label htmlFor="github-integration" className="text-sm font-medium">
           {`GitHub integration`}
@@ -77,7 +93,7 @@ function GithubSection({ enabled }: { enabled: boolean }) {
         <p className="text-xs text-destructive">{error}</p>
       ) : (
         <p className="text-xs text-muted-foreground">
-          {GITHUB_INTEGRATION_HELP}
+          {ghAvailable ? GITHUB_INTEGRATION_HELP : GITHUB_GH_MISSING_HELP}
         </p>
       )}
     </section>
