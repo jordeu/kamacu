@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
-status: verifying
-stopped_at: Phase 9 context gathered
-last_updated: "2026-06-13T05:53:04.223Z"
+status: executing
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-06-13T06:25:17.176Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 12
+  completed_plans: 9
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 08 — tmux-shells-spawn-detach-lifecycle
+**Current focus:** Phase 09 — tmux-restart-resume-cleanup-integration
 
 ## Current Position
 
-Phase: 9
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 09 (tmux-restart-resume-cleanup-integration) — EXECUTING
+Plan: 3 of 5
+Status: Ready to execute
 Last activity: 2026-06-13
 
 Progress: [░░░░░░░░░░] 0%
@@ -51,6 +51,8 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 | Phase 08-tmux-shells-spawn-detach-lifecycle P02 | 8 min | 2 tasks | 4 files |
 | Phase 08-tmux-shells-spawn-detach-lifecycle P03 | 9 min | 3 tasks | 3 files |
 | Phase 08-tmux-shells-spawn-detach-lifecycle P04 | 52min | 3 tasks | 4 files |
+| Phase 09 P01 | 3 min | 2 tasks | 3 files |
+| Phase 09-tmux-restart-resume-cleanup-integration P02 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -88,6 +90,10 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: tmux session names come from tmux_sessions MAX(n)+1 reserved by an INSERT before Spawn (never the in-memory counter) — unique across restarts, UNIQUE(task_id,n) the backstop; spawn failure DELETEs the reserved row, success back-fills label warn-only (TMUX-02)
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: Honest spawn errors are 409s rendered verbatim in the tab header (D-84 'tmux not found...', dev-route 'tmux shells need a task', 'task has no worktree'); 500s stay generic. Frontend stays 100% tmux-unaware (D-77) — only ApiError status===409 forwards the message
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: TMUX-05 (restart reconcile + Resume) deferred to Phase 9: tmux_sessions is persisted but not read at startup and ListByTask is in-memory only, so a surviving tmux session loses its tab after a server restart — no schema change needed, mirrors Phase 5 claude --resume reconcile
+- [Phase 09]: ListSessions captures stdout via exec.Output() (not the error-only run helper); tmux exit 1 (no server running) is the empty case nil,nil, never an error (D-94)
+- [Phase 09]: Migration 00006 adds 4 nullable per-status timestamp cols on tasks; only done_at is backfilled (from updated_at) so existing Done rows are reapable, the other three are banked stats with no current consumer (D-90)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-02]: ParseDoneSessionTTL is the single source of truth for done_session_ttl disable semantics — called by both Validate (save-time) and the 09-05 reaper (read-at-use), so they can never disagree (mirrors AllowedShells shared by Validate + GET options)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-02]: a done_session_ttl duration <= 0 (e.g. 0s, -5m) is treated as disabled, not an error and not reap-everything — it can never expire (REAP-01/D-91)
 
 ### Pending Todos
 
@@ -100,7 +106,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-13T05:53:04.220Z
-Stopped at: Phase 9 context gathered
-Resume file: .planning/phases/09-tmux-restart-resume-cleanup-integration/09-CONTEXT.md
+Last session: 2026-06-13T06:25:17.171Z
+Stopped at: Completed 09-02-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 7`

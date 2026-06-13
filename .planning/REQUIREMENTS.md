@@ -28,8 +28,8 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [ ] **TMUX-05**: After a Kangent server restart, reopening a task whose tmux session still exists auto-reattaches to it — invisibly, no Resume button (reuses the v1.1 agent reconcile mechanism — DB-derived ghost entry gated by `tmux has-session` → `new-session -A` reattach — but diverges from the agent's explicit Resume UX because tmux reattach is cheap and lossless) *(amended 2026-06-13 during Phase 9 discussion, D-88: auto + invisible, not a Resume button)*
 - [x] **TMUX-06**: When the shell exits inside tmux, the tab shows the existing exited state, not "resumable" — exit vs detach discriminated via `tmux has-session` after the attach PTY exits
 - [x] **TMUX-07**: Plain-bash tabs and agent sessions keep their kill-on-stop behavior unchanged — the shared stop path is regression-guarded by tests
-- [ ] **TMUX-08**: Task/worktree cleanup gates count live detached tmux sessions as running work, and confirmed cleanup kills the task's tmux sessions (no orphaned shells in deleted directories)
-- [ ] **REAP-01**: Sessions of tasks in Done — bash, tmux, AND agent — are automatically killed after a configurable TTL (global setting, default 24h, clocked from entering Done; leaving Done cancels; 0/never disables). Worktrees are never auto-removed — worktree cleanup stays manual via the existing gated dialog *(added 2026-06-12 during Phase 8 discussion)*
+- [x] **TMUX-08**: Task/worktree cleanup gates count live detached tmux sessions as running work, and confirmed cleanup kills the task's tmux sessions (no orphaned shells in deleted directories)
+- [x] **REAP-01**: Sessions of tasks in Done — bash, tmux, AND agent — are automatically killed after a configurable TTL (global setting, default 24h, clocked from entering Done; leaving Done cancels; 0/never disables). Worktrees are never auto-removed — worktree cleanup stays manual via the existing gated dialog *(added 2026-06-12 during Phase 8 discussion)*
 
 ## Future Requirements (v2+)
 
@@ -81,8 +81,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TMUX-06 | Phase 8 | Complete |
 | TMUX-07 | Phase 8 | Complete |
 | TMUX-05 | Phase 9 | Pending |
-| TMUX-08 | Phase 9 | Pending |
-| REAP-01 | Phase 9 | Pending |
+| TMUX-08 | Phase 9 | Complete |
+| REAP-01 | Phase 9 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 17 total
