@@ -16,6 +16,7 @@ import { useMoveTask } from "@/api/mutations";
 import { STATUSES, type Status, type Task } from "@/api/types";
 import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 import { Column } from "./Column";
+import { ReviewColumn } from "./ReviewColumn";
 import { TaskCardOverlay } from "./TaskCard";
 
 function groupTasks(tasks: Task[]): Record<Status, Task[]> {
@@ -204,6 +205,12 @@ export function Board({ tasks, projectId }: BoardProps) {
             projectId={projectId}
           />
         ))}
+        {/* Review column — sibling of the status columns, to the RIGHT of Done.
+            NOT a dnd droppable (D-13). Self-gates to null when integration is
+            off or the project is unlinked, so the OFF board is byte-for-byte
+            pre-v1.3 (GHSET-02). Board's props are unchanged — the column reads
+            settings/project itself. */}
+        <ReviewColumn projectId={projectId} />
       </div>
       <DragOverlay>
         {activeTask ? <TaskCardOverlay task={activeTask} /> : null}
