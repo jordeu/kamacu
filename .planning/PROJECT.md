@@ -53,12 +53,13 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ tmux sessions survive a Kangent server restart and reattach automatically and invisibly when the task is reopened — no Resume button (DB-derived ghost entry gated by `has-session` → `new-session -A`); dead-on-restart sessions vanish quietly with lazy row GC — Phase 9
 - ✓ Cleanup/delete account for tmux: live sessions fold into the single "N sessions running" count and are killed before worktree removal on both cleanup and task-delete; a once-at-startup orphan sweep kills any `kangent-*` session with no DB row (reconciles offline deletes) — Phase 9
 - ✓ Done-TTL reaper: a background ticker kills sessions (bash, tmux, AND agent) of tasks in Done past a configurable TTL (`done_session_ttl`, default 24h from entering Done, `0`/`never` disables); the agent stays resumable (PTY killed, transcript kept); worktrees never auto-removed; new per-status timestamps (`todo_at`/`in_progress_at`/`in_review_at`/`done_at`) bank future cycle-time stats — Phase 9
+- ✓ Global GitHub integration toggle (`github_integration` settings KV) with a full OFF cascade hiding all GitHub UI app-wide; **gh-gated**: when `gh` is absent the toggle defaults OFF and refuses to enable, surfacing "Install the GitHub CLI (gh) before enabling GitHub integration." (`GET /api/github/status` → `gh_available`); when `gh` is present it defaults on — Phase 10 (GHSET-01/02/03)
+- ✓ Per-project config: optional short description (280 cap) + linked GitHub repo via Project settings dialog (⋯ menu), origin-prefilled and soft-validated through the degrade-don't-break `internal/github` leaf package (`gh` canonicalization with syntactic fallback) — Phase 10 (GHPRJ-01/02/03)
+- ✓ Schema foundation for the whole milestone: migration 00007 adds `projects.description`/`github_repo` and `tasks.source`/`pr_number`/`pr_base_ref` (so Phases 11–13 need no further migration) — Phase 10
 
 ### Active
 
 **v1.3 GitHub PR Review** (REQ-IDs in REQUIREMENTS.md):
-- [ ] Global GitHub integration toggle (default on); all GitHub UI hidden when off
-- [ ] Per-project config: optional short description + linked GitHub repository
 - [ ] Collapsible PR review column listing review-requested-from-me open PRs via `gh`, auto-poll (paused when hidden) + manual refresh
 - [ ] PR cards rendered like task cards, list synced live from GitHub
 - [ ] PR review view: worktree on the PR branch (`gh pr checkout`) + agent/bash/diff like a normal task
@@ -82,7 +83,9 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 Kangent v1 does the whole loop: create a project on a local git repo → add a task (worktree + `task/<slug>-<id>` branch auto-created under `~/.kangent/worktrees/`) → Start a real `claude` session in the worktree PTY → watch the board as a dispatcher (status dots, amber when an agent needs you) → leave and reattach across tab closes and server restarts (`claude --resume`) → review the diff vs merge-base → mark Done with gated worktree cleanup. Stack: Go stdlib mux + modernc SQLite + creack/pty + coder/websocket; React 19 + Vite + Tailwind 4 + shadcn + xterm.js 6 + dnd-kit + TanStack Query.
 
-**v1.2 complete (2026-06-13)** — all 3 phases done. Phase 7 — Claude quota indicator: `internal/quota` server proxy (`GET /api/usage`) + QuotaIndicator in both headers. Phase 8 — invisible tmux shells: `internal/tmux` leaf package, migration 00005 `tmux_sessions`, call-time shell dropdown, killer-first `Stop()`, end-to-end spawn wiring with honest 409 errors. Phase 9 — restart durability + cleanup: `GET /api/sessions` reconciles surviving tmux rows as auto-reattaching ghost tabs (TMUX-05, the milestone's headline — sessions survive a server restart and reattach invisibly), cleanup/delete kill tmux before worktree removal + a startup orphan sweep (TMUX-08), and the codebase's first background goroutine — a Done-TTL reaper keyed on new per-status timestamps (migration 00006) that kills bash/tmux/agent sessions of long-Done tasks while keeping the agent resumable (REAP-01). All phases verified green (full Go suite + frontend build). Ready for `/gsd:complete-milestone`.
+**v1.2 complete (2026-06-13)** — all 3 phases done. Phase 7 — Claude quota indicator: `internal/quota` server proxy (`GET /api/usage`) + QuotaIndicator in both headers. Phase 8 — invisible tmux shells: `internal/tmux` leaf package, migration 00005 `tmux_sessions`, call-time shell dropdown, killer-first `Stop()`, end-to-end spawn wiring with honest 409 errors. Phase 9 — restart durability + cleanup: `GET /api/sessions` reconciles surviving tmux rows as auto-reattaching ghost tabs (TMUX-05, the milestone's headline — sessions survive a server restart and reattach invisibly), cleanup/delete kill tmux before worktree removal + a startup orphan sweep (TMUX-08), and the codebase's first background goroutine — a Done-TTL reaper keyed on new per-status timestamps (migration 00006) that kills bash/tmux/agent sessions of long-Done tasks while keeping the agent resumable (REAP-01). All phases verified green (full Go suite + frontend build).
+
+**v1.3 in progress — Phase 10 (GitHub Foundations) complete (2026-06-13)** — 5 plans (3 original + 2 gap-closure). Schema migration 00007 lands all five v1.3 columns + the `github_integration` toggle KV; `internal/github` is the degrade-don't-break leaf (`ParseRepoRef`/`ValidateRepo`/`Available`, `gh` a soft dependency); projects gained partial-PATCH description + repo link with origin auto-detect; the `/settings` GitHub Switch and Project settings dialog ship the OFF cascade. UAT-driven refinement (`gh`-gated enablement + copy) closed via `GET /api/github/status` and a gh-aware toggle. Verified passed (full Go suite + web build green; gh-absent degrade exercised live). Next: Phase 11 — PR Review Column.
 
 ## Next Milestone
 
@@ -142,4 +145,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-13 — milestone v1.3 (GitHub PR Review) started*
+*Last updated: 2026-06-13 — Phase 10 (GitHub Foundations) complete; v1.3 in progress*
