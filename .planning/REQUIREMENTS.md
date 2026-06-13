@@ -11,13 +11,13 @@ Requirements for the GitHub PR Review milestone. Each maps to exactly one roadma
 
 - [x] **GHSET-01**: User can turn GitHub integration on/off from the global settings page; it is ON by default.
 - [ ] **GHSET-02**: When GitHub integration is OFF, all GitHub UI disappears (no per-project GitHub config, no Review column) and the app behaves exactly as it did before v1.3.
-- [ ] **GHSET-03**: GitHub features are best-effort — a missing or unauthenticated `gh` CLI, or any GitHub failure, never breaks the board or any existing feature (degrade, don't break). Access is via the host's already-authenticated `gh`; no credentials are stored.
+- [x] **GHSET-03**: GitHub features are best-effort — a missing or unauthenticated `gh` CLI, or any GitHub failure, never breaks the board or any existing feature (degrade, don't break). Access is via the host's already-authenticated `gh`; no credentials are stored.
 
 ### Project GitHub Config
 
-- [ ] **GHPRJ-01**: User can open a per-project config section to view and edit that project's settings.
-- [ ] **GHPRJ-02**: User can set, edit, and clear an optional short description on a project.
-- [ ] **GHPRJ-03**: User can link a project to a GitHub repository (owner/name), and change or clear the link; the link is validated (via `gh` when available, syntactically otherwise).
+- [x] **GHPRJ-01**: User can open a per-project config section to view and edit that project's settings.
+- [x] **GHPRJ-02**: User can set, edit, and clear an optional short description on a project.
+- [x] **GHPRJ-03**: User can link a project to a GitHub repository (owner/name), and change or clear the link; the link is validated (via `gh` when available, syntactically otherwise).
 
 ### PR Review Column
 
@@ -83,10 +83,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | GHSET-01 | Phase 10 | Complete |
 | GHSET-02 | Phase 10 | Pending |
-| GHSET-03 | Phase 10 | Pending |
-| GHPRJ-01 | Phase 10 | Pending |
-| GHPRJ-02 | Phase 10 | Pending |
-| GHPRJ-03 | Phase 10 | Pending |
+| GHSET-03 | Phase 10 | Complete |
+| GHPRJ-01 | Phase 10 | Complete |
+| GHPRJ-02 | Phase 10 | Complete |
+| GHPRJ-03 | Phase 10 | Complete |
 | GHCOL-01 | Phase 11 | Pending |
 | GHCOL-02 | Phase 11 | Pending |
 | GHCOL-03 | Phase 11 | Pending |

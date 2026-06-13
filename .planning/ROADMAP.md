@@ -65,7 +65,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
   5. **Degrade test:** renaming/removing the `gh` binary (or having it unauthenticated) leaves the whole app fully usable — linking still accepts a syntactically valid repo, and nothing in core flows breaks (GHSET-03).
 **Plans**: 3 plans
 - [x] 10-01-PLAN.md — Schema migration 00007 + github_integration settings key (on/off, default on)
-- [ ] 10-02-PLAN.md — internal/github link canonicalization + partial PATCH (description + repo) + origin auto-detect endpoint
+- [x] 10-02-PLAN.md — internal/github link canonicalization + partial PATCH (description + repo) + origin auto-detect endpoint
 - [ ] 10-03-PLAN.md — shadcn Switch + Settings GitHub section + Project settings dialog with OFF cascade
 **UI hint**: yes
 
@@ -120,7 +120,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 7. Claude Quota Indicator | v1.2 | 3/3 | Complete | 2026-06-12 |
 | 8. tmux Shells — Spawn & Detach Lifecycle | v1.2 | 4/4 | Complete | 2026-06-13 |
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 5/5 | Complete | 2026-06-13 |
-| 10. GitHub Foundations | v1.3 | 1/3 | In Progress|  |
+| 10. GitHub Foundations | v1.3 | 2/3 | In Progress|  |
 | 11. PR Review Column | v1.3 | 0/? | Not started | - |
 | 12. Open-a-Review | v1.3 | 0/? | Not started | - |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 0/? | Not started | - |
