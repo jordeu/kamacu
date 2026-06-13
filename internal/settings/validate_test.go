@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"kangent/internal/settings"
 )
@@ -112,6 +113,70 @@ func TestAllowedShellsWithPathScrubbed(t *testing.T) {
 		t.Errorf("Validate(shell, bash) with scrubbed PATH = %v, want nil", err)
 	}
 	checkErrString(t, settings.Validate(settings.KeyShell, "zsh"), "Unknown shell.")
+}
+
+// TestParseDoneSessionTTL covers the shared parse+disable helper (D-91): the
+// single source of truth the validator and the reaper (09-05) both call, so
+// they can never disagree about what "disabled" means.
+func TestParseDoneSessionTTL(t *testing.T) {
+	tests := []struct {
+		value        string
+		wantTTL      time.Duration
+		wantDisabled bool
+		wantErr      bool
+	}{
+		{"24h", 24 * time.Hour, false, false},
+		{"90m", 90 * time.Minute, false, false},
+		{"", 0, true, false},      // empty disables reaping
+		{"0", 0, true, false},     // "0" disables reaping
+		{"never", 0, true, false}, // "never" disables reaping
+		{"  never  ", 0, true, false},
+		{"0s", 0, true, false},   // zero duration can never expire → disabled
+		{"-5m", 0, true, false},  // negative duration can never expire → disabled
+		{"banana", 0, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			ttl, disabled, err := settings.ParseDoneSessionTTL(tt.value)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseDoneSessionTTL(%q) err = nil, want non-nil", tt.value)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseDoneSessionTTL(%q) err = %v, want nil", tt.value, err)
+			}
+			if disabled != tt.wantDisabled {
+				t.Errorf("ParseDoneSessionTTL(%q) disabled = %v, want %v", tt.value, disabled, tt.wantDisabled)
+			}
+			if ttl != tt.wantTTL {
+				t.Errorf("ParseDoneSessionTTL(%q) ttl = %v, want %v", tt.value, ttl, tt.wantTTL)
+			}
+		})
+	}
+}
+
+func TestValidateDoneSessionTTL(t *testing.T) {
+	const canonical = "Enter a duration like 24h, 90m, or 'never' to disable."
+	tests := []struct {
+		value   string
+		wantErr string // "" means valid
+	}{
+		{"24h", ""},
+		{"90m", ""},
+		{"never", ""},
+		{"", ""},
+		{"0", ""},
+		{"banana", canonical},
+		{"24", canonical}, // missing unit is a parse error
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			err := settings.Validate(settings.KeyDoneSessionTTL, tt.value)
+			checkErrString(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestValidateAgentExtraParamsIsPassThrough(t *testing.T) {
