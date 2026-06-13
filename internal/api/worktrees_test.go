@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -13,13 +14,25 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
 // newWorktreeServer wires the full backend surface the worktree endpoints
 // need: task routes (provisioning), session routes, and the worktree routes,
-// all sharing one DB, one worktree.Service, and one session.Manager.
+// all sharing one DB, one worktree.Service, and one session.Manager. The
+// worktree routes get a zero-value tmux.Client — on an unconfigured socket
+// HasSession errs for every name, so liveTmuxNames collects nothing, which is
+// exactly the tmux-absent behavior the non-tmux tests want.
 func newWorktreeServer(t *testing.T) (*httptest.Server, *testWorktreeEnv) {
+	t.Helper()
+	return newWorktreeServerWithTmux(t, tmux.Client{})
+}
+
+// newWorktreeServerWithTmux is newWorktreeServer with an explicit tmux client,
+// so the D-92/D-93 tmux-aware tests can wire a real per-test socket and the
+// Manager that spawns onto it.
+func newWorktreeServerWithTmux(t *testing.T, c tmux.Client) (*httptest.Server, *testWorktreeEnv) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := store.Open(dbPath)
@@ -36,9 +49,10 @@ func newWorktreeServer(t *testing.T) (*httptest.Server, *testWorktreeEnv) {
 	}
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
+	mgr.SetTmuxClient(c)
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
-	WorktreeRoutes(mux, db, wt, mgr)
+	WorktreeRoutes(mux, db, wt, mgr, c)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()
@@ -371,5 +385,71 @@ func TestWorktreeDeleteNoWorktree(t *testing.T) {
 	status, body := doJSON(t, "DELETE", wtURL(srv, id), nil)
 	if status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%v", status, body)
+	}
+}
+
+// TestWorktreeCleanupCountsAndKillsDetachedTmux is TMUX-08 / D-92 + D-93 at the
+// HTTP layer: a DETACHED tmux session of the task (a survivor with no in-memory
+// session) folds into the SINGLE running_sessions count the cleanup dialog
+// shows (no tmux-specific field, D-77), trips the sessions-running gate, and is
+// killed before wt.Remove so zero kangent-* sessions are orphaned in the
+// deleted tree. Skip-guarded on tmux availability per the package convention.
+func TestWorktreeCleanupCountsAndKillsDetachedTmux(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	// Per-test socket + kill-server cleanup registered BEFORE the server (LIFO).
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-wtclean-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, env := newWorktreeServerWithTmux(t, c)
+	id, repo, wtPath, branch := provisionedTask(t, srv, "Orphan Shell")
+
+	// Persisted row + a still-running DETACHED tmux session under that name,
+	// but NO in-memory session — exactly a leave/restart survivor.
+	name := fmt.Sprintf("kangent-%d-1", id)
+	if _, err := env.db.Exec(
+		`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, 1, ?, 'Bash 1')`, id, name); err != nil {
+		t.Fatalf("seed tmux_sessions row: %v", err)
+	}
+	detach := append(c.BaseArgs(), "new-session", "-d", "-s", name, "-c", wtPath)
+	if err := exec.Command("tmux", detach...).Run(); err != nil {
+		t.Fatalf("seed surviving tmux session: %v", err)
+	}
+	awaitHasSession(t, c, name, true)
+
+	// D-92: the dialog count folds the detached survivor into ONE number with
+	// no tmux wording, even though there is NO in-memory session.
+	status, body := doJSON(t, "GET", wtURL(srv, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body=%v", status, body)
+	}
+	if body["running_sessions"] != float64(1) {
+		t.Errorf("running_sessions = %v, want 1 (detached tmux survivor folded in, D-92)", body["running_sessions"])
+	}
+
+	// Gate 1 trips for the detached tmux too: no flags → 409, tree intact.
+	status, body = doJSON(t, "DELETE", wtURL(srv, id), map[string]any{})
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (detached tmux trips the gate); body=%v", status, body)
+	}
+	if body["error"] != "sessions running" {
+		t.Errorf("error = %q, want %q", body["error"], "sessions running")
+	}
+	if fi, err := os.Stat(wtPath); err != nil || !fi.IsDir() {
+		t.Fatalf("worktree must be intact after refused cleanup: %v", err)
+	}
+
+	// stop_sessions=true → 204; the detached tmux is killed BEFORE wt.Remove so
+	// no kangent-* session survives in the deleted tree (D-93). Branch kept (D-34).
+	status, body = doJSON(t, "DELETE", wtURL(srv, id), map[string]any{"stop_sessions": true})
+	if status != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%v", status, body)
+	}
+	awaitHasSession(t, c, name, false) // the orphan shell is gone
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Errorf("worktree dir still present after cleanup: %v", err)
+	}
+	if got := branchList(t, repo, branch); got == "" {
+		t.Errorf("branch %s deleted by cleanup — must ALWAYS be kept (D-34)", branch)
 	}
 }

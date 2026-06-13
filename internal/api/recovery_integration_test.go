@@ -17,6 +17,7 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
@@ -54,7 +55,7 @@ func newRecoveryProcess(t *testing.T, mgr *session.Manager, db *sql.DB, wt *work
 	mux.HandleFunc("POST /api/sessions/{id}/stop", sh.stop)
 	mux.HandleFunc("DELETE /api/sessions/{id}", sh.delete)
 
-	WorktreeRoutes(mux, db, wt, mgr)
+	WorktreeRoutes(mux, db, wt, mgr, tmux.Client{})
 	HookRoutes(mux, mgr, agentLifecycleToken)
 
 	// Agent status route with the injected glob root (resumable derivation +

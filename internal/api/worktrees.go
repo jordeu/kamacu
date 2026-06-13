@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
 	"kangent/internal/session"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
@@ -19,17 +21,23 @@ import (
 // git itself happily removes a worktree with live processes cwd'd inside
 // (Pitfall 4, verified) and the client dialog's snapshot can be stale
 // (Pitfall 8), so the server is the only real safety net.
-func WorktreeRoutes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager) {
-	h := &worktreeHandlers{db: db, wt: wt, mgr: mgr}
+//
+// tmuxClient is the dedicated-socket tmux surface (D-92/D-93): the cleanup
+// dialog count folds in live DETACHED tmux sessions and remove kills them
+// before wt.Remove — git happily deletes a tree with a tmux server still
+// cwd'd inside (the orphan-shell hole).
+func WorktreeRoutes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client) {
+	h := &worktreeHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	mux.HandleFunc("POST /api/tasks/{id}/worktree", h.create)
 	mux.HandleFunc("GET /api/tasks/{id}/worktree", h.get)
 	mux.HandleFunc("DELETE /api/tasks/{id}/worktree", h.remove)
 }
 
 type worktreeHandlers struct {
-	db  *sql.DB
-	wt  *worktree.Service
-	mgr *session.Manager
+	db         *sql.DB
+	wt         *worktree.Service
+	mgr        *session.Manager
+	tmuxClient tmux.Client
 }
 
 // loadTaskRepo fetches a task plus its project's repo_path in one query. The
@@ -55,6 +63,62 @@ func (h *worktreeHandlers) runningSessions(taskID int64) int {
 		}
 	}
 	return n
+}
+
+// liveTmuxNames returns the tmux session names of the task that are ALIVE on
+// the dedicated socket — detached OR attached. It probes every tmux_sessions
+// row of the task with has-session (the row is identity-only; tmux itself is
+// the liveness authority). A name is collected only when has-session is
+// CONCLUSIVELY alive (alive && err == nil): an inconclusive probe (tmux binary
+// broken/hung) is never read as "alive" nor as "dead" (Pitfall 6 honesty), so
+// a broken tmux neither inflates the count nor triggers a kill.
+//
+// This is the load-bearing detached-survivor list: StopAllForTask only reaches
+// IN-MEMORY sessions, but a tmux session that survived a leave/restart has no
+// in-memory session — only its DB row points at it.
+func (h *worktreeHandlers) liveTmuxNames(ctx context.Context, taskID int64) []string {
+	rows, err := h.db.QueryContext(ctx, `SELECT name FROM tmux_sessions WHERE task_id = ?`, taskID)
+	if err != nil {
+		slog.Warn("listing tmux_sessions for task", "task", taskID, "error", err)
+		return nil
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			slog.Warn("scanning tmux_sessions row", "task", taskID, "error", err)
+			continue
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("iterating tmux_sessions rows", "task", taskID, "error", err)
+	}
+	live := make([]string, 0, len(names))
+	for _, name := range names {
+		alive, err := h.tmuxClient.HasSession(ctx, name)
+		if alive && err == nil {
+			live = append(live, name)
+		}
+	}
+	return live
+}
+
+// cleanupSessionCount folds live detached tmux sessions into the single
+// running-sessions number the cleanup dialog shows (D-92). It is ONE honest
+// count with no tmux-specific field (D-77): in-memory running sessions plus
+// every live tmux row the Manager has NO live session for (HasLiveTmux false),
+// so an in-memory tmux session — counted once by runningSessions — is never
+// double-counted.
+func (h *worktreeHandlers) cleanupSessionCount(ctx context.Context, taskID int64) int {
+	count := h.runningSessions(taskID)
+	for _, name := range h.liveTmuxNames(ctx, taskID) {
+		if !h.mgr.HasLiveTmux(name) {
+			count++
+		}
+	}
+	return count
 }
 
 // create handles POST /api/tasks/{id}/worktree — the Retry (worktree_error
@@ -128,10 +192,12 @@ func (h *worktreeHandlers) get(w http.ResponseWriter, r *http.Request) {
 		branch = *t.Branch
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"branch":           branch,
-		"path":             path,
-		"dirty_files":      dirty,
-		"running_sessions": h.runningSessions(id),
+		"branch":      branch,
+		"path":        path,
+		"dirty_files": dirty,
+		// One honest number, no tmux-specific field (D-92/D-77): in-memory
+		// running sessions PLUS live detached tmux survivors of this task.
+		"running_sessions": h.cleanupSessionCount(r.Context(), id),
 	})
 }
 
@@ -169,8 +235,11 @@ func (h *worktreeHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	}
 	path := *t.WorktreePath
 
-	// Gate 1 (D-32): never silently kill sessions.
-	if h.runningSessions(id) > 0 && !req.StopSessions {
+	// Gate 1 (D-32): never silently kill sessions. The count folds in live
+	// detached tmux survivors (D-92), so the gate trips for a detached tmux
+	// session too — the client then sends stop_sessions=true and remove kills
+	// it below. No tmux-specific gate logic: just the same folded count.
+	if h.cleanupSessionCount(r.Context(), id) > 0 && !req.StopSessions {
 		writeError(w, http.StatusConflict, "sessions running")
 		return
 	}
@@ -195,6 +264,17 @@ func (h *worktreeHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	// refuse-while-running enforcement (git removes trees under live cwds
 	// without error, Pitfall 4).
 	h.mgr.StopAllForTask(id)
+	// Kill every live tmux session of the task DIRECTLY before wt.Remove
+	// (D-92/D-93). StopAllForTask only reaches in-memory sessions; a detached
+	// tmux survivor has no in-memory session, so without this kill git would
+	// remove the tree while the tmux server stays daemonized cwd'd inside it
+	// (the orphan-shell hole). KillSession is idempotent; a tmux failure is
+	// warn-only and NEVER blocks cleanup (Pitfall 5).
+	for _, name := range h.liveTmuxNames(ctx, id) {
+		if err := h.tmuxClient.KillSession(ctx, name); err != nil {
+			slog.Warn("killing tmux session before worktree remove", "task", id, "name", name, "error", err)
+		}
+	}
 	// Plain remove when clean; --force only when the user passed the dirty
 	// gate. The clean-but-submodules --force fallback lives inside Remove.
 	if err := h.wt.Remove(ctx, repo, path, dirty > 0); err != nil {

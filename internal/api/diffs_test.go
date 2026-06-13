@@ -17,6 +17,7 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
@@ -41,7 +42,7 @@ func newDiffServer(t *testing.T) (*httptest.Server, *worktree.Service, *session.
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
-	WorktreeRoutes(mux, db, wt, mgr)
+	WorktreeRoutes(mux, db, wt, mgr, tmux.Client{})
 	DiffRoutes(mux, db, wt)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {

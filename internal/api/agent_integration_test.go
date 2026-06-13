@@ -69,7 +69,7 @@ func newAgentIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
 	SessionRoutes(mux, mgr, db, tmux.Client{})
-	WorktreeRoutes(mux, db, wt, mgr)
+	WorktreeRoutes(mux, db, wt, mgr, tmux.Client{})
 	HookRoutes(mux, mgr, agentLifecycleToken)
 	AgentRoutes(mux, mgr, db)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil))

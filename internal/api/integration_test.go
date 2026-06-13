@@ -43,7 +43,7 @@ func newIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
 	SessionRoutes(mux, mgr, db, tmux.Client{})
-	WorktreeRoutes(mux, db, wt, mgr)
+	WorktreeRoutes(mux, db, wt, mgr, tmux.Client{})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()

@@ -117,7 +117,7 @@ func main() {
 	mux := http.NewServeMux()
 	api.Routes(mux, db, wtSvc, mgr)
 	api.SessionRoutes(mux, mgr, db, tmuxClient)
-	api.WorktreeRoutes(mux, db, wtSvc, mgr)
+	api.WorktreeRoutes(mux, db, wtSvc, mgr, tmuxClient)
 	api.DiffRoutes(mux, db, wtSvc)
 	api.HookRoutes(mux, mgr, hookToken)
 	api.AgentRoutes(mux, mgr, db)
