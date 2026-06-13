@@ -208,6 +208,135 @@ func TestProjectRename(t *testing.T) {
 	}
 }
 
+// TestUpdateProjectPartial exercises the grown PATCH: partial updates of
+// description and github_repo, canonicalization, unlink, and the single
+// hard-error case (a syntactically invalid ref). github_repo cases use refs
+// that ParseRepoRef accepts syntactically so the test is deterministic whether
+// or not gh is installed (ValidateRepo soft-saves the syntactic form).
+func TestUpdateProjectPartial(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	id := createProject(t, srv, gitRepo(t))
+	url := fmt.Sprintf("%s/api/projects/%d", srv.URL, id)
+
+	// A fresh project serializes both new keys: description "" and github_repo null.
+	status, body := doJSONList(t, srv.URL+"/api/projects")
+	if status != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", status)
+	}
+	if len(body) != 1 {
+		t.Fatalf("len = %d, want 1", len(body))
+	}
+	if _, ok := body[0]["description"]; !ok {
+		t.Errorf("list project missing 'description' key: %v", body[0])
+	}
+	if v, ok := body[0]["github_repo"]; !ok || v != nil {
+		t.Errorf("fresh github_repo = %v (ok=%v), want present and null", v, ok)
+	}
+
+	// name-only PATCH still renames and leaves description/github_repo untouched.
+	status, pb := doJSON(t, "PATCH", url, map[string]any{"name": "renamed"})
+	if status != http.StatusOK {
+		t.Fatalf("rename status = %d, want 200; body=%v", status, pb)
+	}
+	if pb["name"] != "renamed" {
+		t.Errorf("name = %q, want renamed", pb["name"])
+	}
+	if pb["description"] != "" {
+		t.Errorf("description after name-only PATCH = %v, want \"\"", pb["description"])
+	}
+
+	// description set.
+	status, pb = doJSON(t, "PATCH", url, map[string]any{"description": "hello"})
+	if status != http.StatusOK {
+		t.Fatalf("set description status = %d; body=%v", status, pb)
+	}
+	if pb["description"] != "hello" {
+		t.Errorf("description = %v, want hello", pb["description"])
+	}
+	assertDBProject(t, db, id, "hello", nil)
+
+	// description clear.
+	status, pb = doJSON(t, "PATCH", url, map[string]any{"description": ""})
+	if status != http.StatusOK {
+		t.Fatalf("clear description status = %d; body=%v", status, pb)
+	}
+	if pb["description"] != "" {
+		t.Errorf("description after clear = %v, want \"\"", pb["description"])
+	}
+
+	// github_repo canonicalized from a URL to owner/name.
+	status, pb = doJSON(t, "PATCH", url, map[string]any{"github_repo": "https://github.com/cli/cli.git"})
+	if status != http.StatusOK {
+		t.Fatalf("link status = %d; body=%v", status, pb)
+	}
+	if pb["github_repo"] != "cli/cli" {
+		t.Errorf("github_repo = %v, want cli/cli", pb["github_repo"])
+	}
+	repo := "cli/cli"
+	assertDBProject(t, db, id, "", &repo)
+
+	// github_repo "" → unlink (NULL / JSON null).
+	status, pb = doJSON(t, "PATCH", url, map[string]any{"github_repo": ""})
+	if status != http.StatusOK {
+		t.Fatalf("unlink status = %d; body=%v", status, pb)
+	}
+	if v, ok := pb["github_repo"]; !ok || v != nil {
+		t.Errorf("github_repo after unlink = %v (ok=%v), want null", v, ok)
+	}
+	assertDBProject(t, db, id, "", nil)
+
+	// invalid ref → 400, canonical error, row unchanged. Link first so we can
+	// prove the bad PATCH does not clobber the stored value.
+	status, _ = doJSON(t, "PATCH", url, map[string]any{"github_repo": "owner/name"})
+	if status != http.StatusOK {
+		t.Fatalf("seed link status = %d, want 200", status)
+	}
+	status, pb = doJSON(t, "PATCH", url, map[string]any{"github_repo": "not-a-repo"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid ref status = %d, want 400; body=%v", status, pb)
+	}
+	if pb["error"] != "Not a valid repository — use owner/name or a GitHub URL." {
+		t.Errorf("error = %q, want canonical invalid-ref copy", pb["error"])
+	}
+	seeded := "owner/name"
+	assertDBProject(t, db, id, "", &seeded) // unchanged by the rejected PATCH
+
+	// empty body → 400 nothing to update.
+	status, pb = doJSON(t, "PATCH", url, map[string]any{})
+	if status != http.StatusBadRequest {
+		t.Fatalf("empty body status = %d, want 400; body=%v", status, pb)
+	}
+
+	// 404 for a bogus id.
+	status, _ = doJSON(t, "PATCH", fmt.Sprintf("%s/api/projects/999999", srv.URL), map[string]any{"name": "x"})
+	if status != http.StatusNotFound {
+		t.Fatalf("bogus id status = %d, want 404", status)
+	}
+}
+
+// assertDBProject asserts the persisted description and github_repo for a project.
+// wantRepo nil means the column must be NULL.
+func assertDBProject(t *testing.T, db *sql.DB, id int64, wantDesc string, wantRepo *string) {
+	t.Helper()
+	var desc string
+	var repo sql.NullString
+	if err := db.QueryRow(`SELECT description, github_repo FROM projects WHERE id = ?`, id).Scan(&desc, &repo); err != nil {
+		t.Fatalf("read back project %d: %v", id, err)
+	}
+	if desc != wantDesc {
+		t.Errorf("DB description = %q, want %q", desc, wantDesc)
+	}
+	if wantRepo == nil {
+		if repo.Valid {
+			t.Errorf("DB github_repo = %q, want NULL", repo.String)
+		}
+	} else {
+		if !repo.Valid || repo.String != *wantRepo {
+			t.Errorf("DB github_repo = %v (valid=%v), want %q", repo.String, repo.Valid, *wantRepo)
+		}
+	}
+}
+
 func TestProjectDeleteCascadesAndKeepsRepo(t *testing.T) {
 	srv, db, _ := newTestServer(t)
 	repo := gitRepo(t)
