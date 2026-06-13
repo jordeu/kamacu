@@ -1,10 +1,11 @@
 ---
 phase: 10
 slug: github-foundations
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova / zinc dark (web/components.json present — initialized in Phase 1)
 created: 2026-06-13
+reviewed_at: 2026-06-13
 ---
 
 # Phase 10 — UI Design Contract
@@ -46,7 +47,7 @@ Phase 10 applications:
 | Token | Value | Usage this phase |
 |-------|-------|------------------|
 | xs | 4px | Gap inside a field block: label row → control, and control → help/error/warning line (matches `SettingsField` `gap-1`) |
-| sm | 8px | Gap between the GitHub section label and its Switch row; gap between the Switch and its inline label/help; the dialog's label→input gap uses the `RenameProjectDialog` `gap-1.5` (6px) precedent for dialog fields |
+| sm | 8px | Gap between the GitHub section label and its Switch row; gap between the Switch and its inline label/help; the dialog's label→input gap uses the on-grid 8px `gap-2` token (the `sm` step in the inherited scale) for dialog field blocks |
 | md | 12px | Gap between the `GitHub` group label and the Switch field (matches the other settings sections' `gap-3`) |
 | lg | 16px | Inherited page padding; dialog form `gap-4` between the two fields (matches `RenameProjectDialog` `flex-col gap-4`) |
 | xl | 24px | Gap between the new `GitHub` section and the existing sections (the page's `gap-6` between sections) |
@@ -118,9 +119,9 @@ Tone inherited verbatim: terse, sentence case, no exclamation marks, no "please"
 | Dropdown menu item (in `ProjectMenu`, between `Rename` and `Delete project`) | `Project settings` |
 | Dialog title | `Project settings` |
 | Footer — cancel | `Cancel` (ghost button — `RenameProjectDialog` precedent) |
-| Footer — confirm | `Save` (primary button) |
+| Footer — confirm | `Save changes` (primary button) |
 
-> The dialog SAVE model is per-field on blur/change like the settings page is NOT used here — this dialog uses the `RenameProjectDialog` form-submit model (a single `Save` PATCH on submit). See Interaction Contract for the precise reconciliation. Both fields are sent in one `PATCH /api/projects/{id}` (D-13).
+> The dialog SAVE model is per-field on blur/change like the settings page is NOT used here — this dialog uses the `RenameProjectDialog` form-submit model (a single `Save changes` PATCH on submit). See Interaction Contract for the precise reconciliation. Both fields are sent in one `PATCH /api/projects/{id}` (D-13).
 
 ### Project settings dialog — Description field (GHPRJ-01/02, D-07)
 
@@ -181,24 +182,24 @@ The Switch's value flows through the EXISTING settings KV REST surface (`PUT /ap
 
 ### Project settings — dialog (GHPRJ-01/02/03, D-07/D-08/D-09/D-11)
 
-Modeled on `RenameProjectDialog`: a Radix `Dialog` with `DialogHeader`/`DialogTitle`, a `<form onSubmit>` body (`flex flex-col gap-4`), and a `DialogFooter` with `Cancel` (ghost) + `Save` (primary). One PATCH carries both fields.
+Modeled on `RenameProjectDialog`: a Radix `Dialog` with `DialogHeader`/`DialogTitle`, a `<form onSubmit>` body (`flex flex-col gap-4`), and a `DialogFooter` with `Cancel` (ghost) + `Save changes` (primary). One PATCH carries both fields.
 
 | Interaction | Contract |
 |-------------|----------|
 | Open | Each time the dialog opens: prefill Description from `project.description`; prefill the repo field from `project.github_repo` if linked, else from the origin-derived suggestion (D-08). Clear any prior error/warning. (Mirror the `useEffect(() => { if (open) {...} }, [open, ...])` reset in `RenameProjectDialog`) |
 | Origin auto-detect (D-08) | The origin suggestion is fetched **when the dialog opens** — never on every project-list response. Delivery is planner's discretion (a dedicated suggestion endpoint or an on-open derived read). While the suggestion is loading, the repo field may show a brief disabled/loading state; if detection fails or returns nothing, fall back to an empty field + the no-origin help copy. Detection failure is silent (it's a convenience, not a requirement) |
-| Save | `Save` (or Enter in a single-line field) → one `PATCH /api/projects/{id}` with `{ description, github_repo }` (D-13). Server canonicalizes the repo ref to `owner/name` (D-09) and applies soft validation (D-11). Button disabled while the PATCH is in flight |
+| Save | `Save changes` (or Enter in a single-line field) → one `PATCH /api/projects/{id}` with `{ description, github_repo }` (D-13). Server canonicalizes the repo ref to `owner/name` (D-09) and applies soft validation (D-11). Button disabled while the PATCH is in flight |
 | Save success (verified or no-gh) | Dialog closes; the project query is invalidated so the stored values refresh. If the server returned a soft-verify or gh-degraded advisory (see below), the dialog instead stays open just long enough to surface the muted note, then closes — OR closes immediately and the note is non-blocking; planner's discretion, but a soft advisory must NEVER block closing |
 | Soft-verify warning (D-11, `gh` present, unverifiable) | The PATCH succeeds (the value IS stored). Surface the muted "couldn't verify" line under the repo field. The user may close the dialog — the link is saved. This is the explicit non-blocking path |
 | gh-degraded (D-11, `gh` absent/unauth) | The PATCH succeeds via syntactic validation. Surface the muted "saved without verifying" line. Non-blocking |
 | Hard validation error (syntactically invalid repo ref) | The PATCH 4xx's; the dialog STAYS OPEN; the destructive red message (sentence-cased server copy) renders under the repo field; the draft is preserved for correction; the Description value is not lost. This is the ONLY case that blocks the dialog |
 | Clear / unlink | Emptying the repo field and saving stores `github_repo = NULL` (not linked). Emptying the description and saving clears it. No confirmation — routine |
-| Cancel / dismiss | `Cancel`, Esc, or backdrop click closes the dialog and discards unsaved edits (standard `Dialog` dismissal; nothing is persisted until `Save`) |
+| Cancel / dismiss | `Cancel`, Esc, or backdrop click closes the dialog and discards unsaved edits (standard `Dialog` dismissal; nothing is persisted until `Save changes`) |
 | Field gating | The `GitHub repository` field renders only when `github_integration === "on"` (D-06). When off, the dialog contains only the Description field + footer |
 | Network failure (5xx) | `Couldn't save. Try again.` destructive 12px under the form (or under the field that triggered it); dialog stays open, drafts preserved (`RenameProjectDialog` catch precedent) |
 | Concurrency | Single-user app: last write wins; no conflict UI |
 
-Focal point: neither surface introduces a high-contrast inverted CTA. On `/settings` the visual anchor remains the `Settings` heading and the calm one-column form; the new GitHub section is just one more quiet group with a single accent-track Switch. In the dialog, the primary `Save` button is the only emphasized control (standard primary), exactly as in `RenameProjectDialog` — the soft-verify path deliberately keeps warnings muted so nothing competes with the routine save.
+Focal point: neither surface introduces a high-contrast inverted CTA. On `/settings` the visual anchor remains the `Settings` heading and the calm one-column form; the new GitHub section is just one more quiet group with a single accent-track Switch. In the dialog, the primary `Save changes` button is the only emphasized control (standard primary), exactly as in `RenameProjectDialog` — the soft-verify path deliberately keeps warnings muted so nothing competes with the routine save.
 
 ---
 
@@ -208,8 +209,8 @@ Focal point: neither surface introduces a high-contrast inverted CTA. On `/setti
 |--------|------|
 | Settings — GitHub section | Appended as the last `<section>` in the existing `SettingsPage` content column (max-width 640px, within the lg/16px page padding). Structure: 12px uppercase muted `GitHub` label → md (12px) gap → Switch row → xs gap → 12px muted help. Separated from the `Cleanup` section above by the page's xl (24px / `gap-6`) section gap; no separators, no cards (whitespace + labels do the grouping — Phase 6 rule) |
 | Switch row | `flex items-center gap-2`: Switch (shadcn default size) then the `GitHub integration` label; the help line is a sibling `<p>` below the row at the field's left edge |
-| Project settings dialog | Standard shadcn `DialogContent` (centered, zinc-900 surface, default max-width ≈ `sm:max-w-lg`). `DialogHeader` (`Project settings` title) → `<form className="flex flex-col gap-4">`: Description field block, then (when integration on) the GitHub repository field block → `DialogFooter` (`Cancel` ghost + `Save` primary, right-aligned). Identical shell to `RenameProjectDialog` |
-| Dialog field block | `flex flex-col gap-1.5`: 12px/500 label (with the optional `{n}/280` counter right-aligned on the description label row) → control (Textarea 3 rows / mono Input) → 12px line (help, OR muted soft-warning, OR destructive error — exactly one shows; error/warning replaces help while present) |
+| Project settings dialog | Standard shadcn `DialogContent` (centered, zinc-900 surface, default max-width ≈ `sm:max-w-lg`). `DialogHeader` (`Project settings` title) → `<form className="flex flex-col gap-4">`: Description field block, then (when integration on) the GitHub repository field block → `DialogFooter` (`Cancel` ghost + `Save changes` primary, right-aligned). Identical shell to `RenameProjectDialog` |
+| Dialog field block | `flex flex-col gap-2`: 12px/500 label (with the optional `{n}/280` counter right-aligned on the description label row) → control (Textarea 3 rows / mono Input) → 12px line (help, OR muted soft-warning, OR destructive error — exactly one shows; error/warning replaces help while present) |
 | `⋯` dropdown | The `Project settings` item is a standard `DropdownMenuItem` inserted between `Rename` and the destructive `Delete project`; menu width/alignment unchanged (`side="bottom" align="start"`) |
 
 ---
