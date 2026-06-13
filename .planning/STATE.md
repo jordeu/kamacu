@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
 status: executing
-stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-06-13T06:36:19.753Z"
+stopped_at: Completed 09-04-PLAN.md
+last_updated: "2026-06-13T06:58:11.241Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 09 (tmux-restart-resume-cleanup-integration) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-13
 
@@ -54,6 +54,7 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 | Phase 09 P01 | 3 min | 2 tasks | 3 files |
 | Phase 09-tmux-restart-resume-cleanup-integration P02 | 4min | 2 tasks | 5 files |
 | Phase 09-tmux-restart-resume-cleanup-integration P03 | 14 min | 3 tasks | 11 files |
+| Phase 09-tmux-restart-resume-cleanup-integration P04 | 14 min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 09-tmux-restart-resume-cleanup-integration]: TMUX-05 restart reattach is AUTO + INVISIBLE (D-88): a surviving tmux row surfaces as an orphaned bash entry in GET /api/sessions; the frontend fires one reattach spawn (new-session -A) per name — no Resume button, no banner (diverges from agent explicit-Resume)
 - [Phase 09-tmux-restart-resume-cleanup-integration]: Survivor detection uses Manager.HasLiveTmux(name) so the wire format is unchanged for live sessions; TmuxName is carried on the wire ONLY for orphaned entries (omitempty), keeping live tabs tmux-unaware (D-77)
 - [Phase 09-tmux-restart-resume-cleanup-integration]: Dead-on-restart rows are lazily DELETEd ONLY on a conclusive has-session exit-1 (D-89); an inconclusive probe (tmux binary broken/hung) never GCs — Pitfall 6 honesty. Reattach spawn failure never deletes the row (pre-existing survivor, not a reserved n)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-04]: Cleanup dialog running_sessions folds in live DETACHED tmux via has-session, de-duped by Manager.HasLiveTmux — one honest number, no tmux-specific field (D-92/D-77); a conclusive-only probe (alive && err==nil) keeps a broken tmux from inflating or killing (Pitfall 6)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-04]: TMUX-08 kill-before-remove on BOTH worktree-remove and task-delete (StopAllForTask reaches only in-memory sessions; detached survivors killed by tmux_sessions row), plus a synchronous once-at-startup DB-driven orphan sweep (JOIN tmux_sessions vs tasks) before ListenAndServe — branch always kept (D-34), worktrees never touched (D-87), never periodic (D-99); task-delete removes tmux_sessions rows explicitly (no FK cascade, migration 00005)
 
 ### Pending Todos
 
@@ -110,7 +113,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-13T06:36:07.733Z
-Stopped at: Completed 09-03-PLAN.md
+Last session: 2026-06-13T06:58:11.236Z
+Stopped at: Completed 09-04-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 7`
