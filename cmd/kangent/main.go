@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"kangent/internal/api"
 	"kangent/internal/quota"
@@ -151,10 +154,78 @@ func main() {
 		http.ServeFileFS(w, r, dist, "index.html") // deep links → SPA
 	})
 
+	// Startup orphan sweep (D-93): reconcile task-deletes / worktree-removes
+	// that happened while Kangent was down. Synchronous and ONCE — block until
+	// done so the server starts in a clean state (NOT periodic: tmux sessions
+	// only become orphaned through paths Kangent already controls, D-99).
+	sweepOrphanTmux(context.Background(), db, tmuxClient)
+
 	slog.Info("kangent listening", "url", "http://"+*addr)
 	if err := http.ListenAndServe(*addr, hostCheck(mux)); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
+	}
+}
+
+// sweepOrphanTmux kills any live kangent-* tmux session on the dedicated socket
+// whose name has no matching tmux_sessions row OR whose task no longer exists
+// (D-93). It reconciles deletes/removes that happened while Kangent was down —
+// the kill-before-remove paths in worktrees.go/tasks.go cover the online case,
+// and this covers the offline case. Best-effort throughout: a missing/broken
+// tmux binary is a no-op (nothing to sweep), and a kill failure is warn-only.
+// The branch is never touched (D-34) and worktrees are never removed here
+// (D-87) — this kills orphaned shells only.
+func sweepOrphanTmux(parent context.Context, db *sql.DB, tmuxClient tmux.Client) {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	defer cancel()
+
+	names, err := tmuxClient.ListSessions(ctx)
+	if err != nil {
+		// tmux missing/broken — nothing to sweep (degrade, don't break).
+		slog.Warn("orphan sweep: listing tmux sessions", "error", err)
+		return
+	}
+	if len(names) == 0 {
+		return // no server running -> no sessions
+	}
+
+	// Known = a tmux_sessions row whose task STILL exists. The JOIN drops rows
+	// whose task was deleted while down, so those sessions get swept too.
+	known := make(map[string]bool)
+	rows, err := db.QueryContext(ctx,
+		`SELECT ts.name FROM tmux_sessions ts JOIN tasks t ON t.id = ts.task_id`)
+	if err != nil {
+		slog.Warn("orphan sweep: loading known tmux sessions", "error", err)
+		return // can't tell orphan from live -> never kill blindly (Pitfall 6)
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			slog.Warn("orphan sweep: scanning known name", "error", err)
+			continue
+		}
+		known[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("orphan sweep: iterating known names", "error", err)
+		return
+	}
+	rows.Close()
+
+	for _, name := range names {
+		// Never touch a session Kangent did not create (belt-and-braces — the
+		// dedicated socket should only ever hold kangent-* sessions).
+		if !strings.HasPrefix(name, "kangent-") {
+			continue
+		}
+		if known[name] {
+			continue
+		}
+		if err := tmuxClient.KillSession(ctx, name); err != nil {
+			slog.Warn("orphan sweep: killing orphan tmux session", "name", name, "error", err)
+			continue
+		}
+		slog.Info("swept orphan tmux session", "name", name)
 	}
 }
 
