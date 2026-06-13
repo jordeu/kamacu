@@ -39,3 +39,17 @@ export function useProjectGithubOrigin(projectId: number, enabled: boolean) {
     staleTime: Infinity, // origin rarely changes; fetch once per dialog open via `enabled`
   });
 }
+
+/**
+ * Whether the host has the `gh` CLI installed (GET /api/github/status, always
+ * 200). Gates the GitHub integration toggle's default/enable behavior so the
+ * integration is never shown on — and cannot be enabled — when gh is missing
+ * (GHSET-01/GHSET-03). Call-time on the server, so install/uninstall is picked
+ * up on the next fetch with no restart.
+ */
+export function useGithubStatus() {
+  return useQuery({
+    queryKey: ["github-status"],
+    queryFn: () => get<{ gh_available: boolean }>("/api/github/status"),
+  });
+}
