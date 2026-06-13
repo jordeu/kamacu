@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 ## Current Position
 
-Phase: 10 (github-foundations) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-06-13
+Phase: 10 (github-foundations) — GAPS FOUND
+Plan: 3 of 3 executed; gap closure pending
+Status: UAT found 2 gaps (gh-gated enablement + toggle copy) — run /gsd:plan-phase 10 --gaps
+Last activity: 2026-06-13 — Phase 10 executed (3/3); UAT surfaced gh-gated-enablement + copy gaps
 
 Progress: [░░░░░░░░░░] 0% (0/4 phases)
 

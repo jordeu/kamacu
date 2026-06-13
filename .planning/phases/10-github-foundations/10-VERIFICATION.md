@@ -1,8 +1,8 @@
 ---
 phase: 10-github-foundations
 verified: 2026-06-13T00:00:00Z
-status: human_needed
-score: 5/5 must-haves verified (2 require human click-through/live-degrade confirmation)
+status: gaps_found
+score: 5/5 must-haves verified in code; human UAT found 2 behavioral gaps (gh-gated enablement + copy)
 human_verification:
   - test: "OFF cascade click-through (GHSET-02)"
     expected: "Turn the GitHub integration Switch OFF on /settings; open a project's ⋯ → Project settings: the GitHub repository field is gone, Description remains; no Review column or other GitHub UI appears anywhere; board/tasks/sessions behave exactly as before v1.3."
@@ -20,7 +20,7 @@ human_verification:
 **Phase Goal:** A user can turn GitHub integration on/off globally and link a project to a GitHub repo with an optional description — and when `gh` is missing or the toggle is off, the rest of Kangent is byte-for-byte unchanged.
 
 **Verified:** 2026-06-13
-**Status:** human_needed
+**Status:** gaps_found (human UAT — see `## Gaps`)
 **Re-verification:** No — initial verification
 
 ## Goal Achievement
@@ -118,7 +118,29 @@ See `human_verification` frontmatter. Three items: (1) the OFF-cascade click-thr
 
 ### Gaps Summary
 
-No goal-blocking gaps. The migration, settings key, github leaf package, partial PATCH, origin endpoint, Switch, settings section, project-settings dialog, and ⋯ menu item all exist, are substantive, are wired end to end, and have real data flowing. `go build ./...` and the full phase-10 Go suite pass; `npm run build` is reported green. The only open items are the three inherently human-testable confirmations the prompt called out (full OFF cascade, live gh-removed degrade, origin prefill UX) — none indicate a missing or stubbed artifact.
+Automated verification found no missing or stubbed artifacts (all 5 truths verified in code). However, **human UAT discovered 2 behavioral gaps** that change `gh`-availability handling and copy. These are refinements to GHSET-01/02/03 surfaced by running the live `gh`-removed scenario — not implementation defects in what was specified, but the specified behavior is now wrong. Recorded below for `/gsd:plan-phase 10 --gaps`.
+
+## Gaps
+
+### Gap 1: `gh`-gated default + enable guard (GHSET-01 / GHSET-03)
+- **Source:** Human UAT (user renamed `gh` → now unavailable on host).
+- **Requirements:** GHSET-01 (default state), GHSET-03 (degrade behavior).
+- **Current (wrong) behavior:** GitHub integration is `ON` by default unconditionally (`Defaults["github_integration"]="on"`), and the `/settings` Switch toggles `on`/`off` with no awareness of whether `gh` is installed. `github.Available()` exists but is internal-only — nothing surfaces `gh` availability to the web UI (only the per-project `GET /api/projects/{id}/github-origin` route exists).
+- **Required behavior:**
+  1. When `gh` is **not available** on the host, GitHub integration is **OFF by default** (the effective/displayed enabled state must be gated on `gh` availability; do not show it as on when `gh` is missing).
+  2. When the user attempts to **enable** the integration, the app checks `gh` availability. If `gh` is unavailable, the toggle is **not** enabled; instead the user is shown a message telling them to **install the GitHub CLI (`gh`) before enabling GitHub integration**.
+- **Implementation hint:** Surface `gh` availability to the frontend — e.g. add a `gh_available` field to the settings GET response, or a small always-200 `GET /api/github/status` endpoint reusing `github.Available()` (checked at call time, modeled on the `internal/quota` degrade pattern). Frontend `GithubSection` reads it, gates the Switch (default off + block/guard enable when unavailable), and renders the install-`gh` guidance in place of the default help line.
+- **Where:** backend `internal/github` + `internal/api` (new status surface); frontend `web/src/pages/SettingsPage.tsx` (`GithubSection`), and the shared `useSettings()`/queries layer.
+
+### Gap 2: Remove over-claiming toggle copy (GHSET-02)
+- **Source:** Human UAT.
+- **Requirement:** GHSET-02 (copy).
+- **Current:** `GITHUB_INTEGRATION_HELP` (SettingsPage.tsx:42) = `Show GitHub features across Kangent. Turn off to hide all GitHub UI — the app behaves exactly as it did before.`
+- **Required:** Drop the trailing clause. New copy: `Show GitHub features across Kangent. Turn off to hide all GitHub UI.`
+- **Where:** `web/src/pages/SettingsPage.tsx:42`.
+
+### Deferred (still inherently human-testable after gaps close)
+- Origin prefill-on-open UX (GHPRJ-03 / D-08) — verified in code; confirm interactively. Tracked in `10-HUMAN-UAT.md`.
 
 ---
 
