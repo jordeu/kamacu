@@ -1,212 +1,274 @@
-# Stack Research — v1.2: Claude Quota Indicator + tmux-Backed Resumable Shells
+# Stack Research
 
-**Domain:** Claude Code quota/usage API integration + tmux session persistence for an existing Go+React PTY app
-**Researched:** 2026-06-11
-**Confidence:** HIGH (everything below verified empirically on this machine or read from current source, not training data)
+**Domain:** GitHub PR-review integration (read-only surfacing + worktree checkout) added to an existing single-binary Go + React local app
+**Researched:** 2026-06-13
+**Confidence:** HIGH (all `gh`/`git` commands, flags, and `--json` field lists below were run live against the host's `gh 2.82.0` and real GitHub repos, not recalled from training data)
 
-> Supersedes the v1.0 stack research at this path (2026-06-10), which is fully mirrored into CLAUDE.md. This file covers only the v1.2 additions.
+## TL;DR for the roadmap author
 
-## Headline
-
-**Zero new dependencies.** Both features are built entirely on the existing stack:
-
-- **Quota indicator:** `net/http` GET against an undocumented-but-stable Anthropic OAuth endpoint, bearer token read from `~/.claude/.credentials.json` with `os.ReadFile` + `encoding/json`. Frontend is TanStack Query (`refetchInterval`) + shadcn components already in the copy-in workflow.
-- **tmux shells:** pure `os/exec` argument construction — the *command spawned inside the existing creack/pty session* becomes `tmux ... new-session -A ...` instead of `bash`. tmux is a host prerequisite detected via `exec.LookPath` (same pattern as v1.1 shell validation), never a Go module.
-
-## Part A — Claude Quota/Usage Data (verified end-to-end)
-
-### How SlayZone does it (read from current source, 2026-06-11)
-
-SlayZone's entire quota feature lives in `packages/domains/terminal/src/electron/usage.ts`. Verbatim findings:
-
-1. **Token source (Linux):** `~/.claude/.credentials.json` → JSON path `claudeAiOauth.accessToken`. (macOS: keychain generic password, service `Claude Code-credentials`, same JSON inside.)
-2. **Endpoint:** `GET https://api.anthropic.com/api/oauth/usage`
-3. **Headers:**
-   - `Authorization: Bearer <accessToken>`
-   - `anthropic-beta: oauth-2025-04-20`
-   - `Content-Type: application/json`
-   - `User-Agent: claude-code/<installed claude version>` (SlayZone runs `claude --version` once and caches it; falls back to a hardcoded version string)
-4. **Caching/backoff:** 60s auto-poll TTL, **10s hard floor** even on manual refresh (anti spam-click), in-flight dedup, on 429 honor `Retry-After` with a **30s minimum backoff**, keep last good data marked stale on failure, drop stale windows after 3 consecutive failures.
-
-### Verified on this machine (2026-06-11, claude 2.1.173)
-
-`~/.claude/.credentials.json` exists (mode 0600) with this shape (values redacted):
-
-```json
-{
-  "claudeAiOauth": {
-    "accessToken": "sk-ant-oat01-…",   // 108 chars
-    "refreshToken": "sk-ant-ort01-…",  // 108 chars
-    "expiresAt": 1781209313478,        // epoch ms — ~8h lifetime observed
-    "scopes": ["user:file_upload"],
-    "subscriptionType": "team",
-    "rateLimitTier": "default_clau…"
-  },
-  "mcpOAuth": { … }                    // unrelated; ignore
-}
-```
-
-Live request returned **HTTP 200** with exactly this body:
-
-```json
-{
-  "five_hour":   { "utilization": 12.0, "resets_at": "2026-06-12T00:00:00.069303+00:00" },
-  "seven_day":   { "utilization": 68.0, "resets_at": "2026-06-13T21:00:00.069327+00:00" },
-  "seven_day_oauth_apps": null,
-  "seven_day_opus": null,
-  "seven_day_sonnet": { "utilization": 0.0, "resets_at": null },
-  "seven_day_cowork": null,
-  "seven_day_omelette": null,
-  "tangelo": null,
-  "iguana_necktie": null,
-  "omelette_promotional": null,
-  "cinder_cove": null,
-  "extra_usage": {
-    "is_enabled": true, "monthly_limit": null, "used_credits": 240.0,
-    "utilization": null, "currency": "EUR", "disabled_reason": null
-  }
-}
-```
-
-**Response-shape gotchas (all observed, not theoretical):**
-- `utilization` is a percent float 0–100, already computed server-side.
-- `resets_at` is ISO 8601 with sub-second precision + offset — **and can be `null` even when the window object exists** (`seven_day_sonnet` above). Render "—" for null resets.
-- Whole window objects can be `null` per plan (`seven_day_opus` is null on this team plan). Only render non-null windows — exactly what SlayZone's `filter` does.
-- The payload contains rotating experimental fields (`tangelo`, `iguana_necktie`, `seven_day_cowork`, …). **Decode into a Go struct with only the known fields** — `encoding/json` ignores unknowns natively. Never fail on unrecognized keys.
-- `extra_usage` (pay-per-use overflow credits) exists; optional to surface, but it's there if the popup wants it.
-
-### Token lifecycle (the one real risk)
-
-- The access token is **short-lived (~8h observed)**. The claude CLI refreshes it whenever it runs and rewrites `.credentials.json`.
-- **Re-read the credentials file on every poll.** Never cache the token in memory beyond one request. File is 2.5KB; cost is nil.
-- **Do NOT implement token refresh in Kangent.** The refresh token is in the file and the OAuth flow is known in the ecosystem, but refresh-token rotation means a Kangent-initiated refresh could invalidate the CLI's stored token and break the user's `claude` login. On 401, show "Token expired — run claude to re-authenticate" (SlayZone's exact UX). In practice any running agent session keeps the token fresh.
-
-### Polling etiquette (corroborated externally)
-
-The Claude-Code-Usage-Monitor project (issue #202) independently confirms this endpoint and adds a critical detail: **without the `claude-code/<version>` User-Agent you land in an aggressively rate-limited bucket and get persistent 429s**; with it, polling at sub-minute intervals is safe. Kangent's plan:
-
-- ~60s auto-poll, manual refresh with a 10s server-side hard floor (copy SlayZone's numbers — they're production-tested).
-- On 429: parse `Retry-After` (seconds or HTTP-date), back off `max(retryAfter, 30s)`, serve cached data meanwhile.
-- Server-side cache + in-flight dedup so N open browser tabs ≠ N upstream requests.
-
-### Architecture: backend proxy, not browser fetch
-
-The browser must **not** call `api.anthropic.com` directly: CORS would block it, and the OAuth token must never reach the frontend. Add one endpoint, e.g. `GET /api/quota` (with `?refresh=1` for manual refresh), returning normalized windows `{key, label, utilization, resetsAt}` + `fetchedAt`. This mirrors the existing settings API pattern.
+- **No new Go dependency. No new npm dependency. No stored token.** Shell out to the already-authenticated host `gh` CLI exactly the way Kangent already shells out to `git` and `claude`. A new `internal/github` (or `internal/gh`) leaf package mirroring `internal/tmux` / `internal/quota` is the whole backend footprint.
+- **List PRs:** `gh pr list -R <owner/repo> --search "review-requested:@me" --state open --json <fields>` — per-repo, rich card fields, drives the Review column.
+- **Detect merge/close:** `gh pr view <n> -R <owner/repo> --json state,closed,closedAt,mergedAt,mergeCommit,headRefOid` — poll `state` (`OPEN`/`CLOSED`/`MERGED`).
+- **Check out the PR branch into the pre-made worktree:** do NOT use `gh pr checkout` (it has no target-directory arg and is fork-remote-fragile). Instead resolve the ref yourself and use the existing git-worktree service:
+  `git fetch origin refs/pull/<n>/head:refs/kangent/pr-<n>` then `git worktree add -b review/pr-<n> <dir> refs/kangent/pr-<n>`. Verified end-to-end; fork-agnostic.
+- **Degrade:** `exec.LookPath("gh")` for presence; `gh auth status` (exit code **4** = needs auth, **1** = other auth issue) or `gh auth status --json hosts` for state. Treat like the quota indicator: best-effort, never break.
+- **Rate limits:** `gh pr list`/`gh pr view` hit the **core** GraphQL/REST budget (5000/hr) — fine. `gh search prs` hits the **search** budget (**30/min**) — avoid it for polling.
 
 ## Recommended Stack
 
-### Core Technologies (all existing — no additions)
+### Core Technologies
 
-| Technology | Version | Purpose (new use) | Why |
-|------------|---------|-------------------|-----|
-| `net/http` (stdlib) | Go 1.26 stdlib | GET `https://api.anthropic.com/api/oauth/usage` | One authenticated GET with 4 headers; an HTTP client library would be absurd. Use `http.Client{Timeout: 10 * time.Second}` (SlayZone uses 10s). |
-| `encoding/json` + `os.ReadFile` (stdlib) | stdlib | Read `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`; decode usage response | Known fixed paths/shapes, verified above. Unknown response fields ignored for free. |
-| `os/exec` + system `tmux` | tmux ≥ 2.1 (3.4 on this machine) | tmux session lifecycle | Same shell-out discipline as git worktrees. tmux's CLI is its API; no Go tmux library is worth a dependency (see What NOT to Use). |
-| `exec.LookPath("tmux")` (stdlib) | stdlib | Gate the "tmux" option in `AllowedShells` | Mirrors v1.1's shell validation exactly. Only offer tmux in the dropdown when it resolves. |
-| creack/pty v1.1.24 (existing) | existing | The PTY now runs `tmux` instead of `bash` | Nothing changes in the PTY/WS/ring-buffer layer. tmux is just a different full-screen child process. |
-| TanStack Query 5 (existing) | existing | Quota auto-poll | `useQuery({ queryKey: ['quota'], refetchInterval: 60_000, refetchIntervalInBackground: false })` + invalidation for manual refresh. Built for exactly this. |
-| shadcn/ui (existing copy-in) | CLI latest | Popup + bars | `npx shadcn add hover-card progress` (copied in, not deps — consistent with project convention). `Popover` if click-to-pin is preferred over hover. |
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `gh` CLI (host binary) | **2.82.0 floor** (host has exactly this) | All GitHub reads: list review-requested PRs, fetch single-PR state, auth detection | Already installed and authenticated on the host (`✓ Logged in to github.com`, scopes `repo, read:org, gist, project`). Mirrors Kangent's settled philosophy of shelling out to real CLIs (`git`, `claude`) instead of reimplementing them. No token ever touches Kangent's DB — `gh` owns credentials, refresh, and host config. This is the milestone's *settled* decision; research confirms it is also the technically correct one. |
+| `os/exec` + system `git` (existing `worktree` service) | system git | Materialize the PR head into a worktree | Kangent already shells out to `git worktree add/remove/list --porcelain`. The PR-checkout flow is a *new variant of the existing worktree-create path*, not a new subsystem: fetch the universal pull ref, then `git worktree add` on it. `gh pr checkout` is deliberately **not** used (see "What NOT to Use"). |
+| `internal/github` Go package (new) | n/a | Typed wrapper over `gh` invocations | One leaf package owning `exec.Command("gh", ...)`, JSON unmarshalling into Go structs, and the auth/degrade state machine — the same shape as the existing `internal/quota` (best-effort server proxy) and `internal/tmux` (CLI shell-out) packages. |
+
+### Frontend
+
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| (existing) React 19 + TanStack Query + shadcn card/column | already in repo | Review column + PR cards | **Zero new npm deps.** The Review column reuses the existing board column/card components; the PR list is one more TanStack Query query (`useQuery(['pr-reviews', projectId])`) with the auto-poll-paused-when-hidden pattern already built for the quota indicator (Phase 7). PR cards are presentational variants of the existing task card. |
 
 ### Supporting Libraries
 
-None needed. Explicitly considered and rejected:
-
-| Candidate | Verdict | Why |
-|-----------|---------|-----|
-| Any Go OAuth lib (`golang.org/x/oauth2`) | **No** | We consume an existing token from disk; we never run an OAuth flow. |
-| Go tmux wrappers (`github.com/jubnzv/go-tmux`, etc.) | **No** | Thin `exec` wrappers around the same CLI calls; low adoption; a dep for ~6 one-line commands violates zero-new-dependency discipline for zero gain. |
-| `ccusage` / `claude-monitor` as subprocess | **No** | They focus on cost analytics from local JSONL transcripts; the quota windows come from the OAuth endpoint, which we call directly. Spawning a Node/Python tool to make one HTTP GET is strictly worse. |
-| Parsing `claude /usage` TUI output | **No** | `/usage` is an interactive TUI screen, not a scriptable command; scraping ANSI output of a full-screen app is the most fragile possible source for data the endpoint serves as JSON. |
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| `encoding/json` (stdlib) | stdlib | Unmarshal `gh --json` output into typed structs | Always — `gh` emits clean JSON; define a `PRSummary` struct matching the field list below. |
+| `log/slog` (stdlib) | stdlib | Log `gh` failures at debug/warn without breaking the request | Already the project logger; degrade-don't-throw on every `gh` non-zero exit. |
+| (existing) `goose` migration | v3.27.1 | Persist per-project linked-repo config + the global GitHub toggle + review-worktree metadata | One new migration: add `github_repo` (nullable) and `description` (nullable) to `projects`; a global setting row `github_integration_enabled` (default true); and a way to tag a worktree/task row as a PR review (store `pr_number`, `pr_repo`, `pr_head_oid` so the merge/close reaper knows what to poll). |
 
 ### Development Tools
 
-No changes. tmux 3.4 is already installed at `/bin/tmux`; CI/dev needs nothing new (tmux is runtime-gated by LookPath).
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| `gh <cmd> --help` | Authoritative flag + `--json` field discovery | The JSON field lists below were copied from `gh pr list --help` / `gh pr view --help` on 2.82.0. Re-run `--help` when bumping gh; field names are stable but new ones are additive. |
+| `gh help exit-codes` | Degradation logic | Documents the exit-code contract used in the auth-detection section. |
 
-## Part B — tmux Integration Details (verified on tmux 3.4)
+## The exact commands (verified live on gh 2.82.0)
 
-### The tmux CLI surface Kangent needs
+### 1. List OPEN PRs awaiting your review, for ONE linked repo (drives the Review column)
 
-All commands verified working on this machine. **Use a dedicated socket namespace `-L kangent`** on every invocation so Kangent's sessions never collide with (or appear in) the user's personal tmux server, and `list-sessions` reconciliation only sees Kangent's own sessions.
+**Use `gh pr list` with a `review-requested:@me` search qualifier — NOT `gh search prs`.**
 
-| Command | Purpose | Notes (verified) |
-|---------|---------|------------------|
-| `tmux -L kangent new-session -A -s <name> -c <worktree-dir>` | Spawn-or-reattach — **this is the command run inside the PTY** | `-A` attaches if `<name>` exists, creates otherwise; idempotent, so spawn and resume are the same code path. `-c` sets cwd on create, ignored on attach (session keeps its dir). Requires tmux ≥ 1.8. |
-| `tmux -L kangent has-session -t =<name>` | Existence check (restart reconciliation, Resume affordance) | Exit 0/1. The `=` prefix forces exact match (without it, `-t foo` prefix-matches `foo-2`). Exit 1 + "no server running" stderr when no server at all — treat as "not found". |
-| `tmux -L kangent list-sessions -F '#{session_name} #{session_created} #{session_attached}'` | Startup reconciliation: enumerate surviving sessions | Exits 1 with "no server running on …" when the server is down — treat as empty list, not an error. `session_attached` is a client count (useful for "attached elsewhere" states). |
-| `tmux -L kangent kill-session -t =<name>` | Explicit destroy (kill intent, task cleanup) | Server auto-exits when the last session dies; next `new-session` auto-starts it. No server lifecycle management needed, ever. |
-| `tmux -L kangent set-option -t <name> status off` | Hide the green status bar so tmux tabs look like plain bash tabs | Verified: session-scoped, overrides user config. Run right after create (or keep the bar as a visual "durable" cue — UX decision). |
-| `tmux -L kangent detach-client -s <name>` | Detach from outside (rarely needed) | Usually unnecessary: killing the attach client / closing the PTY detaches automatically (client gets SIGHUP, session survives — that **is** the feature). |
+```bash
+gh pr list \
+  --repo <owner>/<repo> \
+  --search "review-requested:@me" \
+  --state open \
+  --limit 50 \
+  --json number,title,author,headRefName,baseRefName,isDraft,reviewDecision,statusCheckRollup,additions,deletions,updatedAt,url,headRepositoryOwner,headRepository,isCrossRepository,headRefOid
+```
 
-### Detach/reattach mechanics with the existing session layer
+Verified output (real PR, fields trimmed):
+```json
+{"number":1457,"title":"feat(metrics): ...","author":{"login":"alberto-miranda","is_bot":false},
+ "headRefName":"COMP-1819/provider-request-metrics","baseRefName":"master","isDraft":false,
+ "reviewDecision":"REVIEW_REQUIRED","additions":1993,"deletions":32,
+ "headRefOid":"7b80ca5a514d68e57a88d8fa680da330d67c7624",
+ "headRepositoryOwner":{"login":"seqeralabs"},"isCrossRepository":false,
+ "updatedAt":"2026-06-12T17:58:09Z","url":"https://github.com/seqeralabs/fusion/pull/1457"}
+```
 
-- **Detach on tab close:** kill the PTY child (the `tmux … new-session -A` *client* process) exactly as bash tabs are killed today. The tmux client dies; the tmux *server* and session keep running. No new transport code — only the "session exited" semantics differ (process exit ≠ work lost).
-- **Reattach:** spawn a fresh PTY running the same `new-session -A -s <name>` command. tmux fully redraws on attach, so the existing ring-buffer + resize-nudge replay machinery works unchanged (the redraw makes replay artifacts moot).
-- **Server restart:** Kangent's PTYs die, the tmux server survives (it's a daemon, not a Kangent child). On boot, reconcile persisted tab records against `list-sessions`; surviving names get the Resume affordance (mirror of v1.1's `claude --resume` UX).
-- **Session naming:** deterministic, e.g. `kangent-<taskID>-<tabID>`, **restricted to `[A-Za-z0-9_-]`**. Verified: tmux silently rewrites `.` and `:` in `-s` names to `_` (they're target-spec separators), so a name containing them won't round-trip — never derive names from raw slugs without sanitizing.
+Field-by-field (all present in `gh pr list --json` on 2.82.0; confirmed returning data):
 
-### Minimum tmux version
+| `--json` field | Card use |
+|----------------|----------|
+| `number` | PR id, also the arg to `gh pr view` / fetch |
+| `title` | card title |
+| `author` (object: `login`, `name`, `is_bot`, `id`) | "by @login" |
+| `headRefName` | branch label; informs the local review branch name |
+| `baseRefName` | "→ base" label |
+| `isDraft` | draft badge / dim |
+| `reviewDecision` | `REVIEW_REQUIRED` / `APPROVED` / `CHANGES_REQUESTED` / `""` — status pill |
+| `statusCheckRollup` (array of CheckRun/StatusContext: `conclusion`, `status`, `name`, `workflowName`) | CI pass/fail/pending dot. Roll up in the backend to one of pass/fail/pending; do not ship the raw array to the browser. |
+| `additions`, `deletions` | "+838 −2" diffstat |
+| `updatedAt` | sort key + "updated Xh ago" |
+| `url` | open-in-browser link (reuse `@xterm/addon-web-links` philosophy; just an `<a>`) |
+| `headRepositoryOwner.login` | fork owner; with `isCrossRepository` distinguishes forks |
+| `headRepository` (`name`; `nameWithOwner` is **empty for same-repo PRs**) | fork repo name when cross-repo |
+| `isCrossRepository` | **the reliable fork flag** (`true` ⇒ head is a fork) |
+| `headRefOid` | exact head commit SHA — pre-resolves the worktree checkout and lets the poller detect "PR got new commits" |
 
-Everything used here is ancient: `new-session -A` (1.8, 2013), `=` exact-match targets (2.1, 2015), `-L` sockets and `-F` format strings (older still). **Declare tmux ≥ 2.1, realistically expect ≥ 3.0** — Ubuntu 22.04 ships 3.2a, Debian 12 ships 3.3a, this machine has 3.4. A `tmux -V` parse is unnecessary; LookPath gating is sufficient.
+Why `gh pr list` and not `gh search prs`:
+- `gh pr list` is scoped to one repo (the linked project repo) — exactly the Review column's scope.
+- Its `--json` set is **rich** (includes `statusCheckRollup`, `additions/deletions`, `reviewDecision`, `headRefName`, `headRefOid`). `gh search prs --json` is **poor** by comparison: only `number, title, repository, state, isDraft, labels, author, url, createdAt, updatedAt, ...` — **no `headRefName`, no `statusCheckRollup`, no diffstat, no `reviewDecision`, no `headRefOid`** (verified from `gh search prs --help`). You'd then need a second `gh pr view` per card anyway.
+- **Rate budget:** `gh pr list` consumes the **core** budget (verified `rate_limit.resources.core` = 5000/hr). `gh search prs` consumes the **search** budget = **30 requests/min** (verified `rate_limit.resources.search.limit` = 30) — far too tight for an auto-poller across multiple linked projects.
+
+`review-requested:@me` is a GitHub server-side search qualifier (long predates the CLI). Verified it returns the authenticated user's review queue on a real repo. `@me` resolves server-side to the `gh`-authenticated user, so Kangent never needs to know the username.
+
+### 2. Single-PR detail for the auto-cleanup-on-merge/close poll
+
+```bash
+gh pr view <number> \
+  --repo <owner>/<repo> \
+  --json number,state,closed,closedAt,mergedAt,mergeCommit,headRefOid,headRefName,baseRefName,isCrossRepository,headRepositoryOwner
+```
+
+Verified output:
+```json
+{"number":13642,"state":"OPEN","closed":false,"closedAt":null,"mergedAt":null,"mergeCommit":null,
+ "headRefOid":"a74367d8...","headRefName":"...","baseRefName":"trunk","isCrossRepository":false}
+```
+
+**Decision logic for the reaper:** key off `state`, which is `OPEN` | `CLOSED` | `MERGED`.
+- `state == "MERGED"` ⇒ merged (also `mergedAt`/`mergeCommit` populated).
+- `state == "CLOSED"` ⇒ closed-without-merge (also `closed:true`, `closedAt` set, `mergedAt:null`).
+- `state == "OPEN"` ⇒ still in review; keep the worktree.
+
+**Caveat (verified):** `gh pr view --json` has a `merged`-related field? **No top-level boolean named `merged` is exposed** in the `--json` field list on 2.82.0 — the available fields are `state, closed, closedAt, mergedAt, mergeCommit, mergedBy` (no bare `merged`). Use `state` (or `mergedAt != null`) for the merged test; do **not** request a `merged` field (gh will error on an unknown field name). This corrects a common assumption.
+
+The merge/close poll can ride the **same** auto-poll loop as the Review column list (paused-when-hidden), or run server-side on the existing Done-TTL-reaper-style background goroutine — either way, removal stays gated on the existing dirty-tree + running-session gates, and the branch is kept (consistent with the project's worktree-cleanup rules).
+
+### 3. Check out the PR branch into the (already-created) worktree directory
+
+**Recommendation: resolve the ref yourself and reuse the existing `git worktree` service. Do NOT use `gh pr checkout`.**
+
+Why `gh pr checkout` is the wrong tool here (verified from `gh pr checkout --help`):
+- Signature is `gh pr checkout [<number>|<url>|<branch>] [-b|--detach|--force|--recurse-submodules]`. **There is no target-directory argument.** It checks out *into the working directory of the repo it's run from* (`cmd.Dir`) by switching the current branch — it is built for the "I'm in my clone, put me on this PR" flow, not "materialize this PR into a separate, pre-created worktree dir."
+- For **fork** PRs it adds the fork as a remote and fetches the contributor's branch — extra remote-management state in the user's real checkout, and failure modes (fork deleted, branch force-pushed) that you'd have to detect and recover from.
+- It would mutate the *project's primary checkout*, which Kangent must never disturb.
+
+**The recommended sequence (verified end-to-end against a real `cli/cli` PR, including the worktree-dir-must-be-created-by-us constraint):**
+
+```bash
+# Run with cmd.Dir = the project repo root (same as every other worktree op).
+# <n>   = PR number from step 1
+# <dir> = the worktree path Kangent assigns (under the configured worktree base)
+
+# 1. Fetch the PR head into a Kangent-namespaced local ref.
+#    refs/pull/<n>/head is a GitHub server-side ref that resolves to the PR's head
+#    commit REGARDLESS of whether the head is a fork — no fork remote needed.
+git fetch origin "refs/pull/<n>/head:refs/kangent/pr-<n>"
+
+# 2. Create the worktree on that ref with a named local review branch.
+#    (Use the existing worktree-create code path; this is just a different base ref
+#     and a PR-derived branch name instead of task/<slug>-<id>.)
+git worktree add -b "review/pr-<n>" "<dir>" "refs/kangent/pr-<n>"
+```
+
+Verified result: the new worktree's `HEAD` equals the PR's `headRefOid` from step 1 (`a74367d8...` matched exactly), it carries a clean named branch `review/pr-<n>`, and it appears normally in `git worktree list --porcelain` (the format the existing service already parses):
+```
+worktree /.../pr-worktree
+HEAD a74367d8282228856f9edc6bf4d2631545cbb354
+branch refs/heads/review/pr-13642
+```
+
+Notes / variants:
+- **Detached vs named branch:** prefer `-b review/pr-<n>` (named) so the diff tab's merge-base logic and the worktree-list parser behave like a normal task; `--detach` worktrees show `detached HEAD` in porcelain and complicate the existing UI. (`git worktree add --detach <dir> <oid>` also works and is the pure-OID fallback if a branch-name collision occurs.)
+- **Origin remote name:** Kangent should resolve the actual remote name rather than hard-coding `origin` (most clones use `origin`, but parse `git remote` or use `git rev-parse --abbrev-ref --symbolic-full-name @{u}` / `git remote get-url`). For GitHub repos the pull ref lives on whichever remote points at the PR's base repo.
+- **Fork PRs need no special-casing** with this approach — that's the whole point of `refs/pull/<n>/head`. (Confirmed 7/20 sampled `cli/cli` open PRs were `isCrossRepository:true`; the pull-ref fetch is identical for them.)
+- **Branch-name collision / re-open:** if `review/pr-<n>` already exists from a prior review, either reuse it (`git worktree add <dir> review/pr-<n>` without `-b`, then `git reset --hard refs/kangent/pr-<n>` if you want to fast-forward) or fall back to `--detach`. Keep it simple: the milestone says cleanup keeps the branch, so a re-open can reuse it.
+- **Cleanup** uses the existing `git worktree remove` path (gated), keeping the `review/pr-<n>` branch and the `refs/kangent/pr-<n>` ref (or prune the ref — cheap either way).
+
+### 4. Auth detection, presence, and rate-limit surfacing
+
+**Presence:** `exec.LookPath("gh")` (same call-time pattern Kangent already uses for the tmux dropdown). Missing ⇒ hide all GitHub UI / report "gh not installed".
+
+**Auth state — exit codes (verified via `gh help exit-codes` + `gh auth status --help`):**
+
+```bash
+gh auth status            # exit 0 = authed; exit 1 = an account has auth issues; exit 4 = requires authentication
+gh auth status --active   # only the active account
+gh auth status --json hosts   # ALWAYS exits 0 (unless fatal); inspect JSON for issues — better for programmatic use
+```
+
+- Exit **0** ⇒ authenticated; proceed.
+- Exit **4** ⇒ "requires authentication" — show the degrade banner ("Run `gh auth login`").
+- Exit **1** ⇒ an account has an auth problem (e.g. token scope/expiry) — degrade with the stderr message.
+- `gh auth status --json hosts` is the cleaner programmatic probe: it exits 0 even on auth issues and returns a `hosts` object you can inspect, so you parse state rather than branch on exit codes. (Available on 2.82.0; introduced via cli/cli issue #8637.)
+
+Verified on host: `gh auth status` ⇒ `✓ Logged in to github.com account ... (keyring)`, exit 0; scopes include `repo, read:org`.
+
+**Rate-limit surfacing (optional, nice-to-have):**
+```bash
+gh api rate_limit --jq '.resources.core, .resources.search'
+# core:   {"limit":5000,"remaining":...,"reset":<epoch>,"used":...}   <- pr list / pr view live here
+# search: {"limit":30,  "remaining":...,"reset":<epoch>,"used":...}    <- gh search prs lives here (why we avoid it)
+```
+Every `gh api` (and the GraphQL calls behind `gh pr list/view`) also returns `X-RateLimit-Remaining` / `X-RateLimit-Reset` headers (verified via `gh api -i`); if you ever call `gh api` directly you can read them with `-i`. For the degrade UX, mirroring the quota indicator's "best-effort, show stale, back off on failure" model is sufficient — explicit rate-limit polling is optional.
 
 ## Installation
 
 ```bash
-# Backend: nothing. Zero new Go modules.
+# Nothing to install. gh is a HOST dependency (soft), already present:
+gh --version   # gh version 2.82.0 (2025-10-15)   <-- verified floor
 
-# Frontend: nothing in package.json. Only shadcn copy-ins if not already present:
-npx shadcn@latest add hover-card progress
-# (popover likely already present via existing dropdowns; check components/ui/)
+# No Go module additions:
+#   the new internal/github package uses only os/exec, encoding/json, log/slog (all stdlib)
+#   and reuses the existing git-worktree service.
 
-# Host prerequisite (runtime-detected, not bundled):
-#   tmux >= 2.1 on PATH — feature-gated via exec.LookPath, like shells in v1.1
+# No npm additions:
+#   Review column + PR cards reuse existing shadcn card/column + TanStack Query.
 ```
+
+## Alternatives Considered
+
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| Shell out to `gh` | `github.com/google/go-github` v74 (REST) or `shurcooL/githubv4` (GraphQL) + a Go OAuth/token flow | Only if Kangent ever needed to **store its own token**, run **without `gh` installed**, or do high-volume API work. None apply: it's single-user, local, `gh` is present and authed, and the whole project philosophy is "drive real CLIs." A Go GitHub lib would force Kangent to own credential storage/refresh — the exact thing the milestone explicitly rules out. |
+| `gh pr list --search "review-requested:@me"` (per repo) | `gh search prs --review-requested=@me` (cross-repo) | If a future milestone wants a *global* "all my review requests across every repo" view independent of linked projects. For the per-linked-project Review column it's wrong: poorer JSON fields, and the 30/min search rate budget. |
+| Self-resolve `refs/pull/<n>/head` + `git worktree add` | `gh pr checkout <n>` (with `cmd.Dir` = a fresh clone) | If you wanted gh to manage fork remotes for you AND you were operating in a normal single-checkout clone (not a worktree). Not applicable: Kangent pre-creates the worktree dir and must not touch the primary checkout. |
+| Named review branch `review/pr-<n>` | `git worktree add --detach <dir> <headRefOid>` | If a branch name collides or you explicitly want a throwaway detached review with no local branch. Detached HEAD complicates the existing porcelain parser and diff/merge-base UX, so named branch is the default. |
+| `gh auth status` exit codes | `gh auth status --json hosts` | Use the `--json` form when you want to *parse* state without exit-code branching (it always exits 0). Use plain exit codes for a quick "is it usable" gate. Both work on 2.82.0; pick one consistently. |
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| Browser-direct fetch of `api.anthropic.com/api/oauth/usage` | CORS-blocked; leaks OAuth token to frontend | Backend proxy `GET /api/quota` with server-side cache |
-| Calling the endpoint without `User-Agent: claude-code/<ver>` | Lands in an aggressively rate-limited bucket → persistent 429s (corroborated by Claude-Code-Usage-Monitor #202) | Run `claude --version` once at startup, cache, send `claude-code/<ver>`; hardcoded fallback like SlayZone's |
-| Implementing OAuth token refresh in Kangent | Refresh-token rotation can invalidate the claude CLI's stored credentials — you'd break the user's login to draw a progress bar | Re-read `.credentials.json` each poll; on 401 show "run claude to re-authenticate" |
-| Strict-decoding the usage response / assuming `resets_at` non-null | Payload carries rotating experimental fields (`tangelo`, `iguana_necktie`, …) and `resets_at: null` occurs in real responses | Lenient struct with only `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` (+ optionally `extra_usage`); pointer fields, null-safe rendering |
-| Scraping `claude /usage` TUI output | Interactive full-screen ANSI screen; maximally fragile; same data is JSON one GET away | The OAuth usage endpoint |
-| Go tmux libraries (go-tmux et al.) | exec wrappers around the same CLI; new dep for six one-liners | `os/exec` + `tmux -L kangent …` |
-| Default tmux socket (no `-L`) | Kangent sessions mix with the user's personal tmux server; reconciliation would enumerate (and could kill) the user's own sessions | Dedicated `-L kangent` socket on every invocation |
-| `tmux send-keys` / control mode (`-CC`) for I/O | The PTY layer already transports bytes; control mode is an iTerm2-style protocol Kangent doesn't need | Plain `new-session -A` as the PTY child |
-| Session names containing `.` or `:` | tmux silently rewrites them to `_` (verified) — stored name ≠ actual name, reconciliation breaks | `kangent-<taskID>-<tabID>` from `[A-Za-z0-9_-]` only |
+| `go-github` / `githubv4` / any Go GitHub SDK | Forces Kangent to own a token (storage + refresh) — explicitly out of scope; contradicts the "shell out to real CLIs, no stored creds" philosophy; adds a dependency for zero benefit at single-user localhost scale. | `gh` CLI shell-out |
+| Storing a PAT / OAuth token in SQLite or env | Out of scope per PROJECT.md; `gh` already holds creds in the OS keyring and handles refresh/SSO. | Let `gh` own auth |
+| `gh pr checkout` for the worktree flow | No target-dir arg (checks out into `cmd.Dir`, mutating the primary checkout); adds fork remotes; harder to make idempotent for a pre-created worktree. | `git fetch origin refs/pull/<n>/head:<ref>` + existing `git worktree add` |
+| `gh search prs` for the per-repo polling column | Sparse `--json` fields (no `headRefName`/`statusCheckRollup`/diffstat/`reviewDecision`/`headRefOid`) ⇒ needs a second call per card; consumes the **30/min** search rate budget. | `gh pr list -R <repo> --search "review-requested:@me" --json <rich set>` |
+| Requesting a `merged` boolean field from `gh pr view --json` | No top-level `merged` field exists in 2.82.0's field list; gh errors on unknown field names. | `state` (`MERGED`/`CLOSED`/`OPEN`) or `mergedAt != null` |
+| Hard-coding the remote as `origin` blindly | Most clones use `origin`, but Kangent points at user repos that may differ. | Resolve the remote (`git remote`, upstream of base branch) before the pull-ref fetch |
+| Parsing human-readable `gh`/`git` output | Same trap the project already avoids for `git worktree list`. | Always `--json` (gh) / `--porcelain` (git) |
+| New npm DnD/state libs for the Review column | The column is a read-only list, not draggable; PR cards never enter the kanban flow (settled decision). | Reuse existing card/column components + one TanStack Query query |
 
 ## Stack Patterns by Variant
 
-**Quota backend (`GET /api/quota`):**
-- In-memory cache struct `{payload, fetchedAt, backoffUntil, consecutiveFailures}` behind a mutex + in-flight dedup (a plain mutex/chan is fine; don't add `golang.org/x/sync/singleflight` for one call site).
-- Auto-poll path serves cache if `< 60s` old; `?refresh=1` bypasses TTL but never the 10s hard floor; 429 sets `backoffUntil = now + max(RetryAfter, 30s)`.
-- On fetch failure keep last good windows with a stale/error field so the UI shows "Updated 9m ago" + warning instead of blanking — drop after 3 consecutive failures (SlayZone's exact policy, production-tested).
-- Distinguish "no credentials file" (claude never logged in) from 401 (token expired) — different user messages.
-- macOS portability (if ever needed): token lives in the login keychain (`security find-generic-password -s "Claude Code-credentials" -w`), same JSON inside. Linux file path is the only target today.
+**If the linked repo's PR head is a fork (`isCrossRepository: true`):**
+- No special handling. `git fetch origin refs/pull/<n>/head` resolves the fork's head commit via the base repo's server-side pull ref. (Verified across 7 real fork PRs.) Use `headRepositoryOwner.login` only for display ("from @forkowner").
 
-**tmux scrollback UX (decide during planning, not stack):**
-- tmux is a full-screen alternate-screen app, so xterm.js's own scrollback won't accumulate for tmux tabs — scrolling happens via tmux copy-mode. Consider `set-option -t <name> mouse on` at create so wheel-scroll enters copy-mode naturally; otherwise document the difference. This is the one user-visible behavior change vs plain bash tabs.
+**If `gh` is missing or unauthenticated:**
+- Degrade like the quota indicator: `LookPath` fails ⇒ hide GitHub UI; `gh auth status` non-zero ⇒ show a one-line "Connect GitHub via `gh auth login`" notice. Never block the board; the global toggle (default on) plus this runtime check are independent gates.
 
-**Settings seam:**
-- Add `"tmux"` to the Go `AllowedShells` slice, gated by `exec.LookPath("tmux")` — the v1.1 seam (SHELL-FUT-01) was built for exactly this. The shell setting selects the PTY child command template, not a different session subsystem.
+**If a project has no linked GitHub repo:**
+- No Review column for that project. The column is driven entirely by the per-project `github_repo` config (new nullable column) AND the global `github_integration_enabled` setting.
+
+**If the same PR is re-reviewed after a prior cleanup (branch kept):**
+- The `review/pr-<n>` branch still exists; re-attach a worktree to it (skip `-b`) or `--detach` to the fresh `headRefOid`. Refetch `refs/pull/<n>/head` first so you get any new commits (compare `headRefOid` to the stored one).
 
 ## Version Compatibility
 
 | Component | Compatible With | Notes |
 |-----------|-----------------|-------|
-| Endpoint `api/oauth/usage` + `anthropic-beta: oauth-2025-04-20` | claude 2.1.173 credentials (verified 2026-06-11, HTTP 200) | Undocumented API: ship lenient parsing + a graceful "quota unavailable" state so an upstream change degrades, never breaks, the app |
-| tmux ≥ 2.1 (3.4 verified) | creack/pty v1.1.24, existing WS/ring-buffer layer | tmux is just another PTY child; zero transport changes |
-| shadcn `hover-card`/`progress` | Tailwind 4 + React 19 (existing) | Copy-in components; no dependency tracking |
-| TanStack Query 5.x (existing) | `refetchInterval` background polling | Already a dependency; no version change |
+| `gh` 2.82.0 (host floor) | `gh pr list --search --json {…,statusCheckRollup,headRefOid,reviewDecision,headRepositoryOwner,isCrossRepository}` | All fields/flags **verified returning data** on 2.82.0. Field set is additive across releases — re-check `gh pr list --help` only if you adopt newer fields. |
+| `gh` 2.82.0 | `gh auth status --json hosts`, exit codes 0/1/4 | `--json hosts` present and working; exit-code contract per `gh help exit-codes`. |
+| `gh pr checkout` (not used) | — | Documented for completeness; intentionally avoided. |
+| `git worktree add -b <branch> <dir> <ref>` | any modern git (worktrees stable since git 2.5; `--porcelain` list parsing already in use) | The PR-checkout path is a parameter change to the existing worktree service, not a new git feature. |
+| `refs/pull/<n>/head` fetch | GitHub.com (and GHES) | Server-side ref, fork-agnostic; verified fetch returns the PR's `headRefOid`. |
+| New code (`internal/github`) | stdlib only (`os/exec`, `encoding/json`, `log/slog`) | No new go.mod entries; no `CGO`. |
+| Frontend | existing React 19 / TanStack Query 5 / shadcn / Tailwind 4 | No new npm deps. |
+
+## Integration points with existing code (for the roadmap author)
+
+- **New leaf package** `internal/github` modeled on `internal/tmux` (CLI shell-out) + `internal/quota` (best-effort degrade): functions like `ListReviewRequested(ctx, repo) ([]PRSummary, error)`, `ViewPR(ctx, repo, n) (PRState, error)`, `AuthStatus(ctx) (AuthState, error)`, `Available() bool` (LookPath).
+- **Worktree service reuse:** add a "checkout existing ref into a worktree" variant alongside the current `task/<slug>-<id>` create path — same `git worktree add` machinery, different base ref + branch name (`review/pr-<n>`), preceded by the pull-ref `git fetch`. Cleanup uses the existing gated `git worktree remove`.
+- **DB (one goose migration):** `projects.github_repo` (nullable, `owner/repo`), `projects.description` (nullable); global setting `github_integration_enabled` (default `true`, served via the existing settings API); review-task rows tagged with `pr_number` + `pr_repo` + `pr_head_oid` so the merge/close poller knows what to check and can detect new commits.
+- **Polling:** reuse the Phase-7 auto-poll-paused-when-hidden pattern for the Review column (frontend TanStack Query) and the Phase-9 background-goroutine pattern (Done-TTL reaper) for server-side merge/close cleanup — both already exist.
+- **API surface:** ~2 new read endpoints (`GET /api/projects/{id}/pr-reviews`, optionally `GET /api/github/status`) + one action to open a PR as a review workspace (creates the worktree + a task-like view). No write endpoints (settled: no in-app GitHub writes).
 
 ## Sources
 
-- [SlayZone `usage.ts`](https://github.com/debuglebowski/SlayZone/blob/main/packages/domains/terminal/src/electron/usage.ts) — full quota implementation read 2026-06-11: endpoint, headers, token paths, cache/backoff policy (HIGH)
-- **Empirical, this machine, 2026-06-11:** `~/.claude/.credentials.json` structure (claude 2.1.173); live `GET https://api.anthropic.com/api/oauth/usage` → HTTP 200 with full response body captured above; token `expiresAt` ≈ 8h lifetime (HIGH)
-- **Empirical, this machine:** tmux 3.4 — `new-session -A`/`-d`, `has-session -t =`, `list-sessions -F`, `set-option status off`, `kill-session`, `.`/`:` name-sanitization behavior all executed and verified on a throwaway `-L` socket (HIGH)
-- [Claude-Code-Usage-Monitor issue #202](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor/issues/202) — independent confirmation of endpoint + User-Agent rate-limit-bucket behavior (MEDIUM, corroborates HIGH empirical result)
-- tmux changelog knowledge (`new-session -A` in 1.8; `=` exact-match in 2.1) — version floor only; all commands verified live on 3.4 regardless (MEDIUM)
+- Live execution on host `gh 2.82.0 (2025-10-15)` — `gh pr list --help`, `gh pr view --help`, `gh pr checkout --help`, `gh search prs --help`, `gh auth status --help`, `gh help exit-codes` (authoritative `--json` field lists + flags + exit-code contract) — **HIGH**
+- Live `gh pr list -R seqeralabs/fusion --search "review-requested:@me" --json …` and `gh pr list -R cli/cli …` against real repos (confirmed every recommended field returns data; confirmed `isCrossRepository` fork detection on 7 real fork PRs) — **HIGH**
+- Live `gh pr view 13642 -R cli/cli --json state,closed,closedAt,mergedAt,mergeCommit,headRefOid,…` (confirmed merge/close fields; confirmed no top-level `merged` field) — **HIGH**
+- Live end-to-end worktree proof: `git fetch origin refs/pull/13642/head:refs/kangent/pr-13642` + `git worktree add -b review/pr-13642 <dir> refs/kangent/pr-13642` against a real `cli/cli` clone — resulting worktree HEAD matched the PR's `headRefOid` exactly; `git worktree list --porcelain` clean — **HIGH**
+- Live `gh api rate_limit --jq '.resources.core, .resources.search'` + `gh api rate_limit -i` (core 5000/hr vs search 30/min; `X-RateLimit-*` headers) — **HIGH**
+- [cli.github.com/manual/gh_pr_list](https://cli.github.com/manual/gh_pr_list), [gh_pr_view](https://cli.github.com/manual/gh_pr_view), [gh_search_prs](https://cli.github.com/manual/gh_search_prs), [gh_auth_status](https://cli.github.com/manual/gh_auth_status) — official manual corroboration — **MEDIUM**
+- [cli/cli#8637](https://github.com/cli/cli/issues/8637) — `gh auth status --json` provenance — **MEDIUM**
 
 ---
-*Stack research for: Kangent v1.2 — Claude quota indicator + tmux-backed resumable shells*
-*Researched: 2026-06-11*
+*Stack research for: GitHub PR-review (`gh`-CLI) integration in a Go + React local single-binary app*
+*Researched: 2026-06-13*
