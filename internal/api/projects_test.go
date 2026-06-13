@@ -208,11 +208,15 @@ func TestProjectRename(t *testing.T) {
 	}
 }
 
-// TestUpdateProjectPartial exercises the grown PATCH: partial updates of
-// description and github_repo, canonicalization, unlink, and the single
-// hard-error case (a syntactically invalid ref). github_repo cases use refs
-// that ParseRepoRef accepts syntactically so the test is deterministic whether
-// or not gh is installed (ValidateRepo soft-saves the syntactic form).
+// TestUpdateProjectPartial exercises the grown PATCH: partial updates of name
+// and description, the explicit-"" github_repo unlink, and the single
+// host-independent hard-error case (a syntactically invalid ref, rejected by
+// ParseRepoRef BEFORE gh is consulted). It stays gh-agnostic: existing links
+// are seeded directly in the DB rather than via a now-mandatory-verified PATCH,
+// so the test passes whether or not gh is installed/authenticated/online. The
+// gh-verified link + canonicalization path is covered host-independently by
+// package github's ParseRepoRef/ValidateRepo unit tests and exercised live on a
+// gh-authenticated host; it is not asserted at the API layer here.
 func TestUpdateProjectPartial(t *testing.T) {
 	srv, db, _ := newTestServer(t)
 	id := createProject(t, srv, gitRepo(t))
@@ -264,18 +268,12 @@ func TestUpdateProjectPartial(t *testing.T) {
 		t.Errorf("description after clear = %v, want \"\"", pb["description"])
 	}
 
-	// github_repo canonicalized from a URL to owner/name.
-	status, pb = doJSON(t, "PATCH", url, map[string]any{"github_repo": "https://github.com/cli/cli.git"})
-	if status != http.StatusOK {
-		t.Fatalf("link status = %d; body=%v", status, pb)
+	// github_repo "" → unlink (NULL / JSON null). Unlink never invokes gh, so
+	// seed the existing link directly in the DB (a gh-verified PATCH can't be
+	// asserted host-independently now that linking is mandatory-verified).
+	if _, err := db.Exec(`UPDATE projects SET github_repo = ? WHERE id = ?`, "cli/cli", id); err != nil {
+		t.Fatalf("seed link: %v", err)
 	}
-	if pb["github_repo"] != "cli/cli" {
-		t.Errorf("github_repo = %v, want cli/cli", pb["github_repo"])
-	}
-	repo := "cli/cli"
-	assertDBProject(t, db, id, "", &repo)
-
-	// github_repo "" → unlink (NULL / JSON null).
 	status, pb = doJSON(t, "PATCH", url, map[string]any{"github_repo": ""})
 	if status != http.StatusOK {
 		t.Fatalf("unlink status = %d; body=%v", status, pb)
@@ -285,12 +283,12 @@ func TestUpdateProjectPartial(t *testing.T) {
 	}
 	assertDBProject(t, db, id, "", nil)
 
-	// invalid ref → 400, canonical error, row unchanged. Link first (with a
-	// verifiable ref, since linking is now mandatory-verified) so we can prove
-	// the bad PATCH does not clobber the stored value.
-	status, _ = doJSON(t, "PATCH", url, map[string]any{"github_repo": "cli/cli"})
-	if status != http.StatusOK {
-		t.Fatalf("seed link status = %d, want 200", status)
+	// invalid ref → 400, canonical error, row unchanged. ParseRepoRef rejects
+	// "not-a-repo" BEFORE gh is consulted, so the 400 holds on any host. Seed
+	// the existing link directly in the DB (no gh-gated PATCH) so we can prove
+	// the rejected PATCH does not clobber the stored value.
+	if _, err := db.Exec(`UPDATE projects SET github_repo = ? WHERE id = ?`, "cli/cli", id); err != nil {
+		t.Fatalf("seed link: %v", err)
 	}
 	status, pb = doJSON(t, "PATCH", url, map[string]any{"github_repo": "not-a-repo"})
 	if status != http.StatusBadRequest {
