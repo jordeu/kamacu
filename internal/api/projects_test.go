@@ -370,6 +370,73 @@ func TestProjectDeleteCascadesAndKeepsRepo(t *testing.T) {
 	}
 }
 
+// TestGithubOriginSuggestion exercises the dialog's on-open origin prefill
+// endpoint (D-08): it canonicalizes the repo's `origin` remote to owner/name,
+// and returns an empty suggestion (never an error) when there is no GitHub
+// origin. A bogus project id 404s.
+func TestGithubOriginSuggestion(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	// Repo with a GitHub ssh origin → canonicalized owner/name.
+	repoWithOrigin := gitRepo(t)
+	if out, err := exec.Command("git", "-C", repoWithOrigin, "remote", "add", "origin", "git@github.com:owner/name.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	id := createProject(t, srv, repoWithOrigin)
+	status, body := doJSON(t, "GET", fmt.Sprintf("%s/api/projects/%d/github-origin", srv.URL, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("origin status = %d, want 200; body=%v", status, body)
+	}
+	if body["suggestion"] != "owner/name" {
+		t.Errorf("suggestion = %v, want owner/name", body["suggestion"])
+	}
+
+	// Repo with an https origin → also canonicalized.
+	repoHTTPS := gitRepo(t)
+	if out, err := exec.Command("git", "-C", repoHTTPS, "remote", "add", "origin", "https://github.com/foo/bar.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add https: %v\n%s", err, out)
+	}
+	idHTTPS := createProject(t, srv, repoHTTPS)
+	status, body = doJSON(t, "GET", fmt.Sprintf("%s/api/projects/%d/github-origin", srv.URL, idHTTPS), nil)
+	if status != http.StatusOK {
+		t.Fatalf("https origin status = %d, want 200; body=%v", status, body)
+	}
+	if body["suggestion"] != "foo/bar" {
+		t.Errorf("https suggestion = %v, want foo/bar", body["suggestion"])
+	}
+
+	// Repo with NO origin remote → suggestion "" (NOT an error).
+	repoNoOrigin := gitRepo(t)
+	idNoOrigin := createProject(t, srv, repoNoOrigin)
+	status, body = doJSON(t, "GET", fmt.Sprintf("%s/api/projects/%d/github-origin", srv.URL, idNoOrigin), nil)
+	if status != http.StatusOK {
+		t.Fatalf("no-origin status = %d, want 200; body=%v", status, body)
+	}
+	if body["suggestion"] != "" {
+		t.Errorf("no-origin suggestion = %v, want \"\"", body["suggestion"])
+	}
+
+	// Non-GitHub origin → suggestion "" (ParseRepoRef rejects → empty, never error).
+	repoOther := gitRepo(t)
+	if out, err := exec.Command("git", "-C", repoOther, "remote", "add", "origin", "https://gitlab.com/foo/bar.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add gitlab: %v\n%s", err, out)
+	}
+	idOther := createProject(t, srv, repoOther)
+	status, body = doJSON(t, "GET", fmt.Sprintf("%s/api/projects/%d/github-origin", srv.URL, idOther), nil)
+	if status != http.StatusOK {
+		t.Fatalf("non-github origin status = %d, want 200; body=%v", status, body)
+	}
+	if body["suggestion"] != "" {
+		t.Errorf("non-github suggestion = %v, want \"\"", body["suggestion"])
+	}
+
+	// Bogus project id → 404.
+	status, _ = doJSON(t, "GET", fmt.Sprintf("%s/api/projects/999999/github-origin", srv.URL), nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("bogus id status = %d, want 404", status)
+	}
+}
+
 func TestProjectList(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	createProject(t, srv, gitRepo(t))
