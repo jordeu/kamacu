@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: planning
-stopped_at: Phase 10 UI-SPEC approved
-last_updated: "2026-06-13T13:18:34.929Z"
-last_activity: 2026-06-13 — Roadmap created for v1.3 (phases 10–13, 20/20 requirements mapped)
+status: executing
+stopped_at: Completed 10-01-PLAN.md
+last_updated: "2026-06-13T14:17:02.195Z"
+last_activity: 2026-06-13
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-13)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.3 GitHub PR Review — roadmap created (4 phases, 10–13); ready to plan Phase 10.
+**Current focus:** Phase 10 — github-foundations
 
 ## Current Position
 
-Phase: 10 — GitHub Foundations (not started)
-Plan: —
-Status: Roadmapped — ready to plan Phase 10
-Last activity: 2026-06-13 — Roadmap created for v1.3 (phases 10–13, 20/20 requirements mapped)
+Phase: 10 (github-foundations) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-06-13
 
 Progress: [░░░░░░░░░░] 0% (0/4 phases)
 
@@ -56,6 +56,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 09-tmux-restart-resume-cleanup-integration P03 | 14 min | 3 tasks | 11 files |
 | Phase 09-tmux-restart-resume-cleanup-integration P04 | 14 min | 3 tasks | 6 files |
 | Phase 09-tmux-restart-resume-cleanup-integration P05 | 12 min | 3 tasks | 5 files |
+| Phase 10-github-foundations P01 | 7 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,8 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - Named-branch (`kangent-pr/<n>`) vs `--detach` for the PR worktree — STACK prefers a namespaced branch with collision pre-check, PITFALLS prefers `--detach`. Reconcile in Phase 12 (research-flagged).
 - Collapse/count persistence scope (per-project vs global; SQLite vs localStorage) — Phase 11.
 - Unpushed-work gate scope beyond `git status --porcelain` — Phase 13 (research-flagged).
+- [Phase 10-github-foundations]: github_integration default 'on' (D-01): absent settings row reads as 'on' via existing Get fallback — no Get/GetAll/Set change needed
+- [Phase 10-github-foundations]: All five v1.3 columns land in migration 00007 so Phase 12 needs no further migration; tasks.source CHECK(manual/github_pr) default 'manual' gates the board
 
 ### Pending Todos
 
@@ -102,7 +105,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-13T13:18:34.922Z
-Stopped at: Phase 10 UI-SPEC approved
-Resume file: .planning/phases/10-github-foundations/10-UI-SPEC.md
+Last session: 2026-06-13T14:17:02.189Z
+Stopped at: Completed 10-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 10`
