@@ -209,6 +209,41 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+// githubOrigin handles GET /api/projects/{id}/github-origin — the project
+// settings dialog's on-open origin prefill (D-08). git is shelled ONLY here,
+// when the dialog opens, never on the project list. It reads the repo's
+// `origin` remote and canonicalizes it to owner/name; detection is a
+// convenience, so a missing/non-GitHub origin yields an empty suggestion and
+// NEVER an error (200 either way). Only an unknown project id 404s.
+func (h *projectHandlers) githubOrigin(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var repoPath string
+	err := h.db.QueryRow(`SELECT repo_path FROM projects WHERE id = ?`, id).Scan(&repoPath)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// arg array only — never sh -c. Nonzero exit means no origin remote.
+	out, runErr := exec.CommandContext(r.Context(), "git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	if runErr != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"suggestion": ""})
+		return
+	}
+	suggestion, perr := github.ParseRepoRef(strings.TrimSpace(string(out)))
+	if perr != nil {
+		// Non-GitHub origin (e.g. GitLab) → empty suggestion, not an error.
+		suggestion = ""
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"suggestion": suggestion})
+}
+
 // delete handles DELETE /api/projects/{id}. CASCADE removes the project's
 // tasks; the repository on disk is never touched (PROJ-03).
 func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
