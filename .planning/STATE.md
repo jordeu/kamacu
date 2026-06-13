@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
-status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-06-12T22:15:10.246Z"
-last_activity: 2026-06-12
+status: verifying
+stopped_at: Completed 08-04-PLAN.md
+last_updated: "2026-06-13T05:09:54.370Z"
+last_activity: 2026-06-13
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 Phase: 08 (tmux-shells-spawn-detach-lifecycle) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-06-12
+Status: Phase complete — ready for verification
+Last activity: 2026-06-13
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -50,6 +50,7 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 | Phase 08-tmux-shells-spawn-detach-lifecycle P01 | 6min | 3 tasks | 3 files |
 | Phase 08-tmux-shells-spawn-detach-lifecycle P02 | 8 min | 2 tasks | 4 files |
 | Phase 08-tmux-shells-spawn-detach-lifecycle P03 | 9 min | 3 tasks | 3 files |
+| Phase 08-tmux-shells-spawn-detach-lifecycle P04 | 52min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,9 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 08]: AllowedShells converted var->func with exec.LookPath('tmux') checked at call time — dropdown offering and save acceptance can never disagree, no restart needed (TMUX-01)
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: Stop is killer-first: kill-session ends inner shell + tmux session atomically; killer error or undead client falls through to SIGTERM/grace/SIGKILL
 - [Phase 08-tmux-shells-spawn-detach-lifecycle]: Manual detach recorded as detachedAlive with honest exited state in Phase 8 — no auto-reattach; Info() wire shape keeps no tmux marker (D-77)
+- [Phase 08-tmux-shells-spawn-detach-lifecycle]: tmux session names come from tmux_sessions MAX(n)+1 reserved by an INSERT before Spawn (never the in-memory counter) — unique across restarts, UNIQUE(task_id,n) the backstop; spawn failure DELETEs the reserved row, success back-fills label warn-only (TMUX-02)
+- [Phase 08-tmux-shells-spawn-detach-lifecycle]: Honest spawn errors are 409s rendered verbatim in the tab header (D-84 'tmux not found...', dev-route 'tmux shells need a task', 'task has no worktree'); 500s stay generic. Frontend stays 100% tmux-unaware (D-77) — only ApiError status===409 forwards the message
+- [Phase 08-tmux-shells-spawn-detach-lifecycle]: TMUX-05 (restart reconcile + Resume) deferred to Phase 9: tmux_sessions is persisted but not read at startup and ListByTask is in-memory only, so a surviving tmux session loses its tab after a server restart — no schema change needed, mirrors Phase 5 claude --resume reconcile
 
 ### Pending Todos
 
@@ -96,7 +100,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-12T22:15:10.240Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-06-13T05:09:42.370Z
+Stopped at: Completed 08-04-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 7`
