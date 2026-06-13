@@ -36,8 +36,14 @@ export function useUpdateProjectSettings() {
     }: {
       id: number;
       description: string;
-      github_repo: string;
-    }) => patch<Project>(`/api/projects/${id}`, { description, github_repo }),
+      github_repo?: string;
+    }) =>
+      patch<Project>(
+        `/api/projects/${id}`,
+        github_repo === undefined
+          ? { description }
+          : { description, github_repo },
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },

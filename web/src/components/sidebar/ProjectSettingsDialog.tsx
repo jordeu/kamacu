@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import { ApiError } from "@/api/client";
 import { useUpdateProjectSettings } from "@/api/mutations";
 import { useProjectGithubOrigin } from "@/api/queries";
@@ -35,37 +35,6 @@ function sentenceCase(message: string): string {
   return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
-/**
- * Soft advisory copy (D-11). These are non-blocking: the PATCH succeeded and
- * the value is stored. Plan 02's server returns a plain 200 for soft-saves
- * (no verify flag), so the success path closes the dialog and these are not
- * triggered by the current server — but the muted render path below IS wired
- * (the `warning` state renders these), so the advisories are present and
- * testable for a future server verify-flag.
- */
-
-/** `Saved, but couldn't verify {owner/name} on GitHub — check access or the name.` */
-function softVerifyWarning(repo: string): ReactNode {
-  return (
-    <>
-      {`Saved, but couldn't verify `}
-      <span className="font-mono">{repo}</span>
-      {` on GitHub — check access or the name.`}
-    </>
-  );
-}
-
-/** `Saved without verifying — the gh CLI isn't available.` */
-function ghDegradedWarning(): ReactNode {
-  return (
-    <>
-      {`Saved without verifying — the `}
-      <span className="font-mono">{`gh`}</span>
-      {` CLI isn't available.`}
-    </>
-  );
-}
-
 export function ProjectSettingsDialog({
   project,
   open,
@@ -80,8 +49,6 @@ export function ProjectSettingsDialog({
   // origin suggestion never clobbers an edit.
   const [repoEdited, setRepoEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Non-blocking advisory (muted) — wired for a future server verify-flag.
-  const [warning, setWarning] = useState<ReactNode | null>(null);
 
   const updateSettings = useUpdateProjectSettings();
 
@@ -105,7 +72,6 @@ export function ProjectSettingsDialog({
       setRepo(project.github_repo ?? "");
       setRepoEdited(false);
       setError(null);
-      setWarning(null);
     }
   } else if (originSuggestion !== prevSuggestion) {
     setPrevSuggestion(originSuggestion);
@@ -125,33 +91,25 @@ export function ProjectSettingsDialog({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setWarning(null);
-    const typed = integrationOn ? repo.trim() : (project.github_repo ?? "");
+    // Send github_repo ONLY when the user actually changed it (and the field is
+    // visible). An unchanged repo OR integration off → omit it → the backend
+    // leaves the link untouched, so a description-only edit never re-validates
+    // and can't be hard-blocked by a transient gh hiccup.
+    const repoChanged =
+      integrationOn && repo.trim() !== (project.github_repo ?? "");
     try {
-      const updated = await updateSettings.mutateAsync({
+      await updateSettings.mutateAsync({
         id: project.id,
         description,
-        // When integration is off the repo field is hidden — don't clobber the
-        // saved link; send the existing value so the hidden field is preserved.
-        github_repo: typed,
+        github_repo: repoChanged ? repo.trim() : undefined,
       });
-      // Soft advisories never block closing (UI-SPEC). Plan 02's server returns
-      // a plain 200 with no verify flag, so `verifyState` is always undefined
-      // today and the dialog closes. This wires the muted advisory render path
-      // for a future server verify flag without changing today's behavior.
-      const verifyState = (updated as { verify_state?: string }).verify_state;
-      if (verifyState === "no_gh") {
-        setWarning(ghDegradedWarning());
-      } else if (verifyState === "unverifiable" && updated.github_repo) {
-        setWarning(softVerifyWarning(updated.github_repo));
-      } else {
-        onOpenChange(false);
-      }
+      // A 2xx save always closes the dialog.
+      onOpenChange(false);
     } catch (err) {
       if (err instanceof ApiError && err.status < 500) {
-        // Hard validation case (Plan 02 only 400s on a syntactically invalid
-        // ref): destructive red under the repo field, dialog STAYS OPEN, the
-        // description draft is preserved.
+        // Mandatory-validation reject (400): a syntactically invalid OR
+        // gh-unverifiable ref. Highlighted destructive alert under the repo
+        // field, dialog STAYS OPEN, the description draft is preserved.
         setError(sentenceCase(err.message));
       } else {
         // Network / 5xx: form-level destructive copy, dialog stays open.
@@ -195,7 +153,7 @@ export function ProjectSettingsDialog({
                 if (next.length <= DESCRIPTION_CAP) setDescription(next);
               }}
             />
-            {!error && !warning && (
+            {!error && (
               <p className="text-xs text-muted-foreground">{`Shown here in project settings.`}</p>
             )}
           </div>
@@ -217,14 +175,13 @@ export function ProjectSettingsDialog({
                   setRepoEdited(true);
                   setRepo(event.target.value);
                   setError(null);
-                  setWarning(null);
                 }}
               />
-              {/* Exactly one of {error | warning | help} shows. */}
+              {/* Exactly one of {error | help} shows. */}
               {error !== null ? (
-                <p className="text-xs text-destructive">{error}</p>
-              ) : warning !== null ? (
-                <p className="text-xs text-muted-foreground">{warning}</p>
+                <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {error}
+                </p>
               ) : (
                 <p className="text-xs text-muted-foreground">{repoHelp}</p>
               )}
@@ -233,7 +190,9 @@ export function ProjectSettingsDialog({
 
           {/* Form-level error when the repo field is hidden (integration off). */}
           {!integrationOn && error !== null && (
-            <p className="text-xs text-destructive">{error}</p>
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {error}
+            </p>
           )}
 
           <DialogFooter>
