@@ -26,6 +26,24 @@ export function useRenameProject() {
   });
 }
 
+export function useUpdateProjectSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      description,
+      github_repo,
+    }: {
+      id: number;
+      description: string;
+      github_repo: string;
+    }) => patch<Project>(`/api/projects/${id}`, { description, github_repo }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
 export function useDeleteProject() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -13,6 +13,8 @@ export interface Project {
   id: number;
   name: string;
   repo_path: string;
+  description: string;
+  github_repo: string | null;
   created_at: string;
   updated_at: string;
 }

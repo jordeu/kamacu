@@ -24,3 +24,18 @@ export function useTask(taskId: number) {
     enabled: !isNaN(taskId),
   });
 }
+
+/**
+ * On-open origin prefill (D-08): suggests an `owner/name` derived from the
+ * project's git `origin` remote. `enabled` is driven by the dialog-open state
+ * so git is shelled only when the dialog opens — never on the project list.
+ */
+export function useProjectGithubOrigin(projectId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ["github-origin", projectId],
+    queryFn: () =>
+      get<{ suggestion: string }>(`/api/projects/${projectId}/github-origin`),
+    enabled: enabled && !isNaN(projectId),
+    staleTime: Infinity, // origin rarely changes; fetch once per dialog open via `enabled`
+  });
+}
