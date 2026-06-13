@@ -84,6 +84,45 @@
 
 ---
 
+## Milestone: v1.2 — Quota & Resumable Shells
+
+**Shipped:** 2026-06-13
+**Phases:** 3 | **Plans:** 12
+
+### What Was Built
+- (Phase 7) Claude quota indicator: a DB-free `internal/quota` server proxy of the OAuth usage endpoint behind always-200 `GET /api/usage` (token-keyed cache, 60s TTL, in-flight dedup, 429 backoff, never writes the token), plus a QuotaIndicator + hover popup in both page headers polling every 60s while visible — six-state degradation matrix, zero new deps.
+- (Phase 8) Invisible tmux shells: a socket-isolated `internal/tmux` leaf package (`new-session -A`/`has-session`/`kill-session`, `=name` exact-match, 5s timeouts), the identity-only `tmux_sessions` table (migration 00005), a call-time `LookPath` shell dropdown, killer-first `Stop()` with `has-session` exit-vs-detach, and end-to-end spawn wiring with honest 409 errors — tabs indistinguishable from plain bash (× kills).
+- (Phase 9) Restart durability: `GET /api/sessions` reconciles surviving tmux rows into auto-reattaching ghost tabs (no Resume button, D-88), cleanup/delete kill tmux before worktree removal + a once-at-startup orphan sweep (`ListSessions`), and the codebase's first background goroutine — a Done-TTL reaper keyed on new per-status timestamps (migration 00006) that kills bash/tmux/agent sessions of long-Done tasks while keeping the agent resumable.
+
+### What Worked
+- **Empirical per-version tool research, finally re-tested on a novel-risk subsystem.** `08-RESEARCH.md` verified tmux behavior on the host binary before planning and caught the load-bearing traps: SIGTERM kills only the attach client (the "Stop doesn't stop" trap), bare names prefix-match (`kangent-99` matched `kangent-99-1`), and `has-session` is the only exit-vs-detach discriminator. Building the riskiest subsystem against the real binary first paid off.
+- **The phase split isolated risk from payoff.** Phase 8 shipped the durable-session plumbing; Phase 9 added the user-visible reattach. The risky daemonizing-tmux lifecycle landed and was verified before the headline feature rode on top.
+- **A mid-stream user reversal propagated cleanly.** The "invisible tmux / × kills" pivot during Phase 8 discussion was reversed across CONTEXT + REQUIREMENTS + ROADMAP in one commit, so researcher/planner never saw the stale "close = detach" wording.
+- **DB-derived ghost reconcile generalized.** The Phase 5 agent-reconcile (DB row + liveness probe → ghost entry) carried straight over to tmux with `has-session` swapped for `transcriptExists`.
+- **Wave parallelism with disjoint ownership, again.** Phase 9 wave 1 ran 3 executors concurrently in the shared checkout with zero content conflicts.
+
+### What Was Inefficient
+- **The gsd-planner truncated ROADMAP.md on commit** (131→44 lines), deleting the milestone structure and Phase 1–8 details — required manual reconstruction mid-milestone. Code was never affected, but it's a recurring planner foot-gun.
+- **`phase complete` doesn't maintain the summary markers.** It returns `roadmap_updated: true` but never flips the milestone checklist or the Progress-table rows; Phases 7, 8, and 9 all showed "Not started" until corrected by hand each phase.
+- **summary-extract field misfires.** Two plans' "accomplishments" came through as a deviation line and a "Task 1 — reconcile branch" line, needing manual cleanup from MILESTONES.md.
+- **Shared-doc commit churn under parallelism.** Concurrent executors swept STATE/ROADMAP/REQUIREMENTS into sibling commits — harmless but muddies attribution.
+
+### Patterns Established
+- **Invisible-subsystem principle.** A durability mechanism can hide entirely behind existing UI when reattach is cheap/lossless; diverging from an existing pattern (the agent's explicit Resume) is justified by *cost*, not consistency.
+- **Leaf-package-per-external-tool, extended not scattered.** Every tmux verb lives in `internal/tmux`; the orphan sweep added `ListSessions` to it rather than scattering raw `tmux` calls.
+- **Decision-locked-then-amended docs in one commit.** A user reversal updates CONTEXT, REQUIREMENTS, and ROADMAP together so no downstream agent reads a contradiction.
+
+### Key Lessons
+1. **Verify planning-doc integrity after the planner commits** — a post-commit line-count/structure check on ROADMAP.md catches the truncation before it compounds.
+2. **`phase complete` leaves summary markers stale** — manually flip the milestone checklist + Progress-table rows each phase, or they drift silently (they drifted from Phase 7 onward this milestone).
+3. **Name the user-visible payoff's phase explicitly across a split** — Phase 8's checkpoint genuinely couldn't demonstrate restart-survival (Phase 9's deliverable); stating that up front turns a "looks unfinished" surprise into an understood boundary.
+
+### Cost Observations
+- Orchestrated across ~3 execution sessions (Fable 5 inherit, then Opus 4.8). Phase 9 wave 1 ran 3 executors concurrently; checkpoints used the fresh-continuation-agent flow.
+- Notable: real-tmux integration tests (`internal/api` ~80–90s, `internal/ws` ~60s) dominate suite wall-clock; every other package is sub-10s.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -92,6 +131,7 @@
 |-----------|--------|-------|------------|
 | v1.0 | 5 | 28 | Established the discuss → ui-spec → research → plan → execute → verify loop with human checkpoints; risk-front-loaded roadmap; interface-first wave parallelism |
 | v1.1 | 1 | 4 | Coarse single-phase milestone for integration-only scope; checkpoint → fresh continuation-agent flow; manifest-diff-vs-tag as the zero-dep gate |
+| v1.2 | 3 | 12 | Empirical tmux research verified on the host binary pre-planning (first novel-risk subsystem since v1.0); invisible-subsystem principle; DB-derived ghost reconcile generalized from Phase 5; post-planner ROADMAP integrity checks |
 
 ### Cumulative Quality
 
@@ -99,6 +139,7 @@
 |-----------|--------------------|----------|--------------------|
 | v1.0 | 6 (api, diff, session, store, worktree, ws) | tsc + vite build green | Held throughout — only sanctioned deps added (xterm set, dnd-kit, radix collapsible); no go.mod surprises |
 | v1.1 | 7 (+settings) | tsc + vite build green | Held — zero new Go modules and zero new npm deps, proven by manifest diff against the v1.0 tag |
+| v1.2 | 11 (+quota, tmux, reaper) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 3 phases |
 
 ### Top Lessons (Verified Across Milestones)
 
