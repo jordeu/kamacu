@@ -105,7 +105,7 @@ Plans:
 Plans:
 - [x] 09-01-PLAN.md — tmux ListSessions verb (D-94) + migration 00006 per-status timestamps with done_at backfill (D-90) [wave 1]
 - [x] 09-02-PLAN.md — done_session_ttl setting + ParseDoneSessionTTL helper + settings-page field (D-91) [wave 1]
-- [ ] 09-03-PLAN.md — TMUX-05 restart reattach: DB-derived live-tmux session-list entries + reattach spawn variant + invisible frontend auto-reattach (D-88/D-89) [wave 1]
+- [x] 09-03-PLAN.md — TMUX-05 restart reattach: DB-derived live-tmux session-list entries + reattach spawn variant + invisible frontend auto-reattach (D-88/D-89) [wave 1]
 - [ ] 09-04-PLAN.md — TMUX-08 cleanup: fold live-tmux into the count + kill before remove/delete + startup orphan sweep (D-92/D-93) [wave 2]
 - [ ] 09-05-PLAN.md — REAP-01 Done-TTL reaper: move status-timestamp stamping + reaper ticker goroutine + startup wiring (D-90/D-95/D-96) [wave 3]
 

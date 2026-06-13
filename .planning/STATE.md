@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
 status: executing
-stopped_at: Completed 09-02-PLAN.md
-last_updated: "2026-06-13T06:25:17.176Z"
+stopped_at: Completed 09-03-PLAN.md
+last_updated: "2026-06-13T06:36:19.753Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 09 (tmux-restart-resume-cleanup-integration) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-06-13
 
@@ -53,6 +53,7 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 | Phase 08-tmux-shells-spawn-detach-lifecycle P04 | 52min | 3 tasks | 4 files |
 | Phase 09 P01 | 3 min | 2 tasks | 3 files |
 | Phase 09-tmux-restart-resume-cleanup-integration P02 | 4min | 2 tasks | 5 files |
+| Phase 09-tmux-restart-resume-cleanup-integration P03 | 14 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,9 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 09]: Migration 00006 adds 4 nullable per-status timestamp cols on tasks; only done_at is backfilled (from updated_at) so existing Done rows are reapable, the other three are banked stats with no current consumer (D-90)
 - [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-02]: ParseDoneSessionTTL is the single source of truth for done_session_ttl disable semantics — called by both Validate (save-time) and the 09-05 reaper (read-at-use), so they can never disagree (mirrors AllowedShells shared by Validate + GET options)
 - [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-02]: a done_session_ttl duration <= 0 (e.g. 0s, -5m) is treated as disabled, not an error and not reap-everything — it can never expire (REAP-01/D-91)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: TMUX-05 restart reattach is AUTO + INVISIBLE (D-88): a surviving tmux row surfaces as an orphaned bash entry in GET /api/sessions; the frontend fires one reattach spawn (new-session -A) per name — no Resume button, no banner (diverges from agent explicit-Resume)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: Survivor detection uses Manager.HasLiveTmux(name) so the wire format is unchanged for live sessions; TmuxName is carried on the wire ONLY for orphaned entries (omitempty), keeping live tabs tmux-unaware (D-77)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: Dead-on-restart rows are lazily DELETEd ONLY on a conclusive has-session exit-1 (D-89); an inconclusive probe (tmux binary broken/hung) never GCs — Pitfall 6 honesty. Reattach spawn failure never deletes the row (pre-existing survivor, not a reserved n)
 
 ### Pending Todos
 
@@ -106,7 +110,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-13T06:25:17.171Z
-Stopped at: Completed 09-02-PLAN.md
+Last session: 2026-06-13T06:36:07.733Z
+Stopped at: Completed 09-03-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 7`
