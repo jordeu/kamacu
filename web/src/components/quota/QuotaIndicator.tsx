@@ -12,6 +12,7 @@ import {
   type UsageResponse,
   type UsageWindow,
 } from "@/api/usage";
+import { formatAgo } from "@/lib/time";
 
 /** Threshold colors (D-69): muted zinc below 60, amber 60–84, red ≥85.
  *  The traffic-light low band never appears — status dots own that color;
@@ -33,17 +34,6 @@ function useNow(intervalMs: number): number {
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
-}
-
-/** Age of `iso` relative to `now`: "12s", "7m", "1h 5m". Second granularity
- *  under a minute so a watcher can see freshness being tracked. */
-function formatAgo(iso: string | null, now: number): string {
-  if (iso === null) return "0s";
-  const secs = Math.max(0, Math.floor((now - Date.parse(iso)) / 1000));
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
 /** Delta until `iso`: <60m → "37m"; <24h → "4h 12m"; else "2d 5h". */
