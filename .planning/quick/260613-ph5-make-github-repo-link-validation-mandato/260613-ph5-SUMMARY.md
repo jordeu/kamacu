@@ -77,12 +77,13 @@ Each task was committed atomically:
 2. **Task 1 (GREEN): hard-block unverifiable github repo links in PATCH** - `69119c2` (feat)
 3. **Task 2: hard-block repo link in settings dialog with highlighted error** - `857db3b` (feat)
 4. **Task 3: rebuild embedded SPA with mandatory repo-link dialog** - `38415e3` (chore)
+5. **Follow-up: keep TestUpdateProjectPartial gh-agnostic (seed link via DB)** - `9ea0df6` (test)
 
-_TDD Task 1 has two commits (test -> feat); no separate REFACTOR was needed._
+_TDD Task 1 has two commits (test -> feat); no separate REFACTOR was needed. Commit 5 is a post-review portability fix (see Deviations)._
 
 ## Files Created/Modified
 - `internal/api/projects.go` - Removed `projectUpdateResponse`/verify_state; added `msgRepoNotFound`/`msgGHUnavailable` consts; mandatory `if !verified -> 400` hard-block in the non-empty github_repo branch; plain `writeJSON(w, 200, p)`.
-- `internal/api/projects_test.go` - Deleted `TestUpdateProjectVerifyState` and the now-unused `internal/github` import; added `TestUpdateProjectMandatoryValidation`; updated `TestUpdateProjectPartial`'s seed ref to a verifiable one (`cli/cli`) since linking is now mandatory-verified.
+- `internal/api/projects_test.go` - Deleted `TestUpdateProjectVerifyState` and the now-unused `internal/github` import; added the host-independent `TestUpdateProjectMandatoryValidation`; kept `TestUpdateProjectPartial` gh-agnostic by removing the gh-verified URL->`cli/cli` PATCH success assertion and seeding existing links via direct `db.Exec` UPDATE (the `not-a-repo` -> 400 reject is pre-gh, so host-independent).
 - `web/src/components/sidebar/ProjectSettingsDialog.tsx` - Removed `warning` state, `ReactNode` import, `softVerifyWarning`/`ghDegradedWarning`, and verify_state handling; `repoChanged` gate; always-close on 2xx; highlighted destructive alert on both error sites.
 - `web/src/api/mutations.ts` - `useUpdateProjectSettings` `github_repo` now optional; included in PATCH body only when defined.
 - `web/src/api/types.ts` - Removed `verify_state?: string` from `Project`.
@@ -97,21 +98,24 @@ _TDD Task 1 has two commits (test -> feat); no separate REFACTOR was needed._
 
 ### Auto-fixed Issues
 
-**1. [Rule 1 - Bug] Updated `TestUpdateProjectPartial` seed ref to a verifiable repo**
-- **Found during:** Task 1 (GREEN)
-- **Issue:** The pre-existing `TestUpdateProjectPartial` seeded a link with `"owner/name"` and asserted a 200, then proved a later syntactic-reject PATCH (`not-a-repo`) does not clobber that stored link. Under the new mandatory validation, `"owner/name"` does not verify on this gh-authenticated host, so the seed PATCH now returns 400 and the test failed (`seed link status = 400, want 200`). The plan's Task 1 note assumed this test would pass unchanged; the assumption was invalid because the seed used an unverifiable ref. The test's intent (a rejected PATCH must not clobber an existing link) is still valid and must be preserved.
-- **Fix:** Changed the seed ref (and its `assertDBProject` expectation) from `"owner/name"` to `"cli/cli"`, which is already proven verifiable earlier in the same test. The syntactic-reject (`not-a-repo` -> 400 + canonical copy) and the "row unchanged" assertions are otherwise untouched.
+**1. [Rule 1 - Bug] Made the pre-existing `TestUpdateProjectPartial` consistent with mandatory validation (and gh-agnostic)**
+- **Found during:** Task 1 (GREEN), corrected after review.
+- **Issue:** `TestUpdateProjectPartial` was written for the old soft-save contract: it linked repos via PATCH (`https://github.com/cli/cli.git` -> assert 200 + `cli/cli`; later `"owner/name"` -> assert 200) and asserted that a syntactic-reject PATCH (`not-a-repo`) doesn't clobber an existing link. Under mandatory validation those linking PATCHes now require live, authenticated `gh`. My first pass (commit `69119c2`) only swapped the unverifiable `"owner/name"` seed for `"cli/cli"` so the suite passed on this gh-authenticated host — but that traded one host-dependency for another: the test would still fail on a gh-less / unauthenticated / offline / CI host, breaking the repo's gh-agnostic test discipline.
+- **Fix (final, commit `9ea0df6`):**
+  - Removed the gh-verified URL->`cli/cli` PATCH success+canonicalization assertion entirely (that path is covered host-independently by package `github`'s `ParseRepoRef`/`ValidateRepo` unit tests and is exercised live by `TestUpdateProjectMandatoryValidation`; it cannot be asserted host-independently at the API layer now that linking is mandatory-verified).
+  - Seeded the pre-existing link by writing directly to the DB (`db.Exec(`UPDATE projects SET github_repo = ? WHERE id = ?`, "cli/cli", id)`) for both the unlink (`{"github_repo":""}` -> 200 -> NULL, which never invokes gh) and the invalid-ref-does-not-clobber assertions, instead of a now-mandatory-verified PATCH.
+  - Kept `{"github_repo":"not-a-repo"}` -> 400 + canonical copy: `ParseRepoRef` rejects it BEFORE gh is consulted, so the 400 holds on any host.
 - **Files modified:** `internal/api/projects_test.go`
-- **Verification:** `go test ./internal/api/` exits 0 (both `TestUpdateProjectMandatoryValidation` and `TestUpdateProjectPartial` pass).
-- **Committed in:** `69119c2` (Task 1 GREEN commit)
+- **Verification:** `go test ./internal/api/` exits 0; `go build ./...` exits 0; `gofmt -l internal/api/projects_test.go` clean. Critically, `TestUpdateProjectPartial` was run under a sandbox PATH with `gh` removed and passed in 0.04s with no network — proving it no longer depends on gh at all.
+- **Committed in:** `9ea0df6` (final gh-agnostic fix; superseding the partial `cli/cli` seed-swap in `69119c2`).
 
 ---
 
-**Total deviations:** 1 auto-fixed (1 bug — a pre-existing test incompatible with the mandatory-validation contract).
-**Impact on plan:** Minimal and necessary. The fix preserves the original test's intent (rejected PATCH does not clobber an existing link) while making it consistent with mandatory verification. No scope creep.
+**Total deviations:** 1 auto-fixed (1 bug — a pre-existing test incompatible with the mandatory-validation contract, fixed to be gh-agnostic).
+**Impact on plan:** Minimal and necessary. The fix preserves the original test's intent (a rejected syntactic PATCH does not clobber an existing link) while making it consistent with mandatory verification AND independent of gh availability. No scope creep.
 
 ## Issues Encountered
-- The full `go test ./internal/api/` run takes ~80s because several tests now make live `gh repo view cli/cli` network calls (mandatory verification + the `cli/cli` seed). This is expected on a gh-authenticated host and matches the plan's "valid-repo path is exercised live" intent; no action needed.
+- The full `go test ./internal/api/` run takes ~80s because `TestUpdateProjectMandatoryValidation` makes live `gh repo view` calls. Its assertions are host-independent in OUTCOME (a bogus repo never verifies, so the 400 holds; the valid-repo -> 200 path is intentionally exercised live), but the calls add latency on a gh-authenticated host. `TestUpdateProjectPartial` makes no gh calls (verified gh-less, 0.04s).
 
 ## User Setup Required
 None - no external service configuration required. `gh` is present and authenticated on this host (account `jordeu`).
@@ -119,6 +123,7 @@ None - no external service configuration required. `gh` is present and authentic
 ## Next Phase Readiness
 - A linked repo is now guaranteed gh-verified, so downstream PR phases (11-13) never carry a phantom link.
 - All four verify gates green: `go test ./internal/api/` (0), `go build ./...` (0), `cd web && npm run build` (0), `gofmt -l` clean on changed Go files. No `verify_state`/soft-advisory references remain in `internal/api/` (outside a docstring word) or `web/src/`.
+- Test discipline preserved: `TestUpdateProjectPartial` is gh-agnostic (passes with gh absent); only `TestUpdateProjectMandatoryValidation` makes live gh calls, and its assertions hold on any host.
 - No blockers.
 
 ---
@@ -128,4 +133,4 @@ None - no external service configuration required. `gh` is present and authentic
 ## Self-Check: PASSED
 
 - All 6 modified files present on disk + SUMMARY.md created.
-- All 4 task commits present in git history (`7b4cc02`, `69119c2`, `857db3b`, `38415e3`).
+- All 5 commits present in git history (`7b4cc02`, `69119c2`, `857db3b`, `38415e3`, `9ea0df6`).
