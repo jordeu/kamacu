@@ -58,20 +58,11 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 **v1.2 complete (2026-06-13)** — all 3 phases done. Phase 7 — Claude quota indicator: `internal/quota` server proxy (`GET /api/usage`) + QuotaIndicator in both headers. Phase 8 — invisible tmux shells: `internal/tmux` leaf package, migration 00005 `tmux_sessions`, call-time shell dropdown, killer-first `Stop()`, end-to-end spawn wiring with honest 409 errors. Phase 9 — restart durability + cleanup: `GET /api/sessions` reconciles surviving tmux rows as auto-reattaching ghost tabs (TMUX-05, the milestone's headline — sessions survive a server restart and reattach invisibly), cleanup/delete kill tmux before worktree removal + a startup orphan sweep (TMUX-08), and the codebase's first background goroutine — a Done-TTL reaper keyed on new per-status timestamps (migration 00006) that kills bash/tmux/agent sessions of long-Done tasks while keeping the agent resumable (REAP-01). All phases verified green (full Go suite + frontend build). Ready for `/gsd:complete-milestone`.
 
-## Current Milestone: v1.2 Quota & Resumable Shells
+## Next Milestone
 
-**Goal:** Make Kangent a better dispatcher cockpit: see Claude quota usage at a glance before starting agents, and make bash tabs durable via tmux-backed shells that survive tab closes and server restarts.
+v1.2 shipped 2026-06-13. No milestone is currently active — run `/gsd:new-milestone` to define the next one (questioning → research → requirements → roadmap).
 
-**Target features:**
-- Claude quota indicator — compact "Claude 5h" label + usage bar in the top-right of the main area (board and task view); hover popup shows all quotas (5h, 7d, model-specific) with percentage bars, reset times, "Updated Xm ago", and manual refresh (SlayZone-style)
-- Background quota auto-poll (~60s) plus manual refresh
-- "tmux" shell type in the existing global shell setting dropdown (the API-driven seam built in v1.1 for SHELL-FUT-01)
-- tmux-backed tabs detach on close (not kill) and reattach on reopen; after a Kangent restart they offer Resume, reattaching to the still-running tmux session
-
-**Key context:**
-- Quota data source needs empirical research: how SlayZone / `claude /usage` obtain quota data (likely the OAuth usage endpoint), auth, and rate behavior — verify against the installed claude version before planning
-- tmux availability must be detected gracefully (option valid only when `tmux` resolves), mirroring v1.1's LookPath shell validation
-- Both features ride existing seams: data-driven shell dropdown, v1.1 session lifecycle/resume UX patterns
+Open candidates carried forward live in **Deferred** below. The v1.2 work also banked two forward investments worth a future milestone: per-status task timestamps (`todo_at`/`in_progress_at`/`in_review_at`/`done_at`, migration 00006) ready to power board cycle-time / dwell-time stats, and the first background-goroutine pattern (the Done-TTL reaper) that future periodic maintenance (e.g. MAINT-01 stale-worktree purge) can model on.
 
 ## Deferred (post-v1.1)
 
@@ -103,6 +94,9 @@ Parked candidates: browser notifications on waiting/finished (NOTF-01), one-clic
 | Manual git workflow, app only cleans up worktrees | Keeps v1 scope lean; user merges/PRs in terminal | ✓ Good (Phase 3) |
 | Fixed columns: To Do / In Progress / In Review / Done | In Review holds agent-finished work awaiting human check | ✓ Good (Phase 1) |
 | D-51 reversed: `--dangerously-skip-permissions` on by default (Phase 6, AGENT-02) | Dispatcher workflow favors unattended agents; flag is a removable settings default, so interactive prompts are one edit away | ✓ Intentional — documented side effect: amber waiting dot rarely fires while the flag is active |
+| Quota via server-side proxy of the OAuth usage endpoint, never writing/refreshing the token (v1.2, Phase 7) | Browser never holds credentials; token rotation stays Claude Code's job; degrade-don't-break on every failure mode | ✓ Good — `internal/quota`, six-state matrix, token-keyed cache |
+| Invisible tmux: × kills, leaving the task view detaches, sessions survive a server restart and auto-reattach with NO Resume button (v1.2, Phases 8–9, D-77/D-78/D-88) | Durability is the point; the user shouldn't have to know it's tmux. Reattach is cheap/lossless so it diverges from the agent's explicit Resume | ✓ Good — restart-survival verified end-to-end (the milestone's headline) |
+| Done-TTL reaper kills idle bash/tmux/agent sessions of long-Done tasks; agent stays resumable; worktrees never auto-removed (v1.2, Phase 9, REAP-01/D-87/D-96) | Sessions shouldn't pile up on finished work; killing a PTY is reversible (transcript kept) but deleting a worktree is not | ✓ Good — codebase's first background goroutine, keyed on `done_at` |
 
 ## Evolution
 

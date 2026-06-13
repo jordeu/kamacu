@@ -4,7 +4,7 @@ milestone: v1.2
 milestone_name: Quota & Resumable Shells
 status: verifying
 stopped_at: Completed 09-05-PLAN.md
-last_updated: "2026-06-13T07:20:29.095Z"
+last_updated: "2026-06-13T07:56:19.025Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 3

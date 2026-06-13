@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.2 Quota & Resumable Shells (Shipped: 2026-06-13)
+
+**Phases completed:** 3 phases, 12 plans, 29 tasks
+
+**Key accomplishments:**
+
+- Demand-driven token-keyed quota cache (`internal/quota`) proxying Anthropic's OAuth usage endpoint at always-200 `GET /api/usage`, with the full six-state degradation matrix proven by 20 unit tests and zero new dependencies
+- "Claude 5h" trigger with width=5h/color=max-of-all threshold bar, server-driven hover popup with reset countdowns and manual refresh, mounted in both page headers polling /api/usage every 60s while visible — zero new npm dependencies
+- Phase 7 verified end-to-end — whole-repo green, token-leak audit clean, live /api/usage 200 — plus three user-feedback polish passes on the quota popup (live ticking footer, compact icon-free reset column, equal-width comparable bars), human-approved
+- Socket-isolated tmux Client (new-session -A / has-session / kill-session with =name exact match, 5s exec timeouts, idempotent kill) plus the identity-only tmux_sessions table — all later tmux work calls through this one package
+- settings.AllowedShells is now a call-time LookPath function: the shell dropdown offers "tmux" only while the binary resolves on PATH, and save-time validation tracks the exact same truth — zero frontend changes
+- tmux threaded through the session package as a spawn-time lifecycle property: SpawnOpts.TmuxName spawns `tmux new-session -A` under the existing PTY pipeline, Stop is killer-first (kill-session, signal fallback), and waitExit discriminates exit-vs-detach via has-session — with bash/agent stop paths proven byte-identical
+- End-to-end invisible tmux: POST /api/sessions with shell=tmux mints and persists `kangent-<task>-<n>` from the tmux_sessions table, attaches it under creack/pty on the dedicated `-L kangent` socket, and surfaces honest 409 spawn errors verbatim in the tab header — with zero tmux markers reaching the UI or the wire (D-77).
+- `done_session_ttl` global setting (Go-style duration, default 24h; empty/0/never disable) with a shared `ParseDoneSessionTTL` helper that is the single source of truth for both save-time validation and the 09-05 reaper, plus a Cleanup field on the settings page.
+- A background ticker goroutine that kills bash + tmux + agent sessions of tasks left in Done past `done_session_ttl` (clocked from `done_at`), keeping every agent resumable and never touching worktrees — the codebase's first background goroutine.
+
+---
+
 ## v1.1 Settings & Polish (Shipped: 2026-06-11)
 
 **Phases completed:** 1 phases, 4 plans, 10 tasks
