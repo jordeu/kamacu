@@ -3,7 +3,7 @@ import { del, get, post } from "./client";
 import type { ApiError } from "./client";
 
 export interface TermSession {
-  id: string; // opaque uuid — NEVER parse
+  id: string; // opaque uuid — NEVER parse ("" on a restored orphaned ghost)
   label: string; // "bash #3" (dev), "Bash 3" (task-scoped), "Agent" — server-assigned
   status: "running" | "exited";
   exitCode?: number;
@@ -12,6 +12,13 @@ export interface TermSession {
   kind?: "bash" | "agent"; // session discriminator (04-02 server Info JSON)
   agentStatus?: "working" | "idle" | "waiting" | "exited"; // agent sessions only
   stopRequested?: boolean; // Kangent-initiated stop (gray-dot discriminator)
+  // Restored tmux survivor (TMUX-05, D-88): a DB-derived ghost (id "") the
+  // server emits for a tmux session that outlived a Kangent restart. orphaned
+  // is the "needs a one-shot reattach spawn" signal; tmuxName carries the name
+  // to reattach against. Both absent on every real, live session — tmux stays
+  // invisible (D-77).
+  orphaned?: boolean;
+  tmuxName?: string;
 }
 
 export function useSessions(taskId?: number) {
@@ -44,6 +51,33 @@ export function useSpawnSession(taskId?: number) {
         );
       }
       // Prefix-matches the scoped ["sessions", taskId] keys too.
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+// useReattachTmux fires a one-shot reattach spawn for a restored (orphaned)
+// tmux survivor (TMUX-05, D-88). The mutate arg is the persisted tmux name; the
+// server runs new-session -A (attach-or-create) and returns a REAL in-memory
+// session (orphaned:false, real id) that replaces the ghost. No Resume button,
+// no banner — the reattach is automatic and invisible (D-77 divergence from the
+// agent Resume flow).
+export function useReattachTmux(taskId: number) {
+  const queryClient = useQueryClient();
+  return useMutation<TermSession, ApiError, string>({
+    mutationFn: (name: string) =>
+      post<TermSession>("/api/sessions", {
+        task_id: taskId,
+        reattach_tmux_name: name,
+      }),
+    onSuccess: (session) => {
+      // Same spawn-select race fix as useSpawnSession: write the real session
+      // into the scoped cache so the tab attaches immediately; the next poll
+      // drops the orphaned ghost (its row no longer surfaces a survivor entry
+      // once the live session covers the name).
+      queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
+        old ? [session, ...old] : [session],
+      );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });

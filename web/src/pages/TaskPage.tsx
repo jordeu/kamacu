@@ -9,6 +9,7 @@ import { useCreateWorktree } from "@/api/worktrees";
 import { useAgentStatuses } from "@/api/agents";
 import {
   useDeleteSession,
+  useReattachTmux,
   useSessions,
   useSpawnSession,
   useStopSession,
@@ -64,6 +65,8 @@ export default function TaskPage() {
   const spawn = useSpawnSession(taskId);
   const stopSession = useStopSession();
   const deleteSession = useDeleteSession();
+  // Restored tmux survivors auto-reattach invisibly (TMUX-05, D-88).
+  const reattach = useReattachTmux(taskId);
 
   // Agent tab dot (D-50) — same query/component as the board card dot.
   const agentEntry = (useAgentStatuses().data ?? []).find(
@@ -88,6 +91,12 @@ export default function TaskPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const cancelTitleEditRef = useRef(false);
+  // tmux names already reattached this mount (TMUX-05): the 5s poll keeps
+  // surfacing an orphaned ghost until the live session replaces it, and
+  // StrictMode double-mounts, so this ref makes the reattach spawn fire exactly
+  // once per name. The backend is attach-or-create idempotent — this only
+  // avoids redundant POSTs.
+  const reattachedRef = useRef<Set<string>>(new Set());
 
   // Every session currently running for this task joins keepExitedIds.
   useEffect(() => {
@@ -104,6 +113,22 @@ export default function TaskPage() {
     });
   }, [sessions]);
 
+  // Auto-reattach restored tmux survivors (TMUX-05, D-88): each orphaned bash
+  // ghost fires ONE reattach spawn against its persisted tmux name. The ghost
+  // never renders as its own tab (filtered out of visibleSessions below); once
+  // the reattach succeeds the real session appears and connects via the normal
+  // WS path — indistinguishable from a tab that was always there (D-77). No
+  // Resume button, no banner: the reattach is automatic and invisible.
+  useEffect(() => {
+    if (!sessions) return;
+    for (const s of sessions) {
+      if (!s.orphaned || s.kind === "agent" || !s.tmuxName) continue;
+      if (reattachedRef.current.has(s.tmuxName)) continue;
+      reattachedRef.current.add(s.tmuxName);
+      reattach.mutate(s.tmuxName);
+    }
+  }, [sessions, reattach]);
+
   // Visible bash tabs: running sessions, plus self-exited ones kept muted
   // within this visit. User-initiated closes (closingIds) drop on exit.
   // Spawn order left-to-right: createdAt ascending, label tiebreak (the
@@ -115,6 +140,9 @@ export default function TaskPage() {
           // Agents never render as closable bash tabs (D-38) — the Agent
           // tab owns them.
           s.kind !== "agent" &&
+          // Restored tmux ghosts (TMUX-05) are transient reattach triggers, not
+          // tabs: the real session replaces them on the next poll (D-88).
+          !s.orphaned &&
           (s.status === "running" ||
             (s.status === "exited" &&
               keepExitedIds.has(s.id) &&
