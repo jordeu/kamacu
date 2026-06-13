@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenuAction } from "@/components/ui/sidebar";
 import { RenameProjectDialog } from "@/components/sidebar/RenameProjectDialog";
+import { ProjectSettingsDialog } from "@/components/sidebar/ProjectSettingsDialog";
 
 export interface ProjectMenuProps {
   project: Project;
@@ -29,6 +30,7 @@ export interface ProjectMenuProps {
 
 export function ProjectMenu({ project }: ProjectMenuProps) {
   const [renameOpen, setRenameOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const deleteProject = useDeleteProject();
   const queryClient = useQueryClient();
@@ -61,6 +63,9 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
           <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
             Rename
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+            Project settings
+          </DropdownMenuItem>
           <DropdownMenuItem
             variant="destructive"
             onSelect={() => setDeleteOpen(true)}
@@ -74,6 +79,12 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
         project={project}
         open={renameOpen}
         onOpenChange={setRenameOpen}
+      />
+
+      <ProjectSettingsDialog
+        project={project}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
       />
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
