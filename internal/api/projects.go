@@ -11,15 +11,21 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"kangent/internal/github"
 )
 
 // Project is the JSON shape of a project row (RESEARCH.md Pattern 4).
+// Description is NOT NULL ("" when unset). GithubRepo is a pointer so an
+// unlinked project serializes as JSON null (distinct from "").
 type Project struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	RepoPath  string `json:"repo_path"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID          int64   `json:"id"`
+	Name        string  `json:"name"`
+	RepoPath    string  `json:"repo_path"`
+	Description string  `json:"description"`
+	GithubRepo  *string `json:"github_repo"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 type projectHandlers struct{ db *sql.DB }
@@ -53,11 +59,15 @@ func validateRepoPath(p string) (string, error) {
 	return abs, nil
 }
 
-const projectColumns = `id, name, repo_path, created_at, updated_at`
+const projectColumns = `id, name, repo_path, description, github_repo, created_at, updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
-	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.CreatedAt, &p.UpdatedAt)
+	var repo sql.NullString
+	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &p.CreatedAt, &p.UpdatedAt)
+	if repo.Valid {
+		p.GithubRepo = &repo.String
+	}
 	return p, err
 }
 
@@ -122,27 +132,72 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, p)
 }
 
-// update handles PATCH /api/projects/{id} — rename only (repo_path immutable in v1).
+// update handles PATCH /api/projects/{id} — a PARTIAL update (D-13) of name,
+// description, and github_repo. repo_path stays immutable in v1. Fields decode
+// into pointers so an OMITTED key is left untouched while an explicit ""
+// clears (description) or unlinks (github_repo). The lone hard error is a
+// syntactically invalid github_repo (github.ValidateRepo); a gh-unverifiable
+// but syntactically valid ref still saves (degrade-don't-break, GHSET-03).
 func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+		GithubRepo  *string `json:"github_repo"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+	if req.Name == nil && req.Description == nil && req.GithubRepo == nil {
+		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
-	p, err := scanProject(h.db.QueryRow(
-		`UPDATE projects SET name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ? RETURNING `+projectColumns, name, id))
+
+	var sets []string
+	var args []any
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+		sets = append(sets, "name = ?")
+		args = append(args, name)
+	}
+	if req.Description != nil {
+		if len(*req.Description) > 280 {
+			writeError(w, http.StatusBadRequest, "Description is too long.")
+			return
+		}
+		sets = append(sets, "description = ?")
+		args = append(args, *req.Description)
+	}
+	if req.GithubRepo != nil {
+		if strings.TrimSpace(*req.GithubRepo) == "" {
+			// Explicit "" unlinks → store NULL.
+			sets = append(sets, "github_repo = NULL")
+		} else {
+			canonical, _, err := github.ValidateRepo(r.Context(), *req.GithubRepo)
+			if err != nil {
+				// The ONLY blocking case: a syntactically invalid ref. The row
+				// is left untouched. A soft-unverifiable ref returns no error
+				// here and saves the syntactic owner/name.
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			sets = append(sets, "github_repo = ?")
+			args = append(args, canonical)
+		}
+	}
+
+	sets = append(sets, "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+	args = append(args, id)
+	query := `UPDATE projects SET ` + strings.Join(sets, ", ") + ` WHERE id = ? RETURNING ` + projectColumns
+	p, err := scanProject(h.db.QueryRow(query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
