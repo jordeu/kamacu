@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
 status: executing
-stopped_at: Phase 11 UI-SPEC approved
-last_updated: "2026-06-13T17:17:31.777Z"
-last_activity: "2026-06-13 — Completed quick task 260613-ph5: mandatory (hard-block) GitHub repo-link validation"
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-06-13T18:04:52.976Z"
+last_activity: 2026-06-13
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 9
+  completed_plans: 6
   percent: 80
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-13)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 10 — github-foundations
+**Current focus:** Phase 11 — pr-review-column
 
 ## Current Position
 
-Phase: 11
-Plan: Not started
+Phase: 11 (pr-review-column) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-06-13 — Completed quick task 260613-ph5: mandatory (hard-block) GitHub repo-link validation
+Last activity: 2026-06-13
 
 Progress: [████████░░] 80% (4/5 plans)
 
@@ -61,6 +61,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 10-github-foundations P03 | 8 min | 3 tasks | 7 files |
 | Phase 10-github-foundations P04 | 4 min | 1 tasks | 3 files |
 | Phase 10-github-foundations P05 | 3 min | 3 tasks | 3 files |
+| Phase 11-pr-review-column P01 | 6 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -102,6 +103,8 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 10-github-foundations]: Soft-verify/gh-degraded muted advisories are wired but dormant (keyed on a future updated.verify_state); Plan 02's server returns plain 200, so success closes the dialog (UI-SPEC-sanctioned non-blocking)
 - [Phase 10-github-foundations]: Gap 1 backend half: GET /api/github/status is an always-200 endpoint returning {gh_available: bool} from github.Available() (call-time LookPath, reflects install/uninstall without restart); package-level handler (no DB), snake_case field Plan 10-05 reads; contract test compares to github.Available() so it is host-independent
 - [Phase 10-github-foundations]: Gap 1 frontend half + Gap 2: /settings GitHub toggle is gh-aware via useGithubStatus() (GET /api/github/status); effectiveEnabled = enabled && ghAvailable forces OFF when gh is missing, an enable attempt is blocked with install-gh guidance (Switch stays interactive, no disabled), and the over-claiming help copy is dropped
+- [Phase 11-pr-review-column]: internal/github.Service is a quota.Service clone re-keyed to map[owner/name]*repoEntry (per-repo 60s TTL on fetchedAt, 10s floor on lastAttempt binding even force, in-flight dedup, drop-cached-after-3-failures); no 429/backoff field — gh rate-limit surfaces as 'error' with serve-stale per D-11
+- [Phase 11-pr-review-column]: reduceChecks maps SKIPPED/NEUTRAL/STALE to non-failing (Pitfall 1, else ~30% of real PRs go red); auth classification combines exit-code-4 OR stderr substrings (gh auth login/401/Bad credentials) since exit 4 alone is unreliable (cli/cli#9338); PRSummary fetches the rich --json set for Phase 12/13 but renders minimal in Phase 11 (D-01/D-02)
 
 ### Pending Todos
 
@@ -123,7 +126,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-13T17:17:31.768Z
-Stopped at: Phase 11 UI-SPEC approved
-Resume file: .planning/phases/11-pr-review-column/11-UI-SPEC.md
+Last session: 2026-06-13T18:04:42.398Z
+Stopped at: Completed 11-01-PLAN.md
+Resume file: None
 Next: `/gsd:discuss-phase 11`

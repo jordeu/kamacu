@@ -82,7 +82,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
   4. The column auto-refreshes on an interval that is paused when the browser tab is hidden, offers a manual refresh, and mirrors live GitHub state — a card disappears once the user submits its review and reappears on a re-request (GHCOL-04).
   5. The column surfaces clear loading, empty ("you're all caught up"), and degraded (`gh` missing / unauthenticated / error) states inline, never as a modal and never blocking the board (GHCOL-05).
 **Plans**: 4 plans (4 waves — backend leaf → endpoint → frontend hook+card → column+board wiring)
-- [ ] 11-01-PLAN.md — internal/github ListReviewRequested (gh pr list + statusCheckRollup reduction) + best-effort per-repo Service (quota clone)
+- [x] 11-01-PLAN.md — internal/github ListReviewRequested (gh pr list + statusCheckRollup reduction) + best-effort per-repo Service (quota clone)
 - [ ] 11-02-PLAN.md — always-200 GET /api/projects/{id}/pull-requests endpoint (toggle+link gated) + main.go wiring
 - [ ] 11-03-PLAN.md — usePullRequests/useRefreshPullRequests hooks + shared formatAgo + PRCard
 - [ ] 11-04-PLAN.md — ReviewColumn (collapse/localStorage/inline states) + Board.tsx wiring + human-verify checkpoint
@@ -127,7 +127,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 8. tmux Shells — Spawn & Detach Lifecycle | v1.2 | 4/4 | Complete | 2026-06-13 |
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 5/5 | Complete | 2026-06-13 |
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
-| 11. PR Review Column | v1.3 | 0/4 | Planned     | - |
+| 11. PR Review Column | v1.3 | 1/4 | In Progress|  |
 | 12. Open-a-Review | v1.3 | 0/? | Not started | - |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 0/? | Not started | - |
 
