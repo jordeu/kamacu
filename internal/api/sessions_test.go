@@ -745,6 +745,95 @@ func TestSessionTmuxSpawnHappyPath(t *testing.T) {
 	awaitHasSession(t, c, name2, false)
 }
 
+// TestSessionTmuxReattach is TMUX-05 / D-88 at the HTTP layer: a persisted
+// tmux_sessions row whose tmux session survived a restart reattaches by name
+// (new-session -A attach-or-create) without minting a duplicate row, returning
+// a REAL in-memory session the WS handler can attach to. Skip-guarded on tmux
+// availability following the existing convention.
+func TestSessionTmuxReattach(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-reattach-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, mgr, db := newTmuxSessionServer(t, c)
+	id, wtPath := worktreeTask(t, srv, "Survivor Tab")
+
+	// Simulate the post-restart state: a persisted row plus a still-running
+	// tmux session under that exact name (the survivor), but NO in-memory
+	// session — exactly what reconcile would surface as orphaned.
+	name := fmt.Sprintf("kangent-%d-1", id)
+	if _, err := db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, 1, ?, 'Bash 1')`, id, name); err != nil {
+		t.Fatalf("seed tmux_sessions row: %v", err)
+	}
+	// Detached create so the session outlives this command (the "survivor").
+	detach := append(c.BaseArgs(), "new-session", "-d", "-s", name, "-c", wtPath)
+	if err := exec.Command("tmux", detach...).Run(); err != nil {
+		t.Fatalf("seed surviving tmux session: %v", err)
+	}
+	awaitHasSession(t, c, name, true)
+
+	// The reattach POST reuses the persisted name; no new row is minted.
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions",
+		map[string]any{"task_id": id, "reattach_tmux_name": name})
+	if status != http.StatusCreated {
+		t.Fatalf("reattach: status = %d, want 201; body=%v", status, body)
+	}
+	if body["kind"] != "bash" {
+		t.Errorf("kind = %q, want %q (indistinguishable from a plain bash tab)", body["kind"], "bash")
+	}
+	// A REAL in-memory session the WS layer can attach to (mgr.Get must find it).
+	sid, _ := body["id"].(string)
+	if sid == "" {
+		t.Fatalf("reattach returned empty id; body=%v", body)
+	}
+	if _, ok := mgr.Get(sid); !ok {
+		t.Errorf("reattach session %q not in manager — WS could not attach", sid)
+	}
+
+	// No duplicate row: still exactly one row for this name.
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions WHERE name = ?`, name).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("tmux_sessions rows for %q = %d, want 1 (no mint on reattach)", name, count)
+	}
+
+	// Reattaching to a name that has no row → 404 honest copy.
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions",
+		map[string]any{"task_id": id, "reattach_tmux_name": fmt.Sprintf("kangent-%d-99", id)})
+	if status != http.StatusNotFound {
+		t.Fatalf("reattach unknown name: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "no session to reattach" {
+		t.Errorf("error = %q, want %q", body["error"], "no session to reattach")
+	}
+
+	// Clean up the in-memory session before the harness tears down.
+	if s, ok := mgr.Get(sid); ok {
+		s.Stop()
+	}
+	awaitHasSession(t, c, name, false)
+}
+
+// TestSessionTmuxReattachRejectsAgent is the bash-only guard: a reattach
+// request carrying kind=agent is a 400 — reattach reconnects a bash tmux tab,
+// never an agent. tmux-independent (the guard fires before any tmux work).
+func TestSessionTmuxReattachRejectsAgent(t *testing.T) {
+	srv, _, _ := newTmuxSessionServer(t, tmux.Client{Socket: "ktest-unused", ConfPath: "/dev/null"})
+	id, _ := worktreeTask(t, srv, "Agent Reattach")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions",
+		map[string]any{"task_id": id, "kind": "agent", "reattach_tmux_name": "kangent-1-1"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("agent reattach: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != "reattach requires a bash session" {
+		t.Errorf("error = %q, want %q", body["error"], "reattach requires a bash session")
+	}
+}
+
 // TestSessionTmuxSpawnMissingBinaryHTTP is D-84 end-to-end: the shell setting
 // stored as tmux (raw SQL — simulating "stored earlier, binary removed
 // later"; Set would re-validate and reject) and tmux gone from PATH yields an

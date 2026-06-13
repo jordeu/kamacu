@@ -151,6 +151,12 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		TaskID int64  `json:"task_id"`
 		Kind   string `json:"kind"`
 		Resume bool   `json:"resume"` // RCVR-02: resume the task's stored claude session (agent-only)
+		// ReattachTmuxName, when set, reattaches to an EXISTING persisted tmux
+		// session by name instead of minting a new one (TMUX-05, D-88). The
+		// frontend fires it for a restored orphaned entry; new-session -A is
+		// attach-or-create, so spawning with the surviving name reconnects
+		// losslessly. Bash-only; never mints/inserts a row.
+		ReattachTmuxName string `json:"reattach_tmux_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -169,6 +175,20 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if req.Resume && kind != session.KindAgent {
 		writeError(w, http.StatusBadRequest, "resume requires kind agent")
 		return
+	}
+	// Reattach is a bash-only variant: it reconnects to a surviving tmux
+	// session, which agents never use. Validate eagerly so the error copy is
+	// crisp before any DB work.
+	reattach := req.ReattachTmuxName != ""
+	if reattach {
+		if kind == session.KindAgent {
+			writeError(w, http.StatusBadRequest, "reattach requires a bash session")
+			return
+		}
+		if req.TaskID <= 0 {
+			writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
+			return
+		}
 	}
 	// Agents always run in a task worktree: no task means no worktree — the
 	// same gate (and copy) as a worktree-less task.
@@ -233,6 +253,25 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		opts.ExtraArgs = settings.Tokenize(raw)
+	} else if reattach {
+		// Reattach variant (TMUX-05, D-88): reconnect to a surviving tmux row by
+		// name instead of minting a new one. The worktree query above already set
+		// opts.Cwd/TaskID (and rejected a missing worktree with 409 "task has no
+		// worktree"). Verify the row belongs to THIS task so a client can never
+		// reattach to an arbitrary name, then reuse the persisted name — no
+		// mint, no INSERT (the row already exists; MAX(n)+1 stays correct because
+		// it persists). Spawn runs new-session -A against the live session.
+		var label string
+		err := h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&label)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "no session to reattach")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "couldn't start a session")
+			return
+		}
+		opts.TmuxName = req.ReattachTmuxName
 	} else {
 		// Covers task bash tabs AND the unscoped /terminal dev spawn — one
 		// code path (SHELL-02).
@@ -273,8 +312,11 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// Spawn's stat pre-check covers a vanished worktree dir → same 500 path.
 	sess, err := h.mgr.Spawn(opts)
 	if err != nil {
-		if opts.TmuxName != "" {
-			// release the reserved n — the name was never used
+		// Release the reserved n ONLY on a fresh spawn — the name was never
+		// used. A reattach row is a pre-existing survivor, NOT a freshly
+		// reserved n: never delete it on a transient spawn failure (D-89 owns
+		// its eventual GC when the underlying tmux session is conclusively dead).
+		if opts.TmuxName != "" && !reattach {
 			if _, derr := h.db.Exec(`DELETE FROM tmux_sessions WHERE name = ?`, opts.TmuxName); derr != nil {
 				slog.Warn("releasing tmux session row", "name", opts.TmuxName, "error", derr)
 			}
