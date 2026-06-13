@@ -19,6 +19,7 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 	"kangent/internal/ws"
 )
@@ -67,7 +68,7 @@ func newAgentIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
-	SessionRoutes(mux, mgr, db)
+	SessionRoutes(mux, mgr, db, tmux.Client{})
 	WorktreeRoutes(mux, db, wt, mgr)
 	HookRoutes(mux, mgr, agentLifecycleToken)
 	AgentRoutes(mux, mgr, db)

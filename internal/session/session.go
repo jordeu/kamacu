@@ -54,6 +54,16 @@ type Info struct {
 	// Agent-only fields (kind == "agent").
 	AgentStatus   string `json:"agentStatus,omitempty"`   // working | idle | waiting | exited
 	StopRequested bool   `json:"stopRequested,omitempty"` // server-initiated Stop (exit 143 renders gray, not red)
+
+	// Orphaned restored-tmux fields (TMUX-05, D-88). These are NOT produced by
+	// any live Session — the sessions REST handler synthesizes them from
+	// surviving tmux_sessions rows after a Kangent restart (ID is ""). Orphaned
+	// marks "this row needs a one-shot reattach spawn"; TmuxName carries the
+	// persisted session name the frontend reattaches against. Both stay zero on
+	// every real in-memory session, so the wire shape is unchanged for live
+	// sessions and tmux stays invisible (D-77).
+	Orphaned bool   `json:"orphaned,omitempty"`
+	TmuxName string `json:"tmuxName,omitempty"`
 }
 
 // Session is a single shell running on its own PTY. The PTY's lifetime is

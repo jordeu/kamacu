@@ -9,16 +9,20 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"kangent/internal/session"
 	"kangent/internal/settings"
+	"kangent/internal/tmux"
 )
 
-// SessionRoutes registers terminal session endpoints on mux. Sessions remain
-// memory-only this phase; db is consulted only to resolve a task's worktree
-// path when a spawn is task-scoped (TERM-04).
-func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB) {
-	s := &sessionHandlers{mgr: mgr, db: db, globRoot: defaultTranscriptGlobRoot()}
+// SessionRoutes registers terminal session endpoints on mux. db is consulted to
+// resolve a task's worktree path on a task-scoped spawn (TERM-04) and to
+// reconcile surviving tmux_sessions rows after a restart (TMUX-05). tmuxClient
+// drives the has-session liveness probe that decides which persisted rows are
+// post-restart survivors.
+func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxClient tmux.Client) {
+	s := &sessionHandlers{mgr: mgr, db: db, globRoot: defaultTranscriptGlobRoot(), tmuxClient: tmuxClient}
 	mux.HandleFunc("GET /api/sessions", s.list)
 	mux.HandleFunc("POST /api/sessions", s.create)
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
@@ -26,9 +30,10 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB) {
 }
 
 type sessionHandlers struct {
-	mgr      *session.Manager
-	db       *sql.DB
-	globRoot string // ~/.claude/projects; tests inject a temp dir for resume validation
+	mgr        *session.Manager
+	db         *sql.DB
+	globRoot   string      // ~/.claude/projects; tests inject a temp dir for resume validation
+	tmuxClient tmux.Client // socket/config for the TMUX-05 has-session reconcile probe
 }
 
 // list handles GET /api/sessions — newest first, JSON [] when empty.
@@ -45,11 +50,93 @@ func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		infos = h.mgr.ListByTask(id)
+		// TMUX-05 restart reconcile (D-88), mirroring the agents.go two-pass:
+		// the manager-derived pass above is the live in-memory sessions; this
+		// DB-derived pass appends one entry per surviving tmux_sessions row that
+		// is alive per has-session but has NO live in-memory session — a
+		// post-restart survivor. Dead rows are lazily GC'd (D-89) and never
+		// surface. Scoped to task lists only: unscoped dev lists have no rows.
+		infos = h.reconcileTmux(r, id, infos)
 	}
 	if infos == nil {
 		infos = []session.Info{}
 	}
 	writeJSON(w, http.StatusOK, infos)
+}
+
+// reconcileTmux appends orphaned (restored) tmux survivor entries to infos for
+// the given task and lazily GCs rows whose tmux session died while Kangent was
+// down (D-89). A row is a survivor iff (a) NO live in-memory session is bound to
+// its name (else it is already in infos) AND (b) tmux has-session reports it
+// alive. A row whose probe is conclusively dead (exit 1) is DELETEd; an
+// inconclusive probe (tmux binary broken/hung — Pitfall 6) leaves the row
+// untouched for a later poll and surfaces nothing. A query failure degrades to
+// the live-only list rather than failing the whole request.
+func (h *sessionHandlers) reconcileTmux(r *http.Request, taskID int64, infos []session.Info) []session.Info {
+	rows, err := h.db.Query(`SELECT name, label, created_at FROM tmux_sessions WHERE task_id = ?`, taskID)
+	if err != nil {
+		slog.Warn("reconcile tmux sessions: query", "task", taskID, "error", err)
+		return infos
+	}
+	type row struct {
+		name, label, createdAt string
+	}
+	var candidates []row
+	for rows.Next() {
+		var rw row
+		if err := rows.Scan(&rw.name, &rw.label, &rw.createdAt); err != nil {
+			rows.Close()
+			slog.Warn("reconcile tmux sessions: scan", "task", taskID, "error", err)
+			return infos
+		}
+		candidates = append(candidates, rw)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		slog.Warn("reconcile tmux sessions: rows", "task", taskID, "error", err)
+		return infos
+	}
+	rows.Close()
+
+	for _, rw := range candidates {
+		// A live in-memory session for this name is already in infos as a normal
+		// running bash entry — skip, it is no survivor.
+		if h.mgr.HasLiveTmux(rw.name) {
+			continue
+		}
+		alive, err := h.tmuxClient.HasSession(r.Context(), rw.name)
+		switch {
+		case err != nil:
+			// Inconclusive probe (tmux missing/hung): never GC on an honest
+			// unknown (Pitfall 6); leave the row, surface nothing.
+			continue
+		case alive:
+			label := rw.label
+			if label == "" {
+				label = "Bash ?"
+			}
+			created, perr := time.Parse(time.RFC3339, rw.createdAt)
+			if perr != nil {
+				created = time.Now()
+			}
+			infos = append(infos, session.Info{
+				Label:     label,
+				Status:    session.StatusRunning,
+				Kind:      session.KindBash,
+				TaskID:    taskID,
+				CreatedAt: created,
+				Orphaned:  true,
+				TmuxName:  rw.name,
+			})
+		default:
+			// Conclusively dead (exit 1): the session died while Kangent was
+			// down — lazy GC the row (D-89), warn-only on failure.
+			if _, derr := h.db.Exec(`DELETE FROM tmux_sessions WHERE name = ?`, rw.name); derr != nil {
+				slog.Warn("reconcile tmux sessions: GC dead row", "name", rw.name, "error", derr)
+			}
+		}
+	}
+	return infos
 }
 
 // create handles POST /api/sessions — spawns a bash session, or with

@@ -111,11 +111,12 @@ func main() {
 		Token:     hookToken,
 		ClaudeBin: *claudeBin,
 	})
-	mgr.SetTmuxClient(tmux.Client{Socket: tmux.DefaultSocket, ConfPath: tmuxConf})
+	tmuxClient := tmux.Client{Socket: tmux.DefaultSocket, ConfPath: tmuxConf}
+	mgr.SetTmuxClient(tmuxClient)
 
 	mux := http.NewServeMux()
 	api.Routes(mux, db, wtSvc, mgr)
-	api.SessionRoutes(mux, mgr, db)
+	api.SessionRoutes(mux, mgr, db, tmuxClient)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr)
 	api.DiffRoutes(mux, db, wtSvc)
 	api.HookRoutes(mux, mgr, hookToken)

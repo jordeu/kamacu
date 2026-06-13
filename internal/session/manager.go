@@ -315,6 +315,23 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	return s, nil
 }
 
+// HasLiveTmux reports whether any RUNNING in-memory session is bound to the
+// given tmux session name. The sessions REST handler uses it to decide whether
+// a persisted tmux_sessions row is already represented by a live manager entry
+// (skip it) or is a post-restart survivor that needs an orphaned reattach entry
+// (TMUX-05). An exited tmux session never counts as live — its row is either
+// reaped or a real survivor probed via has-session.
+func (m *Manager) HasLiveTmux(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.sessions {
+		if s.tmuxName == name && s.Info().Status == StatusRunning {
+			return true
+		}
+	}
+	return false
+}
+
 // Get returns the session with the given ID.
 func (m *Manager) Get(id string) (*Session, bool) {
 	m.mu.Lock()

@@ -40,7 +40,7 @@ func newSessionServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	t.Cleanup(func() { db.Close() })
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	SessionRoutes(mux, mgr, db)
+	SessionRoutes(mux, mgr, db, tmux.Client{})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() {
@@ -87,7 +87,7 @@ func newTaskSessionServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
-	SessionRoutes(mux, mgr, db)
+	SessionRoutes(mux, mgr, db, tmux.Client{})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()
@@ -615,7 +615,7 @@ func newTmuxSessionServer(t *testing.T, c tmux.Client) (*httptest.Server, *sessi
 	mgr.SetTmuxClient(c)
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
-	SessionRoutes(mux, mgr, db)
+	SessionRoutes(mux, mgr, db, c)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()

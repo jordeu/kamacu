@@ -20,6 +20,7 @@ import (
 	"kangent/internal/api"
 	"kangent/internal/session"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/ws"
 )
 
@@ -37,7 +38,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	t.Cleanup(func() { db.Close() })
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	api.SessionRoutes(mux, mgr, db)
+	api.SessionRoutes(mux, mgr, db, tmux.Client{})
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

@@ -15,6 +15,7 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
@@ -46,7 +47,7 @@ func newAgentServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB) 
 	})
 	mux := http.NewServeMux()
 	Routes(mux, db, wt, mgr)
-	SessionRoutes(mux, mgr, db)
+	SessionRoutes(mux, mgr, db, tmux.Client{})
 	AgentRoutes(mux, mgr, db)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
