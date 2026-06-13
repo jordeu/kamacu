@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 Phase: 11
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-06-13 — Completed quick task 260613-osu: verify_state advisory on GitHub repo link
+Last activity: 2026-06-13 — Completed quick task 260613-ph5: mandatory (hard-block) GitHub repo-link validation
 
 Progress: [████████░░] 80% (4/5 plans)
 
@@ -119,10 +119,11 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260613-osu | Warn when a linked GitHub repo cannot be verified (surface verify_state) — completes GHPRJ-03 soft-save-with-warning | 2026-06-13 | 41f3d50 | [260613-osu-warn-when-a-linked-github-repo-cannot-be](./quick/260613-osu-warn-when-a-linked-github-repo-cannot-be/) |
+| 260613-ph5 | Make GitHub repo-link validation MANDATORY (hard-block invalid repos with highlighted error) — supersedes 260613-osu's soft verify_state advisory; reverses D-11 for the repo-link UX per user decision | 2026-06-13 | 9ea0df6 | [260613-ph5-make-github-repo-link-validation-mandato](./quick/260613-ph5-make-github-repo-link-validation-mandato/) |
 
 ## Session Continuity
 
 Last session: 2026-06-13T15:33:00.370Z
-Stopped at: Quick task 260613-osu (verify_state advisory) complete
+Stopped at: Quick task 260613-ph5 (mandatory repo-link validation) complete
 Resume file: None
 Next: `/gsd:discuss-phase 11`
