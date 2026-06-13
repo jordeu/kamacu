@@ -36,7 +36,7 @@ Full details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
 - [x] **Phase 7: Claude Quota Indicator** - Compact threshold-colored quota bar in the board/task headers with an all-windows hover popup, backed by a cached, backoff-protected server proxy of the OAuth usage endpoint
 - [x] **Phase 8: tmux Shells — Spawn & Detach Lifecycle** - "tmux" shell option spawning attach-or-create sessions on a dedicated socket — invisible-tmux tabs with kill-on-close parity, exit-vs-detach discrimination, and a regression-guarded shared stop path
-- [ ] **Phase 9: tmux Restart Resume & Cleanup Integration** - tmux sessions survive Kangent restarts and reattach automatically and invisibly when the task is reopened (no Resume button — D-88), cleanup gates count and kill them so no shell is ever orphaned, and a Done-TTL reaper kills idle sessions on finished tasks
+- [x] **Phase 9: tmux Restart Resume & Cleanup Integration** - tmux sessions survive Kangent restarts and reattach automatically and invisibly when the task is reopened (no Resume button — D-88), cleanup gates count and kill them so no shell is ever orphaned, and a Done-TTL reaper kills idle sessions on finished tasks
 
 ## Phase Details
 
@@ -129,7 +129,7 @@ Phases execute in numeric order: 7 → 8 → 9 (Phase 7 is independent of 8–9 
 | 6. Settings & Polish | v1.1 | 4/4 | Complete | 2026-06-11 |
 | 7. Claude Quota Indicator | v1.2 | 3/3 | Complete | 2026-06-12 |
 | 8. tmux Shells — Spawn & Detach Lifecycle | v1.2 | 4/4 | Complete | 2026-06-13 |
-| 9. tmux Restart Resume & Cleanup Integration | v1.2 | 0/5 | Not started | - |
+| 9. tmux Restart Resume & Cleanup Integration | v1.2 | 5/5 | Complete | 2026-06-13 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
