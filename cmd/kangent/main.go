@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"kangent/internal/api"
+	"kangent/internal/github"
 	"kangent/internal/quota"
 	"kangent/internal/reaper"
 	"kangent/internal/session"
@@ -127,6 +128,8 @@ func main() {
 	api.AgentRoutes(mux, mgr, db)
 	quotaSvc := quota.New(quota.Config{ClaudeBin: *claudeBin})
 	api.UsageRoutes(mux, quotaSvc)
+	ghSvc := github.New(github.Config{})
+	api.PullRequestRoutes(mux, db, ghSvc)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
