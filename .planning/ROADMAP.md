@@ -7,14 +7,14 @@
   2. If a tmux session died while Kangent was down, the reopened task shows no tab for it and its `tmux_sessions` row is lazily GC'd — no exited stub (D-89) (TMUX-05, TMUX-06 boundary)
   3. Task/worktree cleanup gates count live detached tmux sessions into the single "N sessions running" number (no tmux wording) and surface them in the cleanup dialog; confirmed cleanup or task deletion kills the task's tmux sessions before worktree removal, leaving zero `kangent-*` sessions behind; a once-at-startup orphan sweep reconciles offline deletes (TMUX-08)
   4. Sessions of tasks in Done — bash, tmux, AND agent — are killed after a configurable TTL (global setting, default 24h, clocked from entering Done; leaving Done cancels; 0/never disables); the agent stays resumable (PTY killed, transcript kept); worktrees are never auto-removed (REAP-01, added 2026-06-12)
-**Plans**: 5 plans (2 waves)
+**Plans**: 5 plans (3 waves)
 
 Plans:
 - [ ] 09-01-PLAN.md — tmux ListSessions verb (D-94) + migration 00006 per-status timestamps with done_at backfill (D-90) [wave 1]
 - [ ] 09-02-PLAN.md — done_session_ttl setting + ParseDoneSessionTTL helper + settings-page field (D-91) [wave 1]
 - [ ] 09-03-PLAN.md — TMUX-05 restart reattach: DB-derived live-tmux session-list entries + reattach spawn variant + invisible frontend auto-reattach (D-88/D-89) [wave 1]
 - [ ] 09-04-PLAN.md — TMUX-08 cleanup: fold live-tmux into the count + kill before remove/delete + startup orphan sweep (D-92/D-93) [wave 2]
-- [ ] 09-05-PLAN.md — REAP-01 Done-TTL reaper: move status-timestamp stamping + reaper ticker goroutine + startup wiring (D-90/D-95/D-96) [wave 2]
+- [ ] 09-05-PLAN.md — REAP-01 Done-TTL reaper: move status-timestamp stamping + reaper ticker goroutine + startup wiring (D-90/D-95/D-96) [wave 3]
 
 **Phase notes:**
 - TMUX-05 reattach is AUTO and INVISIBLE (D-88) — diverges from the Phase 5 agent Resume because tmux reattach is cheap/lossless. The WS handler requires a LIVE in-memory session (`mgr.Get(id)`), so a DB-derived ghost cannot WS-attach directly: `GET /api/sessions` reports surviving rows as `orphaned` entries and the frontend fires one reattach spawn (`new-session -A` attach-or-create) per orphan. Dead-on-restart rows are lazily GC'd (D-89). NO Resume button, NO badge (D-77 invisibility).
