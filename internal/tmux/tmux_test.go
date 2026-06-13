@@ -153,6 +153,45 @@ func TestKillSessionIdempotent(t *testing.T) {
 	}
 }
 
+// --- ListSessions tests (Phase 9 orphan sweep input, D-94) ---
+
+// TestListSessionsReturnsNames creates two sessions and asserts ListSessions
+// enumerates exactly their names (order-insensitive, Empirical Finding 14).
+func TestListSessionsReturnsNames(t *testing.T) {
+	c := newTestClient(t)
+	newDetachedSession(t, c, "alpha")
+	newDetachedSession(t, c, "beta")
+
+	got, err := c.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	slices.Sort(got)
+	want := []string{"alpha", "beta"}
+	if !slices.Equal(got, want) {
+		t.Errorf("ListSessions() = %v, want %v", got, want)
+	}
+	// Result never contains an empty string (trimmed, empties dropped).
+	if slices.Contains(got, "") {
+		t.Errorf("ListSessions() contained an empty string: %v", got)
+	}
+}
+
+// TestListSessionsNoServer asserts that exit 1 ("no server running") on a
+// socket whose server was never started is the empty case — nil slice, nil
+// error — NEVER an error (Empirical Finding 5).
+func TestListSessionsNoServer(t *testing.T) {
+	c := newTestClient(t)
+	// Nothing created: the server isn't running on this fresh socket.
+	got, err := c.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions(no server): want nil err, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListSessions(no server) = %v, want empty/nil", got)
+	}
+}
+
 // TestPrefixCollision guards the Empirical Finding 2 trap: WITHOUT "=",
 // tmux prefix-matches session names, so kill-session -t kangent-1-1 could
 // hit kangent-1-10. The "=" exact match must prevent that.
