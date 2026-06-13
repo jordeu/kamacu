@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"kangent/internal/github"
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
@@ -311,6 +312,62 @@ func TestUpdateProjectPartial(t *testing.T) {
 	status, _ = doJSON(t, "PATCH", fmt.Sprintf("%s/api/projects/999999", srv.URL), map[string]any{"name": "x"})
 	if status != http.StatusNotFound {
 		t.Fatalf("bogus id status = %d, want 404", status)
+	}
+}
+
+// TestUpdateProjectVerifyState pins the soft-save-with-warning contract
+// (GHPRJ-03 / D-11): PATCH returns a TRANSIENT verify_state advisory ONLY when
+// a non-empty github_repo was set and gh could not confirm it. The repo-link
+// case branches on github.Available() exactly like TestGithubStatus, so it is
+// green on any host: gh present → `gh repo view <bogus>` exits nonzero →
+// "unverifiable"; gh absent → "no_gh". The description-only and unlink cases
+// must carry NO verify_state field (omitempty), proving non-repo updates and
+// the explicit-"" unlink branch are byte-for-byte identical to today.
+func TestUpdateProjectVerifyState(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	id := createProject(t, srv, gitRepo(t))
+	url := fmt.Sprintf("%s/api/projects/%d", srv.URL, id)
+
+	// 1. A syntactically valid but unconfirmable ref → 200, saved, advisory set.
+	const bogus = "octocat/this-repo-does-not-exist-kangent-test"
+	status, body := doJSON(t, "PATCH", url, map[string]any{"github_repo": bogus})
+	if status != http.StatusOK {
+		t.Fatalf("link bogus repo status = %d, want 200; body=%v", status, body)
+	}
+	if body["github_repo"] != bogus {
+		t.Errorf("github_repo = %v, want %q", body["github_repo"], bogus)
+	}
+	vs, _ := body["verify_state"].(string)
+	want := "unverifiable"
+	if !github.Available() {
+		want = "no_gh"
+	}
+	if vs != want {
+		t.Errorf("verify_state = %q, want %q (github.Available()=%v)", vs, want, github.Available())
+	}
+
+	// 2. description-only PATCH → 200, NO verify_state field (omitempty).
+	status, body = doJSON(t, "PATCH", url, map[string]any{"description": "only desc"})
+	if status != http.StatusOK {
+		t.Fatalf("description-only status = %d, want 200; body=%v", status, body)
+	}
+	if body["description"] != "only desc" {
+		t.Errorf("description = %v, want \"only desc\"", body["description"])
+	}
+	if _, ok := body["verify_state"]; ok {
+		t.Errorf("description-only PATCH carried verify_state = %v, want field ABSENT", body["verify_state"])
+	}
+
+	// 3. explicit unlink (github_repo "") → 200, github_repo null, NO verify_state.
+	status, body = doJSON(t, "PATCH", url, map[string]any{"github_repo": ""})
+	if status != http.StatusOK {
+		t.Fatalf("unlink status = %d, want 200; body=%v", status, body)
+	}
+	if v, ok := body["github_repo"]; !ok || v != nil {
+		t.Errorf("github_repo after unlink = %v (ok=%v), want null", v, ok)
+	}
+	if _, ok := body["verify_state"]; ok {
+		t.Errorf("unlink PATCH carried verify_state = %v, want field ABSENT", body["verify_state"])
 	}
 }
 
