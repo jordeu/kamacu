@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kangent/internal/github"
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
@@ -315,50 +314,60 @@ func TestUpdateProjectPartial(t *testing.T) {
 	}
 }
 
-// TestUpdateProjectVerifyState pins the soft-save-with-warning contract
-// (GHPRJ-03 / D-11): PATCH returns a TRANSIENT verify_state advisory ONLY when
-// a non-empty github_repo was set and gh could not confirm it. The repo-link
-// case branches on github.Available() exactly like TestGithubStatus, so it is
-// green on any host: gh present → `gh repo view <bogus>` exits nonzero →
-// "unverifiable"; gh absent → "no_gh". The description-only and unlink cases
-// must carry NO verify_state field (omitempty), proving non-repo updates and
-// the explicit-"" unlink branch are byte-for-byte identical to today.
-func TestUpdateProjectVerifyState(t *testing.T) {
-	srv, _, _ := newTestServer(t)
+// TestUpdateProjectMandatoryValidation pins the MANDATORY hard-block contract
+// (GHPRJ-03), superseding the soft verify_state advisory: a non-empty
+// github_repo that gh cannot verify is rejected (400) and is NOT persisted,
+// while description-only edits and the explicit-"" unlink never invoke gh and
+// always succeed. Written host-independently — a bogus repo is never verified
+// on any host (gh present → `gh repo view <bogus>` exits nonzero; gh absent →
+// not verified) so the 400 holds either way. The exact error string is NOT
+// asserted because it branches on github.Available(). The valid-repo → 200 path
+// needs authenticated gh + network and is exercised live on this host, mirroring
+// how 10-02 kept tests gh-agnostic.
+func TestUpdateProjectMandatoryValidation(t *testing.T) {
+	srv, db, _ := newTestServer(t)
 	id := createProject(t, srv, gitRepo(t))
 	url := fmt.Sprintf("%s/api/projects/%d", srv.URL, id)
 
-	// 1. A syntactically valid but unconfirmable ref → 200, saved, advisory set.
+	// Seed a link with a syntactically valid ref so we can prove a later
+	// unverifiable PATCH does not clobber it. "owner/name" is syntactically
+	// valid; on this gh host it also won't verify, so seed via the test that
+	// already proves saving works — here we use the canonical owner/name which
+	// the handler will attempt to verify. To keep the seed host-independent we
+	// instead assert on whichever ref the seed leaves persisted.
+	const seedRef = "owner/name"
+	status, _ := doJSON(t, "PATCH", url, map[string]any{"github_repo": seedRef})
+	// On a gh-authenticated host seedRef ("owner/name") may itself be
+	// unverifiable, so this seed PATCH could 400. Only proceed with the
+	// "bad PATCH does not clobber" assertion when the seed actually persisted.
+	seedPersisted := status == http.StatusOK
+
+	// A syntactically valid but unverifiable ref → 400, NOT persisted.
 	const bogus = "octocat/this-repo-does-not-exist-kangent-test"
 	status, body := doJSON(t, "PATCH", url, map[string]any{"github_repo": bogus})
-	if status != http.StatusOK {
-		t.Fatalf("link bogus repo status = %d, want 200; body=%v", status, body)
+	if status != http.StatusBadRequest {
+		t.Fatalf("unverifiable repo status = %d, want 400; body=%v", status, body)
 	}
-	if body["github_repo"] != bogus {
-		t.Errorf("github_repo = %v, want %q", body["github_repo"], bogus)
-	}
-	vs, _ := body["verify_state"].(string)
-	want := "unverifiable"
-	if !github.Available() {
-		want = "no_gh"
-	}
-	if vs != want {
-		t.Errorf("verify_state = %q, want %q (github.Available()=%v)", vs, want, github.Available())
+	if seedPersisted {
+		// The rejected PATCH must leave the previously-linked ref untouched.
+		want := seedRef
+		assertDBProject(t, db, id, "", &want)
+	} else {
+		// The seed itself was rejected, so the column is still NULL; the bogus
+		// PATCH must not have created a link either.
+		assertDBProject(t, db, id, "", nil)
 	}
 
-	// 2. description-only PATCH → 200, NO verify_state field (omitempty).
-	status, body = doJSON(t, "PATCH", url, map[string]any{"description": "only desc"})
+	// description-only PATCH → 200, saved, never invokes gh.
+	status, body = doJSON(t, "PATCH", url, map[string]any{"description": "hello"})
 	if status != http.StatusOK {
 		t.Fatalf("description-only status = %d, want 200; body=%v", status, body)
 	}
-	if body["description"] != "only desc" {
-		t.Errorf("description = %v, want \"only desc\"", body["description"])
-	}
-	if _, ok := body["verify_state"]; ok {
-		t.Errorf("description-only PATCH carried verify_state = %v, want field ABSENT", body["verify_state"])
+	if body["description"] != "hello" {
+		t.Errorf("description = %v, want \"hello\"", body["description"])
 	}
 
-	// 3. explicit unlink (github_repo "") → 200, github_repo null, NO verify_state.
+	// explicit unlink (github_repo "") → 200, github_repo NULL, no validation.
 	status, body = doJSON(t, "PATCH", url, map[string]any{"github_repo": ""})
 	if status != http.StatusOK {
 		t.Fatalf("unlink status = %d, want 200; body=%v", status, body)
@@ -366,9 +375,7 @@ func TestUpdateProjectVerifyState(t *testing.T) {
 	if v, ok := body["github_repo"]; !ok || v != nil {
 		t.Errorf("github_repo after unlink = %v (ok=%v), want null", v, ok)
 	}
-	if _, ok := body["verify_state"]; ok {
-		t.Errorf("unlink PATCH carried verify_state = %v, want field ABSENT", body["verify_state"])
-	}
+	assertDBProject(t, db, id, "hello", nil)
 }
 
 // assertDBProject asserts the persisted description and github_repo for a project.
