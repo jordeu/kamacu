@@ -179,6 +179,30 @@ func TestValidateDoneSessionTTL(t *testing.T) {
 	}
 }
 
+// TestValidateGithubIntegration covers the GHSET-01/D-01 global toggle:
+// only the lowercase literals "on"/"off" validate; anything else returns the
+// canonical UI-SPEC copy "Choose on or off." (case-sensitive, like the other
+// validator errors).
+func TestValidateGithubIntegration(t *testing.T) {
+	const canonical = "Choose on or off."
+	tests := []struct {
+		value   string
+		wantErr string // "" means valid
+	}{
+		{"on", ""},
+		{"off", ""},
+		{"yes", canonical},
+		{"", canonical},
+		{"ON", canonical}, // case-sensitive: only lowercase literals accepted
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			err := settings.Validate(settings.KeyGithubIntegration, tt.value)
+			checkErrString(t, err, tt.wantErr)
+		})
+	}
+}
+
 func TestValidateAgentExtraParamsIsPassThrough(t *testing.T) {
 	for _, v := range []string{"", "--dangerously-skip-permissions", "anything at all \"even unclosed", "--settings x"} {
 		if err := settings.Validate(settings.KeyAgentExtraParams, v); err != nil {
