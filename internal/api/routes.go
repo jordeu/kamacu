@@ -22,6 +22,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.M
 	mux.HandleFunc("POST /api/projects", p.create)
 	mux.HandleFunc("PATCH /api/projects/{id}", p.update)
 	mux.HandleFunc("GET /api/projects/{id}/github-origin", p.githubOrigin)
+	mux.HandleFunc("GET /api/github/status", githubStatus)
 	mux.HandleFunc("DELETE /api/projects/{id}", p.delete)
 	mux.HandleFunc("GET /api/projects/{id}/tasks", t.listByProject)
 	mux.HandleFunc("POST /api/projects/{id}/tasks", t.create)
