@@ -46,7 +46,7 @@ type recoveryHarness struct {
 func newRecoveryProcess(t *testing.T, mgr *session.Manager, db *sql.DB, wt *worktree.Service, globRoot string) recoveryHarness {
 	t.Helper()
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr)
+	Routes(mux, db, wt, mgr, tmux.Client{})
 
 	// Session routes with the injected glob root (resume validation).
 	sh := &sessionHandlers{mgr: mgr, db: db, globRoot: globRoot}

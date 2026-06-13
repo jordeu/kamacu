@@ -16,6 +16,7 @@ import (
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
@@ -42,7 +43,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *sql.DB, string) {
 		t.Fatalf("seed worktree_base: %v", err)
 	}
 	mux := http.NewServeMux()
-	Routes(mux, db, worktree.NewService(wtDir), session.NewManager())
+	Routes(mux, db, worktree.NewService(wtDir), session.NewManager(), tmux.Client{})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()

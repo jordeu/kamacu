@@ -51,7 +51,7 @@ func newWorktreeServerWithTmux(t *testing.T, c tmux.Client) (*httptest.Server, *
 	mgr := session.NewManager()
 	mgr.SetTmuxClient(c)
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr)
+	Routes(mux, db, wt, mgr, tmux.Client{})
 	WorktreeRoutes(mux, db, wt, mgr, c)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {

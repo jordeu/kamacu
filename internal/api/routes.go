@@ -5,15 +5,19 @@ import (
 	"net/http"
 
 	"kangent/internal/session"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
 // Routes registers all REST API endpoints on mux. wt provisions per-task
 // worktrees during task creation (GIT-01); mgr lets task deletion stop the
 // task's sessions before the row goes (D-42's one consistent rule).
-func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager) {
+// tmuxClient lets task deletion kill the task's live tmux sessions before the
+// row delete (D-93) — StopAllForTask only reaches in-memory sessions, so a
+// detached tmux survivor needs a direct kill.
+func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client) {
 	p := &projectHandlers{db: db}
-	t := &taskHandlers{db: db, wt: wt, mgr: mgr}
+	t := &taskHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	mux.HandleFunc("GET /api/projects", p.list)
 	mux.HandleFunc("POST /api/projects", p.create)
 	mux.HandleFunc("PATCH /api/projects/{id}", p.update)

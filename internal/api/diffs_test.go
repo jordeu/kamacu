@@ -41,7 +41,7 @@ func newDiffServer(t *testing.T) (*httptest.Server, *worktree.Service, *session.
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr)
+	Routes(mux, db, wt, mgr, tmux.Client{})
 	WorktreeRoutes(mux, db, wt, mgr, tmux.Client{})
 	DiffRoutes(mux, db, wt)
 	srv := httptest.NewServer(mux)

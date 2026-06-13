@@ -12,6 +12,7 @@ import (
 
 	"kangent/internal/session"
 	"kangent/internal/settings"
+	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
 
@@ -44,9 +45,10 @@ var validStatuses = map[string]bool{
 }
 
 type taskHandlers struct {
-	db  *sql.DB
-	wt  *worktree.Service
-	mgr *session.Manager
+	db         *sql.DB
+	wt         *worktree.Service
+	mgr        *session.Manager
+	tmuxClient tmux.Client
 }
 
 const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error`
@@ -490,6 +492,27 @@ func (h *taskHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.mgr.StopAllForTask(id)
+	// Kill the task's live tmux sessions BEFORE deleting its rows (D-93).
+	// StopAllForTask only reaches in-memory sessions; a detached tmux survivor
+	// (no in-memory session) would otherwise be orphaned cwd'd inside the
+	// worktree. Order is load-bearing: kill -> delete tmux_sessions rows ->
+	// delete task row. tmux_sessions has NO ON DELETE CASCADE (migration 00005)
+	// and SQLite FKs default off, so the rows are removed explicitly — kill is
+	// the correct action (do not add cascade). KillSession is idempotent; a
+	// tmux failure is warn-only and never blocks the delete (Pitfall 5).
+	ctx := r.Context()
+	if names, err := h.taskTmuxNames(ctx, id); err == nil {
+		for _, name := range names {
+			if err := h.tmuxClient.KillSession(ctx, name); err != nil {
+				slog.Warn("killing tmux session before task delete", "task", id, "name", name, "error", err)
+			}
+		}
+	} else {
+		slog.Warn("listing tmux_sessions for task delete", "task", id, "error", err)
+	}
+	if _, err := h.db.ExecContext(ctx, `DELETE FROM tmux_sessions WHERE task_id = ?`, id); err != nil {
+		slog.Warn("deleting tmux_sessions rows on task delete", "task", id, "error", err)
+	}
 	res, err := h.db.Exec(`DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -500,4 +523,23 @@ func (h *taskHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// taskTmuxNames returns the persisted tmux session names of the task (all rows,
+// alive or not — the kill is idempotent so a dead name is a harmless no-op).
+func (h *taskHandlers) taskTmuxNames(ctx context.Context, taskID int64) ([]string, error) {
+	rows, err := h.db.QueryContext(ctx, `SELECT name FROM tmux_sessions WHERE task_id = ?`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }

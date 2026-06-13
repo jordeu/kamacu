@@ -41,7 +41,7 @@ func newIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr)
+	Routes(mux, db, wt, mgr, tmux.Client{})
 	SessionRoutes(mux, mgr, db, tmux.Client{})
 	WorktreeRoutes(mux, db, wt, mgr, tmux.Client{})
 	srv := httptest.NewServer(mux)

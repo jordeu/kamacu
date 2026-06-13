@@ -86,7 +86,7 @@ func newTaskSessionServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	wt := worktree.NewService(wtDir)
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr)
+	Routes(mux, db, wt, mgr, tmux.Client{})
 	SessionRoutes(mux, mgr, db, tmux.Client{})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
@@ -301,7 +301,7 @@ func newResumeServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB,
 	t.Setenv("FAKE_CLAUDE_ARGS_FILE", argsFile)
 
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr) // includes SettingsRoutes — spawn tests PUT settings
+	Routes(mux, db, wt, mgr, tmux.Client{}) // includes SettingsRoutes — spawn tests PUT settings
 	// Session routes with the injected glob root (SessionRoutes signature is
 	// unchanged in production; tests construct the handler directly).
 	s := &sessionHandlers{mgr: mgr, db: db, globRoot: globRoot}
@@ -614,7 +614,9 @@ func newTmuxSessionServer(t *testing.T, c tmux.Client) (*httptest.Server, *sessi
 	mgr := session.NewManager()
 	mgr.SetTmuxClient(c)
 	mux := http.NewServeMux()
-	Routes(mux, db, wt, mgr)
+	// Thread the SAME tmux client through Routes so task-delete can kill the
+	// task's tmux sessions (D-93), mirroring production's single hoisted client.
+	Routes(mux, db, wt, mgr, c)
 	SessionRoutes(mux, mgr, db, c)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
@@ -815,6 +817,50 @@ func TestSessionTmuxReattach(t *testing.T) {
 		s.Stop()
 	}
 	awaitHasSession(t, c, name, false)
+}
+
+// TestTaskDeleteKillsDetachedTmux is TMUX-08 / D-93 at the HTTP layer: deleting
+// a task kills its live DETACHED tmux session (a survivor with no in-memory
+// session — StopAllForTask cannot see it) and removes its tmux_sessions rows
+// BEFORE the task row delete, so no orphan shell stays cwd'd in the doomed
+// worktree. Skip-guarded on tmux availability per the package convention.
+func TestTaskDeleteKillsDetachedTmux(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-taskdel-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, _, db := newTmuxSessionServer(t, c)
+	id, wtPath := worktreeTask(t, srv, "Doomed With Shell")
+
+	// Persisted row + a still-running DETACHED tmux session under that name,
+	// but NO in-memory session — exactly a leave/restart survivor the task
+	// delete must reach directly.
+	name := fmt.Sprintf("kangent-%d-1", id)
+	if _, err := db.Exec(
+		`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, 1, ?, 'Bash 1')`, id, name); err != nil {
+		t.Fatalf("seed tmux_sessions row: %v", err)
+	}
+	detach := append(c.BaseArgs(), "new-session", "-d", "-s", name, "-c", wtPath)
+	if err := exec.Command("tmux", detach...).Run(); err != nil {
+		t.Fatalf("seed surviving tmux session: %v", err)
+	}
+	awaitHasSession(t, c, name, true)
+
+	status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/tasks/%d", srv.URL, id), nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("task delete: status = %d, want 204; body=%v", status, body)
+	}
+	// The detached tmux session is gone (D-93: kill before row delete).
+	awaitHasSession(t, c, name, false)
+	// Its tmux_sessions rows are removed explicitly (no FK cascade, migration 00005).
+	var rows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions WHERE task_id = ?`, id).Scan(&rows); err != nil {
+		t.Fatalf("count tmux_sessions rows: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("tmux_sessions rows for deleted task = %d, want 0", rows)
+	}
 }
 
 // TestSessionTmuxReattachRejectsAgent is the bash-only guard: a reattach
