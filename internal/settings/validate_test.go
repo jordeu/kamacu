@@ -131,8 +131,8 @@ func TestParseDoneSessionTTL(t *testing.T) {
 		{"0", 0, true, false},     // "0" disables reaping
 		{"never", 0, true, false}, // "never" disables reaping
 		{"  never  ", 0, true, false},
-		{"0s", 0, true, false},   // zero duration can never expire → disabled
-		{"-5m", 0, true, false},  // negative duration can never expire → disabled
+		{"0s", 0, true, false},  // zero duration can never expire → disabled
+		{"-5m", 0, true, false}, // negative duration can never expire → disabled
 		{"banana", 0, false, true},
 	}
 	for _, tt := range tests {
@@ -209,7 +209,7 @@ func TestCheckRefFormat(t *testing.T) {
 		ok   bool
 	}{
 		{"task/fix-login-42", true},
-		{"-42", false},  // leading dash rejected app-side
+		{"-42", false}, // leading dash rejected app-side
 		{"a..b", false},
 		{"a.lock", false},
 		{"a b", false},

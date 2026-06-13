@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // AllowedShells returns the curated shell set (SHELL-01). "tmux" is offered
@@ -44,12 +45,46 @@ func Validate(key, value string) error {
 			}
 		}
 		return errors.New("Unknown shell.")
+	case KeyDoneSessionTTL:
+		// REAP-01/D-91: reject garbage, accept durations and the disable
+		// sentinels. ParseDoneSessionTTL is the single source of truth shared
+		// with the reaper (09-05), so validator and reaper can never disagree
+		// about what "disabled" means — same shape as AllowedShells above.
+		if _, _, err := ParseDoneSessionTTL(value); err != nil {
+			return errors.New("Enter a duration like 24h, 90m, or 'never' to disable.")
+		}
+		return nil
 	case KeyAgentExtraParams:
 		// Pass-through field: validating individual claude flags is explicitly
 		// out of scope (REQUIREMENTS Out of Scope).
 		return nil
 	}
 	return nil
+}
+
+// ParseDoneSessionTTL parses the done_session_ttl setting (REAP-01/D-91) into
+// a reaper window. It is the single source of truth for the disable semantics,
+// shared by Validate (save-time) and the reaper (09-05, read-at-use):
+//
+//   - empty, "0", or "never" → disabled (reaping off)
+//   - a Go-style duration <= 0 → disabled (it can never expire)
+//   - a valid positive duration → that ttl, not disabled
+//   - anything else → a non-nil parse error (rejected at save)
+func ParseDoneSessionTTL(value string) (ttl time.Duration, disabled bool, err error) {
+	v := strings.TrimSpace(value)
+	if v == "" || v == "0" || v == "never" {
+		return 0, true, nil
+	}
+	d, perr := time.ParseDuration(v)
+	if perr != nil {
+		return 0, false, perr
+	}
+	if d <= 0 {
+		// A negative or zero duration can never expire — treat as disabled
+		// rather than reaping everything in Done immediately.
+		return 0, true, nil
+	}
+	return d, false, nil
 }
 
 // validateBranchTemplate applies the MANDATORY check order:

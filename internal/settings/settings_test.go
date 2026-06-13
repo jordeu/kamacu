@@ -29,6 +29,7 @@ func TestDefaultsValues(t *testing.T) {
 		settings.KeyWorktreeBase:     "~/.kangent/worktrees/",
 		settings.KeyShell:            "bash",
 		settings.KeyBranchTemplate:   "task/{slug}-{id}",
+		settings.KeyDoneSessionTTL:   "24h", // REAP-01/D-91
 	}
 	for k, v := range want {
 		if got := settings.Defaults[k]; got != v {
@@ -110,7 +111,7 @@ func TestSetEmptyStringIsPreservedNotDefaulted(t *testing.T) {
 func TestGetAllMergesStoredOverDefaults(t *testing.T) {
 	db := testDB(t)
 
-	// Fresh DB: all four keys present, all defaults.
+	// Fresh DB: every known key present, all defaults.
 	all, err := settings.GetAll(db)
 	if err != nil {
 		t.Fatalf("GetAll: %v", err)

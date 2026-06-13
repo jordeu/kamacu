@@ -17,6 +17,7 @@ const (
 	KeyWorktreeBase     = "worktree_base"
 	KeyShell            = "shell"
 	KeyBranchTemplate   = "branch_template"
+	KeyDoneSessionTTL   = "done_session_ttl"
 )
 
 // Defaults maps each setting key to its code default. Absent row = default.
@@ -28,6 +29,9 @@ var Defaults = map[string]string{
 	KeyWorktreeBase:     "~/.kangent/worktrees/", // WT-01; stored raw, expanded at use
 	KeyShell:            "bash",                  // SHELL-01
 	KeyBranchTemplate:   "task/{slug}-{id}",      // BRANCH-01
+	// REAP-01/D-91: Done-TTL reaper window. Go-style duration; empty/"0"/
+	// "never" disable reaping (see ParseDoneSessionTTL). Read-at-use by 09-05.
+	KeyDoneSessionTTL: "24h",
 }
 
 // Get returns the stored value for key, or the code default when no row
