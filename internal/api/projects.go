@@ -28,6 +28,14 @@ type Project struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
+// projectUpdateResponse is the PATCH response: a Project plus a TRANSIENT,
+// non-persisted verify_state advisory (D-11). omitempty keeps the body
+// byte-for-byte identical to a bare Project whenever verify_state is "".
+type projectUpdateResponse struct {
+	Project
+	VerifyState string `json:"verify_state,omitempty"`
+}
+
 type projectHandlers struct{ db *sql.DB }
 
 // validateRepoPath validates that p is an absolute path to an existing
@@ -176,12 +184,16 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		sets = append(sets, "description = ?")
 		args = append(args, *req.Description)
 	}
+	// repoSet/repoVerified are carried past this block so verify_state can be
+	// computed AFTER scanProject. They stay false on the explicit-"" unlink
+	// branch (where ValidateRepo never runs) and when github_repo is omitted.
+	var repoSet, repoVerified bool
 	if req.GithubRepo != nil {
 		if strings.TrimSpace(*req.GithubRepo) == "" {
 			// Explicit "" unlinks → store NULL.
 			sets = append(sets, "github_repo = NULL")
 		} else {
-			canonical, _, err := github.ValidateRepo(r.Context(), *req.GithubRepo)
+			canonical, verified, err := github.ValidateRepo(r.Context(), *req.GithubRepo)
 			if err != nil {
 				// The ONLY blocking case: a syntactically invalid ref. The row
 				// is left untouched. A soft-unverifiable ref returns no error
@@ -189,6 +201,8 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
+			repoSet = true
+			repoVerified = verified
 			sets = append(sets, "github_repo = ?")
 			args = append(args, canonical)
 		}
@@ -206,7 +220,19 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	// verify_state is a transient, non-persisted advisory (D-11): present ONLY
+	// when a non-empty repo was set and gh could not confirm it. omitempty drops
+	// it (and so the whole field) on a verified hit, an unlink, or a non-repo
+	// PATCH, keeping the body byte-for-byte identical to a bare Project.
+	verifyState := ""
+	if repoSet && !repoVerified {
+		if !github.Available() {
+			verifyState = "no_gh"
+		} else {
+			verifyState = "unverifiable"
+		}
+	}
+	writeJSON(w, http.StatusOK, projectUpdateResponse{Project: p, VerifyState: verifyState})
 }
 
 // githubOrigin handles GET /api/projects/{id}/github-origin — the project
