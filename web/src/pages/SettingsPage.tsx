@@ -36,6 +36,7 @@ const AGENT_HELP = `Appended to every claude spawn, starting with the next Start
 const WORKTREE_HELP = `New task worktrees are created under this directory. Existing worktrees stay where they are.`;
 const SHELL_HELP = `Used when opening a new bash tab.`;
 const BRANCH_HELP = `Tokens: {slug}, {id}, {title}. Applied when a task is created — e.g. task/fix-login-42.`;
+const DONE_TTL_HELP = `Sessions of tasks left in Done are killed after this idle time. Use a duration like 24h or 90m; clear the field or enter never to disable. Worktrees are never removed.`;
 
 export default function SettingsPage() {
   const { data: settings, isLoading, isError, refetch } = useSettings();
@@ -118,6 +119,18 @@ export default function SettingsPage() {
                   `{title}`,
                   `task/fix-login-42`,
                 ])}
+              />
+            </section>
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Cleanup`}</h2>
+              {/* REAP-01/D-91: read-at-use TTL; "never"/empty/0 disable reaping
+                  (the disable copy here mirrors ParseDoneSessionTTL semantics). */}
+              <SettingsField
+                settingKey="done_session_ttl"
+                label={`Done session TTL`}
+                entry={settings.done_session_ttl}
+                mono
+                help={DONE_TTL_HELP}
               />
             </section>
           </div>
