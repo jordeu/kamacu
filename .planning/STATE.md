@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Quota & Resumable Shells
-status: verifying
-stopped_at: Completed 09-05-PLAN.md
-last_updated: "2026-06-13T07:56:19.025Z"
+milestone: v1.3
+milestone_name: GitHub PR Review
+status: defining_requirements
+stopped_at: Milestone v1.3 started
+last_updated: "2026-06-13"
 last_activity: 2026-06-13
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 0
 ---
 
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-11)
+See: .planning/PROJECT.md (updated 2026-06-13)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 09 — tmux-restart-resume-cleanup-integration
+**Current focus:** v1.3 GitHub PR Review — defining requirements
 
 ## Current Position
 
-Phase: 09
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-13
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-13 — Milestone v1.3 started
 
 Progress: [░░░░░░░░░░] 0%
 
