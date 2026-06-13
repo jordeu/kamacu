@@ -285,9 +285,10 @@ func TestUpdateProjectPartial(t *testing.T) {
 	}
 	assertDBProject(t, db, id, "", nil)
 
-	// invalid ref → 400, canonical error, row unchanged. Link first so we can
-	// prove the bad PATCH does not clobber the stored value.
-	status, _ = doJSON(t, "PATCH", url, map[string]any{"github_repo": "owner/name"})
+	// invalid ref → 400, canonical error, row unchanged. Link first (with a
+	// verifiable ref, since linking is now mandatory-verified) so we can prove
+	// the bad PATCH does not clobber the stored value.
+	status, _ = doJSON(t, "PATCH", url, map[string]any{"github_repo": "cli/cli"})
 	if status != http.StatusOK {
 		t.Fatalf("seed link status = %d, want 200", status)
 	}
@@ -298,7 +299,7 @@ func TestUpdateProjectPartial(t *testing.T) {
 	if pb["error"] != "Not a valid repository — use owner/name or a GitHub URL." {
 		t.Errorf("error = %q, want canonical invalid-ref copy", pb["error"])
 	}
-	seeded := "owner/name"
+	seeded := "cli/cli"
 	assertDBProject(t, db, id, "", &seeded) // unchanged by the rejected PATCH
 
 	// empty body → 400 nothing to update.

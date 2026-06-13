@@ -28,14 +28,6 @@ type Project struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
-// projectUpdateResponse is the PATCH response: a Project plus a TRANSIENT,
-// non-persisted verify_state advisory (D-11). omitempty keeps the body
-// byte-for-byte identical to a bare Project whenever verify_state is "".
-type projectUpdateResponse struct {
-	Project
-	VerifyState string `json:"verify_state,omitempty"`
-}
-
 type projectHandlers struct{ db *sql.DB }
 
 // validateRepoPath validates that p is an absolute path to an existing
@@ -140,12 +132,21 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, p)
 }
 
+// Hard-block messages for a non-empty github_repo that gh cannot verify
+// (GHPRJ-03). The not-found vs no-gh copy is chosen by github.Available().
+const (
+	msgRepoNotFound  = "Repository not found on GitHub — check the name or your access."
+	msgGHUnavailable = "Couldn't verify the repository — the gh CLI isn't available."
+)
+
 // update handles PATCH /api/projects/{id} — a PARTIAL update (D-13) of name,
 // description, and github_repo. repo_path stays immutable in v1. Fields decode
 // into pointers so an OMITTED key is left untouched while an explicit ""
-// clears (description) or unlinks (github_repo). The lone hard error is a
-// syntactically invalid github_repo (github.ValidateRepo); a gh-unverifiable
-// but syntactically valid ref still saves (degrade-don't-break, GHSET-03).
+// clears (description) or unlinks (github_repo). A non-empty github_repo is now
+// MANDATORY-verified (GHPRJ-03): a syntactically invalid ref OR one that gh
+// cannot confirm is rejected (400) and the row is left untouched — only a
+// gh-verified, canonicalized ref is persisted. (This reverses the prior
+// soft-save: an unverifiable ref no longer saves.)
 func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -184,25 +185,30 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		sets = append(sets, "description = ?")
 		args = append(args, *req.Description)
 	}
-	// repoSet/repoVerified are carried past this block so verify_state can be
-	// computed AFTER scanProject. They stay false on the explicit-"" unlink
-	// branch (where ValidateRepo never runs) and when github_repo is omitted.
-	var repoSet, repoVerified bool
 	if req.GithubRepo != nil {
 		if strings.TrimSpace(*req.GithubRepo) == "" {
-			// Explicit "" unlinks → store NULL.
+			// Explicit "" unlinks → store NULL (no validation).
 			sets = append(sets, "github_repo = NULL")
 		} else {
 			canonical, verified, err := github.ValidateRepo(r.Context(), *req.GithubRepo)
 			if err != nil {
-				// The ONLY blocking case: a syntactically invalid ref. The row
-				// is left untouched. A soft-unverifiable ref returns no error
-				// here and saves the syntactic owner/name.
+				// Syntactically invalid ref → reject with the canonical copy;
+				// the row is left untouched.
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			repoSet = true
-			repoVerified = verified
+			if !verified {
+				// MANDATORY hard block (GHPRJ-03): gh could not confirm the
+				// repo. Reject WITHOUT touching the row — do not append to the
+				// sets/args, so the stored link (if any) is preserved.
+				msg := msgRepoNotFound
+				if !github.Available() {
+					msg = msgGHUnavailable
+				}
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			// Verified → persist the gh-canonicalized owner/name.
 			sets = append(sets, "github_repo = ?")
 			args = append(args, canonical)
 		}
@@ -220,19 +226,7 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// verify_state is a transient, non-persisted advisory (D-11): present ONLY
-	// when a non-empty repo was set and gh could not confirm it. omitempty drops
-	// it (and so the whole field) on a verified hit, an unlink, or a non-repo
-	// PATCH, keeping the body byte-for-byte identical to a bare Project.
-	verifyState := ""
-	if repoSet && !repoVerified {
-		if !github.Available() {
-			verifyState = "no_gh"
-		} else {
-			verifyState = "unverifiable"
-		}
-	}
-	writeJSON(w, http.StatusOK, projectUpdateResponse{Project: p, VerifyState: verifyState})
+	writeJSON(w, http.StatusOK, p)
 }
 
 // githubOrigin handles GET /api/projects/{id}/github-origin — the project
