@@ -107,7 +107,7 @@ Plans:
 - [x] 09-02-PLAN.md — done_session_ttl setting + ParseDoneSessionTTL helper + settings-page field (D-91) [wave 1]
 - [x] 09-03-PLAN.md — TMUX-05 restart reattach: DB-derived live-tmux session-list entries + reattach spawn variant + invisible frontend auto-reattach (D-88/D-89) [wave 1]
 - [x] 09-04-PLAN.md — TMUX-08 cleanup: fold live-tmux into the count + kill before remove/delete + startup orphan sweep (D-92/D-93) [wave 2]
-- [ ] 09-05-PLAN.md — REAP-01 Done-TTL reaper: move status-timestamp stamping + reaper ticker goroutine + startup wiring (D-90/D-95/D-96) [wave 3]
+- [x] 09-05-PLAN.md — REAP-01 Done-TTL reaper: move status-timestamp stamping + reaper ticker goroutine + startup wiring (D-90/D-95/D-96) [wave 3]
 
 **Phase notes:**
 - TMUX-05 reattach is AUTO and INVISIBLE (D-88) — diverges from the Phase 5 agent Resume because tmux reattach is cheap/lossless. The WS handler requires a LIVE in-memory session (`mgr.Get(id)`), so a DB-derived ghost cannot WS-attach directly: `GET /api/sessions` reports surviving rows as `orphaned` entries and the frontend fires one reattach spawn (`new-session -A` attach-or-create) per orphan. Dead-on-restart rows are lazily GC'd (D-89). NO Resume button, NO badge (D-77 invisibility).

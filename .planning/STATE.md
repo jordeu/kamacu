@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Quota & Resumable Shells
-status: executing
-stopped_at: Completed 09-04-PLAN.md
-last_updated: "2026-06-13T06:58:11.241Z"
+status: verifying
+stopped_at: Completed 09-05-PLAN.md
+last_updated: "2026-06-13T07:10:53.183Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 Phase: 09 (tmux-restart-resume-cleanup-integration) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-13
 
 Progress: [░░░░░░░░░░] 0%
@@ -55,6 +55,7 @@ Historical per-plan timings for v1.0 are preserved in `.planning/milestones/` ar
 | Phase 09-tmux-restart-resume-cleanup-integration P02 | 4min | 2 tasks | 5 files |
 | Phase 09-tmux-restart-resume-cleanup-integration P03 | 14 min | 3 tasks | 11 files |
 | Phase 09-tmux-restart-resume-cleanup-integration P04 | 14 min | 3 tasks | 6 files |
+| Phase 09-tmux-restart-resume-cleanup-integration P05 | 12 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 - [Phase 09-tmux-restart-resume-cleanup-integration]: Dead-on-restart rows are lazily DELETEd ONLY on a conclusive has-session exit-1 (D-89); an inconclusive probe (tmux binary broken/hung) never GCs — Pitfall 6 honesty. Reattach spawn failure never deletes the row (pre-existing survivor, not a reserved n)
 - [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-04]: Cleanup dialog running_sessions folds in live DETACHED tmux via has-session, de-duped by Manager.HasLiveTmux — one honest number, no tmux-specific field (D-92/D-77); a conclusive-only probe (alive && err==nil) keeps a broken tmux from inflating or killing (Pitfall 6)
 - [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-04]: TMUX-08 kill-before-remove on BOTH worktree-remove and task-delete (StopAllForTask reaches only in-memory sessions; detached survivors killed by tmux_sessions row), plus a synchronous once-at-startup DB-driven orphan sweep (JOIN tmux_sessions vs tasks) before ListenAndServe — branch always kept (D-34), worktrees never touched (D-87), never periodic (D-99); task-delete removes tmux_sessions rows explicitly (no FK cascade, migration 00005)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-05]: REAP-01 reaper is the codebase's first background goroutine — a 10-min ticker (reap-once-at-start) launched after the orphan sweep, before ListenAndServe, on context.Background() (no graceful shutdown; process death is the stop)
+- [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-05]: the reaper has zero DB writes — one SELECT gated on status='done' AND done_at IS NOT NULL AND done_at < lexical-ISO-cutoff, then StopAllForTask; claude_session_id/transcript (D-96) and worktrees (D-87) are never touched, automatically
+- [Phase 09-tmux-restart-resume-cleanup-integration]: [Phase 09-05]: move stamps only the entered status's *_at column via a fixed status->column map (never raw req.Status), last-entry-wins; leaving Done never clears done_at — the status='done' gate cancels reaping, not done_at (D-90)
 
 ### Pending Todos
 
@@ -113,7 +117,7 @@ v1.2 roadmap-time decisions (from research, treat as settled):
 
 ## Session Continuity
 
-Last session: 2026-06-13T06:58:11.236Z
-Stopped at: Completed 09-04-PLAN.md
+Last session: 2026-06-13T07:10:53.180Z
+Stopped at: Completed 09-05-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 7`
