@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
 status: executing
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-06-13T18:04:52.976Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-06-13T18:12:36.578Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 80
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 ## Current Position
 
 Phase: 11 (pr-review-column) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-06-13
 
@@ -62,6 +62,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 10-github-foundations P04 | 4 min | 1 tasks | 3 files |
 | Phase 10-github-foundations P05 | 3 min | 3 tasks | 3 files |
 | Phase 11-pr-review-column P01 | 6 min | 2 tasks | 4 files |
+| Phase 11-pr-review-column P02 | 5min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 10-github-foundations]: Gap 1 frontend half + Gap 2: /settings GitHub toggle is gh-aware via useGithubStatus() (GET /api/github/status); effectiveEnabled = enabled && ghAvailable forces OFF when gh is missing, an enable attempt is blocked with install-gh guidance (Switch stays interactive, no disabled), and the over-claiming help copy is dropped
 - [Phase 11-pr-review-column]: internal/github.Service is a quota.Service clone re-keyed to map[owner/name]*repoEntry (per-repo 60s TTL on fetchedAt, 10s floor on lastAttempt binding even force, in-flight dedup, drop-cached-after-3-failures); no 429/backoff field — gh rate-limit surfaces as 'error' with serve-stale per D-11
 - [Phase 11-pr-review-column]: reduceChecks maps SKIPPED/NEUTRAL/STALE to non-failing (Pitfall 1, else ~30% of real PRs go red); auth classification combines exit-code-4 OR stderr substrings (gh auth login/401/Bad credentials) since exit 4 alone is unreliable (cli/cli#9338); PRSummary fetches the rich --json set for Phase 12/13 but renders minimal in Phase 11 (D-01/D-02)
+- [Phase 11-pr-review-column]: PR endpoint GET /api/projects/{id}/pull-requests is always-200 with a two-gate ladder: GATE 1 reads settings.KeyGithubIntegration (val != 'on' -> disabled, GHSET-02 backend enforcement), GATE 2 returns disabled for unlinked OR unknown projects (200, never 404); both gates short-circuit before any gh spawn
+- [Phase 11-pr-review-column]: Handler SELECTs github_repo + repo_path; repo_path = cmd.Dir so gh resolves the right host/account (Pitfall 6); settings/DB errors map to state=error (200), the only non-200 is pathID's 400 on a non-numeric id
 
 ### Pending Todos
 
@@ -126,7 +129,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-13T18:04:42.398Z
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-06-13T18:12:36.575Z
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None
 Next: `/gsd:discuss-phase 11`

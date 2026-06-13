@@ -22,10 +22,10 @@ Requirements for the GitHub PR Review milestone. Each maps to exactly one roadma
 ### PR Review Column
 
 - [ ] **GHCOL-01**: When a project is linked to a GitHub repo (and integration is on), a collapsible "Review" column appears on the right side of that project's kanban board.
-- [ ] **GHCOL-02**: The Review column lists the open PRs in the linked repo where review is requested directly from the user (`user-review-requested:@me`), excluding drafts.
+- [x] **GHCOL-02**: The Review column lists the open PRs in the linked repo where review is requested directly from the user (`user-review-requested:@me`), excluding drafts.
 - [ ] **GHCOL-03**: Each PR is shown as a card resembling a task card, with its number, title, author, relative "updated X ago" time, and a CI/checks status indicator (pass/fail/pending).
-- [ ] **GHCOL-04**: The column auto-refreshes on an interval (paused when the browser tab is hidden) and offers a manual refresh; the list mirrors current GitHub state, so cards appear and disappear as review state changes (e.g. the card leaves once the user submits a review).
-- [ ] **GHCOL-05**: The column surfaces clear loading, empty ("you're all caught up"), and degraded (`gh` missing / unauthenticated / error) states inline, without blocking the board.
+- [x] **GHCOL-04**: The column auto-refreshes on an interval (paused when the browser tab is hidden) and offers a manual refresh; the list mirrors current GitHub state, so cards appear and disappear as review state changes (e.g. the card leaves once the user submits a review).
+- [x] **GHCOL-05**: The column surfaces clear loading, empty ("you're all caught up"), and degraded (`gh` missing / unauthenticated / error) states inline, without blocking the board.
 - [ ] **GHCOL-06**: User can collapse and expand the Review column; the collapsed column shows a PR count and the collapse state is remembered.
 
 ### PR Review Workspace
@@ -88,10 +88,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GHPRJ-02 | Phase 10 | Complete |
 | GHPRJ-03 | Phase 10 | Complete |
 | GHCOL-01 | Phase 11 | Pending |
-| GHCOL-02 | Phase 11 | Pending |
+| GHCOL-02 | Phase 11 | Complete |
 | GHCOL-03 | Phase 11 | Pending |
-| GHCOL-04 | Phase 11 | Pending |
-| GHCOL-05 | Phase 11 | Pending |
+| GHCOL-04 | Phase 11 | Complete |
+| GHCOL-05 | Phase 11 | Complete |
 | GHCOL-06 | Phase 11 | Pending |
 | GHREV-01 | Phase 12 | Pending |
 | GHREV-02 | Phase 12 | Pending |
