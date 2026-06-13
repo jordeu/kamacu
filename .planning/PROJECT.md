@@ -32,14 +32,13 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ Background quota auto-poll (60s, paused when tab hidden) backed by a cached, backoff-protected, token-keyed server proxy of the OAuth usage endpoint that never writes credentials and degrades without breaking — Phase 7
 - ✓ "tmux" offered in the global shell setting dropdown only when `tmux` resolves on PATH (call-time LookPath, one truth shared by validation + options) — Phase 8
 - ✓ Invisible tmux-backed bash tabs: spawn attach-or-create `kangent-<task>-<n>` sessions on a dedicated `-L kangent` socket (status off, mouse on), indistinguishable from plain bash tabs; × kills (kill-on-close parity), sessions survive leaving the task view and reattach on reopen; exit-vs-detach discriminated via `tmux has-session`; plain-bash and agent stop paths untouched (regression-guarded) — Phase 8
+- ✓ tmux sessions survive a Kangent server restart and reattach automatically and invisibly when the task is reopened — no Resume button (DB-derived ghost entry gated by `has-session` → `new-session -A`); dead-on-restart sessions vanish quietly with lazy row GC — Phase 9
+- ✓ Cleanup/delete account for tmux: live sessions fold into the single "N sessions running" count and are killed before worktree removal on both cleanup and task-delete; a once-at-startup orphan sweep kills any `kangent-*` session with no DB row (reconciles offline deletes) — Phase 9
+- ✓ Done-TTL reaper: a background ticker kills sessions (bash, tmux, AND agent) of tasks in Done past a configurable TTL (`done_session_ttl`, default 24h from entering Done, `0`/`never` disables); the agent stays resumable (PTY killed, transcript kept); worktrees never auto-removed; new per-status timestamps (`todo_at`/`in_progress_at`/`in_review_at`/`done_at`) bank future cycle-time stats — Phase 9
 
 ### Active
 
-**Milestone v1.2: Quota & Resumable Shells** — Phase 9 remaining
-
-- [ ] tmux-backed tabs survive a Kangent server restart with a Resume affordance that reattaches (TMUX-05)
-- [ ] Cleanup gates count live tmux sessions as running work and kill them on confirmed cleanup — no orphaned shells in deleted worktrees (TMUX-08)
-- [ ] Done-TTL reaper: sessions (bash, tmux, agent) of tasks in Done are killed after a configurable TTL (default 24h from entering Done); worktrees never auto-removed (REAP-01)
+_No active milestone — v1.2 complete, awaiting milestone close or the next milestone._
 
 ### Out of Scope
 
@@ -57,7 +56,7 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 Kangent v1 does the whole loop: create a project on a local git repo → add a task (worktree + `task/<slug>-<id>` branch auto-created under `~/.kangent/worktrees/`) → Start a real `claude` session in the worktree PTY → watch the board as a dispatcher (status dots, amber when an agent needs you) → leave and reattach across tab closes and server restarts (`claude --resume`) → review the diff vs merge-base → mark Done with gated worktree cleanup. Stack: Go stdlib mux + modernc SQLite + creack/pty + coder/websocket; React 19 + Vite + Tailwind 4 + shadcn + xterm.js 6 + dnd-kit + TanStack Query.
 
-**v1.2 progress:** Phases 7–8 complete. Phase 7 (2026-06-12) — Claude quota indicator: `internal/quota` server proxy (`GET /api/usage`) + QuotaIndicator in both headers, human-verified. Phase 8 (2026-06-13) — invisible tmux shells: new `internal/tmux` leaf package, migration 00005 `tmux_sessions`, call-time shell dropdown, killer-first `Stop()`, end-to-end spawn wiring with honest 409 errors; human-verified. Known seam for Phase 9: a tmux session survives a server restart but its tab disappears (the table is persisted but not yet read at startup) — that restart reconcile + Resume is TMUX-05, the headline of Phase 9. Phase 9 (restart resume + cleanup integration + Done-TTL reaper) remains.
+**v1.2 complete (2026-06-13)** — all 3 phases done. Phase 7 — Claude quota indicator: `internal/quota` server proxy (`GET /api/usage`) + QuotaIndicator in both headers. Phase 8 — invisible tmux shells: `internal/tmux` leaf package, migration 00005 `tmux_sessions`, call-time shell dropdown, killer-first `Stop()`, end-to-end spawn wiring with honest 409 errors. Phase 9 — restart durability + cleanup: `GET /api/sessions` reconciles surviving tmux rows as auto-reattaching ghost tabs (TMUX-05, the milestone's headline — sessions survive a server restart and reattach invisibly), cleanup/delete kill tmux before worktree removal + a startup orphan sweep (TMUX-08), and the codebase's first background goroutine — a Done-TTL reaper keyed on new per-status timestamps (migration 00006) that kills bash/tmux/agent sessions of long-Done tasks while keeping the agent resumable (REAP-01). All phases verified green (full Go suite + frontend build). Ready for `/gsd:complete-milestone`.
 
 ## Current Milestone: v1.2 Quota & Resumable Shells
 
@@ -123,4 +122,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-13 — Phase 8 (tmux Shells — Spawn & Detach Lifecycle) complete*
+*Last updated: 2026-06-13 — Phase 9 complete; milestone v1.2 (Quota & Resumable Shells) complete*
