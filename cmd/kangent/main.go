@@ -19,6 +19,7 @@ import (
 
 	"kangent/internal/api"
 	"kangent/internal/quota"
+	"kangent/internal/reaper"
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
@@ -159,6 +160,17 @@ func main() {
 	// done so the server starts in a clean state (NOT periodic: tmux sessions
 	// only become orphaned through paths Kangent already controls, D-99).
 	sweepOrphanTmux(context.Background(), db, tmuxClient)
+
+	// Done-TTL session reaper (REAP-01): the app's first background goroutine.
+	// It kills bash + tmux + agent sessions of tasks left in Done past the
+	// configured done_session_ttl, clocked from done_at, keeping each agent
+	// resumable (claude_session_id/transcript untouched, D-96) and never
+	// touching worktrees (D-87). No graceful shutdown exists — process death
+	// stops it — so context.Background() is the correct process-lifetime scope,
+	// consistent with the rest of the app. *session.Manager satisfies the
+	// reaper's SessionStopper (StopAllForTask + ListByTask).
+	go reaper.New(db, mgr).Run(context.Background())
+	slog.Info("Done-TTL reaper started")
 
 	slog.Info("kangent listening", "url", "http://"+*addr)
 	if err := http.ListenAndServe(*addr, hostCheck(mux)); err != nil {
