@@ -1,7 +1,9 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSettings } from "@/api/settings";
+import { Switch } from "@/components/ui/switch";
+import { useSaveSetting, useSettings } from "@/api/settings";
 import { SettingsField } from "@/components/settings/SettingsField";
 
 /**
@@ -37,6 +39,50 @@ const WORKTREE_HELP = `New task worktrees are created under this directory. Exis
 const SHELL_HELP = `Used when opening a new bash tab.`;
 const BRANCH_HELP = `Tokens: {slug}, {id}, {title}. Applied when a task is created — e.g. task/fix-login-42.`;
 const DONE_TTL_HELP = `Sessions of tasks left in Done are killed after this idle time. Use a duration like 24h or 90m; clear the field or enter never to disable. Worktrees are never removed.`;
+const GITHUB_INTEGRATION_HELP = `Show GitHub features across Kangent. Turn off to hide all GitHub UI — the app behaves exactly as it did before.`;
+
+/**
+ * The GitHub integration on/off Switch (GHSET-01). A Switch has no draft —
+ * it commits immediately via the shared settings KV (PUT
+ * /api/settings/github_integration). The cache is replaced on success
+ * (useSaveSetting), flipping `enabled`; on failure the cache is untouched so
+ * `checked` falls back to the last saved value (never sticks mid-flip) and the
+ * canonical error renders under the row. This section ALWAYS renders — it is
+ * the control that hides everything else, so it cannot hide itself.
+ */
+function GithubSection({ enabled }: { enabled: boolean }) {
+  const save = useSaveSetting("github_integration");
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`GitHub`}</h2>
+      <div className="flex items-center gap-2">
+        <Switch
+          id="github-integration"
+          aria-label={`GitHub integration`}
+          checked={enabled}
+          onCheckedChange={(checked) =>
+            save.mutate(checked ? "on" : "off", {
+              onSuccess: () => setError(null),
+              onError: () => setError(`Couldn't save. Try again.`),
+            })
+          }
+        />
+        <Label htmlFor="github-integration" className="text-sm font-medium">
+          {`GitHub integration`}
+        </Label>
+      </div>
+      {error !== null ? (
+        <p className="text-xs text-destructive">{error}</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {GITHUB_INTEGRATION_HELP}
+        </p>
+      )}
+    </section>
+  );
+}
 
 export default function SettingsPage() {
   const { data: settings, isLoading, isError, refetch } = useSettings();
@@ -133,6 +179,11 @@ export default function SettingsPage() {
                 help={DONE_TTL_HELP}
               />
             </section>
+            {/* Always last; ON by default (absent KV row reads as "on"). The
+                control that hides every other GitHub surface app-wide. */}
+            <GithubSection
+              enabled={settings.github_integration?.value === "on"}
+            />
           </div>
         )}
       </div>
