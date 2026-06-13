@@ -391,9 +391,22 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. Persist and return the updated task.
+	// 5. Persist and return the updated task. Stamp the entered status's *_at
+	// column (D-90, last-entry-wins): entering Done sets done_at — the reaper's
+	// clock (REAP-01) — while the other three are banked for future stats.
+	// statusAtCol comes from a fixed map keyed by the ALREADY-validated
+	// req.Status (never raw user input), so concatenating it into the SQL is
+	// safe. Leaving a status never clears its column; the reaper relies on the
+	// status='done' gate, not done_at, to cancel reaping.
+	statusAtCol := map[string]string{
+		"todo":        "todo_at",
+		"in_progress": "in_progress_at",
+		"in_review":   "in_review_at",
+		"done":        "done_at",
+	}[req.Status]
 	t, err := scanTask(tx.QueryRowContext(ctx,
-		`UPDATE tasks SET status = ?, position = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		`UPDATE tasks SET status = ?, position = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		   `+statusAtCol+` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE id = ? RETURNING `+taskColumns, req.Status, pos, id))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

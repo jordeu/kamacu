@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kangent/internal/session"
 	"kangent/internal/settings"
@@ -652,5 +654,89 @@ func TestMovePersistsAcrossReopen(t *testing.T) {
 	var st string
 	if err := db2.QueryRow(`SELECT status FROM tasks WHERE id = ?`, b).Scan(&st); err != nil || st != "done" {
 		t.Fatalf("task b status after reopen = %q (err %v), want done", st, err)
+	}
+}
+
+// statusAt reads the *_at column for a task directly from the DB. Returns the
+// raw stored ISO string and whether it was non-NULL.
+func statusAt(t *testing.T, db *sql.DB, id int64, col string) (string, bool) {
+	t.Helper()
+	var v sql.NullString
+	// col is a fixed test literal, never user input.
+	if err := db.QueryRow(`SELECT `+col+` FROM tasks WHERE id = ?`, id).Scan(&v); err != nil {
+		t.Fatalf("read %s for task %d: %v", col, id, err)
+	}
+	return v.String, v.Valid
+}
+
+// TestMoveStampsDoneAt (D-90): entering Done stamps done_at with a non-NULL ISO
+// timestamp — the reaper's clock (REAP-01).
+func TestMoveStampsDoneAt(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	x := taskID(t, createTask(t, srv, pid, "x"))
+
+	if _, ok := statusAt(t, db, x, "done_at"); ok {
+		t.Fatalf("done_at non-NULL before any move to done")
+	}
+	if code, body := moveTask(t, srv, x, "done", nil); code != http.StatusOK {
+		t.Fatalf("move to done: status=%d body=%v", code, body)
+	}
+	got, ok := statusAt(t, db, x, "done_at")
+	if !ok || got == "" {
+		t.Fatalf("done_at = %q ok=%v, want non-NULL ISO timestamp after move to done", got, ok)
+	}
+}
+
+// TestMoveStampsEnteredStatusOnly (D-90): moving to in_progress stamps
+// in_progress_at and leaves the (here unset) done_at untouched.
+func TestMoveStampsEnteredStatusOnly(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	x := taskID(t, createTask(t, srv, pid, "x"))
+
+	if code, _ := moveTask(t, srv, x, "in_progress", nil); code != http.StatusOK {
+		t.Fatalf("move to in_progress: status=%d", code)
+	}
+	if got, ok := statusAt(t, db, x, "in_progress_at"); !ok || got == "" {
+		t.Fatalf("in_progress_at = %q ok=%v, want stamped", got, ok)
+	}
+	if _, ok := statusAt(t, db, x, "done_at"); ok {
+		t.Fatalf("done_at stamped by a move to in_progress — only the entered status's column must change")
+	}
+}
+
+// TestMoveDoneAtLastEntryWins (D-90): re-entering Done (done -> in_review ->
+// done) OVERWRITES done_at with the later time; leaving Done does NOT clear it.
+func TestMoveDoneAtLastEntryWins(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	x := taskID(t, createTask(t, srv, pid, "x"))
+
+	moveTask(t, srv, x, "done", nil)
+	first, ok := statusAt(t, db, x, "done_at")
+	if !ok || first == "" {
+		t.Fatalf("done_at not stamped on first entry to done")
+	}
+
+	// Leave Done: done_at must survive (the reaper's status gate, not done_at,
+	// is what cancels reaping).
+	moveTask(t, srv, x, "in_review", nil)
+	afterLeave, ok := statusAt(t, db, x, "done_at")
+	if !ok || afterLeave != first {
+		t.Fatalf("leaving Done changed done_at: was %q now %q (ok=%v) — leaving must not clear it", first, afterLeave, ok)
+	}
+
+	// Re-enter Done after a beat: last-entry-wins overwrites with a later time.
+	// strftime('%f') gives millisecond resolution; sleep past it to guarantee a
+	// strictly greater lexical timestamp.
+	time.Sleep(5 * time.Millisecond)
+	moveTask(t, srv, x, "done", nil)
+	second, ok := statusAt(t, db, x, "done_at")
+	if !ok || second == "" {
+		t.Fatalf("done_at missing after re-entry to done")
+	}
+	if second <= first {
+		t.Fatalf("re-entering Done did not overwrite done_at (last-entry-wins): first=%q second=%q", first, second)
 	}
 }
