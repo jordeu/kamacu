@@ -81,32 +81,38 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GHSET-01 | — | Pending |
-| GHSET-02 | — | Pending |
-| GHSET-03 | — | Pending |
-| GHPRJ-01 | — | Pending |
-| GHPRJ-02 | — | Pending |
-| GHPRJ-03 | — | Pending |
-| GHCOL-01 | — | Pending |
-| GHCOL-02 | — | Pending |
-| GHCOL-03 | — | Pending |
-| GHCOL-04 | — | Pending |
-| GHCOL-05 | — | Pending |
-| GHCOL-06 | — | Pending |
-| GHREV-01 | — | Pending |
-| GHREV-02 | — | Pending |
-| GHREV-03 | — | Pending |
-| GHREV-04 | — | Pending |
-| GHREV-05 | — | Pending |
-| GHCLN-01 | — | Pending |
-| GHCLN-02 | — | Pending |
-| GHCLN-03 | — | Pending |
+| GHSET-01 | Phase 10 | Pending |
+| GHSET-02 | Phase 10 | Pending |
+| GHSET-03 | Phase 10 | Pending |
+| GHPRJ-01 | Phase 10 | Pending |
+| GHPRJ-02 | Phase 10 | Pending |
+| GHPRJ-03 | Phase 10 | Pending |
+| GHCOL-01 | Phase 11 | Pending |
+| GHCOL-02 | Phase 11 | Pending |
+| GHCOL-03 | Phase 11 | Pending |
+| GHCOL-04 | Phase 11 | Pending |
+| GHCOL-05 | Phase 11 | Pending |
+| GHCOL-06 | Phase 11 | Pending |
+| GHREV-01 | Phase 12 | Pending |
+| GHREV-02 | Phase 12 | Pending |
+| GHREV-03 | Phase 12 | Pending |
+| GHREV-04 | Phase 12 | Pending |
+| GHREV-05 | Phase 12 | Pending |
+| GHCLN-01 | Phase 13 | Pending |
+| GHCLN-02 | Phase 13 | Pending |
+| GHCLN-03 | Phase 13 | Pending |
 
 **Coverage:**
 - v1.3 requirements: 20 total
-- Mapped to phases: 0 (set during roadmap)
-- Unmapped: 20 ⚠️ (resolved by roadmap)
+- Mapped to phases: 20 ✓
+- Unmapped: 0 ✓
+
+Phase breakdown:
+- Phase 10 (GitHub Foundations): GHSET-01/02/03, GHPRJ-01/02/03 — 6
+- Phase 11 (PR Review Column): GHCOL-01/02/03/04/05/06 — 6
+- Phase 12 (Open-a-Review): GHREV-01/02/03/04/05 — 5 *(research-flagged)*
+- Phase 13 (PR Worktree Auto-Cleanup): GHCLN-01/02/03 — 3 *(research-flagged)*
 
 ---
 *Requirements defined: 2026-06-13*
-*Last updated: 2026-06-13 after initial definition*
+*Last updated: 2026-06-13 — traceability filled during roadmap creation (20/20 mapped, phases 10–13)*
