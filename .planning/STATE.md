@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: executing
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-06-13T14:29:18.472Z"
+status: verifying
+stopped_at: Completed 10-03-PLAN.md
+last_updated: "2026-06-13T14:40:42.024Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 Phase: 10 (github-foundations) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-13
 
 Progress: [░░░░░░░░░░] 0% (0/4 phases)
@@ -58,6 +58,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 09-tmux-restart-resume-cleanup-integration P05 | 12 min | 3 tasks | 5 files |
 | Phase 10-github-foundations P01 | 7 min | 2 tasks | 5 files |
 | Phase 10-github-foundations P02 | 9 min | 3 tasks | 5 files |
+| Phase 10-github-foundations P03 | 8 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,9 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 10-github-foundations]: All five v1.3 columns land in migration 00007 so Phase 12 needs no further migration; tasks.source CHECK(manual/github_pr) default 'manual' gates the board
 - [Phase 10-github-foundations]: internal/github leaf (ParseRepoRef/ValidateRepo/Available): pure canonicalization of owner/name + URL/ssh, gh soft-validation that degrades (syntactic save, no error) on absence or unverifiable refs — only syntactic invalidity hard-blocks (GHSET-03/D-11)
 - [Phase 10-github-foundations]: PATCH /api/projects/{id} is a partial update (D-13): pointer fields so omitted != clear; description "" clears, github_repo "" unlinks to NULL; canonical hard-error copy 'Not a valid repository — use owner/name or a GitHub URL.'; GET .../github-origin prefills from git origin on dialog open only (D-08)
+- [Phase 10-github-foundations]: shadcn ui/* primitives use the radix-ui umbrella import (Switch as SwitchPrimitive from 'radix-ui'), not @radix-ui/react-*; hand-authored switch.tsx to match select.tsx/label.tsx — no new dep
+- [Phase 10-github-foundations]: OFF cascade is a render gate on the shared useSettings() github_integration==='on' value; when off the ProjectSettingsDialog re-sends the existing github_repo so the hidden link is never clobbered
+- [Phase 10-github-foundations]: Soft-verify/gh-degraded muted advisories are wired but dormant (keyed on a future updated.verify_state); Plan 02's server returns plain 200, so success closes the dialog (UI-SPEC-sanctioned non-blocking)
 
 ### Pending Todos
 
@@ -108,7 +112,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-13T14:29:07.663Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-06-13T14:40:33.195Z
+Stopped at: Completed 10-03-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 10`

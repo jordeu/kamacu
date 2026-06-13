@@ -10,7 +10,7 @@ Requirements for the GitHub PR Review milestone. Each maps to exactly one roadma
 ### GitHub Integration Settings
 
 - [x] **GHSET-01**: User can turn GitHub integration on/off from the global settings page; it is ON by default.
-- [ ] **GHSET-02**: When GitHub integration is OFF, all GitHub UI disappears (no per-project GitHub config, no Review column) and the app behaves exactly as it did before v1.3.
+- [x] **GHSET-02**: When GitHub integration is OFF, all GitHub UI disappears (no per-project GitHub config, no Review column) and the app behaves exactly as it did before v1.3.
 - [x] **GHSET-03**: GitHub features are best-effort — a missing or unauthenticated `gh` CLI, or any GitHub failure, never breaks the board or any existing feature (degrade, don't break). Access is via the host's already-authenticated `gh`; no credentials are stored.
 
 ### Project GitHub Config
@@ -82,7 +82,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | GHSET-01 | Phase 10 | Complete |
-| GHSET-02 | Phase 10 | Pending |
+| GHSET-02 | Phase 10 | Complete |
 | GHSET-03 | Phase 10 | Complete |
 | GHPRJ-01 | Phase 10 | Complete |
 | GHPRJ-02 | Phase 10 | Complete |
