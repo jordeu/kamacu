@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 Phase: 11
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-06-13
+Last activity: 2026-06-13 — Completed quick task 260613-osu: verify_state advisory on GitHub repo link
 
 Progress: [████████░░] 80% (4/5 plans)
 
@@ -114,9 +114,15 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - `gh` is a soft dependency; the integration must degrade-don't-break on every failure mode (missing/unauthenticated/rate-limited). Secondary rate limits (403/`Retry-After`) are a real risk under multi-project auto-poll — bounded steady-state call rate, paused-when-hidden, backoff (Phase 11).
 - The board-leak regression (a forgotten `source='manual'` filter on any `tasks` SELECT) is the milestone's highest-severity risk — treat as a per-query checklist item in Phase 12.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260613-osu | Warn when a linked GitHub repo cannot be verified (surface verify_state) — completes GHPRJ-03 soft-save-with-warning | 2026-06-13 | 41f3d50 | [260613-osu-warn-when-a-linked-github-repo-cannot-be](./quick/260613-osu-warn-when-a-linked-github-repo-cannot-be/) |
+
 ## Session Continuity
 
 Last session: 2026-06-13T15:33:00.370Z
-Stopped at: Completed 10-05-PLAN.md
+Stopped at: Quick task 260613-osu (verify_state advisory) complete
 Resume file: None
-Next: `/gsd:plan-phase 10`
+Next: `/gsd:discuss-phase 11`
