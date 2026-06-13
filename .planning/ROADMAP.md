@@ -63,10 +63,12 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
   3. User can open a per-project config section and set, edit, or clear a short description on a project (GHPRJ-01, GHPRJ-02).
   4. User can link a project to a GitHub repo (`owner/name`), and change or clear the link; the link is validated via `gh` when present and falls back to syntactic validation when `gh` is absent (GHPRJ-03).
   5. **Degrade test:** renaming/removing the `gh` binary (or having it unauthenticated) leaves the whole app fully usable — linking still accepts a syntactically valid repo, and nothing in core flows breaks (GHSET-03).
-**Plans**: 3 plans
+**Plans**: 5 plans (3 original + 2 gap closure)
 - [x] 10-01-PLAN.md — Schema migration 00007 + github_integration settings key (on/off, default on)
 - [x] 10-02-PLAN.md — internal/github link canonicalization + partial PATCH (description + repo) + origin auto-detect endpoint
 - [x] 10-03-PLAN.md — shadcn Switch + Settings GitHub section + Project settings dialog with OFF cascade
+- [ ] 10-04-PLAN.md — (gap closure) GET /api/github/status gh-availability endpoint
+- [ ] 10-05-PLAN.md — (gap closure) gh-gate the integration toggle (default off + enable guard) + fix toggle copy
 **UI hint**: yes
 
 ### Phase 11: PR Review Column
