@@ -68,7 +68,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 - [x] 10-02-PLAN.md — internal/github link canonicalization + partial PATCH (description + repo) + origin auto-detect endpoint
 - [x] 10-03-PLAN.md — shadcn Switch + Settings GitHub section + Project settings dialog with OFF cascade
 - [x] 10-04-PLAN.md — (gap closure) GET /api/github/status gh-availability endpoint
-- [ ] 10-05-PLAN.md — (gap closure) gh-gate the integration toggle (default off + enable guard) + fix toggle copy
+- [x] 10-05-PLAN.md — (gap closure) gh-gate the integration toggle (default off + enable guard) + fix toggle copy
 **UI hint**: yes
 
 ### Phase 11: PR Review Column

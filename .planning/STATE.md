@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: verifying
-stopped_at: Completed 10-04-PLAN.md
-last_updated: "2026-06-13T15:27:29.352Z"
+status: executing
+stopped_at: Completed 10-05-PLAN.md
+last_updated: "2026-06-13T15:33:08.467Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
   percent: 80
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 ## Current Position
 
 Phase: 10 (github-foundations) — GAP CLOSURE in progress
-Plan: 4 of 5 executed (gap-closure 10-04 done; 10-05 remains)
-Status: 10-04 (Gap 1 backend half) complete — GET /api/github/status shipped; Plan 10-05 (frontend gate + copy) next
-Last activity: 2026-06-13 — executed gap-closure Plan 10-04
+Plan: 5 of 5 executed (gap-closure 10-04 done; 10-05 remains)
+Status: Ready to execute
+Last activity: 2026-06-13
 
 Progress: [████████░░] 80% (4/5 plans)
 
@@ -60,6 +60,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 10-github-foundations P02 | 9 min | 3 tasks | 5 files |
 | Phase 10-github-foundations P03 | 8 min | 3 tasks | 7 files |
 | Phase 10-github-foundations P04 | 4 min | 1 tasks | 3 files |
+| Phase 10-github-foundations P05 | 3 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -100,6 +101,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 10-github-foundations]: OFF cascade is a render gate on the shared useSettings() github_integration==='on' value; when off the ProjectSettingsDialog re-sends the existing github_repo so the hidden link is never clobbered
 - [Phase 10-github-foundations]: Soft-verify/gh-degraded muted advisories are wired but dormant (keyed on a future updated.verify_state); Plan 02's server returns plain 200, so success closes the dialog (UI-SPEC-sanctioned non-blocking)
 - [Phase 10-github-foundations]: Gap 1 backend half: GET /api/github/status is an always-200 endpoint returning {gh_available: bool} from github.Available() (call-time LookPath, reflects install/uninstall without restart); package-level handler (no DB), snake_case field Plan 10-05 reads; contract test compares to github.Available() so it is host-independent
+- [Phase 10-github-foundations]: Gap 1 frontend half + Gap 2: /settings GitHub toggle is gh-aware via useGithubStatus() (GET /api/github/status); effectiveEnabled = enabled && ghAvailable forces OFF when gh is missing, an enable attempt is blocked with install-gh guidance (Switch stays interactive, no disabled), and the over-claiming help copy is dropped
 
 ### Pending Todos
 
@@ -114,7 +116,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-13T15:27:29.349Z
-Stopped at: Completed 10-04-PLAN.md
+Last session: 2026-06-13T15:33:00.370Z
+Stopped at: Completed 10-05-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 10`
