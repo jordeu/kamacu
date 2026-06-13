@@ -13,6 +13,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -125,4 +126,32 @@ func (c Client) KillServer(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// ListSessions enumerates live session names on this socket (Phase 9 orphan
+// sweep input, D-94). Exit 1 (no server running) is the empty case — nil,
+// nil — never an error.
+//
+// Does NOT use the run helper (which returns only an error): listing needs
+// stdout. The name format emits one clean name per line (Empirical Finding
+// 14). Output is split on "\n", each line trimmed, empties dropped.
+func (c Client) ListSessions(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, execTimeout)
+	defer cancel()
+	args := append(c.BaseArgs(), "list-sessions", "-F", "#{session_name}")
+	out, err := exec.CommandContext(ctx, "tmux", args...).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil // no server running -> zero sessions, never an error
+		}
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
