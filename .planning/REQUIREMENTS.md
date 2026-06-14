@@ -30,11 +30,11 @@ Requirements for the GitHub PR Review milestone. Each maps to exactly one roadma
 
 ### PR Review Workspace
 
-- [ ] **GHREV-01**: Clicking a PR card opens a task-like review view backed by a worktree that has the PR's branch checked out (by fetching the PR head ref, not creating a fresh task branch), reusing the existing agent, bash, and diff tabs.
-- [ ] **GHREV-02**: Opening the same PR again reattaches to its existing review workspace instead of creating a duplicate.
-- [ ] **GHREV-03**: The review view's diff is computed against the PR's own base branch merge-base, matching the changes GitHub shows for that PR.
-- [ ] **GHREV-04**: PR review workspaces never appear as cards on the kanban board — they are not To Do / In Progress / In Review / Done tasks.
-- [ ] **GHREV-05**: Fork PRs, and PRs whose branch name collides with an existing branch, open correctly without disturbing the project's primary checkout (HEAD of the main checkout is unchanged).
+- [x] **GHREV-01**: Clicking a PR card opens a task-like review view backed by a worktree that has the PR's branch checked out (by fetching the PR head ref, not creating a fresh task branch), reusing the existing agent, bash, and diff tabs.
+- [x] **GHREV-02**: Opening the same PR again reattaches to its existing review workspace instead of creating a duplicate.
+- [x] **GHREV-03**: The review view's diff is computed against the PR's own base branch merge-base, matching the changes GitHub shows for that PR.
+- [x] **GHREV-04**: PR review workspaces never appear as cards on the kanban board — they are not To Do / In Progress / In Review / Done tasks.
+- [x] **GHREV-05**: Fork PRs, and PRs whose branch name collides with an existing branch, open correctly without disturbing the project's primary checkout (HEAD of the main checkout is unchanged).
 
 ### PR Worktree Cleanup
 
@@ -93,11 +93,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GHCOL-04 | Phase 11 | Complete |
 | GHCOL-05 | Phase 11 | Complete |
 | GHCOL-06 | Phase 11 | Complete |
-| GHREV-01 | Phase 12 | Pending |
-| GHREV-02 | Phase 12 | Pending |
-| GHREV-03 | Phase 12 | Pending |
-| GHREV-04 | Phase 12 | Pending |
-| GHREV-05 | Phase 12 | Pending |
+| GHREV-01 | Phase 12 | Complete |
+| GHREV-02 | Phase 12 | Complete |
+| GHREV-03 | Phase 12 | Complete |
+| GHREV-04 | Phase 12 | Complete |
+| GHREV-05 | Phase 12 | Complete |
 | GHCLN-01 | Phase 13 | Pending |
 | GHCLN-02 | Phase 13 | Pending |
 | GHCLN-03 | Phase 13 | Pending |

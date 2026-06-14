@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
 status: verifying
-stopped_at: Completed 12-06-PLAN.md (backend gap closure); 12-07 frontend gap pending; phase NOT verified
-last_updated: "2026-06-14T07:14:24.838Z"
+stopped_at: "Completed 12-07-PLAN.md — all 5 12-05 follow-ups closed (12-06 backend + 12-07 frontend); human-verify APPROVED 2026-06-14; phase 12 plans all complete; awaiting orchestrator phase re-verification (gsd-verifier)"
+last_updated: "2026-06-14T10:20:00.000Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 16
-  completed_plans: 15
-  percent: 94
+  completed_plans: 16
+  percent: 100
 ---
 
 # Project State
@@ -25,22 +25,24 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 ## Current Position
 
-Phase: 12 (open-a-review) — EXECUTING (NOT verified)
-Plan: 12-06 (backend gap closure) DONE; 12-07 (frontend gap) pending
-Status: backend follow-ups closed; phase blocked on the frontend gap + re-verification
+Phase: 12 (open-a-review) — ALL PLANS COMPLETE; human-verify APPROVED; awaiting phase re-verification (gsd-verifier)
+Plan: 12-01..12-07 all DONE (12-07 frontend gap closure approved 2026-06-14)
+Status: all 5 12-05 follow-ups closed (12-06 backend + 12-07 frontend); orchestrator re-runs phase verification next
 Last activity: 2026-06-14
 
-Progress: [█████████░] ~94% (12-01..12-06 implemented; 12-07 gap plan + phase verification remain)
+Progress: [██████████] 100% (12-01..12-07 implemented; phase re-verification remains)
 
-**12-05 human-verify outcome (NOT approved) — 5 follow-ups → gap plans 12-06/12-07:**
+**12-05 human-verify outcome — 5 follow-ups → gap plans 12-06/12-07 — ALL CLOSED + APPROVED 2026-06-14:**
 
 1. PR worktree is detached HEAD; want the PR's real head branch checked out (fallback `pr/<n>` on collision). [12-06 ✓ DONE — CheckoutPR named-branch + collision fallback, GHREV-05 preserved]
-2. Bash terminal in the PR review opens empty with excessive height forcing scroll (layout/fit regression). [12-07]
-3. Seed prompt re-injected on every open (per-mount ref) — inject only once, at first agent Start. [12-07]
-4. Make the review prompt configurable via a Settings field (default = current template, `<n>`/`<title>` placeholders). [12-06 key ✓ DONE — pr_review_seed; 12-07 field pending]
-5. Show a GitHub-style merge line: "<author> wants to merge <N> commits into <base> from <head>". [12-06 commits/head/base ✓ DONE — prWire.headRefName+commits; 12-07 render pending]
+2. Bash terminal in the PR review opens empty with excessive height forcing scroll (layout/fit regression). [12-07 ✓ DONE — confirmed the body chain was never forked; merge line kept inside the shrink-0 header block]
+3. Seed prompt re-injected on every open (per-mount ref) — inject only once, at first agent Start. [12-07 ✓ DONE — module-level seededSessionIds Set keyed by agent session id]
+4. Make the review prompt configurable via a Settings field (default = current template, `<n>`/`<title>` placeholders). [12-06 key ✓ + 12-07 textarea field ✓ DONE — pr_review_seed, frontend-interpolated, blank = no injection]
+5. Show a GitHub-style merge line: "<author> wants to merge <N> commits into <base> from <head>". [12-06 commits/head/base ✓ + 12-07 render ✓ DONE — single-line clickable header #<num> @<author> wants to merge <N> commits into <base> from <head>]
 
-GHREV-01..05 remain Pending in REQUIREMENTS.md until the remaining (frontend) gap lands and the phase is verified.
+**Bonus checkpoint fixes (12-07):** single-line clickable PR header (merge the two rows; #<num> is the GitHub link); F5 re-hydration via a read-only GET /api/projects/{id}/pull-requests/{n} + usePullRequestDetail (the cache-only detail blanked on hard reload).
+
+GHREV-01 / GHREV-05 are now COMPLETE in REQUIREMENTS.md (gap fixes landed + human-verified). The orchestrator re-runs phase verification (gsd-verifier) next.
 
 ## Performance Metrics
 
@@ -81,6 +83,8 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 12-open-a-review P04 | 12min | 1 tasks | 3 files |
 | Phase 12-open-a-review P05 | 18min | 2 tasks | 7 files |
 | Phase 12-open-a-review P06 | 7min | 3 tasks | 9 files |
+| Phase 12-open-a-review P07 | ~3h (incl. 3 human-verify rounds) | 4 tasks | 7 files |
+| Phase 12-open-a-review P07 | ~3h (incl. 3 human-verify rounds) | 4 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -135,6 +139,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 12-open-a-review]: Open-or-reattach endpoint POST .../{n}/review: find-or-create source='github_pr' keyed by (project_id, pr_number); full row -> instant reattach (no CheckoutPR), worktree_path NULL -> re-provision in place, not found -> INSERT (position=0 sentinel, board filters exclude it). off/unlinked/unknown -> 409 BEFORE any gh/worktree spawn. Live gh pr view on EVERY open (no title/body drift) returned as {task, pr}; ViewPR fetched before INSERT so a gh failure 502s with no half-row. viewPR package seam keeps create/reattach tests hermetic (real refs/pull/<n>/head + stubbed gh).
 - [Phase 12-open-a-review]: 12-05 frontend wiring shipped (open-or-reattach at the query cache: useOpenReview.onSuccess stashes {task, pr}; TaskPage branches every delta on source==='github_pr'; one-shot seed via pasteApiRef). Human-verify NOT approved -> 5 follow-ups become gap plans 12-06/12-07; phase NOT verified, GHREV-01..05 Pending.
 - [Phase 12-open-a-review]: 12-06 gap backend: CheckoutPR DECISION-OVERRIDES D-01 detached -> NAMED branch (headRefName) via worktree add -b, with a never-reuse selection (headRefName -> pr/<n> -> pr/<n>-<shortOID> -> error). Realigns with literal GHREV-01 while PRESERVING GHREV-05 (an existing local ref is never chosen/moved; the pr/<n> fallback protects the fork same-name 'master' trap). PRDetail.Commits (len of gh commits array) + prWire.headRefName/commits feed the 12-07 merge line; pr_review_seed settings key (free-text, length-capped, migration-free) feeds the 12-07 configurable seed.
+- [Phase 12-open-a-review]: 12-07 gap frontend (APPROVED 2026-06-14): once-per-session seed via a module-level seededSessionIds Set keyed by agent session id (replaces the per-mount ref re-injection); seed from pr_review_seed with <n>/<title> frontend-interpolated (blank = no injection); single-line clickable PR header #<num> @<author> wants to merge <N> commits into <base> from <head> kept inside the shrink-0 block (fix-#6 height chain preserved, never forked); F5 re-hydration via a read-only GET /pull-requests/{n} + usePullRequestDetail re-fetching under the same prDetailKey (no schema/migration). All 5 follow-ups verified live.
 
 ### Pending Todos
 
@@ -146,7 +151,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - Plan-mode exit-plan approval → amber dot (v1.0 research OQ1): still unobserved — carry to v1.3 UAT.
 - `gh` is a soft dependency; the integration must degrade-don't-break on every failure mode (missing/unauthenticated/rate-limited). Secondary rate limits (403/`Retry-After`) are a real risk under multi-project auto-poll — bounded steady-state call rate, paused-when-hidden, backoff (Phase 11).
 - The board-leak regression (a forgotten `source='manual'` filter on any `tasks` SELECT) is the milestone's highest-severity risk — treat as a per-query checklist item in Phase 12.
-- Phase 12 NOT verified: 12-05 human-verify found 5 follow-ups routed to gap plans 12-06 (backend: named-branch PR checkout, configurable-prompt settings key, commits count + head/base) and 12-07 (frontend: PR-view terminal fit fix, once-per-review seed guard, Settings prompt field, merge-line render). GHREV-01..05 stay Pending until fixed and the phase is re-verified.
+- Phase 12 gap closure DONE + human-verify APPROVED (2026-06-14): all 5 12-05 follow-ups closed across 12-06 (backend: named-branch PR checkout, pr_review_seed key, commits+head/base) and 12-07 (frontend: once-per-session seed, single-line clickable merge-line header, terminal-height chain confirmed, Settings prompt field, + F5 detail re-hydration via GET /pull-requests/{n}). GHREV-01/05 now Complete. Remaining: the orchestrator re-runs the phase verification (gsd-verifier) before the phase is closed.
 
 ### Quick Tasks Completed
 
@@ -157,7 +162,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T07:14:13.701Z
-Stopped at: Completed 12-06-PLAN.md (backend gap closure); 12-07 frontend gap pending; phase NOT verified
+Last session: 2026-06-14T10:20:00.000Z
+Stopped at: Completed 12-07-PLAN.md — all 5 12-05 follow-ups closed (12-06 backend + 12-07 frontend); human-verify APPROVED 2026-06-14; phase 12 plans all complete
 Resume file: None
-Next: `/gsd:discuss-phase 11`
+Next: orchestrator re-runs phase 12 verification (gsd-verifier); GHREV-01/05 marked Complete
