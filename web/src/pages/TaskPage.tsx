@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
-import { prDetailKey, type PRDetailWire } from "@/api/pullRequests";
+import { usePullRequestDetail } from "@/api/pullRequests";
 import { useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
@@ -78,6 +78,19 @@ export default function TaskPage() {
   // Global settings (shared cache) — drives the configurable PR-review seed
   // (pr_review_seed, 12-06). Unconditional hook (rules-of-hooks); read below.
   const { data: settings } = useSettings();
+
+  // Live PR detail (12-07): re-hydrate on mount so a hard reload (cache wiped)
+  // still renders the header link/author/from-branch + the seed's live title.
+  // Unconditional hook (rules-of-hooks) called BEFORE the early returns; shares
+  // prDetailKey with useOpenReview's open-time seed (no flicker on a normal
+  // open). Enabled only for a github_pr task with a pr_number; errors leave
+  // data undefined → header degrades to its task-field fallback, never breaks.
+  const { data: prDetail } = usePullRequestDetail(
+    projectId,
+    task?.pr_number,
+    taskId,
+    task?.source === "github_pr",
+  );
 
   // Newest agent session, running or exited (server list is newest-first).
   // An exited agent stays in the pane with the Start-again banner until a
@@ -244,14 +257,14 @@ export default function TaskPage() {
   }
 
   // PR review branch (Phase 12): a source='github_pr' task renders the
-  // read-only review identity. The live PR detail (title/body/author/url/base)
-  // was stashed by useOpenReview at open time (prDetailKey) and survives
-  // reattach in the cache; fall back to the task's own pr_* fields if absent
-  // (e.g. a hard refresh on a deep link — header degrades, never breaks).
+  // read-only review identity. The live PR detail (title/body/author/url/
+  // headRefName/commits) is seeded by useOpenReview at open time and re-fetched
+  // by usePullRequestDetail on mount (12-07) so a hard reload re-hydrates it;
+  // fall back to the task's own pr_* fields if absent (e.g. while the re-fetch
+  // is in flight, or it errors — the header degrades, never breaks).
   const isPR = task.source === "github_pr";
-  const prDetail = isPR
-    ? queryClient.getQueryData<PRDetailWire>(prDetailKey(task.id))
-    : undefined;
+  // prDetail comes from usePullRequestDetail (above) — seeded by useOpenReview
+  // at open time, re-fetched on a hard reload so the header never stays blank.
   const prTitle = prDetail?.title ?? task.title;
   // D-07 seed: prefilled-not-sent on agent Start, sourced from the configurable
   // pr_review_seed setting (12-06) with <n>/<title> interpolated to the live PR.

@@ -22,6 +22,7 @@ var viewPR = github.ViewPR
 
 // PullRequestRoutes registers:
 //   - GET  /api/projects/{id}/pull-requests[?refresh=1]   — the review-queue list
+//   - GET  /api/projects/{id}/pull-requests/{n}            — live PR detail (re-hydrate)
 //   - POST /api/projects/{id}/pull-requests/{n}/review     — open-or-reattach
 //
 // Always 200 on the GET — the Result.State field carries degradation (GHSET-03 /
@@ -77,6 +78,62 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 
 		force := r.URL.Query().Get("refresh") == "1"
 		writeJSON(w, http.StatusOK, svc.Get(r.Context(), repo.String, repoPath, force))
+	})
+
+	// GET .../pull-requests/{n} — live PR detail for re-hydration (12-07).
+	//
+	// Pure read: a fresh `gh pr view` mapped to the prWire the POST /review
+	// handler returns. NO worktree, NO DB write. The review view seeds this from
+	// the open-time POST response, but a hard reload wipes the client cache; the
+	// frontend re-fetches here so the header (link/author/from-branch) and the
+	// seed's interpolated title come from live GitHub again (the "live, never
+	// drift" design — D-08/D-11, Pitfall 6). Same toggle+link gating as the
+	// list/review handlers; a gh failure degrades to 502 and the frontend simply
+	// keeps the header on its task-field fallback.
+	mux.HandleFunc("GET /api/projects/{id}/pull-requests/{n}", func(w http.ResponseWriter, r *http.Request) {
+		pid, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		n, perr := strconv.ParseInt(r.PathValue("n"), 10, 64)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid PR number")
+			return
+		}
+
+		// GATE 1 (GHSET-02): integration off -> 409, never spawn gh.
+		val, err := settings.Get(db, settings.KeyGithubIntegration)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if val != "on" {
+			writeError(w, http.StatusConflict, "GitHub integration is off")
+			return
+		}
+
+		// GATE 2: project not linked / unknown -> 409, never spawn gh.
+		var repo sql.NullString
+		qerr := db.QueryRow(`SELECT github_repo FROM projects WHERE id = ?`, pid).Scan(&repo)
+		if errors.Is(qerr, sql.ErrNoRows) {
+			writeError(w, http.StatusConflict, "project is not linked to a GitHub repo")
+			return
+		}
+		if qerr != nil {
+			writeError(w, http.StatusInternalServerError, qerr.Error())
+			return
+		}
+		if !repo.Valid || strings.TrimSpace(repo.String) == "" {
+			writeError(w, http.StatusConflict, "project is not linked to a GitHub repo")
+			return
+		}
+
+		detail, derr := viewPR(r.Context(), repo.String, int(n))
+		if derr != nil {
+			writeError(w, http.StatusBadGateway, "couldn't load this PR: "+derr.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, prWireFrom(detail))
 	})
 
 	// POST .../pull-requests/{n}/review — open-or-reattach a PR review (GHREV-01/02).
@@ -228,20 +285,28 @@ type prWire struct {
 	Commits     int    `json:"commits"`
 }
 
+// prWireFrom maps a live github.PRDetail to the prWire the frontend reads. The
+// single builder keeps the POST /review envelope and the GET .../{n} detail
+// byte-identical, so a hard-reload re-hydration (GET) renders exactly what the
+// open-time response (POST) seeded.
+func prWireFrom(d github.PRDetail) prWire {
+	return prWire{
+		Number:      d.Number,
+		Title:       d.Title,
+		Body:        d.Body,
+		Author:      d.AuthorLogin,
+		URL:         d.URL,
+		BaseRefName: d.BaseRefName,
+		HeadRefName: d.HeadRefName,
+		Commits:     d.Commits,
+	}
+}
+
 // writeReview returns the {task, pr} envelope (200).
 func writeReview(w http.ResponseWriter, t Task, d github.PRDetail) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task": t,
-		"pr": prWire{
-			Number:      d.Number,
-			Title:       d.Title,
-			Body:        d.Body,
-			Author:      d.AuthorLogin,
-			URL:         d.URL,
-			BaseRefName: d.BaseRefName,
-			HeadRefName: d.HeadRefName,
-			Commits:     d.Commits,
-		},
+		"pr":   prWireFrom(d),
 	})
 }
 

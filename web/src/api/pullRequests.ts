@@ -83,6 +83,29 @@ export function prDetailKey(taskId: number) {
   return ["pr-detail", taskId] as const;
 }
 
+/** Re-hydrate the live PR detail on a review-view mount (12-07). useOpenReview
+ *  seeds prDetailKey at open time, but a hard reload wipes the client cache —
+ *  this query re-fetches GET .../pull-requests/{n} under the SAME key so the
+ *  header (link/author/from-branch) + the seed's interpolated title come from
+ *  live GitHub again. The open-time seed is the initial cache (no flicker on a
+ *  normal open); staleTime defers an immediate refetch right after open already
+ *  seeded it. Errors (toggle off / unlinked / gh down) leave `data` undefined,
+ *  and the header degrades to its task-field fallback — never breaks. */
+export function usePullRequestDetail(
+  projectId: number,
+  prNumber: number | null | undefined,
+  taskId: number,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: prDetailKey(taskId), // SAME key useOpenReview seeds → shares the open-time cache
+    queryFn: () =>
+      get<PRDetailWire>(`/api/projects/${projectId}/pull-requests/${prNumber}`),
+    enabled: enabled && prNumber != null,
+    staleTime: 30_000, // avoid an immediate refetch right after open already seeded it
+  });
+}
+
 /** Open-or-reattach a PR review (12-04): POST .../pull-requests/{n}/review →
  *  find-or-create the source='github_pr' task, provision the detached PR-head
  *  worktree, and return {task, pr}. Mirrors useCreateWorktree's mutation shape

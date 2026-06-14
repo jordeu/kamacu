@@ -587,6 +587,120 @@ func TestReviewReprovisionWhenWorktreeNull(t *testing.T) {
 	}
 }
 
+// --- Live PR detail endpoint (12-07 re-hydration on reload) ---
+
+// prDetailResp mirrors the bare prWire the GET .../{n} handler returns (NOT the
+// {task, pr} envelope of POST /review).
+type prDetailResp struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	Author      string `json:"author"`
+	URL         string `json:"url"`
+	BaseRefName string `json:"baseRefName"`
+	HeadRefName string `json:"headRefName"`
+	Commits     int    `json:"commits"`
+}
+
+func decodePRDetail(t *testing.T, rec *httptest.ResponseRecorder) prDetailResp {
+	t.Helper()
+	var d prDetailResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatalf("decode pr detail body %q: %v", rec.Body.String(), err)
+	}
+	return d
+}
+
+// TestPRDetailOkWhenLinked: GET .../{n} on a linked, integration-on project
+// returns the live prWire (author/url/headRefName/commits), pure read — no
+// worktree, no DB write. This is the F5 re-hydration path.
+func TestPRDetailOkWhenLinked(t *testing.T) {
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/repo-detail-ok", "owner/name")
+	mux := newPRReviewEnv(t, db, t.TempDir())
+
+	var viewCalls atomic.Int64
+	stubViewPR(t, func(ctx context.Context, repo string, n int) (github.PRDetail, error) {
+		viewCalls.Add(1)
+		if repo != "owner/name" {
+			t.Errorf("viewPR repo = %q, want owner/name", repo)
+		}
+		if n != 7 {
+			t.Errorf("viewPR n = %d, want 7", n)
+		}
+		return github.PRDetail{
+			Number: 7, Title: "Fix it", Body: "body",
+			AuthorLogin: "octocat", URL: "https://example.com/pr/7",
+			HeadRefName: "feature", BaseRefName: "trunk", Commits: 3,
+		}, nil
+	})
+
+	rec := prGet(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/7")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	d := decodePRDetail(t, rec)
+	if d.Number != 7 || d.Author != "octocat" || d.URL != "https://example.com/pr/7" {
+		t.Errorf("detail number/author/url = %d/%q/%q, want 7/octocat/the url", d.Number, d.Author, d.URL)
+	}
+	if d.HeadRefName != "feature" || d.BaseRefName != "trunk" || d.Commits != 3 {
+		t.Errorf("detail head/base/commits = %q/%q/%d, want feature/trunk/3", d.HeadRefName, d.BaseRefName, d.Commits)
+	}
+	if viewCalls.Load() != 1 {
+		t.Errorf("viewPR called %d times, want 1", viewCalls.Load())
+	}
+	// No PR row should have been created — this is a pure read.
+	if countPRRows(t, db, id, 7) != 0 {
+		t.Errorf("pr rows after a pure GET detail = %d, want 0 (no DB write)", countPRRows(t, db, id, 7))
+	}
+}
+
+// TestPRDetailToggleOff: integration off -> 409 BEFORE any gh read.
+func TestPRDetailToggleOff(t *testing.T) {
+	db := newPRTestDB(t)
+	if err := settings.Set(db, settings.KeyGithubIntegration, "off"); err != nil {
+		t.Fatalf("set toggle off: %v", err)
+	}
+	id := insertProject(t, db, "p", "/tmp/repo-detail-off", "owner/name")
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	stubViewPR(t, func(context.Context, string, int) (github.PRDetail, error) {
+		t.Fatal("viewPR called despite toggle off")
+		return github.PRDetail{}, nil
+	})
+
+	rec := prGet(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/7")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for toggle off", rec.Code)
+	}
+}
+
+// TestPRDetailUnlinkedProject: NULL github_repo -> 409 before gh.
+func TestPRDetailUnlinkedProject(t *testing.T) {
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/repo-detail-unlinked", "") // NULL github_repo
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	stubViewPR(t, func(context.Context, string, int) (github.PRDetail, error) {
+		t.Fatal("viewPR called despite unlinked project")
+		return github.PRDetail{}, nil
+	})
+
+	rec := prGet(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/7")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for unlinked project", rec.Code)
+	}
+}
+
+// TestPRDetailBadPRNumber: a non-numeric {n} -> 400.
+func TestPRDetailBadPRNumber(t *testing.T) {
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/repo-detail-badn", "owner/name")
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	rec := prGet(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/abc")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for non-numeric PR number", rec.Code)
+	}
+}
+
 // itoa is a tiny local int64→string helper to keep the test imports lean.
 func itoa(n int64) string {
 	if n == 0 {
