@@ -428,23 +428,323 @@ func (h *projectHandlers) githubOrigin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"suggestion": suggestion})
 }
 
-// delete handles DELETE /api/projects/{id}. CASCADE removes the project's
-// tasks; the repository on disk is never touched (PROJ-03).
+// deleteBlocker is one reason a managed-project delete is refused (CKOUT-03 /
+// D-07). The 409 body is { "error": ..., "reasons": [ {kind, target}, ... ] }
+// — a STRUCTURED list a Phase 15 cleanup dialog can enumerate (research Open
+// Question 3, recommended). Kind is a stable machine token; Target is a
+// human-readable subject ("task #N" or "the managed checkout").
+type deleteBlocker struct {
+	Kind   string `json:"kind"`   // "uncommitted" | "unpushed" | "stash" | "sessions"
+	Target string `json:"target"` // "task #<id>" | "the managed checkout"
+}
+
+// managedTaskWorktree is a project's task (or PR-review) worktree to gate/remove.
+type managedTaskWorktree struct {
+	taskID int64
+	path   string
+}
+
+// delete handles DELETE /api/projects/{id}.
+//
+//   - Folder project (managed=0): today's behavior EXACTLY — DELETE FROM
+//     projects (CASCADE removes tasks); the repository on disk is NEVER touched
+//     (PROJ-03 / D-09). No git, no disk ops.
+//   - Managed project (managed=1, v1.4 CKOUT-03): a two-pass, all-or-nothing
+//     gated removal. The GATE phase computes the four gates
+//     (dirty/unpushed/stash/sessions) over EVERY task worktree AND the clone
+//     root, mutating nothing; if ANY gate trips it returns 409 with the
+//     aggregated reasons and removes NOTHING (D-07). On all-clear the REMOVE
+//     phase tears each linked worktree down first, then os.RemoveAll's the clone
+//     dir, then deletes the rows (D-08 ordering). The clone root is removed with
+//     os.RemoveAll — never `git worktree remove`, which refuses the main
+//     worktree (Pitfall 2).
 func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	res, err := h.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+
+	// Load the marker + repo root. The marker is the SINGLE source of truth for
+	// "Kangent owns this dir" — never derive it from the path (data-loss hazard).
+	var managed int
+	var clone string
+	err := h.db.QueryRow(`SELECT managed, repo_path FROM projects WHERE id = ?`, id).Scan(&managed, &clone)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		writeError(w, http.StatusNotFound, "project not found")
+
+	// --- Folder path (UNCHANGED, D-09): never touch the directory. ---
+	if managed == 0 {
+		res, err := h.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// --- Managed path (CKOUT-03): gated, all-or-nothing removal. ---
+	h.deleteManaged(w, r, id, clone)
+}
+
+// deleteManaged runs the two-pass gated removal of a managed clone (CKOUT-03 /
+// D-07 / D-08). It is reached only after delete() confirmed managed=1.
+func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, id int64, clone string) {
+	ctx := r.Context()
+
+	// Resolve the clone's default branch ONCE (origin/<default>); it is the
+	// unpushed gate base for the clone AND every task worktree (they branch off
+	// it). A read failure is CONSERVATIVE — treat it as a blocker rather than
+	// skipping the unpushed gate (research §"Gated Delete", D-08 safety net).
+	defBranch, dberr := h.wt.DefaultBranch(ctx, clone)
+	unpushedBase := "origin/" + defBranch
+
+	// Enumerate the project's task/PR-review worktrees. PR-review worktrees
+	// (source='github_pr') branch off the same clone and MUST be gated/removed
+	// too — no source filter.
+	worktrees, err := h.projectWorktrees(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// === GATE PHASE (compute fresh, mutate NOTHING; two-pass per Pitfall 8). ===
+	var blockers []deleteBlocker
+
+	// If origin/<default> could not be resolved we cannot run the unpushed gate
+	// safely → conservative blocker; remove nothing.
+	if dberr != nil {
+		blockers = append(blockers, deleteBlocker{
+			Kind: "unpushed", Target: "the managed checkout",
+		})
+	}
+
+	for _, wt := range worktrees {
+		target := fmt.Sprintf("task #%d", wt.taskID)
+		// A manually-deleted worktree dir counts clean (it will simply be
+		// pruned in the remove phase) — only gate dirs that still exist.
+		if _, statErr := os.Stat(wt.path); statErr != nil {
+			// Still gate sessions for the task (a live session can exist with a
+			// vanished tree); skip the git gates for the missing dir.
+			if h.cleanupSessionCount(ctx, wt.taskID) > 0 {
+				blockers = append(blockers, deleteBlocker{Kind: "sessions", Target: target})
+			}
+			continue
+		}
+		if dirty, derr := h.wt.DirtyCount(ctx, wt.path); derr != nil {
+			writeError(w, http.StatusInternalServerError, derr.Error())
+			return
+		} else if dirty > 0 {
+			blockers = append(blockers, deleteBlocker{Kind: "uncommitted", Target: target})
+		}
+		// Unpushed gate: origin/<default>..HEAD, NO fetch (network-free,
+		// conservative — research Open Question 2). dberr already blocked above
+		// if the base is unknown; only run rev-list when we have a base.
+		if dberr == nil {
+			if unpushed, uerr := h.wt.UnpushedCount(ctx, wt.path, unpushedBase); uerr != nil {
+				writeError(w, http.StatusInternalServerError, uerr.Error())
+				return
+			} else if unpushed > 0 {
+				blockers = append(blockers, deleteBlocker{Kind: "unpushed", Target: target})
+			}
+		}
+		if stash, serr := h.wt.StashCount(ctx, wt.path); serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		} else if stash > 0 {
+			blockers = append(blockers, deleteBlocker{Kind: "stash", Target: target})
+		}
+		if h.cleanupSessionCount(ctx, wt.taskID) > 0 {
+			blockers = append(blockers, deleteBlocker{Kind: "sessions", Target: target})
+		}
+	}
+
+	// Clone-root gates (D-08 safety net): the clone IS a worktree for the gates.
+	// A missing clone dir is unusual for a managed project; gate it only when
+	// present (RemoveAll would be a no-op anyway).
+	if _, statErr := os.Stat(clone); statErr == nil {
+		if dirty, derr := h.wt.DirtyCount(ctx, clone); derr != nil {
+			writeError(w, http.StatusInternalServerError, derr.Error())
+			return
+		} else if dirty > 0 {
+			blockers = append(blockers, deleteBlocker{Kind: "uncommitted", Target: "the managed checkout"})
+		}
+		if dberr == nil {
+			if unpushed, uerr := h.wt.UnpushedCount(ctx, clone, unpushedBase); uerr != nil {
+				writeError(w, http.StatusInternalServerError, uerr.Error())
+				return
+			} else if unpushed > 0 {
+				blockers = append(blockers, deleteBlocker{Kind: "unpushed", Target: "the managed checkout"})
+			}
+		}
+		if stash, serr := h.wt.StashCount(ctx, clone); serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		} else if stash > 0 {
+			blockers = append(blockers, deleteBlocker{Kind: "stash", Target: "the managed checkout"})
+		}
+	}
+
+	// ANY blocker → 409 with the structured reason list. REMOVE NOTHING (D-07).
+	if len(blockers) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   "the project can't be deleted yet",
+			"reasons": blockers,
+		})
+		return
+	}
+
+	// === REMOVE PHASE (all clear). Order is load-bearing (Pitfall 1). ===
+	h.removeManaged(w, ctx, id, clone, worktrees)
+}
+
+// projectWorktrees enumerates a project's task/PR-review worktrees (those with
+// a non-NULL worktree_path). No source filter: PR-review worktrees branch off
+// the same managed clone and are gated/removed alongside task worktrees.
+func (h *projectHandlers) projectWorktrees(ctx context.Context, projectID int64) ([]managedTaskWorktree, error) {
+	rows, err := h.db.QueryContext(ctx,
+		`SELECT id, worktree_path FROM tasks WHERE project_id = ? AND worktree_path IS NOT NULL`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []managedTaskWorktree
+	for rows.Next() {
+		var w managedTaskWorktree
+		if err := rows.Scan(&w.taskID, &w.path); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// removeManaged is the REMOVE phase of the managed delete — reached ONLY after
+// every gate passed (deleteManaged). The ordering is load-bearing (research
+// Pitfall 1): remove each LINKED worktree first (wt.Remove via the shared
+// CleanupWorktreeGated), THEN os.RemoveAll the clone dir, THEN delete the rows
+// FK-ordered. The clone root is NEVER passed to wt.Remove — git refuses the main
+// worktree (Pitfall 2); it is removed with os.RemoveAll.
+func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Context, id int64, clone string, worktrees []managedTaskWorktree) {
+	for _, wt := range worktrees {
+		// stopSessions=true: the gate phase already verified idleness; any
+		// session that appeared since is intentionally reaped during teardown
+		// (the gate is the user-facing refuse; teardown stops what remains).
+		count := h.cleanupSessionCount(ctx, wt.taskID)
+		live := h.liveTmuxNames(ctx, wt.taskID)
+		removed, reason, cerr := CleanupWorktreeGated(
+			ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
+			wt.taskID, clone, wt.path, count, true /*stopSessions*/, false /*force*/)
+		if cerr != nil {
+			writeError(w, http.StatusInternalServerError, cerr.Error())
+			return
+		}
+		if !removed {
+			// A race re-tripped a gate (rare/defensive). Refuse with the reason.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":   "the project can't be deleted yet",
+				"reasons": []deleteBlocker{{Kind: gateReasonKind(reason), Target: fmt.Sprintf("task #%d", wt.taskID)}},
+			})
+			return
+		}
+	}
+
+	// All linked worktrees gone → remove the clone root (main worktree + .git).
+	// os.RemoveAll ONLY (git worktree remove refuses the main worktree).
+	if rerr := os.RemoveAll(clone); rerr != nil {
+		writeError(w, http.StatusInternalServerError, rerr.Error())
+		return
+	}
+
+	// Delete rows FK-ordered (FKs ON, no CASCADE on tmux_sessions): clear
+	// tmux_sessions of the project's tasks first, then the project (CASCADE
+	// removes the task rows). Mirror reaper.go / tasks.go delete ordering.
+	if _, derr := h.db.ExecContext(ctx,
+		`DELETE FROM tmux_sessions WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id); derr != nil {
+		writeError(w, http.StatusInternalServerError, derr.Error())
+		return
+	}
+	if _, derr := h.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); derr != nil {
+		writeError(w, http.StatusInternalServerError, derr.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// gateReasonKind maps the shared CleanupWorktreeGated reason strings to a
+// deleteBlocker kind (defensive remove-phase race path only).
+func gateReasonKind(reason string) string {
+	switch reason {
+	case "sessions running":
+		return "sessions"
+	case "worktree has uncommitted changes":
+		return "uncommitted"
+	default:
+		return "uncommitted"
+	}
+}
+
+// --- session-count helpers (replicated from worktreeHandlers; ~30 lines, keeps
+// the package boundary clean per the plan's interface note). ---
+
+// runningSessions counts the task's in-memory running sessions.
+func (h *projectHandlers) runningSessions(taskID int64) int {
+	n := 0
+	for _, info := range h.mgr.ListByTask(taskID) {
+		if info.Status == session.StatusRunning {
+			n++
+		}
+	}
+	return n
+}
+
+// liveTmuxNames returns the task's tmux session names alive on the dedicated
+// socket (probed via has-session; an inconclusive probe is never read as
+// alive). Mirrors worktreeHandlers.liveTmuxNames.
+func (h *projectHandlers) liveTmuxNames(ctx context.Context, taskID int64) []string {
+	rows, err := h.db.QueryContext(ctx, `SELECT name FROM tmux_sessions WHERE task_id = ?`, taskID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+	live := make([]string, 0, len(names))
+	for _, name := range names {
+		if alive, herr := h.tmuxClient.HasSession(ctx, name); alive && herr == nil {
+			live = append(live, name)
+		}
+	}
+	return live
+}
+
+// cleanupSessionCount folds live detached tmux survivors into the in-memory
+// running-session count (one honest number, no double-count). Mirrors
+// worktreeHandlers.cleanupSessionCount.
+func (h *projectHandlers) cleanupSessionCount(ctx context.Context, taskID int64) int {
+	count := h.runningSessions(taskID)
+	for _, name := range h.liveTmuxNames(ctx, taskID) {
+		if !h.mgr.HasLiveTmux(name) {
+			count++
+		}
+	}
+	return count
 }
 
 // pathID parses the {id} path value; writes a 400 and returns ok=false on failure.
