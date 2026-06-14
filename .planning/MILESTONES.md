@@ -1,5 +1,21 @@
 # Milestones
 
+## v1.3 GitHub PR Review (Shipped: 2026-06-14)
+
+**Phases completed:** 4 phases, 19 plans, 46 tasks
+
+**Delivered:** Surface the GitHub PRs that need your review on a linked project's board and open each as a full task-like review workspace — a worktree on the PR's branch with the same agent/bash/diff tabs — then auto-clean the worktree when the PR merges/closes. All via the host's already-authenticated `gh` (no tokens stored), best-effort and degrade-don't-break throughout.
+
+**Key accomplishments:**
+
+- **GitHub Foundations (Phase 10):** migration 00007 lands all five v1.3 schema columns (`projects.description`/`github_repo`, `tasks.source`/`pr_number`/`pr_base_ref`) so Phases 11–13 need no further migration; the degrade-don't-break `internal/github` leaf (`ParseRepoRef`/`ValidateRepo`/`Available`); a gh-gated `/settings` integration toggle (OFF + un-enableable when `gh` is absent, via always-200 `GET /api/github/status`) with a full OFF cascade; and a Project settings dialog editing an origin-prefilled, soft-validated `owner/name` link + description.
+- **PR Review Column (Phase 11):** a self-gating, collapsible per-project "Review" column listing `user-review-requested:@me draft:false` open PRs via ONE cached `gh pr list` call (server-side `statusCheckRollup` → pass/fail/pending/none, no N+1), behind an always-200 `GET /api/projects/{id}/pull-requests` endpoint; 60s visibility-paused auto-poll + manual refresh, inline loading/empty/degraded states, default-collapsed, appended outside the dnd machinery so PR cards never enter the kanban.
+- **Open-a-Review (Phase 12) — the milestone headline:** clicking a PR card find-or-creates a `source='github_pr'` task rendered through the same TaskPage/agent/bash/diff shell, backed by a worktree on the PR's REAL head branch (`fetch refs/pull/<n>/head` + `worktree add -b`, `pr/<n>` collision fallback — never `gh pr checkout`); reopening reattaches (no duplicates); the diff computes against the PR's own base merge-base (matches GitHub Files-changed); a 5-query `source='manual'` board-leak guard + `/move` 409 keeps PR reviews off the board; fork/colliding-branch PRs open with the primary checkout HEAD provably unchanged (GHREV-05).
+- **PR Worktree Auto-Cleanup (Phase 13):** the Phase-9 reaper gains a second `reconcilePRsOnce` pass that reads each PR's state (`gh pr view --json state`) and gated-removes a merged/closed worktree ONLY when pristine + idle (dirty / unpushed via `rev-list FETCH_HEAD..HEAD` / stash / running session each skip), always keeping the branch; the gated logic was extracted byte-equivalent into a shared `CleanupWorktreeGated` (HTTP DELETE + reaper, `force=false`); manual cleanup re-adds a PR `⋯` "Clean up worktree" item + a merged/closed banner.
+- **Cross-phase integrity:** one shared `github.Service` flows through all three downstream phases (list cache, PR detail/checkout, reaper PRState); audit confirmed 20/20 requirements satisfied, 6/6 integration seams wired, 4/4 E2E flows complete. Every blocking human-verify checkpoint (11/12/13) was approved by the user.
+
+---
+
 ## v1.2 Quota & Resumable Shells (Shipped: 2026-06-13)
 
 **Phases completed:** 3 phases, 12 plans, 29 tasks

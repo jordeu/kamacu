@@ -123,6 +123,48 @@
 
 ---
 
+## Milestone: v1.3 — GitHub PR Review
+
+**Shipped:** 2026-06-14
+**Phases:** 4 | **Plans:** 19 | **Tasks:** 46
+
+### What Was Built
+- (Phase 10) GitHub Foundations: migration 00007 (all five v1.3 columns + the `github_integration` KV); the degrade-don't-break `internal/github` leaf (`ParseRepoRef`/`ValidateRepo`/`Available`); a gh-gated `/settings` toggle (OFF + un-enableable when `gh` absent, via always-200 `GET /api/github/status`) with a full OFF cascade; a Project settings dialog editing an origin-prefilled, soft-validated `owner/name` link + description.
+- (Phase 11) PR Review Column: a self-gating, default-collapsed per-project column listing `user-review-requested:@me draft:false` PRs via ONE cached `gh pr list` call (server-side `statusCheckRollup` reduction, no N+1), behind always-200 `GET /api/projects/{id}/pull-requests`; 60s visibility-paused poll + manual refresh; appended outside the dnd machinery.
+- (Phase 12) Open-a-Review — the headline: clicking a PR find-or-creates a `source='github_pr'` task in the same TaskPage/agent/bash/diff shell, on a worktree on the PR's REAL head branch (`fetch refs/pull/<n>/head` + `worktree add -b`, `pr/<n>` collision fallback — never `gh pr checkout`); reattach-not-duplicate; diff vs the PR's own base merge-base; a 5-query `source='manual'` board-leak guard + `/move` 409; fork/colliding-branch PRs open with primary HEAD provably unchanged.
+- (Phase 13) PR Worktree Auto-Cleanup: the Phase-9 reaper gains a `reconcilePRsOnce` pass reading `gh pr view --json state`; merged/closed worktrees auto-remove ONLY when pristine + idle (dirty/unpushed/stash/session each skip), branch always kept; the gated logic extracted byte-equivalent into a shared `CleanupWorktreeGated` (HTTP DELETE + reaper, `force=false`); manual cleanup `⋯` item + merged/closed banner.
+
+### What Worked
+- **Research-flagged the integration risk center and spiked it before planning.** Phases 12 and 13 carried explicit research flags; `12-RESEARCH.md` proved `gh pr checkout` is NOT worktree-aware (cli/cli#972), fails on `/`-branches (#3231), and fast-forwards fork same-name branches (#8383) — so it was replaced with `git fetch refs/pull/<n>/head` + `worktree add`, verified end-to-end. The riskiest subsystem (PR-branch checkout) was proven against the real `gh`/git before anything rode on it — the v1.0 "build the riskiest part first" lesson, re-exercised on a genuine novel-risk surface.
+- **One shared `github.Service` across three phases.** Constructed once in `main.go` and injected into both `PullRequestRoutes` (list cache + PR detail/checkout) and `reaper.NewWithPR` (PRState) via a compiler-enforced `PRStateGetter` seam — one cache, one auth context, no divergent instances. The leaf-package-per-external-tool pattern, extended not scattered (as with `internal/tmux` in v1.2).
+- **Byte-equivalent extraction with a regression guard.** `CleanupWorktreeGated` was lifted out of the live HTTP DELETE handler into one helper with two callers, proven unchanged by the existing DELETE tests *before* the reaper became the second caller — the 409/500/204 contract never moved.
+- **Human checkpoints as load-bearing design input, again.** Phase 12's checkpoint surfaced 5 follow-ups → gap plans 12-06/12-07 (named-branch over detached HEAD, configurable seed, single-line header, F5 re-hydration); Phase 10's UAT surfaced gh-gated enablement → 10-04/10-05. Each reversal updated PROJECT.md Key Decisions with a dated supersede note.
+- **Independent integration audit before completion.** The milestone audit + integration checker re-verified all 6 cross-phase seams against source (`go build` proves the type seams) rather than trusting the per-phase VERIFICATION.md — confirming the board-leak guard, the shared service, and the branch-never-deleted invariant hold across phase boundaries.
+
+### What Was Inefficient
+- **The summary-extract one-liner misfire is now a three-milestone recurring bug.** 13-02-SUMMARY's `one_liner` came through as `"1. [Rule 1 - Bug] Unpushed-gate fetch must run in the worktree..."` — a numbered deviation list, not a one-liner — and the milestone-complete CLI dumped all 19 raw plan one-liners (including that garbage) straight into MILESTONES.md, needing manual curation to the intended 4–6 accomplishments. Same class of bug flagged in v1.1 and v1.2.
+- **Mid-stream design reversals left stale wording in settled artifacts.** Detached→named-branch (supersedes D-01) and default-expanded→default-collapsed (supersedes D-05/D-06) meant the original plans/UI-SPECs/CONTEXT carried wording the code no longer matched; reconciled with dated supersede notes, but PROJECT.md's "Current Milestone" target list still described `gh pr checkout` after the research had ruled it out.
+- **Gap-closure churn.** Phases 10 and 12 each needed unplanned gap plans (10-04/05, 12-06/07) after their human-verify gates — 4 of the milestone's 19 plans were gap closure. Front-loading the gh-gate (10) and the named-branch decision (12) at discuss-time could have folded them into the original plans.
+- **Pre-existing react-hooks lint debt kept surfacing, never addressed.** Logged to `deferred-items.md` in both Phase 10 and Phase 12; the green gating build (`tsc -b && vite build`) masks ~18–20 eslint errors, and v1.3 added two more (`Date.now()` in render). Carried as audited tech debt.
+- **Phase 10 Progress row drifted to "4/5"** (gap-plan accounting) until corrected at completion — the `phase complete` summary-marker staleness flagged in v1.2 recurred.
+
+### Patterns Established
+- **Shared-service-across-phases with an interface seam.** A single external-tool service constructed once and injected into multiple consumers, with a narrow interface (`PRStateGetter`) for the lower-layer consumer (reaper → no import cycle) — integration is compiler-enforced, not asserted.
+- **Source-discriminated view shell.** One `TaskPage`/`TaskTabs` branches every PR delta on `task.source==='github_pr'`, leaving the manual-task path byte-for-byte unchanged — the v1.0 `TabDef[]`/source-discrimination seam paying off a fifth time.
+- **Conservative multi-gate auto-removal.** Auto-cleanup skips on ANY of dirty / unpushed (`rev-list FETCH_HEAD..HEAD` after a per-worktree re-fetch) / stash / running-session, runs `force=false`, and never deletes the branch — a destructive action defaults to "leave it for the human".
+
+### Key Lessons
+1. **Research-flag and spike the integration risk center before planning** — `gh pr checkout`'s worktree-unawareness would have been a late, expensive discovery; proving the `fetch refs/pull/<n>/head` path first made GHREV-05 (primary-checkout safety) a verified property, not a hope.
+2. **A single shared service + interface seam beats per-phase re-construction** — one `github.Service` across three phases gave one cache, one auth context, and a compiler-proven seam the audit could confirm had no divergent instances.
+3. **Treat the milestone-complete accomplishments list as a DRAFT** — the summary-extract one-liner misfire has now polluted MILESTONES.md three milestones running; always hand-curate (or fix the extractor to reject numbered-list one_liners).
+4. **Fold checkpoint-likely reversals into the first plan** — the named-branch and gh-gate decisions were both foreseeable at discuss-time; deferring them cost 4 gap plans across the milestone.
+
+### Cost Observations
+- Orchestrated on Opus 4.8 (inherit profile) across ~3 execution sessions over 2 days (2026-06-13 → 06-14); 125 commits (42 `feat`), +5,410/−159 LOC code (51 files), zero new Go modules or npm deps.
+- Notable: the milestone audit spawned a dedicated integration checker that re-verified all 6 seams independently against source; gap-closure cycles in Phases 10 and 12 added 4 unplanned plans.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -132,6 +174,7 @@
 | v1.0 | 5 | 28 | Established the discuss → ui-spec → research → plan → execute → verify loop with human checkpoints; risk-front-loaded roadmap; interface-first wave parallelism |
 | v1.1 | 1 | 4 | Coarse single-phase milestone for integration-only scope; checkpoint → fresh continuation-agent flow; manifest-diff-vs-tag as the zero-dep gate |
 | v1.2 | 3 | 12 | Empirical tmux research verified on the host binary pre-planning (first novel-risk subsystem since v1.0); invisible-subsystem principle; DB-derived ghost reconcile generalized from Phase 5; post-planner ROADMAP integrity checks |
+| v1.3 | 4 | 19 | Research-flagged the integration risk center (`gh pr checkout` worktree-unawareness) and spiked it pre-planning; one shared `github.Service` across 3 phases via a compiler-enforced interface seam; byte-equivalent helper extraction with regression guard; independent integration audit before completion |
 
 ### Cumulative Quality
 
@@ -140,9 +183,12 @@
 | v1.0 | 6 (api, diff, session, store, worktree, ws) | tsc + vite build green | Held throughout — only sanctioned deps added (xterm set, dnd-kit, radix collapsible); no go.mod surprises |
 | v1.1 | 7 (+settings) | tsc + vite build green | Held — zero new Go modules and zero new npm deps, proven by manifest diff against the v1.0 tag |
 | v1.2 | 11 (+quota, tmux, reaper) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 3 phases |
+| v1.3 | 12 (+github) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 4 phases; carried ~18–20 pre-existing react-hooks lint advisories (build green) as audited tech debt |
 
 ### Top Lessons (Verified Across Milestones)
 
-1. **Empirical per-version tool research before planning** — exercised lightly in v1.1 (integration-only scope; call sites verified against the actual v1.0 code rather than assumptions). Held.
-2. *(still to be re-tested — v1.1 had no novel-risk subsystem)* Build the riskiest subsystem first against a stand-in.
-3. **Interface-first wave parallelism with disjoint file ownership** — confirmed across both milestones; zero merge conflicts in any parallel wave.
+1. **Empirical per-version tool research before planning** — re-confirmed strongly in v1.3: the `gh pr checkout` worktree-unawareness research (cli/cli#972/#3231/#8383) changed the whole checkout approach before a line was planned. Held across v1.0, v1.2, v1.3.
+2. **Build the riskiest, least-off-the-shelf subsystem first** — re-tested in v1.3 (the PR-branch worktree checkout was research-flagged and proven against real `gh`/git before Phases 12–13 rode on it), after v1.1 had no novel-risk subsystem to exercise it. Held.
+3. **Interface-first wave parallelism with disjoint file ownership** — confirmed across all milestones; zero merge conflicts in any parallel wave.
+4. **A single shared service + narrow interface seam for a cross-phase external tool** — `internal/tmux` (v1.2) and `internal/github` (v1.3) both stayed one leaf package with one constructed instance fanned out to multiple consumers; integration became compiler-enforced rather than asserted.
+5. **The milestone-complete accomplishments list needs hand-curation** — the summary-extract one-liner misfire polluted MILESTONES.md in v1.1, v1.2, and v1.3; treat the CLI output as a draft.

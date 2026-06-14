@@ -8,23 +8,30 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone: v1.3 GitHub PR Review
+## Current Milestone
+
+**v1.3 GitHub PR Review — shipped 2026-06-14.** No milestone is currently active; run `/gsd:new-milestone` to scope the next one. See the Validated requirements and Current State below for what v1.3 delivered.
+
+<details>
+<summary>Shipped milestone targets — v1.3 GitHub PR Review (2026-06-14)</summary>
 
 **Goal:** Surface the GitHub pull requests that need your review on a linked project's board, and open each as a full task-like review workspace — a worktree checked out on the PR's branch, with the same agent session, bash tabs, and diff as a normal task.
 
-**Target features:**
-- Global GitHub integration toggle in settings (enabled by default); when off, all GitHub UI disappears
+**Delivered features:**
+- Global GitHub integration toggle in settings (gh-gated; default on when `gh` present, OFF + un-enableable when absent); when off, all GitHub UI disappears
 - Per-project config section: optional short description + a linked GitHub repository
 - Collapsible "Review" column on the right of a linked project's board, listing open PRs where review is requested from you, fetched via `gh`, auto-polled (paused when tab hidden) + manual refresh
 - PR cards rendered like task cards; the list syncs live from GitHub (cards appear/disappear as review state changes)
-- Clicking a PR opens a task-like view backed by a worktree that checks out the PR branch (`gh pr checkout`) instead of creating a new branch
-- A review's worktree is auto-removed when its PR merges/closes (gated on dirty-tree + running sessions; branch kept)
+- Clicking a PR opens a task-like view backed by a worktree on the PR's real head branch (fetch `refs/pull/<n>/head`, named branch with `pr/<n>` collision fallback — **not** `gh pr checkout`, which the research ruled out as not worktree-aware)
+- A review's worktree is auto-removed when its PR merges/closes (gated on dirty/unpushed/stash/running-session; branch kept)
 
 **Settled decisions (milestone-time):**
 - GitHub access is via the `gh` CLI (already authenticated on host) — no tokens stored; mirrors how Kangent shells out to git/claude. `gh` is a soft dependency: the integration is best-effort (like the quota indicator) and degrades gracefully when `gh` is absent or unauthenticated.
 - PR reviews are a GitHub-synced list, not kanban tasks — they never enter To Do/In Progress/Done.
 - No in-app GitHub write actions (approve/request-changes/comment/merge) — done in the terminal, preserving the manual-git philosophy.
 - Worktrees CAN be auto-removed on PR merge/close — a deliberate, gated exception to the prior "worktrees never auto-removed" rule.
+
+</details>
 
 ## Requirements
 
@@ -56,14 +63,13 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ Global GitHub integration toggle (`github_integration` settings KV) with a full OFF cascade hiding all GitHub UI app-wide; **gh-gated**: when `gh` is absent the toggle defaults OFF and refuses to enable, surfacing "Install the GitHub CLI (gh) before enabling GitHub integration." (`GET /api/github/status` → `gh_available`); when `gh` is present it defaults on — Phase 10 (GHSET-01/02/03)
 - ✓ Per-project config: optional short description (280 cap) + linked GitHub repo via Project settings dialog (⋯ menu), origin-prefilled and soft-validated through the degrade-don't-break `internal/github` leaf package (`gh` canonicalization with syntactic fallback) — Phase 10 (GHPRJ-01/02/03)
 - ✓ Schema foundation for the whole milestone: migration 00007 adds `projects.description`/`github_repo` and `tasks.source`/`pr_number`/`pr_base_ref` (so Phases 11–13 need no further migration) — Phase 10
+- ✓ Collapsible per-project "Review" column listing `user-review-requested:@me draft:false` open PRs via one cached `gh pr list` call (server-side `statusCheckRollup` → pass/fail/pending/none), 60s visibility-paused auto-poll + manual refresh, inline loading/empty/degraded states, default-collapsed, never blocking the board — Phase 11 (GHCOL-01..06)
+- ✓ Open-a-Review: clicking a PR card opens a task-like review workspace (`source='github_pr'` task reusing TaskPage/agent/bash/diff) backed by a worktree on the PR's real head branch (fetch `refs/pull/<n>/head`, `pr/<n>` collision fallback, primary checkout HEAD provably unchanged); open-or-reattach (no duplicates); diff vs the PR's own base merge-base matching GitHub; PR reviews never leak onto the kanban board — Phase 12 (GHREV-01..05)
+- ✓ PR worktree auto-cleanup: the reaper reconciles PR state (`gh pr view --json state`) and gated-removes a merged/closed worktree only when pristine + idle (dirty/unpushed/stash/session all skip), always keeping the branch; manual cleanup from the review view via the same gated `CleanupWorktreeGated` flow + a merged/closed banner — Phase 13 (GHCLN-01/02/03)
 
 ### Active
 
-**v1.3 GitHub PR Review** (REQ-IDs in REQUIREMENTS.md):
-- [ ] Collapsible PR review column listing review-requested-from-me open PRs via `gh`, auto-poll (paused when hidden) + manual refresh
-- [ ] PR cards rendered like task cards, list synced live from GitHub
-- [ ] PR review view: worktree on the PR branch (`gh pr checkout`) + agent/bash/diff like a normal task
-- [ ] Auto-cleanup of the review worktree on PR merge/close (gated on dirty-tree + running sessions; branch kept)
+_No milestone currently active. Run `/gsd:new-milestone` to define the next one (questioning → research → requirements → roadmap)._ Carried-forward candidates live in **Deferred** below.
 
 ### Out of Scope
 
@@ -91,13 +97,18 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 **Phase 12 (Open-a-Review) complete (2026-06-14)** — 7 plans (5 original + 2 gap-closure after the human-verify checkpoint). The milestone headline: clicking a PR card opens it as a task-like review workspace — a `tasks` row with `source='github_pr'` rendered through the same `TaskPage`/`TaskTabs` shell. `worktree.CheckoutPR` fetches `refs/pull/<n>/head` and `git worktree add -b <branch> <path> <headOID>` on the PR's **real head branch** with a `pr/<n>` collision fallback (the named-branch path *supersedes* the original detached D-01 after human-verify, and preserves GHREV-05 — an existing local ref is never reused/moved, main checkout HEAD provably unchanged). Open-or-reattach `POST .../pull-requests/{n}/review` (find by project+pr_number) + read-only `GET .../pull-requests/{n}` (live `gh pr view` re-hydration on F5). Diff branches on `pr_base_ref` (fetch + merge-base `origin/<base>`, renderer reused). Board-leak guard: `source='manual'` on all 5 board/position queries + `/move` 409. Frontend: read-only single-line clickable GitHub-style header (`#<n> @<author> wants to merge <N> commits into <base> from <head>`), read-only PR-body Description, Agent-tab-first, seed prefilled-once-per-session from the configurable `pr_review_seed` Settings field. 5/5 success criteria verified; human-verify approved end-to-end.
 
-**Phase 13 (PR Worktree Auto-Cleanup) complete (2026-06-14) — v1.3 fully implemented** — 3 plans. The reaper (the Phase 9 Done-TTL goroutine) gains a second `reconcilePRsOnce` pass: per tick, each `source='github_pr'` task with a worktree is checked via `github.PRState` (`gh pr view --json state` → OPEN/CLOSED/MERGED); a MERGED/CLOSED PR's worktree is auto-removed **only when pristine and idle** (conservative gate: uncommitted / unpushed via `rev-list FETCH_HEAD..HEAD` re-fetched in the worktree / stash / running session — skip on any), and on success the task row is deleted (FK-ordered `tmux_sessions` before `tasks`). The gated-cleanup logic was extracted byte-equivalent into `CleanupWorktreeGated` (shared by the HTTP handler + reaper; reaper passes `force=false`, never stops sessions); the branch ref is never deleted. Manual cleanup (GHCLN-03) re-adds a PR `⋯` "Clean up worktree" item + a merged/closed banner in the review view. 18/18 must-haves verified; human-verify approved end-to-end. **v1.3 (GitHub PR Review) complete — ready for `/gsd:complete-milestone`.**
+**Phase 13 (PR Worktree Auto-Cleanup) complete (2026-06-14) — v1.3 fully implemented** — 3 plans. The reaper (the Phase 9 Done-TTL goroutine) gains a second `reconcilePRsOnce` pass: per tick, each `source='github_pr'` task with a worktree is checked via `github.PRState` (`gh pr view --json state` → OPEN/CLOSED/MERGED); a MERGED/CLOSED PR's worktree is auto-removed **only when pristine and idle** (conservative gate: uncommitted / unpushed via `rev-list FETCH_HEAD..HEAD` re-fetched in the worktree / stash / running session — skip on any), and on success the task row is deleted (FK-ordered `tmux_sessions` before `tasks`). The gated-cleanup logic was extracted byte-equivalent into `CleanupWorktreeGated` (shared by the HTTP handler + reaper; reaper passes `force=false`, never stops sessions); the branch ref is never deleted. Manual cleanup (GHCLN-03) re-adds a PR `⋯` "Clean up worktree" item + a merged/closed banner in the review view. 18/18 must-haves verified; human-verify approved end-to-end. **v1.3 (GitHub PR Review) shipped 2026-06-14** — milestone audit passed (20/20 requirements, 6/6 integration seams, 4/4 E2E flows), archived to `milestones/v1.3-*`.
 
 ## Next Milestone
 
-**v1.3 GitHub PR Review is now active** (started 2026-06-13). See "Current Milestone" above plus REQUIREMENTS.md / ROADMAP.md for scope and phasing.
+**No milestone active.** v1.3 shipped 2026-06-14; run `/gsd:new-milestone` to scope the next cycle (questioning → research → requirements → roadmap).
 
-Open candidates carried forward live in **Deferred** below. The v1.2 work also banked two forward investments worth a future milestone: per-status task timestamps (`todo_at`/`in_progress_at`/`in_review_at`/`done_at`, migration 00006) ready to power board cycle-time / dwell-time stats, and the first background-goroutine pattern (the Done-TTL reaper) that future periodic maintenance (e.g. MAINT-01 stale-worktree purge) can model on.
+Candidates carried forward live in **Deferred** below. Three banked forward investments are worth a future milestone:
+- Per-status task timestamps (`todo_at`/`in_progress_at`/`in_review_at`/`done_at`, migration 00006) ready to power board cycle-time / dwell-time stats.
+- The background-goroutine reaper pattern (Done-TTL + PR reconcile passes) that future periodic maintenance (e.g. MAINT-01 stale-worktree purge) can model on.
+- Deferred v1.3 GitHub follow-ups already scoped in the archived `milestones/v1.3-REQUIREMENTS.md` "Future Requirements": richer PR cards (diff size, fork pill, head→base line, review-decision/labels — GHCARD-01..04), filter options (team review requests, draft PRs — GHFILT-01/02), and broader surfaces (cross-project review inbox, author-side PRs — GHWIDE-01/02).
+
+**Known tech debt (from the v1.3 audit, non-blocking):** ~18–20 pre-existing `react-hooks` eslint errors plus two v1.3-introduced lint advisories (`Date.now()` in render in `PRCard.tsx`/`ReviewColumn.tsx`) — gating build (`tsc -b && vite build`) is green; a dedicated lint-cleanup pass is the right home.
 
 ## Deferred (post-v1.1)
 
@@ -156,4 +167,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-14 — Phase 13 complete; v1.3 (GitHub PR Review) fully implemented, ready for milestone completion*
+*Last updated: 2026-06-14 after v1.3 GitHub PR Review milestone — shipped, audited, and archived*

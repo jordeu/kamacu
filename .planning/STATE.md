@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: verifying
-stopped_at: Completed 13-03-PLAN.md (phase 13 all plans complete; human-verify approved)
-last_updated: "2026-06-14T14:50:09.224Z"
+status: shipped
+stopped_at: v1.3 shipped 2026-06-14 — audited (passed), archived, tagged. No milestone active; run /gsd:new-milestone.
+last_updated: "2026-06-14T15:10:38.018Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
@@ -18,31 +18,22 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-13)
+See: .planning/PROJECT.md (updated 2026-06-14)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 13 — pr-worktree-auto-cleanup
+**Current focus:** Planning next milestone — run `/gsd:new-milestone`
 
 ## Current Position
 
-Phase: 13
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-14
+Milestone: v1.3 GitHub PR Review — ✅ SHIPPED 2026-06-14
+Phase: none active
+Status: Milestone complete — audited (passed), archived, tagged
 
-Progress: [██████████] 100% (12-01..12-07 implemented; phase re-verification remains)
+Progress: [██████████] 100% — 4 phases, 19 plans, 46 tasks
 
-**12-05 human-verify outcome — 5 follow-ups → gap plans 12-06/12-07 — ALL CLOSED + APPROVED 2026-06-14:**
+**v1.3 shipped:** Surface review-requested GitHub PRs on a linked project's board and open each as a worktree-backed task-like review workspace, with auto-cleanup of merged/closed clean worktrees. Audit: 20/20 requirements satisfied, 6/6 integration seams wired, 4/4 E2E flows complete. Archived to `milestones/v1.3-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
 
-1. PR worktree is detached HEAD; want the PR's real head branch checked out (fallback `pr/<n>` on collision). [12-06 ✓ DONE — CheckoutPR named-branch + collision fallback, GHREV-05 preserved]
-2. Bash terminal in the PR review opens empty with excessive height forcing scroll (layout/fit regression). [12-07 ✓ DONE — confirmed the body chain was never forked; merge line kept inside the shrink-0 header block]
-3. Seed prompt re-injected on every open (per-mount ref) — inject only once, at first agent Start. [12-07 ✓ DONE — module-level seededSessionIds Set keyed by agent session id]
-4. Make the review prompt configurable via a Settings field (default = current template, `<n>`/`<title>` placeholders). [12-06 key ✓ + 12-07 textarea field ✓ DONE — pr_review_seed, frontend-interpolated, blank = no injection]
-5. Show a GitHub-style merge line: "<author> wants to merge <N> commits into <base> from <head>". [12-06 commits/head/base ✓ + 12-07 render ✓ DONE — single-line clickable header #<num> @<author> wants to merge <N> commits into <base> from <head>]
-
-**Bonus checkpoint fixes (12-07):** single-line clickable PR header (merge the two rows; #<num> is the GitHub link); F5 re-hydration via a read-only GET /api/projects/{id}/pull-requests/{n} + usePullRequestDetail (the cache-only detail blanked on hard reload).
-
-GHREV-01 / GHREV-05 are now COMPLETE in REQUIREMENTS.md (gap fixes landed + human-verified). The orchestrator re-runs phase verification (gsd-verifier) next.
+**Next:** `/gsd:new-milestone` to scope the next cycle. Carried tech debt (non-blocking, build green): ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render lint items — a dedicated lint pass is the right home.
 
 ## Performance Metrics
 
