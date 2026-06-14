@@ -161,7 +161,9 @@ func (h *taskHandlers) listByProject(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	rows, err := h.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE project_id = ? ORDER BY status, position ASC`, pid)
+	// GHREV-04: the board lists MANUAL tasks only — PR reviews
+	// (source='github_pr') own a worktree/agent/diff but never render as cards.
+	rows, err := h.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE project_id = ? AND source = 'manual' ORDER BY status, position ASC`, pid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -215,7 +217,7 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 	t, err := scanTask(h.db.QueryRow(
 		`INSERT INTO tasks (project_id, title, description, status, position)
 		 VALUES (?, ?, ?, 'todo',
-		   (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks WHERE project_id = ? AND status = 'todo'))
+		   (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks WHERE project_id = ? AND status = 'todo' AND source = 'manual'))
 		 RETURNING `+taskColumns, pid, title, req.Description, pid))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -331,13 +333,21 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// 1. Load the moving task; validate target status.
+	// GHREV-04 guard (defense-in-depth, D-13): a PR review (source != 'manual')
+	// can never receive a board position. Reject it with 409 BEFORE any
+	// position math, even though the position queries already filter PR rows.
 	var projectID int64
-	if err := tx.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id = ?`, id).Scan(&projectID); err != nil {
+	var source string
+	if err := tx.QueryRowContext(ctx, `SELECT project_id, source FROM tasks WHERE id = ?`, id).Scan(&projectID, &source); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 		} else {
 			writeError(w, http.StatusInternalServerError, err.Error())
 		}
+		return
+	}
+	if source != "manual" {
+		writeError(w, http.StatusConflict, "PR reviews are not board tasks")
 		return
 	}
 	if !validStatuses[req.Status] {
@@ -351,7 +361,7 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 		// re-dropping at the top of its own column works.
 		err = tx.QueryRowContext(ctx,
 			`SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks
-			 WHERE project_id = ? AND status = ? AND id != ?`,
+			 WHERE project_id = ? AND status = ? AND id != ? AND source = 'manual'`,
 			projectID, req.Status, id).Scan(&pos)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -457,7 +467,7 @@ func (h *taskHandlers) nextPosition(ctx context.Context, tx *sql.Tx, projectID i
 	var next sql.NullFloat64
 	err := tx.QueryRowContext(ctx,
 		`SELECT MIN(position) FROM tasks
-		 WHERE project_id = ? AND status = ? AND position > ? AND id != ?`,
+		 WHERE project_id = ? AND status = ? AND position > ? AND id != ? AND source = 'manual'`,
 		projectID, status, afterPos, movingID).Scan(&next)
 	if err != nil {
 		return nil, err
@@ -473,7 +483,7 @@ func (h *taskHandlers) nextPosition(ctx context.Context, tx *sql.Tx, projectID i
 // preserving the current order. Runs inside the caller's transaction.
 func renumberColumn(ctx context.Context, tx *sql.Tx, projectID int64, status string) error {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM tasks WHERE project_id = ? AND status = ? ORDER BY position, id`,
+		`SELECT id FROM tasks WHERE project_id = ? AND status = ? AND source = 'manual' ORDER BY position, id`,
 		projectID, status)
 	if err != nil {
 		return err
