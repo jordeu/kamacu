@@ -8,7 +8,10 @@
 //   - Success is exit 0 ONLY. Exit codes are inconsistent across failure
 //     modes (255 vs 128 observed) and stderr is chatty on success
 //     ("Preparing worktree…"), so neither is a signal.
-//   - This package NEVER deletes branches (D-34) and never fetches (D-24).
+//   - This package NEVER deletes branches (D-34) and never fetches (D-24) —
+//     EXCEPT CheckoutPR/FetchRef, a deliberate scoped exception for
+//     PR-head/PR-base retrieval (Phase 12, ARCHITECTURE §4): a PR review's
+//     whole point is fetching someone else's branch.
 package worktree
 
 import (
@@ -171,6 +174,43 @@ func (s *Service) Create(ctx context.Context, repo, branch, path, base string) e
 		return err
 	}
 	_, err := gitRun(ctx, repo, "worktree", "add", "-b", branch, path, base)
+	return err
+}
+
+// CheckoutPR provisions a DETACHED worktree at `path` on the PR head (D-01,
+// GHREV-01/05). headOID comes from gh pr view (NOT FETCH_HEAD — that is
+// clobbered by a later base fetch, RESEARCH Pitfall 1). The fetch is a
+// DELIBERATE, SCOPED EXCEPTION to this package's "never fetch" invariant
+// (D-24): a PR review's whole point is fetching someone else's branch.
+// refs/pull/<n>/head resolves FORK heads from the BASE repo, so forks need
+// no fork remote and no special-casing. A detached HEAD occupies no branch,
+// so it never moves the project's primary checkout HEAD and never trips the
+// "branch already checked out" lock (PITFALL 3/5). Remote is hard-coded
+// "origin" for v1.3 (RESEARCH OQ3 — every linked repo is a GitHub clone).
+func (s *Service) CheckoutPR(ctx context.Context, repo, path, headOID string, prNumber int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("worktree path already exists: %s", path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if _, err := gitRun(ctx, repo, "fetch", "origin", fmt.Sprintf("refs/pull/%d/head", prNumber)); err != nil {
+		return err
+	}
+	_, err := gitRun(ctx, repo, "worktree", "add", "--detach", path, headOID)
+	return err
+}
+
+// FetchRef best-effort fetches a named ref from origin (e.g. a PR base
+// branch) so the remote-tracking ref origin/<ref> exists for a later
+// merge-base. Same scoped-fetch exception as CheckoutPR. Callers may ignore
+// the error and let the subsequent merge-base surface a clear message.
+func (s *Service) FetchRef(ctx context.Context, repo, ref string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := gitRun(ctx, repo, "fetch", "origin", ref)
 	return err
 }
 
