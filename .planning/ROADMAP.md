@@ -139,7 +139,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
 | 11. PR Review Column | v1.3 | 4/4 | Complete    | 2026-06-14 |
 | 12. Open-a-Review | v1.3 | 7/7 | Complete    | 2026-06-14 |
-| 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete   | 2026-06-14 |
+| 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete    | 2026-06-14 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
