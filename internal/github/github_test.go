@@ -1,6 +1,14 @@
 package github
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseRepoRef(t *testing.T) {
 	tests := []struct {
@@ -64,4 +72,119 @@ func TestParseRepoRefCanonicalError(t *testing.T) {
 // depends on whether gh resolves on the host PATH.
 func TestAvailable(t *testing.T) {
 	_ = Available()
+}
+
+// TestViewPRNoGH forces gh to be unresolvable (an empty PATH) and asserts
+// ViewPR degrades to a typed error + an empty PRDetail (degrade-don't-break) —
+// it must NEVER panic and never return partial data.
+func TestViewPRNoGH(t *testing.T) {
+	// An empty dir on PATH so exec.LookPath("gh") fails deterministically,
+	// regardless of whether gh is installed on the host.
+	t.Setenv("PATH", t.TempDir())
+
+	d, err := ViewPR(context.Background(), "cli/cli", 1)
+	if err == nil {
+		t.Fatal("ViewPR with gh absent returned nil error, want a typed error")
+	}
+	if d != (PRDetail{}) {
+		t.Errorf("ViewPR with gh absent returned %+v, want a zero PRDetail", d)
+	}
+}
+
+// viewPRRaw mirrors the lenient decode shape ViewPR uses internally: the
+// PRDetail fields plus a nested author OBJECT that is flattened to AuthorLogin.
+// The test exercises the decode contract (author.login flattening + empty-body
+// tolerance) against a captured gh pr view fixture (RESEARCH §1).
+type viewPRRaw struct {
+	PRDetail
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
+// ghViewFixture is a captured `gh pr view … --json …` payload (RESEARCH §1
+// shape): author is an object, and body is an empty string (the empty-PR-body
+// case D-11 must tolerate).
+var ghViewFixture = []byte(`{
+  "number": 1,
+  "title": "interactive pr list",
+  "body": "",
+  "author": {"id": "x", "is_bot": false, "login": "vilmibm", "name": "Nate Smith"},
+  "url": "https://github.com/cli/cli/pull/1",
+  "headRefName": "gh-pr",
+  "headRefOid": "e9a3253762e768badaa1d4a5b3d267416d1e42f4",
+  "baseRefName": "prototype",
+  "baseRefOid": "8ebaf1d3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "isCrossRepository": false
+}`)
+
+func TestViewPRDecodeFlattensAuthorAndEmptyBody(t *testing.T) {
+	var raw viewPRRaw
+	if err := json.Unmarshal(ghViewFixture, &raw); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	d := raw.PRDetail
+	d.AuthorLogin = raw.Author.Login
+
+	if d.AuthorLogin != "vilmibm" {
+		t.Errorf("AuthorLogin = %q, want %q (flattened from author.login)", d.AuthorLogin, "vilmibm")
+	}
+	if d.Body != "" {
+		t.Errorf("Body = %q, want empty (empty-body tolerance, D-11)", d.Body)
+	}
+	if d.Number != 1 {
+		t.Errorf("Number = %d, want 1", d.Number)
+	}
+	if d.Title != "interactive pr list" {
+		t.Errorf("Title = %q, want %q", d.Title, "interactive pr list")
+	}
+	if d.HeadRefOid != "e9a3253762e768badaa1d4a5b3d267416d1e42f4" {
+		t.Errorf("HeadRefOid = %q, want the captured head OID", d.HeadRefOid)
+	}
+	if d.BaseRefName != "prototype" {
+		t.Errorf("BaseRefName = %q, want %q", d.BaseRefName, "prototype")
+	}
+	if d.URL != "https://github.com/cli/cli/pull/1" {
+		t.Errorf("URL = %q, want the captured url", d.URL)
+	}
+	if d.IsCrossRepository {
+		t.Error("IsCrossRepository = true, want false")
+	}
+}
+
+// TestViewPRFakeGH stubs `gh` with a tiny script that echoes the fixture, so
+// the full ViewPR path (exec + decode + flatten) is exercised end-to-end
+// without the real gh CLI or network. The script uses only the `echo` shell
+// builtin (no external cat/printf) so it works under the restricted PATH this
+// test sets — only the temp dir is on PATH, so no /usr/bin tools resolve.
+func TestViewPRFakeGH(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "gh")
+	// Compact the fixture to a single line so `echo` reproduces it faithfully.
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, ghViewFixture); err != nil {
+		t.Fatalf("compact fixture: %v", err)
+	}
+	// Escape for safe embedding inside double-quoted echo: the JSON has only
+	// `"` to escape (no `$`, backtick, or backslash in this fixture).
+	escaped := strings.ReplaceAll(compact.String(), `"`, `\"`)
+	script := "#!/bin/sh\necho \"" + escaped + "\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	d, err := ViewPR(context.Background(), "cli/cli", 1)
+	if err != nil {
+		t.Fatalf("ViewPR with fake gh: %v", err)
+	}
+	if d.AuthorLogin != "vilmibm" {
+		t.Errorf("AuthorLogin = %q, want %q", d.AuthorLogin, "vilmibm")
+	}
+	if d.Number != 1 || d.Title != "interactive pr list" {
+		t.Errorf("ViewPR returned %+v, want number 1 / interactive pr list", d)
+	}
+	if d.Body != "" {
+		t.Errorf("Body = %q, want empty", d.Body)
+	}
 }
