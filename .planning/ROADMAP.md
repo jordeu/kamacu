@@ -119,7 +119,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
   3. User can also clean up a PR review worktree manually from the review view using the same gated cleanup flow tasks already use (GHCLN-03).
 **Plans**: 3 plans (2 waves — backend foundations → {reaper pass, frontend + human-verify})
 - [x] 13-01-PLAN.md — backend foundations: PR `state` through PRDetail/ViewPR + cheap github.Service.PRState; byte-equivalent `cleanupWorktreeGated` extraction (regression-guarded); worktree UnpushedCount/StashCount gate primitives; `state` on the detail wire
-- [ ] 13-02-PLAN.md — reaper `reconcilePRsOnce` pass (PRStateGetter seam) + conservative gate (dirty/unpushed/stash/session) + D-07 FK-ordered row delete + main.go wiring + spy test matrix
+- [x] 13-02-PLAN.md — reaper `reconcilePRsOnce` pass (PRStateGetter seam) + conservative gate (dirty/unpushed/stash/session) + D-07 FK-ordered row delete + main.go wiring + spy test matrix
 - [ ] 13-03-PLAN.md — frontend: PR-review `⋯` "Clean up worktree" menu + merged/closed banner (D-08/D-09) + end-to-end human-verify checkpoint
 **Research flag**: yes — carried forward from research SUMMARY. The gated-cleanup-helper extraction refactors live cleanup code (`cleanupWorktreeGated` extracted from `worktreeHandlers.remove`; one path, two callers — HTTP + reaper), and the unpushed-work gate beyond `git status --porcelain` (also check `git rev-list <headRefOid>..HEAD` and `git stash list`) deserves careful, regression-guarded planning. RESEARCH complete (13-RESEARCH.md): all gates verified live; the helper extraction is taken as a byte-equivalent mechanical refactor with the two new gates in the reaper only (lowest-regression reading).
 
@@ -139,7 +139,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
 | 11. PR Review Column | v1.3 | 4/4 | Complete    | 2026-06-14 |
 | 12. Open-a-Review | v1.3 | 7/7 | Complete    | 2026-06-14 |
-| 13. PR Worktree Auto-Cleanup | v1.3 | 1/3 | In Progress|  |
+| 13. PR Worktree Auto-Cleanup | v1.3 | 2/3 | In Progress|  |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
