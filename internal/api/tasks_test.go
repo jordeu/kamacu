@@ -629,6 +629,104 @@ func TestMoveValidation(t *testing.T) {
 	}
 }
 
+// TestPRReviewNeverLeaksToBoard (GHREV-04, 12-02 Task 2): the milestone's
+// single highest-severity regression guard. A source='github_pr' row must NEVER
+// appear on the board, must NEVER receive a board position via /move (409), and
+// must NEVER perturb a manual task's positioning math.
+func TestPRReviewNeverLeaksToBoard(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+
+	// A manual task and a PR-review row co-exist in the same project + status.
+	manualID := taskID(t, createTask(t, srv, pid, "Manual Card"))
+	prID := insertPRRow(t, db, pid, 7, "main", "todo")
+
+	// 1. The PR row is ABSENT from the board; the manual task IS present.
+	code, list := doJSONList(t, fmt.Sprintf("%s/api/projects/%d/tasks", srv.URL, pid))
+	if code != http.StatusOK {
+		t.Fatalf("board list status = %d, want 200", code)
+	}
+	var sawManual, sawPR bool
+	for _, task := range list {
+		switch int64(task["id"].(float64)) {
+		case manualID:
+			sawManual = true
+		case prID:
+			sawPR = true
+		}
+	}
+	if !sawManual {
+		t.Errorf("manual task %d missing from board list", manualID)
+	}
+	if sawPR {
+		t.Errorf("PR review %d leaked onto the board (GHREV-04)", prID)
+	}
+
+	// 2. POST /api/tasks/{prId}/move → 409 (a PR review can never get a board
+	// position, even via a hand-crafted request).
+	code, body := moveTask(t, srv, prID, "in_progress", nil)
+	if code != http.StatusConflict {
+		t.Fatalf("move PR review: status = %d, want 409; body=%v", code, body)
+	}
+	if body["error"] != "PR reviews are not board tasks" {
+		t.Errorf("move PR review error = %q, want %q", body["error"], "PR reviews are not board tasks")
+	}
+	// The PR row's status must be unchanged (the move was rejected before any write).
+	status, prBody := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, prID), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET PR review after rejected move: status = %d", status)
+	}
+	if prBody["status"] != "todo" {
+		t.Errorf("PR review status = %q after rejected move, want unchanged %q", prBody["status"], "todo")
+	}
+
+	// 3. Positioning purity: a manual task moved to the top of To Do lands at a
+	// position strictly below every OTHER manual task, with the PR row's
+	// position (1.0) NOT perturbing the MIN-based top-of-column math.
+	other := taskID(t, createTask(t, srv, pid, "Other Manual"))
+	_ = other
+	code, body = moveTask(t, srv, manualID, "todo", nil)
+	if code != http.StatusOK {
+		t.Fatalf("move manual to top: status = %d, want 200; body=%v", code, body)
+	}
+	movedPos := body["position"].(float64)
+	for _, task := range columnTasks(t, srv, pid, "todo") {
+		if int64(task["id"].(float64)) == manualID {
+			continue
+		}
+		if task["position"].(float64) <= movedPos {
+			t.Errorf("manual task %v position %v <= moved task position %v — must be strict top of column",
+				task["id"], task["position"], movedPos)
+		}
+	}
+}
+
+// TestPRReviewExcludedFromCreatePositioning (GHREV-04): a manual task created in
+// a project whose ONLY existing To Do row is a PR review still lands at a sane
+// top-of-column position (the PR row's position must not seed the MIN). With no
+// manual To Do rows, COALESCE(MIN,2.0)-1.0 = 1.0; a PR row at any position must
+// not change that.
+func TestPRReviewExcludedFromCreatePositioning(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+
+	// Seed a PR row at a low position to try to poison the create MIN.
+	if _, err := db.Exec(
+		`INSERT INTO tasks (project_id, title, description, status, position, source, pr_number, pr_base_ref)
+		 VALUES (?, 'PR #99', '', 'todo', -5.0, 'github_pr', 99, 'main')`, pid); err != nil {
+		t.Fatalf("seed low-position PR row: %v", err)
+	}
+
+	body := createTask(t, srv, pid, "First Manual")
+	pos := body["position"].(float64)
+	// Baseline (no PR row) yields 1.0; the PR row's -5.0 must be excluded, so the
+	// manual task must NOT inherit a position derived from -5.0 (which would be
+	// -6.0). Assert it matches the clean top-of-empty-column value.
+	if pos != 1.0 {
+		t.Errorf("first manual task position = %v, want 1.0 (PR row must not seed create MIN)", pos)
+	}
+}
+
 func TestMoveStressRenormalize(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	pid := createProject(t, srv, gitRepo(t))
