@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { useSaveSetting, useSettings } from "@/api/settings";
+import { useSaveSetting, useSettings, type Settings } from "@/api/settings";
 import { useGithubStatus } from "@/api/queries";
 import { SettingsField } from "@/components/settings/SettingsField";
 
@@ -42,6 +42,7 @@ const BRANCH_HELP = `Tokens: {slug}, {id}, {title}. Applied when a task is creat
 const DONE_TTL_HELP = `Sessions of tasks left in Done are killed after this idle time. Use a duration like 24h or 90m; clear the field or enter never to disable. Worktrees are never removed.`;
 const GITHUB_INTEGRATION_HELP = `Show GitHub features across Kangent. Turn off to hide all GitHub UI.`;
 const GITHUB_GH_MISSING_HELP = `Install the GitHub CLI (gh) before enabling GitHub integration.`;
+const PR_REVIEW_SEED_HELP = `Prefilled (not sent) into the agent when you Start a review. Use <n> for the PR number and <title> for the PR title. Leave blank to start with no prompt.`;
 
 /**
  * The GitHub integration on/off Switch (GHSET-01/GHSET-03). A Switch has no
@@ -59,7 +60,13 @@ const GITHUB_GH_MISSING_HELP = `Install the GitHub CLI (gh) before enabling GitH
  * still-loading or errored status query is treated as "not available" so the
  * toggle never falsely shows on before availability is known.
  */
-function GithubSection({ enabled }: { enabled: boolean }) {
+function GithubSection({
+  enabled,
+  settings,
+}: {
+  enabled: boolean;
+  settings: Settings;
+}) {
   const save = useSaveSetting("github_integration");
   const [error, setError] = useState<string | null>(null);
   const { data: ghStatus } = useGithubStatus();
@@ -95,6 +102,20 @@ function GithubSection({ enabled }: { enabled: boolean }) {
         <p className="text-xs text-muted-foreground">
           {ghAvailable ? GITHUB_INTEGRATION_HELP : GITHUB_GH_MISSING_HELP}
         </p>
+      )}
+      {/* PR review prompt (12-07 fix #7): the configurable seed bound to
+          pr_review_seed. Lives in the section the toggle controls, so it only
+          shows while integration is enabled. Default-prefilled from the stored
+          value or the code default; edit + blur persists via the settings PUT
+          the review view (TaskPage) then reads. */}
+      {effectiveEnabled && settings.pr_review_seed && (
+        <SettingsField
+          settingKey="pr_review_seed"
+          label={`PR review prompt`}
+          entry={settings.pr_review_seed}
+          control="textarea"
+          help={withMono(PR_REVIEW_SEED_HELP, ["<n>", "<title>"])}
+        />
       )}
     </section>
   );
@@ -199,6 +220,7 @@ export default function SettingsPage() {
                 control that hides every other GitHub surface app-wide. */}
             <GithubSection
               enabled={settings.github_integration?.value === "on"}
+              settings={settings}
             />
           </div>
         )}

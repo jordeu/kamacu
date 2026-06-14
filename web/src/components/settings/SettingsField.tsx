@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 interface SettingsFieldProps {
@@ -20,7 +21,7 @@ interface SettingsFieldProps {
   entry: SettingEntry;
   help: ReactNode;
   mono?: boolean;
-  control?: "input" | "select";
+  control?: "input" | "select" | "textarea";
 }
 
 /**
@@ -150,6 +151,27 @@ export function SettingsField({
             ))}
           </SelectContent>
         </Select>
+      ) : control === "textarea" ? (
+        // Multi-line variant (PR review prompt): same commit-on-blur semantics
+        // as the input (no request when the draft equals the saved value), but
+        // Enter inserts a NEWLINE (a prompt is multi-line) — only Escape reverts.
+        <Textarea
+          id={id}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError(null);
+          }}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setDraft(entry.value);
+              setError(null);
+            }
+          }}
+          className={cn("min-h-[80px]", mono && "font-mono")}
+        />
       ) : (
         <Input
           id={id}
