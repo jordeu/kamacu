@@ -67,9 +67,18 @@ func ParseRepoRef(ref string) (string, error) {
 	return s, nil
 }
 
-// ValidateRepo is the soft-validate entry point used by the PATCH handler. It
-// returns the canonical owner/name, whether gh verified it, and an error ONLY
-// when the ref is syntactically invalid (the lone blocking case):
+// validateRunner is the overridable seam for ValidateRepo's gh-verification leg,
+// mirroring clone.go's cloneRunner package var. Production points at ghValidate
+// (real `gh repo view`); tests swap in a fake so the API-layer create-by-repo
+// tests can inject a canonical/verified outcome WITHOUT a live gh or network
+// (the seam recommended in 14-02-PLAN.md Task 2's validation-seam note). It is
+// reached ONLY after ParseRepoRef succeeds, so it never sees syntactic garbage.
+var validateRunner = ghValidate
+
+// ValidateRepo is the soft-validate entry point used by the PATCH handler and
+// the create-by-repo path. It returns the canonical owner/name, whether gh
+// verified it, and an error ONLY when the ref is syntactically invalid (the
+// lone blocking case):
 //
 //   - ParseRepoRef errors                 → ("", false, err)   [HARD block]
 //   - gh absent (LookPath fails)          → (parsed, false, nil) [soft save]
@@ -87,6 +96,14 @@ func ValidateRepo(ctx context.Context, ref string) (canonical string, verified b
 	if !Available() {
 		return parsed, false, nil
 	}
+	return validateRunner(ctx, parsed)
+}
+
+// ghValidate is the production validateRunner: it shells out to `gh repo view`
+// with an arg array (NEVER `sh -c`) and returns the gh-canonicalized
+// nameWithOwner on a verified hit, or (parsed, false, nil) on any gh failure
+// (degrade-don't-break). parsed is the already-canonicalized owner/name.
+func ghValidate(ctx context.Context, parsed string) (canonical string, verified bool, err error) {
 	out, runErr := exec.CommandContext(ctx, "gh", "repo", "view", parsed, "--json", "nameWithOwner").Output()
 	if runErr != nil {
 		return parsed, false, nil
@@ -161,10 +178,22 @@ func ViewPR(ctx context.Context, repo string, n int) (PRDetail, error) {
 	return d, nil
 }
 
+// availableRunner is the overridable seam behind Available, mirroring
+// cloneRunner/validateRunner. Production points at ghLookPath; tests in other
+// packages swap it (via SetAvailableForTest) so the create-by-repo path can be
+// exercised deterministically regardless of whether `gh` is installed on the
+// CI/dev host.
+var availableRunner = ghLookPath
+
 // Available reports whether the `gh` CLI resolves on PATH. Checked at call time
 // (microseconds on localhost) so install/uninstall is reflected without a
 // restart — mirroring AllowedShells's tmux LookPath.
 func Available() bool {
+	return availableRunner()
+}
+
+// ghLookPath is the production availableRunner: a real PATH lookup for `gh`.
+func ghLookPath() bool {
 	_, err := exec.LookPath("gh")
 	return err == nil
 }

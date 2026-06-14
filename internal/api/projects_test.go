@@ -13,12 +13,185 @@ import (
 	"path/filepath"
 	"testing"
 
+	"context"
+
+	"kangent/internal/github"
 	"kangent/internal/session"
 	"kangent/internal/settings"
 	"kangent/internal/store"
 	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
+
+// newRepoTestServer is like newTestServer but also points the managed-clone base
+// (~/.kangent/repos/) at an isolated temp dir via the HOME env so the repo-first
+// create path (which hardcodes ExpandHome("~/.kangent/repos/")) never writes into
+// the developer's real home. It returns the server, DB, and the repos base dir.
+func newRepoTestServer(t *testing.T) (*httptest.Server, *sql.DB, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home) // ExpandHome resolves ~ via os.UserHomeDir → HOME
+	srv, db, _ := newTestServer(t)
+	return srv, db, filepath.Join(home, ".kangent", "repos")
+}
+
+// countProjects returns the number of rows in projects (for atomicity asserts).
+func countProjects(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&n); err != nil {
+		t.Fatalf("count projects: %v", err)
+	}
+	return n
+}
+
+// failCloneRunner installs a clone seam that records whether it was invoked and
+// always fails; the test fails immediately if it is called when it must not be.
+func failCloneNeverCalled(t *testing.T) func() {
+	t.Helper()
+	return github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		t.Errorf("clone runner invoked for %q → %q but it must NOT be (validate-before-clone / reattach)", ref, dest)
+		return "", fmt.Errorf("clone must not run")
+	})
+}
+
+// TestCreateRepoValidateBeforeClone (RPROJ-05): a syntactically invalid ref and
+// a gh-unverified ref are both rejected 400 with NO clone attempted and NO row
+// created. The clone seam fails the test if invoked.
+func TestCreateRepoValidateBeforeClone(t *testing.T) {
+	srv, db, _ := newRepoTestServer(t)
+	defer failCloneNeverCalled(t)()
+	// gh present so the verified leg runs, but the validator says "not verified".
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return parsed, false, nil // never verified
+	})()
+
+	// Syntactically invalid ref → 400, no clone, no row (ParseRepoRef hard-reject).
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "-bad/owner"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid ref: status = %d, want 400; body=%v", status, body)
+	}
+	if n := countProjects(t, db); n != 0 {
+		t.Fatalf("rows after invalid ref = %d, want 0", n)
+	}
+
+	// gh present but repo not verified → 400 msgRepoNotFound, no clone, no row.
+	status, body = doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "octocat/nope"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("unverified repo: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != msgRepoNotFound {
+		t.Errorf("error = %q, want %q", body["error"], msgRepoNotFound)
+	}
+	if n := countProjects(t, db); n != 0 {
+		t.Fatalf("rows after unverified ref = %d, want 0", n)
+	}
+}
+
+// TestCreateRepoGHUnavailable: with gh absent, the repo-first path is rejected
+// with msgGHUnavailable (no clone, no row) while the folder path on the SAME
+// endpoint stays fully usable (RPROJ-04 safety).
+func TestCreateRepoGHUnavailable(t *testing.T) {
+	srv, db, _ := newRepoTestServer(t)
+	defer failCloneNeverCalled(t)()
+	defer github.SetAvailableForTest(false)()
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "owner/name"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("gh-absent repo create: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != msgGHUnavailable {
+		t.Errorf("error = %q, want %q", body["error"], msgGHUnavailable)
+	}
+	if n := countProjects(t, db); n != 0 {
+		t.Fatalf("rows after gh-absent repo create = %d, want 0", n)
+	}
+
+	// Folder path still works on the same endpoint.
+	repo := gitRepo(t)
+	status, body = doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo_path": repo})
+	if status != http.StatusCreated {
+		t.Fatalf("folder create after gh-absent repo create: status = %d, want 201; body=%v", status, body)
+	}
+}
+
+// TestCreateRepoSuccess (CKOUT-01): a verified repo clones, then a row is
+// created with managed=1, github_repo=canonical, repo_path under the managed
+// base. The clone seam runs a real git init at dest (so reattach/diff machinery
+// sees a real repo) and returns success.
+func TestCreateRepoSuccess(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return "Octocat/Hello-World", true, nil // gh-canonical casing wins
+	})()
+	defer github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		// Simulate a real clone: create dest as a git repo.
+		if out, err := exec.Command("git", "init", dest).CombinedOutput(); err != nil {
+			return string(out), err
+		}
+		return "", nil
+	})()
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "octocat/hello-world"})
+	if status != http.StatusCreated {
+		t.Fatalf("repo create: status = %d, want 201; body=%v", status, body)
+	}
+	if body["managed"] != true {
+		t.Errorf("managed = %v, want true", body["managed"])
+	}
+	if body["github_repo"] != "Octocat/Hello-World" {
+		t.Errorf("github_repo = %v, want canonical Octocat/Hello-World", body["github_repo"])
+	}
+	wantPath := filepath.Join(base, "Octocat", "Hello-World")
+	if body["repo_path"] != wantPath {
+		t.Errorf("repo_path = %v, want %v", body["repo_path"], wantPath)
+	}
+	if body["name"] != "Hello-World" {
+		t.Errorf("name = %v, want repo name Hello-World", body["name"])
+	}
+	// DB row persisted managed=1 + github_repo.
+	var managed int
+	var ghRepo sql.NullString
+	if err := db.QueryRow(`SELECT managed, github_repo FROM projects WHERE repo_path = ?`, wantPath).Scan(&managed, &ghRepo); err != nil {
+		t.Fatalf("read back managed row: %v", err)
+	}
+	if managed != 1 {
+		t.Errorf("DB managed = %d, want 1", managed)
+	}
+	if !ghRepo.Valid || ghRepo.String != "Octocat/Hello-World" {
+		t.Errorf("DB github_repo = %v, want Octocat/Hello-World", ghRepo)
+	}
+}
+
+// TestCreateRepoCloneAtomicity (CKOUT-04 / D-01): a clone failure leaves zero
+// new rows and no directory at dest — never a half-created project.
+func TestCreateRepoCloneAtomicity(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return parsed, true, nil
+	})()
+	defer github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		// Simulate git creating a partial dir, then failing.
+		_ = os.MkdirAll(dest, 0o755)
+		return "network is unreachable", fmt.Errorf("boom")
+	})()
+
+	before := countProjects(t, db)
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "owner/name"})
+	if status < 400 {
+		t.Fatalf("clone-fail create: status = %d, want >=400; body=%v", status, body)
+	}
+	if after := countProjects(t, db); after != before {
+		t.Fatalf("rows after clone failure = %d, want unchanged %d (atomicity)", after, before)
+	}
+	dest := filepath.Join(base, "owner", "name")
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("dest still exists after clone failure (stat err=%v); must be removed", err)
+	}
+}
 
 // newTestServer opens an isolated SQLite database in a temp dir, migrates it,
 // and returns an httptest server with all API routes registered, plus the DB
