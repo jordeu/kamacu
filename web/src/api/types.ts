@@ -33,4 +33,10 @@ export interface Task {
   branch: string | null;
   worktree_path: string | null;
   worktree_error: string | null;
+  // PR-review discriminator (Phase 12): a 'github_pr' task is a PR review
+  // workspace, never a board card. pr_number/pr_base_ref are set only when
+  // source === 'github_pr' (the backend returns them — 12-02).
+  source: "manual" | "github_pr";
+  pr_number: number | null;
+  pr_base_ref: string | null;
 }

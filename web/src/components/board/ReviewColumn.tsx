@@ -138,7 +138,7 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-md bg-[#101013] p-3">
-        <ReviewStates data={data} prs={prs} />
+        <ReviewStates data={data} prs={prs} projectId={projectId} />
       </div>
     </div>
   );
@@ -152,9 +152,11 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
 function ReviewStates({
   data,
   prs,
+  projectId,
 }: {
   data: ReturnType<typeof usePullRequests>["data"];
   prs: import("@/api/pullRequests").PRSummary[];
+  projectId: number;
 }) {
   // Loading — first fetch unresolved. Quiet skeletons, no spinner, no overlay.
   if (data === undefined) {
@@ -229,7 +231,7 @@ function ReviewStates({
   return (
     <>
       {prs.map((pr) => (
-        <PRCard key={pr.number} pr={pr} />
+        <PRCard key={pr.number} pr={pr} projectId={projectId} />
       ))}
       {staleFooter}
     </>
