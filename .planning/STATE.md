@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Repo-First Projects
 status: executing
-stopped_at: Completed 14-02-PLAN.md
-last_updated: "2026-06-14T17:24:35.038Z"
+stopped_at: Completed 14-03-PLAN.md
+last_updated: "2026-06-14T17:34:42.202Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-14)
 
 Milestone: v1.4 Repo-First Projects (Kangent-Managed Checkouts)
 Phase: 14 (managed-checkout-foundations) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-06-14
 
@@ -89,6 +89,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 13-pr-worktree-auto-cleanup P03 | 2min active (+ human-verify gate) | 3 tasks | 3 files |
 | Phase 14-managed-checkout-foundations P01 | 13 min | 3 tasks | 6 files |
 | Phase 14-managed-checkout-foundations P02 | 9 min | 2 tasks | 4 files |
+| Phase 14-managed-checkout-foundations P03 | 7 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 - [Phase 14-managed-checkout-foundations]: github.Clone uses a package-level cloneRunner var as its test seam (Clone is a package function like ValidateRepo); exit-0-only success + os.RemoveAll on failure + trimmed stderr.
 - [Phase 14-managed-checkout-foundations]: Phase 14 sets github_repo=canonical at create-by-repo INSERT (research OQ1) so Phase 15's form relies on it.
 - [Phase 14-managed-checkout-foundations]: create-by-repo tests use github package-level validateRunner/availableRunner seams + exported SetXForTest setters so they are deterministic regardless of host gh.
+- [Phase 14-managed-checkout-foundations]: CKOUT-02: provisionWorktree does a managed-only, best-effort (error-discarded, D-05) default-branch fetch via worktree.DefaultBranch+FetchRef immediately before ResolveBase; folder projects skip it (D-24 preserved). The git read lives in worktree.DefaultBranch, not the api layer.
 
 ### Pending Todos
 
@@ -151,7 +153,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-14T17:24:26.719Z
-Stopped at: Completed 14-02-PLAN.md
+Last session: 2026-06-14T17:34:32.354Z
+Stopped at: Completed 14-03-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
