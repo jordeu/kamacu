@@ -37,9 +37,9 @@ This phase is a **pure read path**: no worktree, no task mutation, no GitHub wri
 - **D-03:** Render the CI rollup as a **small colored dot** using the card's existing dot visual language (consistent with `StatusDot` on task cards): **green = pass, red = fail, amber = pending**.
 - **D-04:** When a PR has **no checks configured** (`none`), render **nothing** — no dot, no reserved gutter (matches the dotless-task-card rule: dotless cards must not shift layout).
 
-### Collapse + count persistence (GHCOL-01/06) — **localStorage, per-project, default expanded**
-- **D-05:** Collapse state is persisted in **`localStorage`, keyed per-project** (project id). No SQLite, **no new migration, no new endpoint** — Phase 10 banked "no further migration needed through Phase 12," and single-user-localhost doesn't need cross-browser persistence.
-- **D-06:** The column **defaults to expanded** so review requests are visible the first time a linked project's board opens.
+### Collapse + count persistence (GHCOL-01/06) — **localStorage, per-project, default collapsed**
+- **D-05:** Collapse state is persisted in **`localStorage`, keyed per-project** (project id). No SQLite, **no new migration, no new endpoint** — Phase 10 banked "no further migration needed through Phase 12," and single-user-localhost doesn't need cross-browser persistence. **Default is collapsed** — this supersedes the original D-05/D-06 "default expanded" per user request on 2026-06-14.
+- **D-06:** The column **defaults to collapsed** (supersedes the original "defaults to expanded" per user request 2026-06-14) — the board opens with the slim Review rail; the column only stays expanded once the user has explicitly expanded it.
 - **D-07:** The **collapsed** column shows a **PR count badge**; the count reflects current GitHub state (so it changes as cards appear/disappear). Count source is the same query data that fills the expanded list.
 
 ### Click behavior (Phase 11 has no worktree yet) — **Inert body + ↗ to GitHub**

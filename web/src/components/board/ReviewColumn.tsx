@@ -49,11 +49,13 @@ export function ReviewColumn({ projectId }: { projectId: number }) {
  * that is only mounted once the gate is open.
  */
 function ReviewColumnInner({ projectId }: { projectId: number }) {
-  // --- Collapse state — localStorage, per-project, default expanded
-  // (D-05/D-06, GHCOL-06). Absent key => "1" mismatch => false => expanded. ---
+  // --- Collapse state — localStorage, per-project, default collapsed
+  // (supersedes D-05 per user request 2026-06-14; D-06 / GHCOL-06). The column
+  // is collapsed UNLESS the user has explicitly expanded it (stored "0"); an
+  // absent key => collapsed. ---
   const storageKey = `kangent:review-collapsed:${projectId}`;
   const [collapsed, setCollapsed] = useState<boolean>(
-    () => localStorage.getItem(storageKey) === "1",
+    () => localStorage.getItem(storageKey) !== "0",
   );
   const toggle = () =>
     setCollapsed((c) => {

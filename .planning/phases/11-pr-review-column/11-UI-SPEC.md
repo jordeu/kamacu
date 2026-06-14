@@ -130,7 +130,7 @@ Voice: terse, lowercase-where-the-app-is, no exclamation beyond the canonical em
 - Card-list container: `flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-md bg-[#101013] p-3` (verbatim from `Column`, minus the `isOver` ring since it is not a droppable). Loading/empty/degraded states render **inside** this container, inline.
 
 ### Collapsed column
-- Collapse state persisted in **`localStorage`, keyed per-project** (`kangent:review-collapsed:{projectId}`), **default expanded** (D-05/D-06).
+- Collapse state persisted in **`localStorage`, keyed per-project** (`kangent:review-collapsed:{projectId}`), **default collapsed** (D-06; supersedes the original D-05 "default expanded" per user request 2026-06-14 — the column starts as the slim rail and only stays expanded once the user has explicitly expanded it).
 - Collapsed visual: the column narrows to a **slim rail** — a fixed `w-10` (40px) vertical strip, NOT `flex-1` — so it reclaims board width for the kanban while staying visible.
   - The strip keeps the same card-list track look (`rounded-md bg-[#101013]`).
   - Content top-to-bottom: the expand chevron button at top, then a **vertical "REVIEW" label** (`text-xs uppercase tracking-wide text-muted-foreground`, rotated via `[writing-mode:vertical-rl] rotate-180` or `-rotate-90`), then the **count badge** beneath/above the label.
