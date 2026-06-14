@@ -196,7 +196,7 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 			return
 		}
 		prWtPath := worktree.PathUnder(baseDir, repoPath, "pr-"+strconv.FormatInt(n, 10), t.ID)
-		if cerr := wtSvc.CheckoutPR(r.Context(), repoPath, prWtPath, detail.HeadRefOid, int(n)); cerr != nil {
+		if cerr := wtSvc.CheckoutPR(r.Context(), repoPath, prWtPath, detail.HeadRefOid, detail.HeadRefName, int(n)); cerr != nil {
 			recordWorktreeError(db, t.ID, cerr)
 			writeError(w, http.StatusBadGateway, "couldn't set up the worktree: "+cerr.Error())
 			return
@@ -212,9 +212,11 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 }
 
 // prWire is the live PR detail returned alongside the task. The frontend reads
-// task.source to branch and pr.{title,body,author,url,baseRefName} for the
-// read-only header / PR meta line / Description (these MUST come from a live gh
-// read, never the stored row, so they mirror GitHub — D-08/D-11, Pitfall 6).
+// task.source to branch and pr.{title,body,author,url,baseRefName,headRefName,
+// commits} for the read-only header / PR meta line / Description / merge line
+// (these MUST come from a live gh read, never the stored row, so they mirror
+// GitHub — D-08/D-11, Pitfall 6). headRefName + commits feed the GitHub-style
+// "<author> wants to merge <N> commits into <base> from <head>" line (12-07).
 type prWire struct {
 	Number      int    `json:"number"`
 	Title       string `json:"title"`
@@ -222,6 +224,8 @@ type prWire struct {
 	Author      string `json:"author"`
 	URL         string `json:"url"`
 	BaseRefName string `json:"baseRefName"`
+	HeadRefName string `json:"headRefName"`
+	Commits     int    `json:"commits"`
 }
 
 // writeReview returns the {task, pr} envelope (200).
@@ -235,6 +239,8 @@ func writeReview(w http.ResponseWriter, t Task, d github.PRDetail) {
 			Author:      d.AuthorLogin,
 			URL:         d.URL,
 			BaseRefName: d.BaseRefName,
+			HeadRefName: d.HeadRefName,
+			Commits:     d.Commits,
 		},
 	})
 }

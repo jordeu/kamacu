@@ -114,6 +114,12 @@ type PRDetail struct {
 	BaseRefName       string `json:"baseRefName"`
 	BaseRefOid        string `json:"baseRefOid"`
 	IsCrossRepository bool   `json:"isCrossRepository"`
+	// Commits is the PR's commit count, DERIVED from the length of gh's
+	// `commits` JSON array (not a scalar in the payload) — hence json:"-" so
+	// the direct unmarshal never touches it; ViewPR sets it from len(raw.Commits).
+	// GHREV-05/12-07: feeds the GitHub-style "<author> wants to merge <N>
+	// commits into <base> from <head>" merge line.
+	Commits int `json:"-"`
 }
 
 // ViewPR reads one PR's metadata via `gh pr view`. Read-only leaf surface
@@ -126,7 +132,7 @@ func ViewPR(ctx context.Context, repo string, n int) (PRDetail, error) {
 	}
 	out, err := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(n),
 		"-R", repo, "--json",
-		"number,title,body,author,url,headRefName,headRefOid,baseRefName,baseRefOid,isCrossRepository",
+		"number,title,body,author,url,headRefName,headRefOid,baseRefName,baseRefOid,isCrossRepository,commits",
 	).Output()
 	if err != nil {
 		return PRDetail{}, fmt.Errorf("couldn't read PR #%d", n)
@@ -136,12 +142,16 @@ func ViewPR(ctx context.Context, repo string, n int) (PRDetail, error) {
 		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
+		// gh returns `commits` as an array of objects; we only need the count,
+		// so decode each element as an empty struct (ignores all fields).
+		Commits []struct{} `json:"commits"`
 	}
 	if jsonErr := json.Unmarshal(out, &raw); jsonErr != nil {
 		return PRDetail{}, fmt.Errorf("couldn't parse PR #%d", n)
 	}
 	d := raw.PRDetail
 	d.AuthorLogin = raw.Author.Login
+	d.Commits = len(raw.Commits)
 	return d, nil
 }
 

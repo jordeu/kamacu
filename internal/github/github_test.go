@@ -100,6 +100,9 @@ type viewPRRaw struct {
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	// commits decodes as an array of empty structs — we only need its length
+	// for the PR commit count (the GitHub-style merge line, 12-07).
+	Commits []struct{} `json:"commits"`
 }
 
 // ghViewFixture is a captured `gh pr view … --json …` payload (RESEARCH §1
@@ -115,7 +118,8 @@ var ghViewFixture = []byte(`{
   "headRefOid": "e9a3253762e768badaa1d4a5b3d267416d1e42f4",
   "baseRefName": "prototype",
   "baseRefOid": "8ebaf1d3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "isCrossRepository": false
+  "isCrossRepository": false,
+  "commits": [{"oid": "a"}, {"oid": "b"}, {"oid": "c"}]
 }`)
 
 func TestViewPRDecodeFlattensAuthorAndEmptyBody(t *testing.T) {
@@ -125,6 +129,7 @@ func TestViewPRDecodeFlattensAuthorAndEmptyBody(t *testing.T) {
 	}
 	d := raw.PRDetail
 	d.AuthorLogin = raw.Author.Login
+	d.Commits = len(raw.Commits)
 
 	if d.AuthorLogin != "vilmibm" {
 		t.Errorf("AuthorLogin = %q, want %q (flattened from author.login)", d.AuthorLogin, "vilmibm")
@@ -140,6 +145,12 @@ func TestViewPRDecodeFlattensAuthorAndEmptyBody(t *testing.T) {
 	}
 	if d.HeadRefOid != "e9a3253762e768badaa1d4a5b3d267416d1e42f4" {
 		t.Errorf("HeadRefOid = %q, want the captured head OID", d.HeadRefOid)
+	}
+	if d.HeadRefName != "gh-pr" {
+		t.Errorf("HeadRefName = %q, want %q (head branch surfacing, GHREV-01)", d.HeadRefName, "gh-pr")
+	}
+	if d.Commits != 3 {
+		t.Errorf("Commits = %d, want 3 (count of the commits array, merge line)", d.Commits)
 	}
 	if d.BaseRefName != "prototype" {
 		t.Errorf("BaseRefName = %q, want %q", d.BaseRefName, "prototype")
