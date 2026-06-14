@@ -600,6 +600,7 @@ type prDetailResp struct {
 	BaseRefName string `json:"baseRefName"`
 	HeadRefName string `json:"headRefName"`
 	Commits     int    `json:"commits"`
+	State       string `json:"state"`
 }
 
 func decodePRDetail(t *testing.T, rec *httptest.ResponseRecorder) prDetailResp {
@@ -632,6 +633,7 @@ func TestPRDetailOkWhenLinked(t *testing.T) {
 			Number: 7, Title: "Fix it", Body: "body",
 			AuthorLogin: "octocat", URL: "https://example.com/pr/7",
 			HeadRefName: "feature", BaseRefName: "trunk", Commits: 3,
+			State: "MERGED",
 		}, nil
 	})
 
@@ -645,6 +647,9 @@ func TestPRDetailOkWhenLinked(t *testing.T) {
 	}
 	if d.HeadRefName != "feature" || d.BaseRefName != "trunk" || d.Commits != 3 {
 		t.Errorf("detail head/base/commits = %q/%q/%d, want feature/trunk/3", d.HeadRefName, d.BaseRefName, d.Commits)
+	}
+	if d.State != "MERGED" {
+		t.Errorf("detail state = %q, want MERGED (drives the D-09 review banner)", d.State)
 	}
 	if viewCalls.Load() != 1 {
 		t.Errorf("viewPR called %d times, want 1", viewCalls.Load())

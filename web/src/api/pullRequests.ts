@@ -69,6 +69,8 @@ export interface PRDetailWire {
   // "<author> wants to merge <N> commits into <base> from <head>" (12-07).
   headRefName: string;
   commits: number;
+  // 13-01: PR lifecycle state — drives the merged/closed review banner (D-09).
+  state: "OPEN" | "CLOSED" | "MERGED";
 }
 
 export interface OpenReviewResponse {

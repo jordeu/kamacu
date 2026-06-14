@@ -283,6 +283,7 @@ type prWire struct {
 	BaseRefName string `json:"baseRefName"`
 	HeadRefName string `json:"headRefName"`
 	Commits     int    `json:"commits"`
+	State       string `json:"state"` // "OPEN" | "CLOSED" | "MERGED" — drives the D-09 review banner
 }
 
 // prWireFrom maps a live github.PRDetail to the prWire the frontend reads. The
@@ -299,6 +300,7 @@ func prWireFrom(d github.PRDetail) prWire {
 		BaseRefName: d.BaseRefName,
 		HeadRefName: d.HeadRefName,
 		Commits:     d.Commits,
+		State:       d.State,
 	}
 }
 
