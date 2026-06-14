@@ -8,6 +8,7 @@ import { useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
 import { useAgentStatuses } from "@/api/agents";
+import { useSettings } from "@/api/settings";
 import {
   useDeleteSession,
   useReattachTmux,
@@ -73,6 +74,10 @@ export default function TaskPage() {
   const agentEntry = (useAgentStatuses().data ?? []).find(
     (e) => e.taskId === taskId,
   );
+
+  // Global settings (shared cache) — drives the configurable PR-review seed
+  // (pr_review_seed, 12-06). Unconditional hook (rules-of-hooks); read below.
+  const { data: settings } = useSettings();
 
   // Newest agent session, running or exited (server list is newest-first).
   // An exited agent stays in the pane with the Start-again banner until a
@@ -248,10 +253,17 @@ export default function TaskPage() {
     ? queryClient.getQueryData<PRDetailWire>(prDetailKey(task.id))
     : undefined;
   const prTitle = prDetail?.title ?? task.title;
-  // D-07 seed: prefilled-not-sent on agent Start, interpolating the live PR.
-  const seed = isPR
-    ? `Review PR #${task.pr_number} "${prTitle}". Summarize the changes, then flag bugs, risky changes, and missing tests.`
-    : undefined;
+  // D-07 seed: prefilled-not-sent on agent Start, sourced from the configurable
+  // pr_review_seed setting (12-06) with <n>/<title> interpolated to the live PR.
+  // A blank/whitespace-only setting → seed is undefined → AgentTab does a plain
+  // Start with no injection (acceptance: empty setting = no injection).
+  const seedTemplate = settings?.pr_review_seed?.value ?? "";
+  const seed =
+    isPR && seedTemplate.trim() !== ""
+      ? seedTemplate
+          .replaceAll("<n>", String(task.pr_number ?? ""))
+          .replaceAll("<title>", prTitle)
+      : undefined;
 
   function commitTitle(value: string) {
     const cancelled = cancelTitleEditRef.current;
@@ -522,28 +534,48 @@ export default function TaskPage() {
         </header>
 
         {isPR ? (
-          // PR meta line (D-09): #num · @author · base · ↗. The worktree always
-          // exists by render time, so no Create/Retry affordance applies — the
-          // PR identity is the only meta this review needs.
-          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-            <span>#{task.pr_number}</span>
-            <span>·</span>
-            <span>@{prDetail?.author}</span>
-            <span>·</span>
-            <span className="font-mono">
-              {prDetail?.baseRefName ?? task.pr_base_ref}
-            </span>
-            <span>·</span>
-            <a
-              href={prDetail?.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`Open PR #${task.pr_number} on GitHub`}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <ExternalLink className="size-3.5" />
-            </a>
-          </div>
+          // PR meta (D-09): the GitHub-style merge line + the #num · @author ·
+          // base · ↗ row. Both live inside the w-full shrink-0 header block so
+          // they never steal flex height from the tabs/terminal chain (12-07
+          // fix #6). The worktree always exists by render time, so no
+          // Create/Retry affordance applies. Degrades gracefully: if prDetail
+          // is absent (hard refresh on a deep link) the spans render with the
+          // task-field fallbacks; head/commits may be blank — never breaks.
+          <>
+            {/* GitHub-style merge line (12-07 fix #5): makes the head branch
+                visible — the #1 UX ask from the 12-05 human-verify. */}
+            <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              <span>@{prDetail?.author}</span>
+              <span>wants to merge</span>
+              <span>{prDetail?.commits}</span>
+              <span>{prDetail?.commits === 1 ? "commit" : "commits"}</span>
+              <span>into</span>
+              <span className="font-mono">
+                {prDetail?.baseRefName ?? task.pr_base_ref}
+              </span>
+              <span>from</span>
+              <span className="font-mono">{prDetail?.headRefName}</span>
+            </div>
+            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <span>#{task.pr_number}</span>
+              <span>·</span>
+              <span>@{prDetail?.author}</span>
+              <span>·</span>
+              <span className="font-mono">
+                {prDetail?.baseRefName ?? task.pr_base_ref}
+              </span>
+              <span>·</span>
+              <a
+                href={prDetail?.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Open PR #${task.pr_number} on GitHub`}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <ExternalLink className="size-3.5" />
+              </a>
+            </div>
+          </>
         ) : (
           <WorktreeMetaLine
             task={task}

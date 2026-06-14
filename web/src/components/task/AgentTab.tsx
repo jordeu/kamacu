@@ -15,6 +15,11 @@ import {
 } from "@/components/ui/tooltip";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 
+// Agent session ids whose PR-review seed has already been injected. Module
+// scope (not a ref) so reopening/remounting the review never re-injects —
+// the guard is the SESSION, which is stable across mounts (12-07 fix #4).
+const seededSessionIds = new Set<string>();
+
 /**
  * The permanent Agent tab's content (D-38..D-41, revised at checkpoint
  * 2026-06-11): pre-start empty state, running TerminalPane with the
@@ -40,8 +45,6 @@ export function AgentTab({
   const resume = useResumeAgent(task.id);
   const queryClient = useQueryClient();
   const pasteApiRef = useRef<{ paste: (t: string) => void } | null>(null);
-  // Fires the seed paste exactly once per mount, after the first connect.
-  const oneShotSeededRef = useRef(false);
 
   // The server's resumable flag is the SINGLE driver for which pair renders —
   // the UI never infers resumability client-side (UI-SPEC). Read it from the
@@ -159,13 +162,16 @@ export function AgentTab({
       ),
     );
 
-    // PR-review seed (D-06/D-07): one-shot prefill after the agent connects.
+    // PR-review seed (D-06/D-07): prefill once per agent session after connect.
     // Reuses the exact Insert-description mechanism (pasteApiRef → term.paste,
     // wrapped by xterm in bracketed-paste \x1b[200~..\x1b[201~ so claude
     // receives it as a single un-submitted prompt). NEVER auto-sent — the user
-    // edits and presses Enter. Guarded by a ref so it fires exactly once.
-    if (seed && !oneShotSeededRef.current) {
-      oneShotSeededRef.current = true;
+    // edits and presses Enter. Guarded by the SESSION id at module scope
+    // (12-07 fix #4): a freshly started session seeds once on first connect;
+    // reopening the review re-mounts onto the same session id → already in the
+    // set → never re-pastes; reconnects (same id) also never re-paste.
+    if (seed && agentSession && !seededSessionIds.has(agentSession.id)) {
+      seededSessionIds.add(agentSession.id);
       pasteApiRef.current?.paste(seed);
     }
   };

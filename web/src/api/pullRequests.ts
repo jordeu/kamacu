@@ -65,6 +65,10 @@ export interface PRDetailWire {
   author: string;
   url: string;
   baseRefName: string;
+  // 12-06 wire fields — feed the GitHub-style merge line
+  // "<author> wants to merge <N> commits into <base> from <head>" (12-07).
+  headRefName: string;
+  commits: number;
 }
 
 export interface OpenReviewResponse {
