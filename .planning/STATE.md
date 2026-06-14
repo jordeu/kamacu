@@ -4,7 +4,7 @@ milestone: v1.4
 milestone_name: Repo-First Projects
 status: verifying
 stopped_at: Completed 14-04-PLAN.md
-last_updated: "2026-06-14T17:44:59.082Z"
+last_updated: "2026-06-14T17:50:21.712Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 2
@@ -25,8 +25,8 @@ See: .planning/PROJECT.md (updated 2026-06-14)
 ## Current Position
 
 Milestone: v1.4 Repo-First Projects (Kangent-Managed Checkouts)
-Phase: 14 (managed-checkout-foundations) — EXECUTING
-Plan: 4 of 4
+Phase: 15
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-06-14
 
