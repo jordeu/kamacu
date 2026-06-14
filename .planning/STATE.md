@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
 status: executing
-stopped_at: Completed 12-03-PLAN.md
-last_updated: "2026-06-14T05:52:45.827Z"
+stopped_at: Completed 12-04-PLAN.md
+last_updated: "2026-06-14T06:05:16.696Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 14
-  completed_plans: 12
+  completed_plans: 13
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 ## Current Position
 
 Phase: 12 (open-a-review) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-14
 
@@ -68,6 +68,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 12-open-a-review P01 | 6 min | 2 tasks | 4 files |
 | Phase 12-open-a-review P02 | 7min | 2 tasks | 3 files |
 | Phase 12-open-a-review P03 | 4min | 1 tasks | 2 files |
+| Phase 12-open-a-review P04 | 12min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 12-open-a-review]: CheckoutPR pins the detached worktree to gh's headRefOid (never FETCH_HEAD, clobbered by 12-03's base fetch); remote hard-coded origin for v1.3; ViewPR does a fresh gh pr view (Phase 11 PRSummary lacks body and reattach can fire with no list mounted)
 - [Phase 12-open-a-review]: GHREV-04 board-leak guard at the data layer: AND source = 'manual' on the 5 board/position queries (listByProject, create top-of-ToDo, move drop-at-top, nextPosition, renumberColumn) + a /move 409 guard rejecting source != 'manual'; by-id get/update/delete/afterPosition left unfiltered so the review view deep-links its own PR row. source/pr_number/pr_base_ref added to the Task wire shape (scanTask + loadTaskRepo column-aligned)
 - [Phase 12-open-a-review]: Diff base for a github_pr review comes from its own pr_base_ref (D-12/GHREV-03): diffs.go SELECT reads source+pr_base_ref, FetchRef(base) runs before merge-base (RESEARCH Pitfall 3), then resolvePRBase prefers local refs/heads/<base> (show-ref in the worktree dir) else origin/<base> (never FETCH_HEAD); diff.Compute reused unchanged, internal/diff untouched. Manual tasks keep ResolveBase verbatim.
+- [Phase 12-open-a-review]: Open-or-reattach endpoint POST .../{n}/review: find-or-create source='github_pr' keyed by (project_id, pr_number); full row -> instant reattach (no CheckoutPR), worktree_path NULL -> re-provision in place, not found -> INSERT (position=0 sentinel, board filters exclude it). off/unlinked/unknown -> 409 BEFORE any gh/worktree spawn. Live gh pr view on EVERY open (no title/body drift) returned as {task, pr}; ViewPR fetched before INSERT so a gh failure 502s with no half-row. viewPR package seam keeps create/reattach tests hermetic (real refs/pull/<n>/head + stubbed gh).
 
 ### Pending Todos
 
@@ -140,7 +142,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T05:52:30.019Z
-Stopped at: Completed 12-03-PLAN.md
+Last session: 2026-06-14T06:05:16.692Z
+Stopped at: Completed 12-04-PLAN.md
 Resume file: None
 Next: `/gsd:discuss-phase 11`
