@@ -45,7 +45,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 ### 🚧 v1.3 GitHub PR Review (Phases 10–13)
 
 - [x] **Phase 10: GitHub Foundations** — Schema, global toggle, project link config, and the degrade-don't-break `internal/github` base. (3/3 plans executed; gaps found in UAT — gh-gated enablement + copy) (completed 2026-06-13)
-- [ ] **Phase 11: PR Review Column** — Read-only `gh`-backed Review column listing review-requested PRs with auto-poll, refresh, and PR cards.
+- [x] **Phase 11: PR Review Column** — Read-only `gh`-backed Review column listing review-requested PRs with auto-poll, refresh, and PR cards. (completed 2026-06-14)
 - [ ] **Phase 12: Open-a-Review** — Click a PR → worktree on the PR branch + reused task view (agent/bash/PR-base diff), board-leak-safe. *(research-flagged)*
 - [ ] **Phase 13: PR Worktree Auto-Cleanup** — Reaper reconciles PR state and gated-removes merged/closed review worktrees (branch kept). *(research-flagged)*
 
@@ -85,7 +85,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 - [x] 11-01-PLAN.md — internal/github ListReviewRequested (gh pr list + statusCheckRollup reduction) + best-effort per-repo Service (quota clone)
 - [x] 11-02-PLAN.md — always-200 GET /api/projects/{id}/pull-requests endpoint (toggle+link gated) + main.go wiring
 - [x] 11-03-PLAN.md — usePullRequests/useRefreshPullRequests hooks + shared formatAgo + PRCard
-- [ ] 11-04-PLAN.md — ReviewColumn (collapse/localStorage/inline states) + Board.tsx wiring + human-verify checkpoint
+- [x] 11-04-PLAN.md — ReviewColumn (collapse/localStorage/inline states) + Board.tsx wiring + human-verify checkpoint
 **UI hint**: yes
 
 ### Phase 12: Open-a-Review
@@ -127,7 +127,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 8. tmux Shells — Spawn & Detach Lifecycle | v1.2 | 4/4 | Complete | 2026-06-13 |
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 5/5 | Complete | 2026-06-13 |
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
-| 11. PR Review Column | v1.3 | 3/4 | In Progress|  |
+| 11. PR Review Column | v1.3 | 4/4 | Complete   | 2026-06-14 |
 | 12. Open-a-Review | v1.3 | 0/? | Not started | - |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 0/? | Not started | - |
 

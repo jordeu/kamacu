@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: executing
-stopped_at: Completed 11-03-PLAN.md
-last_updated: "2026-06-13T18:18:45.805Z"
-last_activity: 2026-06-13
+status: verifying
+stopped_at: Completed 11-04-PLAN.md (Phase 11 ready for verification)
+last_updated: "2026-06-14T04:25:35.261Z"
+last_activity: 2026-06-14
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
   percent: 80
 ---
 
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 ## Current Position
 
-Phase: 11 (pr-review-column) — EXECUTING
-Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-06-13
+Phase: 11 (pr-review-column) — COMPLETE (ready for verification)
+Plan: 4 of 4 (all plans complete)
+Status: Phase complete — ready for verification
+Last activity: 2026-06-14
 
-Progress: [████████░░] 80% (4/5 plans)
+Progress: [██████████] 100% (4/4 plans in Phase 11)
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 11-pr-review-column P01 | 6 min | 2 tasks | 4 files |
 | Phase 11-pr-review-column P02 | 5min | 2 tasks | 3 files |
 | Phase 11-pr-review-column P03 | 3min | 3 tasks | 4 files |
+| Phase 11-pr-review-column P04 | ~10 min active (overnight human-verify gate) | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -111,6 +112,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 11-pr-review-column]: Handler SELECTs github_repo + repo_path; repo_path = cmd.Dir so gh resolves the right host/account (Pitfall 6); settings/DB errors map to state=error (200), the only non-200 is pathID's 400 on a non-numeric id
 - [Phase 11-pr-review-column]: formatAgo lifted to web/src/lib/time.ts (RESEARCH Open Q2 = LIFT): one tier-logic shared by the quota footer + PR card; QuotaIndicator imports it, behavior byte-identical (zero local defs)
 - [Phase 11-pr-review-column]: PRCard checks dot uses a local 3-way switch typed Exclude<checks,'none'> (D-03), not StatusDot.dotMeta; none renders nothing (no gutter, no layout shift, D-04); body inert, only the ↗ anchor is interactive (D-08/D-09)
+- [Phase 11-pr-review-column]: Review column defaults to COLLAPSED (supersedes D-05/D-06 'default expanded') per user request 2026-06-14: collapsed unless localStorage holds explicit '0'; absent key reads as collapsed (getItem !== '0')
 
 ### Pending Todos
 
@@ -132,7 +134,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-13T18:18:35.332Z
-Stopped at: Completed 11-03-PLAN.md
+Last session: 2026-06-14T04:25:35.258Z
+Stopped at: Completed 11-04-PLAN.md (Phase 11 ready for verification)
 Resume file: None
 Next: `/gsd:discuss-phase 11`
