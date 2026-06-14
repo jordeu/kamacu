@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, Ellipsis, ExternalLink, Plus } from "lucide-react";
+import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { prDetailKey, type PRDetailWire } from "@/api/pullRequests";
 import { useTask } from "@/api/queries";
@@ -534,48 +534,35 @@ export default function TaskPage() {
         </header>
 
         {isPR ? (
-          // PR meta (D-09): the GitHub-style merge line + the #num · @author ·
-          // base · ↗ row. Both live inside the w-full shrink-0 header block so
-          // they never steal flex height from the tabs/terminal chain (12-07
-          // fix #6). The worktree always exists by render time, so no
-          // Create/Retry affordance applies. Degrades gracefully: if prDetail
+          // PR meta (D-09): a single GitHub-style merge line with the clickable
+          // PR number as the GitHub link — #<num> @<author> wants to merge <N>
+          // commits into <base> from <head>. Lives inside the w-full shrink-0
+          // header block so it never steals flex height from the tabs/terminal
+          // chain (12-07 fix #6). The worktree always exists by render time, so
+          // no Create/Retry affordance applies. Degrades gracefully: if prDetail
           // is absent (hard refresh on a deep link) the spans render with the
           // task-field fallbacks; head/commits may be blank — never breaks.
-          <>
-            {/* GitHub-style merge line (12-07 fix #5): makes the head branch
-                visible — the #1 UX ask from the 12-05 human-verify. */}
-            <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-              <span>@{prDetail?.author}</span>
-              <span>wants to merge</span>
-              <span>{prDetail?.commits}</span>
-              <span>{prDetail?.commits === 1 ? "commit" : "commits"}</span>
-              <span>into</span>
-              <span className="font-mono">
-                {prDetail?.baseRefName ?? task.pr_base_ref}
-              </span>
-              <span>from</span>
-              <span className="font-mono">{prDetail?.headRefName}</span>
-            </div>
-            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-              <span>#{task.pr_number}</span>
-              <span>·</span>
-              <span>@{prDetail?.author}</span>
-              <span>·</span>
-              <span className="font-mono">
-                {prDetail?.baseRefName ?? task.pr_base_ref}
-              </span>
-              <span>·</span>
-              <a
-                href={prDetail?.url}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Open PR #${task.pr_number} on GitHub`}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <ExternalLink className="size-3.5" />
-              </a>
-            </div>
-          </>
+          <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+            <a
+              href={prDetail?.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open PR #${task.pr_number} on GitHub`}
+              className="font-medium text-muted-foreground hover:text-foreground hover:underline"
+            >
+              #{task.pr_number}
+            </a>
+            <span>@{prDetail?.author}</span>
+            <span>wants to merge</span>
+            <span>{prDetail?.commits}</span>
+            <span>{prDetail?.commits === 1 ? "commit" : "commits"}</span>
+            <span>into</span>
+            <span className="font-mono">
+              {prDetail?.baseRefName ?? task.pr_base_ref}
+            </span>
+            <span>from</span>
+            <span className="font-mono">{prDetail?.headRefName}</span>
+          </div>
         ) : (
           <WorktreeMetaLine
             task={task}
