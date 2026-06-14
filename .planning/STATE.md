@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
 status: executing
-stopped_at: Completed 12-01-PLAN.md
-last_updated: "2026-06-14T05:35:14.211Z"
+stopped_at: Completed 12-02-PLAN.md
+last_updated: "2026-06-14T05:45:22.208Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 14
-  completed_plans: 10
+  completed_plans: 11
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 ## Current Position
 
 Phase: 12 (open-a-review) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-06-14
 
@@ -66,6 +66,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 11-pr-review-column P03 | 3min | 3 tasks | 4 files |
 | Phase 11-pr-review-column P04 | ~10 min active (overnight human-verify gate) | 3 tasks | 2 files |
 | Phase 12-open-a-review P01 | 6 min | 2 tasks | 4 files |
+| Phase 12-open-a-review P02 | 7min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 11-pr-review-column]: PRCard checks dot uses a local 3-way switch typed Exclude<checks,'none'> (D-03), not StatusDot.dotMeta; none renders nothing (no gutter, no layout shift, D-04); body inert, only the ↗ anchor is interactive (D-08/D-09)
 - [Phase 11-pr-review-column]: Review column defaults to COLLAPSED (supersedes D-05/D-06 'default expanded') per user request 2026-06-14: collapsed unless localStorage holds explicit '0'; absent key reads as collapsed (getItem !== '0')
 - [Phase 12-open-a-review]: CheckoutPR pins the detached worktree to gh's headRefOid (never FETCH_HEAD, clobbered by 12-03's base fetch); remote hard-coded origin for v1.3; ViewPR does a fresh gh pr view (Phase 11 PRSummary lacks body and reattach can fire with no list mounted)
+- [Phase 12-open-a-review]: GHREV-04 board-leak guard at the data layer: AND source = 'manual' on the 5 board/position queries (listByProject, create top-of-ToDo, move drop-at-top, nextPosition, renumberColumn) + a /move 409 guard rejecting source != 'manual'; by-id get/update/delete/afterPosition left unfiltered so the review view deep-links its own PR row. source/pr_number/pr_base_ref added to the Task wire shape (scanTask + loadTaskRepo column-aligned)
 
 ### Pending Todos
 
@@ -136,7 +138,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T05:35:04.866Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-06-14T05:45:07.333Z
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None
 Next: `/gsd:discuss-phase 11`
