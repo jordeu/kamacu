@@ -8,9 +8,23 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone
+## Current Milestone: v1.4 Repo-First Projects
 
-**v1.3 GitHub PR Review — shipped 2026-06-14.** No milestone is currently active; run `/gsd:new-milestone` to scope the next one. See the Validated requirements and Current State below for what v1.3 delivered.
+**Goal:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent clones and manages the checkout under `~/.kangent` on the default branch — with the folder path as the optional fallback.
+
+**Target features:**
+- Repo-first "Add project" when GitHub is on: enter `owner/name` → Kangent `gh repo clone`s it into `~/.kangent/repos/<owner>/<name>` on the repo's auto-detected default branch (main/master).
+- Project name auto-derived from the repo (prefilled, editable); GitHub link + description auto-filled.
+- Folder path becomes the optional alternative when GitHub is on; folder-only when GitHub is off — existing folder-based projects untouched (backward compatible).
+- Task (and PR-review) worktrees branch off the managed checkout; fetch the latest default branch before creating each new task worktree.
+- Deleting a managed-checkout project does a gated removal of the clone (dirty / unpushed / running-session gates, like worktree cleanup); folder-based project dirs are never touched.
+- Degrade-don't-break: clone failures (auth/network/bad repo) surface inline without leaving a half-created project; re-adding an existing managed dir reattaches instead of failing.
+
+**Settled decisions (milestone-time):**
+- Repo cloning uses `gh repo clone` (host auth, so private/org repos work) into an `owner/name`-namespaced dir under `~/.kangent/repos/` — collision-safe.
+- The managed clone IS the repo root that task/PR-review worktrees branch off (the user just never picks a folder); a new schema marker distinguishes Kangent-managed checkouts from user-pointed folders so delete knows what it owns.
+- GitHub-only for the repo path (consistent with v1.3); arbitrary git URLs / other forges stay out of scope — the folder is the non-GitHub escape hatch.
+- Builds on v1.3's `internal/github` (gh auth, `ParseRepoRef`/`ValidateRepo`, repo link) and the existing worktree/cleanup gating.
 
 <details>
 <summary>Shipped milestone targets — v1.3 GitHub PR Review (2026-06-14)</summary>
@@ -69,7 +83,13 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Active
 
-_No milestone currently active. Run `/gsd:new-milestone` to define the next one (questioning → research → requirements → roadmap)._ Carried-forward candidates live in **Deferred** below.
+**v1.4 Repo-First Projects** (REQ-IDs in REQUIREMENTS.md):
+- [ ] Add a project from a GitHub repo (`owner/name`) when GitHub is on — Kangent `gh repo clone`s it into `~/.kangent/repos/<owner>/<name>` on the auto-detected default branch
+- [ ] Project name auto-derived from the repo (editable); GitHub link + description auto-filled
+- [ ] Repo-first by default when GitHub is on, folder optional; folder-only when GitHub is off; existing folder-based projects untouched
+- [ ] Task/PR-review worktrees branch off the managed checkout, fetching the latest default branch before each new task worktree
+- [ ] Gated removal of the managed checkout on project delete (dirty/unpushed/running-session gates); folder-based dirs never touched
+- [ ] Degrade-don't-break provisioning: clone failures surface inline with no half-created project; re-adding an existing managed dir reattaches
 
 ### Out of Scope
 
@@ -167,4 +187,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-14 after v1.3 GitHub PR Review milestone — shipped, audited, and archived*
+*Last updated: 2026-06-14 — v1.4 Repo-First Projects milestone started*

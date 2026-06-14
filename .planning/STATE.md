@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: GitHub PR Review
-status: shipped
-stopped_at: v1.3 shipped 2026-06-14 — audited (passed), archived, tagged. No milestone active; run /gsd:new-milestone.
+milestone: v1.4
+milestone_name: Repo-First Projects
+status: defining_requirements
+stopped_at: v1.4 started 2026-06-14 — defining requirements (repo-first project creation / Kangent-managed checkouts)
 last_updated: "2026-06-14T15:10:38.018Z"
 last_activity: 2026-06-14
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 19
-  completed_plans: 19
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,19 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-14)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Planning next milestone — run `/gsd:new-milestone`
+**Current focus:** v1.4 Repo-First Projects — defining requirements
 
 ## Current Position
 
-Milestone: v1.3 GitHub PR Review — ✅ SHIPPED 2026-06-14
-Phase: none active
-Status: Milestone complete — audited (passed), archived, tagged
+Milestone: v1.4 Repo-First Projects (Kangent-Managed Checkouts)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-14 — Milestone v1.4 started
 
-Progress: [██████████] 100% — 4 phases, 19 plans, 46 tasks
+**v1.4 goal:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent `gh repo clone`s and manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch — folder path becomes the optional fallback (folder-only when GitHub is off). Builds on v1.3's `internal/github` + worktree/cleanup gating. Phase numbering continues from 14.
 
-**v1.3 shipped:** Surface review-requested GitHub PRs on a linked project's board and open each as a worktree-backed task-like review workspace, with auto-cleanup of merged/closed clean worktrees. Audit: 20/20 requirements satisfied, 6/6 integration seams wired, 4/4 E2E flows complete. Archived to `milestones/v1.3-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
-
-**Next:** `/gsd:new-milestone` to scope the next cycle. Carried tech debt (non-blocking, build green): ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render lint items — a dedicated lint pass is the right home.
+Carried tech debt (non-blocking, build green): ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render lint items — a dedicated lint pass is the right home.
 
 ## Performance Metrics
 
