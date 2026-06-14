@@ -38,9 +38,9 @@ Requirements for the GitHub PR Review milestone. Each maps to exactly one roadma
 
 ### PR Worktree Cleanup
 
-- [ ] **GHCLN-01**: When a PR is merged or closed on GitHub, its review worktree is removed automatically.
-- [ ] **GHCLN-02**: Auto-removal is gated — a dirty worktree, uncommitted/unpushed work, or running sessions block silent removal; the branch is always kept (the user may not own it).
-- [ ] **GHCLN-03**: User can also clean up a PR review worktree manually from the review view, using the same gated cleanup flow tasks already use.
+- [x] **GHCLN-01**: When a PR is merged or closed on GitHub, its review worktree is removed automatically.
+- [x] **GHCLN-02**: Auto-removal is gated — a dirty worktree, uncommitted/unpushed work, or running sessions block silent removal; the branch is always kept (the user may not own it).
+- [x] **GHCLN-03**: User can also clean up a PR review worktree manually from the review view, using the same gated cleanup flow tasks already use.
 
 ## Future Requirements
 
@@ -98,9 +98,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GHREV-03 | Phase 12 | Complete |
 | GHREV-04 | Phase 12 | Complete |
 | GHREV-05 | Phase 12 | Complete |
-| GHCLN-01 | Phase 13 | Pending |
-| GHCLN-02 | Phase 13 | Pending |
-| GHCLN-03 | Phase 13 | Pending |
+| GHCLN-01 | Phase 13 | Complete |
+| GHCLN-02 | Phase 13 | Complete |
+| GHCLN-03 | Phase 13 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 20 total

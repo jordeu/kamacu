@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: verifying
-stopped_at: Phase 13 context gathered
-last_updated: "2026-06-14T09:37:43.787Z"
+status: executing
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-06-14T10:30:16.687Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 16
-  completed_plans: 16
+  total_plans: 19
+  completed_plans: 17
   percent: 100
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-13)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 12 — open-a-review
+**Current focus:** Phase 13 — pr-worktree-auto-cleanup
 
 ## Current Position
 
-Phase: 13
-Plan: Not started
-Status: all 5 12-05 follow-ups closed (12-06 backend + 12-07 frontend); orchestrator re-runs phase verification next
+Phase: 13 (pr-worktree-auto-cleanup) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-06-14
 
 Progress: [██████████] 100% (12-01..12-07 implemented; phase re-verification remains)
@@ -85,6 +85,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 12-open-a-review P06 | 7min | 3 tasks | 9 files |
 | Phase 12-open-a-review P07 | ~3h (incl. 3 human-verify rounds) | 4 tasks | 7 files |
 | Phase 12-open-a-review P07 | ~3h (incl. 3 human-verify rounds) | 4 tasks | 7 files |
+| Phase 13-pr-worktree-auto-cleanup P01 | 9 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -140,6 +141,9 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 12-open-a-review]: 12-05 frontend wiring shipped (open-or-reattach at the query cache: useOpenReview.onSuccess stashes {task, pr}; TaskPage branches every delta on source==='github_pr'; one-shot seed via pasteApiRef). Human-verify NOT approved -> 5 follow-ups become gap plans 12-06/12-07; phase NOT verified, GHREV-01..05 Pending.
 - [Phase 12-open-a-review]: 12-06 gap backend: CheckoutPR DECISION-OVERRIDES D-01 detached -> NAMED branch (headRefName) via worktree add -b, with a never-reuse selection (headRefName -> pr/<n> -> pr/<n>-<shortOID> -> error). Realigns with literal GHREV-01 while PRESERVING GHREV-05 (an existing local ref is never chosen/moved; the pr/<n> fallback protects the fork same-name 'master' trap). PRDetail.Commits (len of gh commits array) + prWire.headRefName/commits feed the 12-07 merge line; pr_review_seed settings key (free-text, length-capped, migration-free) feeds the 12-07 configurable seed.
 - [Phase 12-open-a-review]: 12-07 gap frontend (APPROVED 2026-06-14): once-per-session seed via a module-level seededSessionIds Set keyed by agent session id (replaces the per-mount ref re-injection); seed from pr_review_seed with <n>/<title> frontend-interpolated (blank = no injection); single-line clickable PR header #<num> @<author> wants to merge <N> commits into <base> from <head> kept inside the shrink-0 block (fix-#6 height chain preserved, never forked); F5 re-hydration via a read-only GET /pull-requests/{n} + usePullRequestDetail re-fetching under the same prDetailKey (no schema/migration). All 5 follow-ups verified live.
+- [Phase 13-pr-worktree-auto-cleanup]: PRState is a dedicated minimal gh pr view --json state method on *Service (one fewer field than ViewPR), satisfying the reaper's PRStateGetter; PRDetail.State decodes via a plain json tag (single source for the D-09 banner)
+- [Phase 13-pr-worktree-auto-cleanup]: cleanupWorktreeGated is a BYTE-EQUIVALENT extraction of remove()'s dirty+sessions logic in internal/api (reaper->api acyclic); the two NEW gates (rev-list unpushed, stash) stay in 13-02's reaper so the helper is verifiable against the unchanged worktree DELETE tests (RESEARCH Open Q1)
+- [Phase 13-pr-worktree-auto-cleanup]: worktree.Service.UnpushedCount (rev-list base..HEAD) + StashCount (repo-global stash list) added as the reaper's conservative-gate primitives; per-kill tmux slog.Warn dropped (best-effort, never blocked; test asserts the kill not the log)
 
 ### Pending Todos
 
@@ -162,7 +166,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T09:37:43.784Z
-Stopped at: Phase 13 context gathered
-Resume file: .planning/phases/13-pr-worktree-auto-cleanup/13-CONTEXT.md
+Last session: 2026-06-14T10:30:04.470Z
+Stopped at: Completed 13-01-PLAN.md
+Resume file: None
 Next: orchestrator re-runs phase 12 verification (gsd-verifier); GHREV-01/05 marked Complete
