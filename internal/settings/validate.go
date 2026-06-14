@@ -64,6 +64,15 @@ func Validate(key, value string) error {
 		// Pass-through field: validating individual claude flags is explicitly
 		// out of scope (REQUIREMENTS Out of Scope).
 		return nil
+	case KeyPRReviewSeed:
+		// Free-text seed prompt (12-07). Accept any value; cap length so a
+		// pathological paste can't bloat the KV row. <n>/<title> placeholders
+		// are interpolated on the frontend.
+		const maxPRReviewSeed = 2000
+		if len(value) > maxPRReviewSeed {
+			return errors.New("Prompt is too long.")
+		}
+		return nil
 	}
 	return nil
 }

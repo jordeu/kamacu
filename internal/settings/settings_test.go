@@ -31,6 +31,7 @@ func TestDefaultsValues(t *testing.T) {
 		settings.KeyBranchTemplate:    "task/{slug}-{id}",
 		settings.KeyDoneSessionTTL:    "24h", // REAP-01/D-91
 		settings.KeyGithubIntegration: "on",  // GHSET-01/D-01: absent row = on
+		settings.KeyPRReviewSeed:      `Review PR #<n> "<title>". Summarize the changes, then flag bugs, risky changes, and missing tests.`, // GHREV/12-07
 	}
 	for k, v := range want {
 		if got := settings.Defaults[k]; got != v {

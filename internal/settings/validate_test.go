@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,6 +202,20 @@ func TestValidateGithubIntegration(t *testing.T) {
 			checkErrString(t, err, tt.wantErr)
 		})
 	}
+}
+
+// TestValidatePRReviewSeed covers the GHREV/12-07 configurable seed prompt:
+// free-text accepted (including empty, which means "no injection" downstream),
+// but a pathological 2001-char paste is rejected with the canonical copy.
+func TestValidatePRReviewSeed(t *testing.T) {
+	if err := settings.Validate(settings.KeyPRReviewSeed, "anything"); err != nil {
+		t.Errorf("Validate(pr_review_seed, \"anything\") = %v, want nil (free-text)", err)
+	}
+	if err := settings.Validate(settings.KeyPRReviewSeed, ""); err != nil {
+		t.Errorf("Validate(pr_review_seed, \"\") = %v, want nil (empty allowed)", err)
+	}
+	tooLong := strings.Repeat("x", 2001)
+	checkErrString(t, settings.Validate(settings.KeyPRReviewSeed, tooLong), "Prompt is too long.")
 }
 
 func TestValidateAgentExtraParamsIsPassThrough(t *testing.T) {
