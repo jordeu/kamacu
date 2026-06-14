@@ -282,7 +282,16 @@ func (r *Reaper) reconcilePRsOnce(ctx context.Context) {
 		// re-fetch refs/pull/<n>/head (the same fetch CheckoutPR uses; fork-safe)
 		// then rev-list FETCH_HEAD..HEAD (Pitfall 1 — porcelain alone misses a
 		// committed-but-unpushed fixup).
-		if ferr := r.wt.FetchRef(ctx, t.repoDir, fmt.Sprintf("refs/pull/%d/head", t.n)); ferr != nil {
+		//
+		// The fetch MUST run IN THE WORKTREE (t.wtPath), not the common repo dir:
+		// FETCH_HEAD is a PER-WORKTREE ref (git writes it into the worktree's own
+		// git dir), so a fetch in the main repo dir leaves FETCH_HEAD unresolvable
+		// from the linked worktree — the subsequent rev-list FETCH_HEAD..HEAD would
+		// then error and conservatively skip EVERY merged/closed PR forever. The
+		// worktree shares origin's config via the common git dir, so the fetch
+		// resolves there. (Verified: fetch-in-repo -> rev-list-in-wt fails; fetch-
+		// in-wt -> rev-list-in-wt works.)
+		if ferr := r.wt.FetchRef(ctx, t.wtPath, fmt.Sprintf("refs/pull/%d/head", t.n)); ferr != nil {
 			slog.Warn("reaper: fetch PR head for unpushed gate", "task", t.id, "pr", t.n, "error", ferr)
 			continue // can't verify -> conservative skip
 		}
