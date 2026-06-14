@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: verifying
-stopped_at: Phase 12 UI-SPEC approved
-last_updated: "2026-06-14T04:58:36.399Z"
+status: executing
+stopped_at: Completed 12-01-PLAN.md
+last_updated: "2026-06-14T05:35:14.211Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 14
+  completed_plans: 10
   percent: 100
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-13)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 11 — pr-review-column
+**Current focus:** Phase 12 — open-a-review
 
 ## Current Position
 
-Phase: 12
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 12 (open-a-review) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
 Last activity: 2026-06-14
 
 Progress: [██████████] 100% (4/4 plans in Phase 11)
@@ -65,6 +65,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 11-pr-review-column P02 | 5min | 2 tasks | 3 files |
 | Phase 11-pr-review-column P03 | 3min | 3 tasks | 4 files |
 | Phase 11-pr-review-column P04 | ~10 min active (overnight human-verify gate) | 3 tasks | 2 files |
+| Phase 12-open-a-review P01 | 6 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -113,6 +114,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 11-pr-review-column]: formatAgo lifted to web/src/lib/time.ts (RESEARCH Open Q2 = LIFT): one tier-logic shared by the quota footer + PR card; QuotaIndicator imports it, behavior byte-identical (zero local defs)
 - [Phase 11-pr-review-column]: PRCard checks dot uses a local 3-way switch typed Exclude<checks,'none'> (D-03), not StatusDot.dotMeta; none renders nothing (no gutter, no layout shift, D-04); body inert, only the ↗ anchor is interactive (D-08/D-09)
 - [Phase 11-pr-review-column]: Review column defaults to COLLAPSED (supersedes D-05/D-06 'default expanded') per user request 2026-06-14: collapsed unless localStorage holds explicit '0'; absent key reads as collapsed (getItem !== '0')
+- [Phase 12-open-a-review]: CheckoutPR pins the detached worktree to gh's headRefOid (never FETCH_HEAD, clobbered by 12-03's base fetch); remote hard-coded origin for v1.3; ViewPR does a fresh gh pr view (Phase 11 PRSummary lacks body and reattach can fire with no list mounted)
 
 ### Pending Todos
 
@@ -134,7 +136,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T04:58:36.396Z
-Stopped at: Phase 12 UI-SPEC approved
-Resume file: .planning/phases/12-open-a-review/12-UI-SPEC.md
+Last session: 2026-06-14T05:35:04.866Z
+Stopped at: Completed 12-01-PLAN.md
+Resume file: None
 Next: `/gsd:discuss-phase 11`
