@@ -280,6 +280,42 @@ func (s *Service) DirtyCount(ctx context.Context, wt string) (int, error) {
 	return n, nil
 }
 
+// UnpushedCount returns the number of commits in base..HEAD for the worktree
+// at wt — commits present locally but NOT in base (e.g. a committed-but-unpushed
+// fixup, which is INVISIBLE to `git status --porcelain` — verified, Pitfall 1).
+// base is typically FETCH_HEAD after a fresh `fetch origin refs/pull/<n>/head`.
+// A non-zero count means the reaper MUST skip auto-removal (D-05 gate b).
+func (s *Service) UnpushedCount(ctx context.Context, wt, base string) (int, error) {
+	out, err := gitRun(ctx, wt, "rev-list", "--count", base+"..HEAD")
+	if err != nil {
+		return 0, err
+	}
+	n, perr := strconv.Atoi(strings.TrimSpace(out))
+	if perr != nil {
+		return 0, perr
+	}
+	return n, nil
+}
+
+// StashCount returns the number of stash entries visible from the worktree at
+// wt. NOTE (Pitfall 2, verified): stashes are stored as refs/stash in the
+// SHARED common git dir, so this is REPO-GLOBAL — a stash created in the main
+// checkout is visible here. The reaper uses it as a conservative gate (D-05
+// gate c): any stash anywhere in the repo skips auto-removal. This can cause a
+// too-conservative skip (never a destructive removal) — the correct failure
+// direction; the user's escape hatch is the manual D-08 cleanup.
+func (s *Service) StashCount(ctx context.Context, wt string) (int, error) {
+	out, err := gitRun(ctx, wt, "stash", "list")
+	if err != nil {
+		return 0, err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return 0, nil
+	}
+	return len(strings.Split(out, "\n")), nil
+}
+
 // Remove removes the worktree at wt from repo, then prunes bookkeeping
 // (D-34). It NEVER deletes branches.
 //

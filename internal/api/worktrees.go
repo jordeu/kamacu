@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
 	"kangent/internal/session"
 	"kangent/internal/tmux"
@@ -236,57 +235,25 @@ func (h *worktreeHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	}
 	path := *t.WorktreePath
 
-	// Gate 1 (D-32): never silently kill sessions. The count folds in live
-	// detached tmux survivors (D-92), so the gate trips for a detached tmux
-	// session too — the client then sends stop_sessions=true and remove kills
-	// it below. No tmux-specific gate logic: just the same folded count.
-	if h.cleanupSessionCount(r.Context(), id) > 0 && !req.StopSessions {
-		writeError(w, http.StatusConflict, "sessions running")
-		return
-	}
-	// Gate 2 (D-33): never silently destroy uncommitted work. Missing dir
-	// counts as clean (Remove self-heals; never block cleanup on it).
-	dirty := 0
-	if _, statErr := os.Stat(path); statErr == nil {
-		dirty, err = h.wt.DirtyCount(r.Context(), path)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if dirty > 0 && !req.Force {
-		writeError(w, http.StatusConflict, "worktree has uncommitted changes")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	// Stop FIRST and block through the grace — this ordering IS the GIT-03
-	// refuse-while-running enforcement (git removes trees under live cwds
-	// without error, Pitfall 4).
-	h.mgr.StopAllForTask(id)
-	// Kill every live tmux session of the task DIRECTLY before wt.Remove
-	// (D-92/D-93). StopAllForTask only reaches in-memory sessions; a detached
-	// tmux survivor has no in-memory session, so without this kill git would
-	// remove the tree while the tmux server stays daemonized cwd'd inside it
-	// (the orphan-shell hole). KillSession is idempotent; a tmux failure is
-	// warn-only and NEVER blocks cleanup (Pitfall 5).
-	for _, name := range h.liveTmuxNames(ctx, id) {
-		if err := h.tmuxClient.KillSession(ctx, name); err != nil {
-			slog.Warn("killing tmux session before worktree remove", "task", id, "name", name, "error", err)
-		}
-	}
-	// Plain remove when clean; --force only when the user passed the dirty
-	// gate. The clean-but-submodules --force fallback lives inside Remove.
-	if err := h.wt.Remove(ctx, repo, path, dirty > 0); err != nil {
+	// Delegate the gate+stop+kill+remove+null-columns core to the shared helper
+	// (D-04). The handler keeps the HTTP-only logic: body parse, loadTaskRepo,
+	// the 404s above, and mapping the helper's (removed, reason) back to the
+	// SAME 409 strings / 500 / 204 it returned inline before. The session count
+	// and live tmux names are probed HERE (handler-owned methods) and passed in.
+	count := h.cleanupSessionCount(r.Context(), id)
+	live := h.liveTmuxNames(r.Context(), id)
+	removed, reason, err := cleanupWorktreeGated(
+		r.Context(), h.db, h.wt, h.mgr, h.tmuxClient, live,
+		id, repo, path, count, req.StopSessions, req.Force)
+	if err != nil {
 		// Dialog shows: "Couldn't remove the worktree: {git error}".
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Task lands in the D-26 absent state; the git branch itself survives (D-34).
-	if _, err := h.db.Exec(
-		`UPDATE tasks SET branch = NULL, worktree_path = NULL, worktree_error = NULL WHERE id = ?`, id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if !removed {
+		// The two gate reasons map to the SAME 409 strings as before:
+		// "sessions running" (D-32) / "worktree has uncommitted changes" (D-33).
+		writeError(w, http.StatusConflict, reason)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
