@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Repo-First Projects
-status: defining_requirements
-stopped_at: v1.4 started 2026-06-14 — defining requirements (repo-first project creation / Kangent-managed checkouts)
-last_updated: "2026-06-14T15:10:38.018Z"
+status: roadmapped
+stopped_at: v1.4 roadmapped 2026-06-14 — 2 phases (14–15), 10 requirements mapped (coarse granularity); ready to plan Phase 14
+last_updated: "2026-06-14T15:40:00.000Z"
 last_activity: 2026-06-14
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,21 +21,31 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-14)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.4 Repo-First Projects — defining requirements
+**Current focus:** v1.4 Repo-First Projects — roadmap created, ready to plan Phase 14
 
 ## Current Position
 
 Milestone: v1.4 Repo-First Projects (Kangent-Managed Checkouts)
-Phase: Not started (defining requirements)
+Phase: 14 — Managed Checkout Foundations (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-14 — Milestone v1.4 started
+Status: Roadmapped — awaiting Phase 14 planning
+Last activity: 2026-06-14 — Roadmap created (Phases 14–15)
 
 **v1.4 goal:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent `gh repo clone`s and manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch — folder path becomes the optional fallback (folder-only when GitHub is off). Builds on v1.3's `internal/github` + worktree/cleanup gating. Phase numbering continues from 14.
+
+**Roadmap shape (coarse, 2 phases, build order forced 14 → 15):**
+
+- **Phase 14 — Managed Checkout Foundations** (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03): the `gh`-validated clone/provisioning primitive into `~/.kangent/repos/<owner>/<name>` on the auto-detected default branch; a schema marker (migration **00008**, next after v1.3's 00007) distinguishing Kangent-managed checkouts from user-pointed folders; fresh-off-default-branch task/PR-review worktrees off the managed clone (fetch latest default branch first); reattach-on-existing-dir; gated removal of the clone on project delete (reusing `CleanupWorktreeGated`'s dirty/unpushed/stash/session gates), never touching folder-based dirs.
+- **Phase 15 — Repo-First Creation Flow** (RPROJ-01, RPROJ-02, RPROJ-03, RPROJ-04, CKOUT-04): the "Add project" surface defaults to entering `owner/name` when integration is on (folder optional; folder-only + no repo-first UI when off), name/link/description auto-fill from the repo, and clone failures surface inline with no half-created project (no orphan row, no partial dir). Sits on top of Phase 14's primitive. UI phase.
 
 Carried tech debt (non-blocking, build green): ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render lint items — a dedicated lint pass is the right home.
 
 ## Performance Metrics
+
+**Velocity (v1.3):**
+
+- Plans completed: 19 across 4 phases (10–13); 46 tasks
+- Headline: clicking a PR opens it as a full task-like review workspace on the PR's real head branch; reaper auto-cleans merged/closed worktrees
 
 **Velocity (v1.2):**
 
@@ -75,7 +85,6 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 12-open-a-review P05 | 18min | 2 tasks | 7 files |
 | Phase 12-open-a-review P06 | 7min | 3 tasks | 9 files |
 | Phase 12-open-a-review P07 | ~3h (incl. 3 human-verify rounds) | 4 tasks | 7 files |
-| Phase 12-open-a-review P07 | ~3h (incl. 3 human-verify rounds) | 4 tasks | 7 files |
 | Phase 13-pr-worktree-auto-cleanup P01 | 9 min | 3 tasks | 11 files |
 | Phase 13-pr-worktree-auto-cleanup P02 | 9min | 3 tasks | 5 files |
 | Phase 13-pr-worktree-auto-cleanup P03 | 2min active (+ human-verify gate) | 3 tasks | 3 files |
@@ -88,71 +97,44 @@ Full decision log lives in PROJECT.md (Key Decisions) and the archived milestone
 
 - `.planning/milestones/v1.0-ROADMAP.md` / `v1.0-REQUIREMENTS.md`
 - `.planning/milestones/v1.1-ROADMAP.md` / `v1.1-REQUIREMENTS.md`
+- `.planning/milestones/v1.2-ROADMAP.md` / `v1.2-REQUIREMENTS.md`
+- `.planning/milestones/v1.3-ROADMAP.md` / `v1.3-REQUIREMENTS.md`
 
 Notable standing decisions for future work:
 
 - D-51 reversed in v1.1 (AGENT-02): `--dangerously-skip-permissions` is the default extra-param; removable per-settings. Documented side effect: amber waiting dot rarely fires while active.
 - Settings are global-only, read-at-use, absent-row-=-code-default; per-project overrides deferred (SET-FUT-01); additional shells are future data, not code (SHELL-FUT-01).
 
-v1.3 roadmap-time decisions (from research, treat as settled going into planning):
+v1.4 milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):
 
-- **Model a PR review as a `tasks` row with `source='github_pr'` + `pr_number` + `pr_base_ref`, NOT a separate `pr_reviews` table** (forced by the `taskID`-keyed session manager). Board excludes them via `WHERE source='manual'`. This is the milestone's single highest-risk regression: audit EVERY `SELECT ... FROM tasks` for the `source` filter (Phase 12).
-- **Never use `gh pr checkout`** — it mutates the current checkout, isn't worktree-aware, and breaks on fork PRs / `/`-branches. Use `git fetch <remote> refs/pull/<n>/head:<localBranch>` + `git worktree add` (fork-safe via the server-side pull ref). The fetch is a deliberate, scoped exception to worktree's "never fetch" invariant (D-24).
-- **PR diff base comes from the PR's own `pr_base_ref`, not the project default** — `diff.Compute(wt, base)` is already parameterized, so only the diff handler branches.
-- **Review qualifier = `user-review-requested:@me`** (direct requests only; the unprefixed `review-requested:@me` floods with all team requests — ~100 PRs seen). Exclude drafts by default. GitHub auto-removes the user from the set on review submit, so the column self-empties for free — don't over-cache against it.
-- **`internal/github` is a best-effort leaf package modeled on `internal/quota`**: per-repo cache with TTL/floor/backoff, typed degraded states (`ok`/`no_gh`/`auth_required`/`disabled`/`error`), always-200 endpoints. `gh` is a soft dependency — degrade, don't break. Don't trust `gh auth status` exit codes alone (cli/cli#8845).
-- **Migration 00007** adds `projects.description`, `projects.github_repo` (nullable = not linked), `tasks.source` (default `'manual'`), `tasks.pr_number`, `tasks.pr_base_ref`, and the `github_integration` settings KV (code-default `'on'`). Store the canonical `owner/name` (validated/canonicalized via `gh repo view --json nameWithOwner`).
-- **Merge/close detection is server-side in the always-on reaper**, never the browser poll (the poll pauses when hidden and only sees open PRs). Add a `reconcilePRsOnce` pass via a `PRStateGetter` interface (mirror the existing `SessionStopper` seam). `gh pr view --json state` returns UPPERCASE `OPEN`/`CLOSED`/`MERGED`; there is no `merged` field — derive it from state.
-- **Gated auto-removal**: only remove a merged/closed PR worktree when the dirty gate AND the sessions gate pass clean (research recommends also gating on unpushed commits `git rev-list <headRefOid>..HEAD` + `git stash list`); deferred-and-re-checked, never immediate. The branch is always kept (D-34). Extract `cleanupWorktreeGated` once — one path, two callers (HTTP + reaper).
-- **Global toggle** is a `github_integration` settings KV (default `on`), read-at-use in API gating and via the shared `useSettings()` query in the frontend so all GitHub UI flips atomically. When off, the app is byte-for-byte unchanged.
+- **Repo cloning uses `gh repo clone`** (host auth, so private/org repos work) into an `owner/name`-namespaced dir under `~/.kangent/repos/` — collision-safe. GitHub-only for the repo path (consistent with v1.3); arbitrary git URLs / other forges stay out of scope — the folder is the non-GitHub escape hatch.
+- **The managed clone IS the repo root** that task/PR-review worktrees branch off (the user just never picks a folder). A **new schema marker** distinguishes Kangent-managed checkouts from user-pointed folders so delete/cleanup knows what it owns — this needs a migration (**00008**, next after v1.3's 00007), landed in Phase 14 so Phase 15 needs no further migration.
+- **Repo-first when on, folder-only when off:** with `github_integration` on, "Add project" defaults to `owner/name`; folder becomes the optional alternative. With the toggle off, creation is folder-only exactly as before v1.4. Existing folder-based projects are untouched (backward compatible).
+- **Freshness:** before each new task worktree on a managed checkout, fetch the latest default branch so new work starts from latest.
+- **Gated delete:** deleting a managed-checkout project removes the clone, gated like worktree cleanup (dirty / unpushed / stash / running-session) via the v1.3 shared `CleanupWorktreeGated`; folder-based dirs are never removed (cleanup is local-directory-only; the app never mutates the remote).
+- **Degrade-don't-break provisioning:** clone failures (auth/network/bad repo) surface inline with no half-created project (no orphan row, no partial dir); re-adding an existing managed dir reattaches/reuses rather than re-cloning.
+- **Builds directly on v1.3's `internal/github`** (gh auth, `ParseRepoRef`/`ValidateRepo`, `Available`, the project `github_repo` link) and the existing worktree provisioning + gated cleanup — an internally-focused milestone, no new external surface beyond `gh repo clone`.
 
-Open product decisions to resolve in Phase planning (from research, mostly defaulted above):
+Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride the same machinery):
 
-- Named-branch (`kangent-pr/<n>`) vs `--detach` for the PR worktree — STACK prefers a namespaced branch with collision pre-check, PITFALLS prefers `--detach`. Reconcile in Phase 12 (research-flagged).
-- Collapse/count persistence scope (per-project vs global; SQLite vs localStorage) — Phase 11.
-- Unpushed-work gate scope beyond `git status --porcelain` — Phase 13 (research-flagged).
-- [Phase 10-github-foundations]: github_integration default 'on' (D-01): absent settings row reads as 'on' via existing Get fallback — no Get/GetAll/Set change needed
-- [Phase 10-github-foundations]: All five v1.3 columns land in migration 00007 so Phase 12 needs no further migration; tasks.source CHECK(manual/github_pr) default 'manual' gates the board
-- [Phase 10-github-foundations]: internal/github leaf (ParseRepoRef/ValidateRepo/Available): pure canonicalization of owner/name + URL/ssh, gh soft-validation that degrades (syntactic save, no error) on absence or unverifiable refs — only syntactic invalidity hard-blocks (GHSET-03/D-11)
-- [Phase 10-github-foundations]: PATCH /api/projects/{id} is a partial update (D-13): pointer fields so omitted != clear; description "" clears, github_repo "" unlinks to NULL; canonical hard-error copy 'Not a valid repository — use owner/name or a GitHub URL.'; GET .../github-origin prefills from git origin on dialog open only (D-08)
-- [Phase 10-github-foundations]: shadcn ui/* primitives use the radix-ui umbrella import (Switch as SwitchPrimitive from 'radix-ui'), not @radix-ui/react-*; hand-authored switch.tsx to match select.tsx/label.tsx — no new dep
-- [Phase 10-github-foundations]: OFF cascade is a render gate on the shared useSettings() github_integration==='on' value; when off the ProjectSettingsDialog re-sends the existing github_repo so the hidden link is never clobbered
-- [Phase 10-github-foundations]: Soft-verify/gh-degraded muted advisories are wired but dormant (keyed on a future updated.verify_state); Plan 02's server returns plain 200, so success closes the dialog (UI-SPEC-sanctioned non-blocking)
-- [Phase 10-github-foundations]: Gap 1 backend half: GET /api/github/status is an always-200 endpoint returning {gh_available: bool} from github.Available() (call-time LookPath, reflects install/uninstall without restart); package-level handler (no DB), snake_case field Plan 10-05 reads; contract test compares to github.Available() so it is host-independent
-- [Phase 10-github-foundations]: Gap 1 frontend half + Gap 2: /settings GitHub toggle is gh-aware via useGithubStatus() (GET /api/github/status); effectiveEnabled = enabled && ghAvailable forces OFF when gh is missing, an enable attempt is blocked with install-gh guidance (Switch stays interactive, no disabled), and the over-claiming help copy is dropped
-- [Phase 11-pr-review-column]: internal/github.Service is a quota.Service clone re-keyed to map[owner/name]*repoEntry (per-repo 60s TTL on fetchedAt, 10s floor on lastAttempt binding even force, in-flight dedup, drop-cached-after-3-failures); no 429/backoff field — gh rate-limit surfaces as 'error' with serve-stale per D-11
-- [Phase 11-pr-review-column]: reduceChecks maps SKIPPED/NEUTRAL/STALE to non-failing (Pitfall 1, else ~30% of real PRs go red); auth classification combines exit-code-4 OR stderr substrings (gh auth login/401/Bad credentials) since exit 4 alone is unreliable (cli/cli#9338); PRSummary fetches the rich --json set for Phase 12/13 but renders minimal in Phase 11 (D-01/D-02)
-- [Phase 11-pr-review-column]: PR endpoint GET /api/projects/{id}/pull-requests is always-200 with a two-gate ladder: GATE 1 reads settings.KeyGithubIntegration (val != 'on' -> disabled, GHSET-02 backend enforcement), GATE 2 returns disabled for unlinked OR unknown projects (200, never 404); both gates short-circuit before any gh spawn
-- [Phase 11-pr-review-column]: Handler SELECTs github_repo + repo_path; repo_path = cmd.Dir so gh resolves the right host/account (Pitfall 6); settings/DB errors map to state=error (200), the only non-200 is pathID's 400 on a non-numeric id
-- [Phase 11-pr-review-column]: formatAgo lifted to web/src/lib/time.ts (RESEARCH Open Q2 = LIFT): one tier-logic shared by the quota footer + PR card; QuotaIndicator imports it, behavior byte-identical (zero local defs)
-- [Phase 11-pr-review-column]: PRCard checks dot uses a local 3-way switch typed Exclude<checks,'none'> (D-03), not StatusDot.dotMeta; none renders nothing (no gutter, no layout shift, D-04); body inert, only the ↗ anchor is interactive (D-08/D-09)
-- [Phase 11-pr-review-column]: Review column defaults to COLLAPSED (supersedes D-05/D-06 'default expanded') per user request 2026-06-14: collapsed unless localStorage holds explicit '0'; absent key reads as collapsed (getItem !== '0')
-- [Phase 12-open-a-review]: CheckoutPR pins the detached worktree to gh's headRefOid (never FETCH_HEAD, clobbered by 12-03's base fetch); remote hard-coded origin for v1.3; ViewPR does a fresh gh pr view (Phase 11 PRSummary lacks body and reattach can fire with no list mounted)
-- [Phase 12-open-a-review]: GHREV-04 board-leak guard at the data layer: AND source = 'manual' on the 5 board/position queries (listByProject, create top-of-ToDo, move drop-at-top, nextPosition, renumberColumn) + a /move 409 guard rejecting source != 'manual'; by-id get/update/delete/afterPosition left unfiltered so the review view deep-links its own PR row. source/pr_number/pr_base_ref added to the Task wire shape (scanTask + loadTaskRepo column-aligned)
-- [Phase 12-open-a-review]: Diff base for a github_pr review comes from its own pr_base_ref (D-12/GHREV-03): diffs.go SELECT reads source+pr_base_ref, FetchRef(base) runs before merge-base (RESEARCH Pitfall 3), then resolvePRBase prefers local refs/heads/<base> (show-ref in the worktree dir) else origin/<base> (never FETCH_HEAD); diff.Compute reused unchanged, internal/diff untouched. Manual tasks keep ResolveBase verbatim.
-- [Phase 12-open-a-review]: Open-or-reattach endpoint POST .../{n}/review: find-or-create source='github_pr' keyed by (project_id, pr_number); full row -> instant reattach (no CheckoutPR), worktree_path NULL -> re-provision in place, not found -> INSERT (position=0 sentinel, board filters exclude it). off/unlinked/unknown -> 409 BEFORE any gh/worktree spawn. Live gh pr view on EVERY open (no title/body drift) returned as {task, pr}; ViewPR fetched before INSERT so a gh failure 502s with no half-row. viewPR package seam keeps create/reattach tests hermetic (real refs/pull/<n>/head + stubbed gh).
-- [Phase 12-open-a-review]: 12-05 frontend wiring shipped (open-or-reattach at the query cache: useOpenReview.onSuccess stashes {task, pr}; TaskPage branches every delta on source==='github_pr'; one-shot seed via pasteApiRef). Human-verify NOT approved -> 5 follow-ups become gap plans 12-06/12-07; phase NOT verified, GHREV-01..05 Pending.
-- [Phase 12-open-a-review]: 12-06 gap backend: CheckoutPR DECISION-OVERRIDES D-01 detached -> NAMED branch (headRefName) via worktree add -b, with a never-reuse selection (headRefName -> pr/<n> -> pr/<n>-<shortOID> -> error). Realigns with literal GHREV-01 while PRESERVING GHREV-05 (an existing local ref is never chosen/moved; the pr/<n> fallback protects the fork same-name 'master' trap). PRDetail.Commits (len of gh commits array) + prWire.headRefName/commits feed the 12-07 merge line; pr_review_seed settings key (free-text, length-capped, migration-free) feeds the 12-07 configurable seed.
-- [Phase 12-open-a-review]: 12-07 gap frontend (APPROVED 2026-06-14): once-per-session seed via a module-level seededSessionIds Set keyed by agent session id (replaces the per-mount ref re-injection); seed from pr_review_seed with <n>/<title> frontend-interpolated (blank = no injection); single-line clickable PR header #<num> @<author> wants to merge <N> commits into <base> from <head> kept inside the shrink-0 block (fix-#6 height chain preserved, never forked); F5 re-hydration via a read-only GET /pull-requests/{n} + usePullRequestDetail re-fetching under the same prDetailKey (no schema/migration). All 5 follow-ups verified live.
-- [Phase 13-pr-worktree-auto-cleanup]: PRState is a dedicated minimal gh pr view --json state method on *Service (one fewer field than ViewPR), satisfying the reaper's PRStateGetter; PRDetail.State decodes via a plain json tag (single source for the D-09 banner)
-- [Phase 13-pr-worktree-auto-cleanup]: cleanupWorktreeGated is a BYTE-EQUIVALENT extraction of remove()'s dirty+sessions logic in internal/api (reaper->api acyclic); the two NEW gates (rev-list unpushed, stash) stay in 13-02's reaper so the helper is verifiable against the unchanged worktree DELETE tests (RESEARCH Open Q1)
-- [Phase 13-pr-worktree-auto-cleanup]: worktree.Service.UnpushedCount (rev-list base..HEAD) + StashCount (repo-global stash list) added as the reaper's conservative-gate primitives; per-kill tmux slog.Warn dropped (best-effort, never blocked; test asserts the kill not the log)
-- [Phase 13-pr-worktree-auto-cleanup]: reconcilePRsOnce is the reaper's 2nd pass (D-01): source='github_pr' worktree tasks, MERGED/CLOSED only proceed; conservative gate (dirty + unpushed-vs-re-fetched-PR-head + repo-global stash + sessions) all from FRESH git state; force=false/stopSessions=false (never forces, never stops a live session); on a clean remove the row is FK-deleted (tmux_sessions then tasks, D-07). source='manual' never selected (D-87).
-- [Phase 13-pr-worktree-auto-cleanup]: NewWithPR is a 2nd reaper constructor (pr==nil disables the PR pass) so New(db, spy) Done-TTL tests stay unchanged; cleanupWorktreeGated exported to CleanupWorktreeGated for the cross-package reaper call (reaper->api acyclic). Rule 1 fix: the unpushed-gate fetch runs IN THE WORKTREE not the common repo dir (FETCH_HEAD is per-worktree; fetching in the repo dir left it unresolvable from the linked worktree, silently skipping every PR).
-- [Phase 13-pr-worktree-auto-cleanup]: 13-03 PR review ⋯ menu (single 'Clean up worktree', no Delete task, D-08) + inline merged/closed banner (D-09, role=status, never modal) both reuse the existing gated CleanupWorktreeDialog via setCleanupOpen(true); placed inside the shrink-0 header block (no 12-07 fix-#6 height regression); separate PR-only menu gate (isPR && task.worktree_path) leaves the manual-task menu byte-for-byte unchanged
-- [Phase 13-pr-worktree-auto-cleanup]: Phase 13 human-verified APPROVED 2026-06-14: GHCLN-01 (auto-cleanup of a clean merged worktree + row delete), GHCLN-02 (dirty/busy worktree left in place, branch kept), GHCLN-03 (manual cleanup via the ⋯ menu / banner link through the gated dialog) all confirmed end-to-end in the running app
+- **Model a PR review as a `tasks` row with `source='github_pr'`**; the board excludes them via `WHERE source='manual'`. v1.4's CKOUT-02 freshness/branching must keep this guard intact for PR-review worktrees off the managed clone.
+- **Never use `gh pr checkout`** — use `git fetch <remote> refs/pull/<n>/head:<localBranch>` + `git worktree add`; the fetch is a scoped exception to worktree's "never fetch" invariant. v1.4's per-new-task default-branch fetch is a second deliberate, scoped fetch.
+- **`CleanupWorktreeGated`** (force=false) is the shared gated-removal path (dirty + unpushed via `rev-list` + stash + sessions); v1.4's managed-clone delete reuses these gates.
+- **Global `github_integration` toggle** (settings KV, default `on`), read-at-use in API gating and via `useSettings()` in the frontend; when off the app is byte-for-byte unchanged. v1.4 gates the repo-first Add-project UI on this same value (RPROJ-04).
+
+(Earlier v1.0–v1.3 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
 
 ### Pending Todos
 
 - Quota poll while idle (no connected browsers) is acceptable for the first iteration with jitter + backoff; revisit before milestone close (research tech-debt note).
-- Phase 12 and Phase 13 are research-flagged in ROADMAP.md — `/gsd:plan-phase` should decide whether to run `/gsd:research-phase` (PR-branch checkout mechanics + per-query board-leak audit for 12; gated-cleanup refactor + unpushed-work gate for 13).
+- Lint-cleanup pass: ~18–20 pre-existing react-hooks eslint errors + two v1.3 `Date.now()`-in-render advisories (`PRCard.tsx`/`ReviewColumn.tsx`) — gating build green, but a dedicated pass is the right home.
+- Phase 14 open product questions to resolve at plan time: exact schema-marker shape (a `managed`/`source` flag on `projects` vs a separate column distinguishing clone-owned from user-pointed paths); whether reattach (CKOUT-05) validates the existing dir's remote matches `owner/name` before reusing; how a gated-blocked managed-clone delete surfaces to the user (mirror the worktree CleanupWorktreeDialog variants).
 
 ### Blockers/Concerns
 
-- Plan-mode exit-plan approval → amber dot (v1.0 research OQ1): still unobserved — carry to v1.3 UAT.
-- `gh` is a soft dependency; the integration must degrade-don't-break on every failure mode (missing/unauthenticated/rate-limited). Secondary rate limits (403/`Retry-After`) are a real risk under multi-project auto-poll — bounded steady-state call rate, paused-when-hidden, backoff (Phase 11).
-- The board-leak regression (a forgotten `source='manual'` filter on any `tasks` SELECT) is the milestone's highest-severity risk — treat as a per-query checklist item in Phase 12.
-- Phase 12 gap closure DONE + human-verify APPROVED (2026-06-14): all 5 12-05 follow-ups closed across 12-06 (backend: named-branch PR checkout, pr_review_seed key, commits+head/base) and 12-07 (frontend: once-per-session seed, single-line clickable merge-line header, terminal-height chain confirmed, Settings prompt field, + F5 detail re-hydration via GET /pull-requests/{n}). GHREV-01/05 now Complete. Remaining: the orchestrator re-runs the phase verification (gsd-verifier) before the phase is closed.
+- `gh` is a soft dependency; provisioning must degrade-don't-break on every failure mode (missing/unauthenticated/network/bad-repo). CKOUT-04's "no half-created project" guarantee (no orphan row, no partial dir) is the milestone's highest-severity correctness item — treat clone as a transaction: validate (RPROJ-05) → clone to a staging/namespaced dir → only then commit the project row; roll back the dir on any failure.
+- The CKOUT-03 gated delete must never remove a folder-based (user-pointed) directory — the schema marker is the single source of truth for "Kangent owns this dir." A missing/incorrect marker check is a data-loss risk (deleting a user's working checkout).
+- Plan-mode exit-plan approval → amber dot (v1.0 research OQ1): still unobserved — carry to v1.4 UAT.
 
 ### Quick Tasks Completed
 
@@ -163,7 +145,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T14:44:59.265Z
-Stopped at: Completed 13-03-PLAN.md (phase 13 all plans complete; human-verify approved)
+Last session: 2026-06-14T15:40:00.000Z
+Stopped at: v1.4 roadmap created — ROADMAP.md (Phases 14–15), REQUIREMENTS.md traceability (10/10 mapped), STATE.md updated
 Resume file: None
-Next: orchestrator re-runs phase 12 verification (gsd-verifier); GHREV-01/05 marked Complete
+Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation

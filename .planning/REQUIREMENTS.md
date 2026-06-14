@@ -55,21 +55,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RPROJ-01 | TBD | Pending |
-| RPROJ-02 | TBD | Pending |
-| RPROJ-03 | TBD | Pending |
-| RPROJ-04 | TBD | Pending |
-| RPROJ-05 | TBD | Pending |
-| CKOUT-01 | TBD | Pending |
-| CKOUT-02 | TBD | Pending |
-| CKOUT-03 | TBD | Pending |
-| CKOUT-04 | TBD | Pending |
-| CKOUT-05 | TBD | Pending |
+| RPROJ-01 | Phase 15 | Pending |
+| RPROJ-02 | Phase 15 | Pending |
+| RPROJ-03 | Phase 15 | Pending |
+| RPROJ-04 | Phase 15 | Pending |
+| RPROJ-05 | Phase 14 | Pending |
+| CKOUT-01 | Phase 14 | Pending |
+| CKOUT-02 | Phase 14 | Pending |
+| CKOUT-03 | Phase 14 | Pending |
+| CKOUT-04 | Phase 15 | Pending |
+| CKOUT-05 | Phase 14 | Pending |
 
 **Coverage:**
 - v1.4 requirements: 10 total
-- Mapped to phases: 0 (filled by roadmap)
-- Unmapped: 10
+- Mapped to phases: 10 (Phase 14: CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03 — Phase 15: RPROJ-01, RPROJ-02, RPROJ-03, RPROJ-04, CKOUT-04)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-14*
+*Roadmapped: 2026-06-14 — 2 phases (14–15), granularity: coarse*
