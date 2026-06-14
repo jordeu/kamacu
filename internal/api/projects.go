@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 
 	"kangent/internal/github"
 	"kangent/internal/session"
+	"kangent/internal/settings"
 	"kangent/internal/tmux"
 	"kangent/internal/worktree"
 )
@@ -120,16 +122,36 @@ func (h *projectHandlers) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, projects)
 }
 
-// create handles POST /api/projects.
+// create handles POST /api/projects. Two creation paths share this endpoint:
+//
+//   - Folder path (the original): `{ "repo_path": "/abs/path" }` points Kangent
+//     at a user-owned checkout. managed defaults to 0 — Kangent never touches
+//     the dir on delete (D-09). UNCHANGED by v1.4.
+//   - Repo-first path (v1.4, CKOUT-01): `{ "repo": "owner/name" }` gh-validates
+//     the ref (RPROJ-05/D-03), `gh repo clone`s it into
+//     ~/.kangent/repos/<owner>/<name> (D-02), and records it with managed=1 +
+//     github_repo=canonical — but ONLY after the clone returns exit 0, so a
+//     failed clone leaves no row and no dir (atomic, D-01/CKOUT-04). If the dest
+//     already exists, it reattaches on origin-match (CKOUT-05/D-10).
+//
+// The branch is chosen by whether `repo` is non-empty.
 func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name     string `json:"name"`
 		RepoPath string `json:"repo_path"`
+		Repo     string `json:"repo"` // owner/name OR a GitHub URL → repo-first path
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
+	if strings.TrimSpace(req.Repo) != "" {
+		h.createByRepo(w, r, req.Repo, req.Name)
+		return
+	}
+
+	// --- Folder path (unchanged) ---
 	abs, err := validateRepoPath(req.RepoPath)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -155,6 +177,123 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+// reposBase is the hardcoded managed-clone root (D-02 / Claude's discretion: no
+// repos_base setting for v1.4). Clones nest under it as <owner>/<name>.
+const reposBase = "~/.kangent/repos/"
+
+// createByRepo is the repo-first creation path (CKOUT-01). The ordering is the
+// research §"Clone-then-Create Ordering" 8-step sequence and is load-bearing for
+// atomicity: validate BEFORE any clone, clone BEFORE any row, row only after the
+// clone returns exit 0.
+func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, repoInput, nameInput string) {
+	// 1. Parse/canonicalize the ref. The ONLY hard, host-independent reject.
+	if _, err := github.ParseRepoRef(repoInput); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// 2. gh-validate (RPROJ-05/D-03). Mirror the update handler's degrade block:
+	//    a syntactic error → 400; not-verified → 400 (msgRepoNotFound, or
+	//    msgGHUnavailable when gh is absent). No clone, no row on any reject.
+	canonical, verified, err := github.ValidateRepo(r.Context(), repoInput)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !verified {
+		msg := msgRepoNotFound
+		if !github.Available() {
+			msg = msgGHUnavailable
+		}
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
+	// 3. Compute the managed dest: ~/.kangent/repos/<owner>/<name>. canonical is
+	//    "owner/name", so filepath.Join nests it correctly.
+	base, err := settings.ExpandHome(reposBase)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dest := filepath.Join(base, canonical)
+
+	// 4. Dest already on disk → reattach-or-refuse (CKOUT-05/D-10). Never clone
+	//    over or clobber an existing dir; on mismatch/non-git it 409s.
+	reattached := false
+	if _, statErr := os.Stat(dest); statErr == nil {
+		if rerr := reattachManaged(r.Context(), dest, canonical); rerr != nil {
+			writeError(w, http.StatusConflict, rerr.Error())
+			return
+		}
+		reattached = true
+	}
+
+	// 5. Dedup pre-check on dest (mirror the folder branch): an existing row → 409.
+	var exists int
+	if derr := h.db.QueryRow(`SELECT 1 FROM projects WHERE repo_path = ?`, dest).Scan(&exists); derr == nil {
+		writeError(w, http.StatusConflict, "this repository is already added")
+		return
+	} else if !errors.Is(derr, sql.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, derr.Error())
+		return
+	}
+
+	// 6. Clone — only when not reattaching. On failure: belt-and-braces remove
+	//    (Clone already removed it), surface ONE inline error, NO row (atomicity).
+	if !reattached {
+		if cerr := github.Clone(r.Context(), canonical, dest); cerr != nil {
+			_ = os.RemoveAll(dest)
+			writeError(w, http.StatusInternalServerError, cerr.Error())
+			return
+		}
+	}
+
+	// 7. INSERT only now (managed=1, github_repo=canonical — Phase 14 sets it so
+	//    Phase 15's form can rely on it; research Open Question 1).
+	name := strings.TrimSpace(nameInput)
+	if name == "" {
+		name = filepath.Base(dest) // = repo name
+	}
+	p, err := scanProject(h.db.QueryRow(
+		`INSERT INTO projects (name, repo_path, github_repo, managed) VALUES (?, ?, ?, 1) RETURNING `+projectColumns,
+		name, dest, canonical))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// 8. Created.
+	writeJSON(w, http.StatusCreated, p)
+}
+
+// reattachManaged decides whether an already-existing dest can be reused as the
+// managed clone for canonical owner/name (CKOUT-05/D-10). It NEVER removes or
+// resets the dir (D-11): returning nil means "reuse dest"; a non-nil error (with
+// a user-facing message) means "refuse, do not clobber". It is reached only when
+// os.Stat(dest) showed the directory already exists.
+func reattachManaged(ctx context.Context, dest, canonical string) error {
+	// 1. dest must be a git repo (the validateRepoPath check). A stray/user dir
+	//    is never clobbered.
+	if err := exec.CommandContext(ctx, "git", "-C", dest, "rev-parse", "--git-dir").Run(); err != nil {
+		return fmt.Errorf("a directory already exists at %s but is not a git repository", dest)
+	}
+	// 2. Read origin (the githubOrigin pattern). No origin → can't confirm
+	//    ownership, refuse.
+	out, err := exec.CommandContext(ctx, "git", "-C", dest, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return fmt.Errorf("a directory already exists at %s with no origin remote", dest)
+	}
+	// 3. Canonicalize origin (ParseRepoRef handles ssh + https) and compare
+	//    case-insensitively (gh canonicalizes casing). A parse error or mismatch
+	//    → refuse without clobbering.
+	got, perr := github.ParseRepoRef(strings.TrimSpace(string(out)))
+	if perr != nil || !strings.EqualFold(got, canonical) {
+		return fmt.Errorf("a different repository is already checked out at %s", dest)
+	}
+	// 4. Match → reuse. No re-clone, no reset, no fetch (D-11: plan 03's per-task
+	//    fetch already provides freshness; a blocking fetch here is forbidden).
+	return nil
 }
 
 // Hard-block messages for a non-empty github_repo that gh cannot verify
