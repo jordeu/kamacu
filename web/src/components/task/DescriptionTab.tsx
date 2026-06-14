@@ -7,12 +7,50 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 /**
+ * Read-only markdown body (a PR review — Phase 12 D-11): the same prose block,
+ * NO Edit button, NO Textarea, NO Save. Review context lifted from GitHub that
+ * must not drift. Split into its own component so the editable variant's hooks
+ * are never conditionally skipped (rules-of-hooks).
+ */
+function ReadOnlyDescription({ source }: { source: string }) {
+  if (!source) {
+    return <span className="text-muted-foreground">No description.</span>;
+  }
+  return (
+    <div className="prose prose-invert prose-sm max-w-none prose-a:text-blue-500">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+    </div>
+  );
+}
+
+/**
  * Markdown description with an explicit edit/preview toggle (D-10):
  * no autosave, no side-by-side preview. react-markdown's defaults are the
  * security posture — raw HTML stays unrendered, javascript: URLs are
  * neutralized. Do not add any raw-HTML rehype plugin.
+ *
+ * When `readOnlySource` is provided (a PR review — Phase 12 D-11), the body is
+ * rendered read-only via ReadOnlyDescription instead.
  */
 export function DescriptionTab({
+  task,
+  projectId,
+  readOnlySource,
+}: {
+  task: Task;
+  projectId: number;
+  readOnlySource?: string;
+}) {
+  if (readOnlySource !== undefined) {
+    return <ReadOnlyDescription source={readOnlySource} />;
+  }
+
+  return (
+    <EditableDescription task={task} projectId={projectId} />
+  );
+}
+
+function EditableDescription({
   task,
   projectId,
 }: {

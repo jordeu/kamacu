@@ -27,15 +27,21 @@ import { TerminalPane } from "@/components/terminal/TerminalPane";
 export function AgentTab({
   task,
   agentSession,
+  seed,
 }: {
   task: Task;
   agentSession: TermSession | undefined;
   projectId: number;
+  // PR-review seed (Phase 12 D-06/D-07): when set, prefill (never send) this
+  // prompt into the agent once, after the session connects.
+  seed?: string;
 }) {
   const spawn = useSpawnAgent(task.id);
   const resume = useResumeAgent(task.id);
   const queryClient = useQueryClient();
   const pasteApiRef = useRef<{ paste: (t: string) => void } | null>(null);
+  // Fires the seed paste exactly once per mount, after the first connect.
+  const oneShotSeededRef = useRef(false);
 
   // The server's resumable flag is the SINGLE driver for which pair renders —
   // the UI never infers resumability client-side (UI-SPEC). Read it from the
@@ -152,6 +158,16 @@ export function AgentTab({
           : e,
       ),
     );
+
+    // PR-review seed (D-06/D-07): one-shot prefill after the agent connects.
+    // Reuses the exact Insert-description mechanism (pasteApiRef → term.paste,
+    // wrapped by xterm in bracketed-paste \x1b[200~..\x1b[201~ so claude
+    // receives it as a single un-submitted prompt). NEVER auto-sent — the user
+    // edits and presses Enter. Guarded by a ref so it fires exactly once.
+    if (seed && !oneShotSeededRef.current) {
+      oneShotSeededRef.current = true;
+      pasteApiRef.current?.paste(seed);
+    }
   };
 
   // State B — session exists (running or exited). Exited output stays

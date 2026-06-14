@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
+import { ArrowLeft, Ellipsis, ExternalLink, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
+import { prDetailKey, type PRDetailWire } from "@/api/pullRequests";
 import { useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
@@ -237,6 +238,21 @@ export default function TaskPage() {
     );
   }
 
+  // PR review branch (Phase 12): a source='github_pr' task renders the
+  // read-only review identity. The live PR detail (title/body/author/url/base)
+  // was stashed by useOpenReview at open time (prDetailKey) and survives
+  // reattach in the cache; fall back to the task's own pr_* fields if absent
+  // (e.g. a hard refresh on a deep link — header degrades, never breaks).
+  const isPR = task.source === "github_pr";
+  const prDetail = isPR
+    ? queryClient.getQueryData<PRDetailWire>(prDetailKey(task.id))
+    : undefined;
+  const prTitle = prDetail?.title ?? task.title;
+  // D-07 seed: prefilled-not-sent on agent Start, interpolating the live PR.
+  const seed = isPR
+    ? `Review PR #${task.pr_number} "${prTitle}". Summarize the changes, then flag bugs, risky changes, and missing tests.`
+    : undefined;
+
   function commitTitle(value: string) {
     const cancelled = cancelTitleEditRef.current;
     cancelTitleEditRef.current = false;
@@ -306,6 +322,7 @@ export default function TaskPage() {
             task={task}
             agentSession={agentSession}
             projectId={projectId}
+            seed={seed}
           />
         </div>
       ),
@@ -315,7 +332,11 @@ export default function TaskPage() {
       label: "Description",
       content: (
         <div className="h-full max-w-[860px] overflow-y-auto">
-          <DescriptionTab task={task} projectId={projectId} />
+          <DescriptionTab
+            task={task}
+            projectId={projectId}
+            readOnlySource={isPR ? (prDetail?.body ?? "") : undefined}
+          />
         </div>
       ),
     },
@@ -429,7 +450,17 @@ export default function TaskPage() {
             <TooltipContent>Back to board (Esc)</TooltipContent>
           </Tooltip>
 
-          {titleDraft === null ? (
+          {isPR ? (
+            // Read-only PR title (D-08): same box/typography as the editable
+            // title so there is zero layout shift, but NOT a button — no hover
+            // surface, no onClick, no Edit affordance. Reads as a label.
+            <span
+              className="min-w-0 flex-1 truncate px-1 py-0.5 text-left text-base font-medium"
+              title={prTitle}
+            >
+              {prTitle}
+            </span>
+          ) : titleDraft === null ? (
             <button
               type="button"
               className="min-w-0 flex-1 truncate rounded-md px-1 py-0.5 text-left text-base font-medium hover:bg-muted/50"
@@ -458,38 +489,68 @@ export default function TaskPage() {
 
           <QuotaIndicator />
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Task actions">
-                <Ellipsis className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {/* D-31 menu path: neutral item — it opens a gated dialog;
-                  `Delete task` stays the menu's only red item. */}
-              {task.worktree_path && (
-                <>
-                  <DropdownMenuItem onSelect={() => setCleanupOpen(true)}>
-                    Clean up worktree
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              )}
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => setDeleteOpen(true)}
-              >
-                Delete task
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* ⋯ menu OMITTED for a PR review (D-10): no Delete-task, no
+              Clean-up-worktree yet (Phase 13 re-adds cleanup). ↗ open-on-GitHub
+              lives in the PR meta line instead. */}
+          {!isPR && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label="Task actions">
+                  <Ellipsis className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {/* D-31 menu path: neutral item — it opens a gated dialog;
+                    `Delete task` stays the menu's only red item. */}
+                {task.worktree_path && (
+                  <>
+                    <DropdownMenuItem onSelect={() => setCleanupOpen(true)}>
+                      Clean up worktree
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() => setDeleteOpen(true)}
+                >
+                  Delete task
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </header>
 
-        <WorktreeMetaLine
-          task={task}
-          onCreate={() => createWorktree.mutate()}
-          creating={createWorktree.isPending}
-        />
+        {isPR ? (
+          // PR meta line (D-09): #num · @author · base · ↗. The worktree always
+          // exists by render time, so no Create/Retry affordance applies — the
+          // PR identity is the only meta this review needs.
+          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            <span>#{task.pr_number}</span>
+            <span>·</span>
+            <span>@{prDetail?.author}</span>
+            <span>·</span>
+            <span className="font-mono">
+              {prDetail?.baseRefName ?? task.pr_base_ref}
+            </span>
+            <span>·</span>
+            <a
+              href={prDetail?.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open PR #${task.pr_number} on GitHub`}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <ExternalLink className="size-3.5" />
+            </a>
+          </div>
+        ) : (
+          <WorktreeMetaLine
+            task={task}
+            onCreate={() => createWorktree.mutate()}
+            creating={createWorktree.isPending}
+          />
+        )}
       </div>
 
       <TaskTabs
