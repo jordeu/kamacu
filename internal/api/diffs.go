@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"strings"
 
 	"kangent/internal/diff"
 	"kangent/internal/worktree"
@@ -34,14 +37,17 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One query for the task's worktree_path + its project's repo_path (mirror
+	// One query for the task's worktree_path, source/pr_base_ref (the diff-base
+	// discriminator — D-12/GHREV-03), + its project's repo_path (mirror
 	// worktreeHandlers.loadTaskRepo; the FK guarantees the project row exists).
 	var wtPath sql.NullString
 	var repo string
+	var source string
+	var prBaseRef sql.NullString
 	err := h.db.QueryRow(
-		`SELECT worktree_path,
+		`SELECT worktree_path, source, pr_base_ref,
 		   (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id)
-		 FROM tasks WHERE id = ?`, id).Scan(&wtPath, &repo)
+		 FROM tasks WHERE id = ?`, id).Scan(&wtPath, &source, &prBaseRef, &repo)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -67,12 +73,31 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-resolve the base (its 4-step chain covers most base weirdness; failure
-	// routes to the error state).
-	base, err := h.wt.ResolveBase(r.Context(), repo)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	// Select the diff base. A github_pr review (D-12/GHREV-03) diffs against the
+	// PR's OWN base (pr_base_ref), not the project default — otherwise a PR
+	// targeting a non-default branch shows a misleading mega-diff. A manual task
+	// (or a defensive github_pr row with NULL pr_base_ref) keeps the unchanged
+	// ResolveBase chain. The base is re-read + re-resolved on every request (no
+	// caching), so a retargeted PR picks up its new base on the next open.
+	var base string
+	if source == "github_pr" && prBaseRef.Valid && strings.TrimSpace(prBaseRef.String) != "" {
+		baseName := strings.TrimSpace(prBaseRef.String)
+		// Fetch the base FIRST so origin/<base> exists before merge-base
+		// (RESEARCH Pitfall 3 — "Not a valid object name origin/<base>"
+		// otherwise). Best-effort: ignore the fetch error and let merge-base
+		// surface a clear message into the UI error card if the ref truly can't
+		// resolve. Then prefer a local refs/heads/<base>, else origin/<base>
+		// (the stable remote-tracking ref — never FETCH_HEAD, Pitfall 1).
+		_ = h.wt.FetchRef(r.Context(), repo, baseName)
+		base = resolvePRBase(r.Context(), path, baseName)
+	} else {
+		// Re-resolve the project base (its 4-step chain covers most base
+		// weirdness; failure routes to the error state).
+		base, err = h.wt.ResolveBase(r.Context(), repo)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	d, err := diff.Compute(r.Context(), path, base)
@@ -82,4 +107,21 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Base = base // totals bar + empty state share the resolved base
 	writeJSON(w, http.StatusOK, d)
+}
+
+// resolvePRBase resolves a PR base branch name to a commit-ish for merge-base,
+// mirroring worktree.ResolveBase's local-then-remote shape (D-12): prefer a
+// local refs/heads/<baseName> if present, else the remote-tracking
+// origin/<baseName> (stable after FetchRef — NEVER FETCH_HEAD, RESEARCH Pitfall
+// 1). show-ref runs in the worktree dir; worktrees share the common git dir, so
+// refs/heads and refs/remotes resolve identically there. If neither ref exists,
+// origin/<baseName> is returned and diff.Compute's merge-base relays git's clear
+// "Not a valid object name" message into the UI error card (Pitfall 3 posture).
+func resolvePRBase(ctx context.Context, wt, baseName string) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", wt,
+		"show-ref", "--verify", "--quiet", "refs/heads/"+baseName)
+	if err := cmd.Run(); err == nil {
+		return baseName // local branch tip
+	}
+	return "origin/" + baseName // remote-tracking ref (fetched above)
 }
