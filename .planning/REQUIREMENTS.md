@@ -13,7 +13,7 @@ Requirements for the Repo-First Projects (Kangent-Managed Checkouts) milestone. 
 - [ ] **RPROJ-02**: Entering a valid repo auto-derives the project name (prefilled from the repo name, editable before create) and auto-fills the GitHub link and description.
 - [ ] **RPROJ-03**: The user can still create a project from a local folder when GitHub is on — the folder path is the optional alternative, not the default.
 - [ ] **RPROJ-04**: When GitHub integration is off, project creation is folder-only (exactly as before v1.4) and no repo-first UI appears.
-- [ ] **RPROJ-05**: The repo is validated via `gh` before any clone is attempted; an invalid or inaccessible repo is rejected inline without creating a project.
+- [x] **RPROJ-05**: The repo is validated via `gh` before any clone is attempted; an invalid or inaccessible repo is rejected inline without creating a project.
 
 ### Managed Checkout Lifecycle
 
@@ -21,7 +21,7 @@ Requirements for the Repo-First Projects (Kangent-Managed Checkouts) milestone. 
 - [ ] **CKOUT-02**: Task and PR-review worktrees branch off the managed checkout; before creating a new task's worktree, Kangent fetches the latest default branch so new work starts from latest.
 - [ ] **CKOUT-03**: Deleting a managed-checkout project removes the managed clone from disk, gated on the same conditions as worktree cleanup (uncommitted/unpushed work or running sessions block silent removal); folder-based (user-pointed) project directories are never removed.
 - [ ] **CKOUT-04**: Provisioning degrades-don't-break — a clone failure (auth, network, or missing repo) surfaces inline and leaves no half-created project (no orphan DB row, no partial directory).
-- [ ] **CKOUT-05**: Re-adding a repo whose managed directory already exists on disk reattaches to / reuses the existing checkout rather than failing or cloning over it.
+- [x] **CKOUT-05**: Re-adding a repo whose managed directory already exists on disk reattaches to / reuses the existing checkout rather than failing or cloning over it.
 
 ## Future Requirements
 
@@ -59,12 +59,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RPROJ-02 | Phase 15 | Pending |
 | RPROJ-03 | Phase 15 | Pending |
 | RPROJ-04 | Phase 15 | Pending |
-| RPROJ-05 | Phase 14 | Pending |
+| RPROJ-05 | Phase 14 | Complete |
 | CKOUT-01 | Phase 14 | Complete |
 | CKOUT-02 | Phase 14 | Pending |
 | CKOUT-03 | Phase 14 | Pending |
 | CKOUT-04 | Phase 15 | Pending |
-| CKOUT-05 | Phase 14 | Pending |
+| CKOUT-05 | Phase 14 | Complete |
 
 **Coverage:**
 - v1.4 requirements: 10 total
