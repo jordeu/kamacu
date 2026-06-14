@@ -193,6 +193,142 @@ func TestCreateRepoCloneAtomicity(t *testing.T) {
 	}
 }
 
+// preCreateManagedDir creates dest (the managed clone location) as a real git
+// repo with the given origin remote (empty origin = no remote added). It mirrors
+// the on-disk shape reattach inspects.
+func preCreateManagedDir(t *testing.T, dest, origin string) {
+	t.Helper()
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("mkdir dest: %v", err)
+	}
+	if out, err := exec.Command("git", "init", dest).CombinedOutput(); err != nil {
+		t.Fatalf("git init dest: %v\n%s", err, out)
+	}
+	if origin != "" {
+		if out, err := exec.Command("git", "-C", dest, "remote", "add", "origin", origin).CombinedOutput(); err != nil {
+			t.Fatalf("git remote add origin: %v\n%s", err, out)
+		}
+	}
+}
+
+// TestReattachOriginMatch (CKOUT-05/D-10): dest already exists with an origin
+// canonicalizing to the requested owner/name → reuse it (no re-clone) and INSERT
+// managed=1. The clone seam fails the test if invoked.
+func TestReattachOriginMatch(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer failCloneNeverCalled(t)()
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return "owner/name", true, nil
+	})()
+
+	dest := filepath.Join(base, "owner", "name")
+	preCreateManagedDir(t, dest, "git@github.com:owner/name.git") // ssh origin, canonicalizes to owner/name
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "owner/name"})
+	if status != http.StatusCreated {
+		t.Fatalf("reattach-match: status = %d, want 201; body=%v", status, body)
+	}
+	if body["managed"] != true {
+		t.Errorf("managed = %v, want true", body["managed"])
+	}
+	if body["repo_path"] != dest {
+		t.Errorf("repo_path = %v, want reused dest %v", body["repo_path"], dest)
+	}
+	// Row persisted.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM projects WHERE repo_path = ? AND managed = 1`, dest).Scan(&n); err != nil {
+		t.Fatalf("count managed row: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("managed rows at dest = %d, want 1", n)
+	}
+}
+
+// TestReattachOriginMismatch (D-10): dest exists with a DIFFERENT origin → 409,
+// directory NOT removed, no new row.
+func TestReattachOriginMismatch(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer failCloneNeverCalled(t)()
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return "owner/name", true, nil
+	})()
+
+	dest := filepath.Join(base, "owner", "name")
+	preCreateManagedDir(t, dest, "git@github.com:someone/else.git") // different repo
+
+	before := countProjects(t, db)
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "owner/name"})
+	if status != http.StatusConflict {
+		t.Fatalf("reattach-mismatch: status = %d, want 409; body=%v", status, body)
+	}
+	if after := countProjects(t, db); after != before {
+		t.Fatalf("rows after mismatch = %d, want unchanged %d", after, before)
+	}
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("dest removed on mismatch (stat err=%v); must be untouched", err)
+	}
+}
+
+// TestReattachNonGitDir (D-10): dest exists but is NOT a git repo → 409, dir
+// untouched, no row. Never clobber a stray/user dir.
+func TestReattachNonGitDir(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer failCloneNeverCalled(t)()
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return "owner/name", true, nil
+	})()
+
+	dest := filepath.Join(base, "owner", "name")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("mkdir dest: %v", err)
+	}
+	// a stray file so the dir is non-empty and clearly user data
+	if err := os.WriteFile(filepath.Join(dest, "keepme.txt"), []byte("data\n"), 0o644); err != nil {
+		t.Fatalf("write stray file: %v", err)
+	}
+
+	before := countProjects(t, db)
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "owner/name"})
+	if status != http.StatusConflict {
+		t.Fatalf("reattach-nongit: status = %d, want 409; body=%v", status, body)
+	}
+	if after := countProjects(t, db); after != before {
+		t.Fatalf("rows after non-git dir = %d, want unchanged %d", after, before)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "keepme.txt")); err != nil {
+		t.Fatalf("stray file removed (stat err=%v); dir must be untouched", err)
+	}
+}
+
+// TestReattachAlreadyAdded (D-10 dedup): dest exists with matching origin AND a
+// project row already references it → 409 "this repository is already added".
+func TestReattachAlreadyAdded(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer failCloneNeverCalled(t)()
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return "owner/name", true, nil
+	})()
+
+	dest := filepath.Join(base, "owner", "name")
+	preCreateManagedDir(t, dest, "https://github.com/owner/name.git")
+	// Seed a row already referencing dest.
+	if _, err := db.Exec(`INSERT INTO projects (name, repo_path, github_repo, managed) VALUES ('name', ?, 'owner/name', 1)`, dest); err != nil {
+		t.Fatalf("seed managed row: %v", err)
+	}
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "owner/name"})
+	if status != http.StatusConflict {
+		t.Fatalf("reattach-already-added: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "this repository is already added" {
+		t.Errorf("error = %q, want %q", body["error"], "this repository is already added")
+	}
+}
+
 // newTestServer opens an isolated SQLite database in a temp dir, migrates it,
 // and returns an httptest server with all API routes registered, plus the DB
 // handle (for direct assertions) and the DB file path (for reopen tests).
