@@ -242,7 +242,7 @@ func (h *worktreeHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	// and live tmux names are probed HERE (handler-owned methods) and passed in.
 	count := h.cleanupSessionCount(r.Context(), id)
 	live := h.liveTmuxNames(r.Context(), id)
-	removed, reason, err := cleanupWorktreeGated(
+	removed, reason, err := CleanupWorktreeGated(
 		r.Context(), h.db, h.wt, h.mgr, h.tmuxClient, live,
 		id, repo, path, count, req.StopSessions, req.Force)
 	if err != nil {

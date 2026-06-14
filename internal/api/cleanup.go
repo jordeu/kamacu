@@ -11,12 +11,16 @@ import (
 	"kangent/internal/worktree"
 )
 
-// cleanupWorktreeGated runs the gated worktree-removal core shared by the HTTP
+// CleanupWorktreeGated runs the gated worktree-removal core shared by the HTTP
 // handler (worktreeHandlers.remove) and the reaper (reconcilePRsOnce, 13-02).
 // It is a BYTE-EQUIVALENT extraction of the inline sequence in remove(): the
 // two gates (sessions, dirty), stop-before-remove, kill-tmux-before-remove,
 // wt.Remove, and the null-columns UPDATE (manual semantics — the ROW survives;
 // the reaper performs its own extra row-delete on top, D-07).
+//
+// It is EXPORTED so the reaper (a different package, internal/reaper) can call
+// the one shared cleanup path — one path, two callers (D-04). reaper -> api is
+// acyclic (api does NOT import reaper).
 //
 // It NEVER writes HTTP. A tripped gate returns removed=false + the SAME reason
 // string the handler maps to a 409, and mutates NOTHING. A remove failure
@@ -29,7 +33,7 @@ import (
 // unpushed, stash) live entirely in 13-02's reconcilePRsOnce, NOT here, so this
 // helper stays a pure mechanical extraction verifiable against the unchanged
 // worktree DELETE tests (D-04 regression guard).
-func cleanupWorktreeGated(
+func CleanupWorktreeGated(
 	ctx context.Context, db *sql.DB, wt *worktree.Service,
 	mgr *session.Manager, tmuxClient tmux.Client, liveTmux []string,
 	taskID int64, repo, path string, sessionCount int,
