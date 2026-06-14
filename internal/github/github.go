@@ -10,8 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -96,6 +98,51 @@ func ValidateRepo(ctx context.Context, ref string) (canonical string, verified b
 		return parsed, false, nil
 	}
 	return resp.NameWithOwner, true, nil
+}
+
+// PRDetail is a fresh, full PR-metadata read for opening a review (RESEARCH
+// §1). It is read on the OPEN click (not per-poll), so the Description tab
+// gets `body` (the Phase 11 list omits it) and the freshest head/base OIDs.
+type PRDetail struct {
+	Number            int    `json:"number"`
+	Title             string `json:"title"`
+	Body              string `json:"body"`
+	AuthorLogin       string `json:"-"` // flattened from author.login
+	URL               string `json:"url"`
+	HeadRefName       string `json:"headRefName"`
+	HeadRefOid        string `json:"headRefOid"`
+	BaseRefName       string `json:"baseRefName"`
+	BaseRefOid        string `json:"baseRefOid"`
+	IsCrossRepository bool   `json:"isCrossRepository"`
+}
+
+// ViewPR reads one PR's metadata via `gh pr view`. Read-only leaf surface
+// (the package contract). Degrades to a typed error when gh is absent or the
+// call/parse fails, so the open endpoint can surface the UI-SPEC §F
+// provisioning error instead of crashing (GHSET-03, degrade-don't-break).
+func ViewPR(ctx context.Context, repo string, n int) (PRDetail, error) {
+	if !Available() {
+		return PRDetail{}, errors.New("the GitHub CLI (gh) is not installed")
+	}
+	out, err := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(n),
+		"-R", repo, "--json",
+		"number,title,body,author,url,headRefName,headRefOid,baseRefName,baseRefOid,isCrossRepository",
+	).Output()
+	if err != nil {
+		return PRDetail{}, fmt.Errorf("couldn't read PR #%d", n)
+	}
+	var raw struct {
+		PRDetail
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	}
+	if jsonErr := json.Unmarshal(out, &raw); jsonErr != nil {
+		return PRDetail{}, fmt.Errorf("couldn't parse PR #%d", n)
+	}
+	d := raw.PRDetail
+	d.AuthorLogin = raw.Author.Login
+	return d, nil
 }
 
 // Available reports whether the `gh` CLI resolves on PATH. Checked at call time
