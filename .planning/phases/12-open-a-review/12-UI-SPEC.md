@@ -1,10 +1,11 @@
 ---
 phase: 12
 slug: open-a-review
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-06-14
+reviewed_at: 2026-06-14
 ---
 
 # Phase 12 — UI Design Contract
