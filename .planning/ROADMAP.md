@@ -101,7 +101,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 **Plans**: 5 plans (4 waves — worktree/gh leaf -> diff-base + board-leak audit -> open/reattach endpoint -> frontend wiring + human-verify)
 - [x] 12-01-PLAN.md — worktree.CheckoutPR (detached refs/pull/<n>/head, pinned to headRefOid) + FetchRef + github.ViewPR/PRDetail
 - [x] 12-02-PLAN.md — board-leak audit: source='manual' on 5 board/position queries + /move 409 guard + source/pr_number/pr_base_ref on the Task wire shape
-- [ ] 12-03-PLAN.md — diff base branched on source/pr_base_ref (fetch base + merge-base origin/<base>, reuse diff.Compute)
+- [x] 12-03-PLAN.md — diff base branched on source/pr_base_ref (fetch base + merge-base origin/<base>, reuse diff.Compute)
 - [ ] 12-04-PLAN.md — POST .../pull-requests/{n}/review open-or-reattach endpoint (ViewPR + CheckoutPR, find-by project+pr_number) + main.go wiring
 - [ ] 12-05-PLAN.md — frontend: PR card open trigger + useOpenReview + TaskPage source branches (read-only title/meta/Description) + seeded Start + human-verify checkpoint
 **UI hint**: yes
@@ -133,7 +133,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 5/5 | Complete | 2026-06-13 |
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
 | 11. PR Review Column | v1.3 | 4/4 | Complete    | 2026-06-14 |
-| 12. Open-a-Review | v1.3 | 2/5 | In Progress|  |
+| 12. Open-a-Review | v1.3 | 3/5 | In Progress|  |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 0/? | Not started | - |
 
 ---
