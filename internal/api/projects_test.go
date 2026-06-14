@@ -150,6 +150,27 @@ func TestProjectCreateValidRepo(t *testing.T) {
 	}
 }
 
+// TestProjectManagedDefaultsZero proves the migration-00008 `managed` column
+// flows create→scan→JSON: a folder-created project (the existing POST path,
+// which omits `managed`) serializes "managed": false, i.e. the DEFAULT 0
+// backfill (D-06/D-09 — folder dirs are never Kangent-owned).
+func TestProjectManagedDefaultsZero(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	repo := gitRepo(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo_path": repo})
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%v", status, body)
+	}
+	managed, ok := body["managed"]
+	if !ok {
+		t.Fatalf("response missing \"managed\" key: %v", body)
+	}
+	if managed != false {
+		t.Errorf("managed = %v, want false (folder default)", managed)
+	}
+}
+
 func TestProjectCreateRelativePath(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 

@@ -16,7 +16,7 @@ import (
 // row delete (D-93) — StopAllForTask only reaches in-memory sessions, so a
 // detached tmux survivor needs a direct kill.
 func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client) {
-	p := &projectHandlers{db: db}
+	p := &projectHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	t := &taskHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	mux.HandleFunc("GET /api/projects", p.list)
 	mux.HandleFunc("POST /api/projects", p.create)

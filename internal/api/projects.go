@@ -13,6 +13,9 @@ import (
 	"strings"
 
 	"kangent/internal/github"
+	"kangent/internal/session"
+	"kangent/internal/tmux"
+	"kangent/internal/worktree"
 )
 
 // Project is the JSON shape of a project row (RESEARCH.md Pattern 4).
@@ -24,11 +27,27 @@ type Project struct {
 	RepoPath    string  `json:"repo_path"`
 	Description string  `json:"description"`
 	GithubRepo  *string `json:"github_repo"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	// Managed is the v1.4 marker (migration 00008, D-06): true when Kangent
+	// cloned and OWNS the directory under ~/.kangent/repos/ (gated-remove on
+	// delete, pre-task fetch); false for user-pointed folder projects (never
+	// touch their dir, D-09). SQLite stores it as INTEGER 0/1; scanProject maps
+	// it to bool.
+	Managed   bool   `json:"managed"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
-type projectHandlers struct{ db *sql.DB }
+// projectHandlers carries the gated-delete dependencies (mirrors taskHandlers /
+// worktreeHandlers): wt removes the managed clone's linked worktrees, mgr stops
+// their sessions, tmuxClient kills detached tmux survivors — all needed by the
+// gated managed-clone delete wired in plan 04. The folder-delete path (D-09)
+// uses none of them.
+type projectHandlers struct {
+	db         *sql.DB
+	wt         *worktree.Service
+	mgr        *session.Manager
+	tmuxClient tmux.Client
+}
 
 // validateRepoPath validates that p is an absolute path to an existing
 // directory containing a git repository (RESEARCH.md Pattern 5). A leading
@@ -59,15 +78,21 @@ func validateRepoPath(p string) (string, error) {
 	return abs, nil
 }
 
-const projectColumns = `id, name, repo_path, description, github_repo, created_at, updated_at`
+const projectColumns = `id, name, repo_path, description, github_repo, managed, created_at, updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
 	var repo sql.NullString
-	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &p.CreatedAt, &p.UpdatedAt)
+	// SQLite returns managed as INTEGER 0/1; scan into an int and map to bool
+	// to avoid any modernc bool-scan friction (14-RESEARCH.md §"Wire/scan
+	// changes"). Column ORDER must match projectColumns (managed before the
+	// timestamps).
+	var managedInt int
+	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.CreatedAt, &p.UpdatedAt)
 	if repo.Valid {
 		p.GithubRepo = &repo.String
 	}
+	p.Managed = managedInt != 0
 	return p, err
 }
 
