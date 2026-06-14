@@ -544,6 +544,34 @@ export default function TaskPage() {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+
+          {/* D-08 (Phase 13): a PR review re-gains a ⋯ menu, but with ONLY
+              "Clean up worktree" — no Delete task (a PR review is GitHub-synced,
+              not a board task). Opens the SAME gated CleanupWorktreeDialog the
+              manual menu uses (confirm/force/stop-sessions); manual semantics
+              keep the row and null the worktree, so re-opening the PR
+              re-provisions. Guarded on task.worktree_path: with no worktree
+              there is nothing to clean up (a clean auto-removed PR has had its
+              row deleted by the reaper so it never reaches here; a skipped one
+              still has worktree_path set). Mirrors the non-PR menu's gate. */}
+          {isPR && task.worktree_path && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Review actions"
+                >
+                  <Ellipsis className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setCleanupOpen(true)}>
+                  Clean up worktree
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </header>
 
         {isPR ? (
@@ -555,27 +583,61 @@ export default function TaskPage() {
           // no Create/Retry affordance applies. Degrades gracefully: if prDetail
           // is absent (hard refresh on a deep link) the spans render with the
           // task-field fallbacks; head/commits may be blank — never breaks.
-          <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-            <a
-              href={prDetail?.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`Open PR #${task.pr_number} on GitHub`}
-              className="font-medium text-muted-foreground hover:text-foreground hover:underline"
-            >
-              #{task.pr_number}
-            </a>
-            <span>@{prDetail?.author}</span>
-            <span>wants to merge</span>
-            <span>{prDetail?.commits}</span>
-            <span>{prDetail?.commits === 1 ? "commit" : "commits"}</span>
-            <span>into</span>
-            <span className="font-mono">
-              {prDetail?.baseRefName ?? task.pr_base_ref}
-            </span>
-            <span>from</span>
-            <span className="font-mono">{prDetail?.headRefName}</span>
-          </div>
+          <>
+            <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              <a
+                href={prDetail?.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Open PR #${task.pr_number} on GitHub`}
+                className="font-medium text-muted-foreground hover:text-foreground hover:underline"
+              >
+                #{task.pr_number}
+              </a>
+              <span>@{prDetail?.author}</span>
+              <span>wants to merge</span>
+              <span>{prDetail?.commits}</span>
+              <span>{prDetail?.commits === 1 ? "commit" : "commits"}</span>
+              <span>into</span>
+              <span className="font-mono">
+                {prDetail?.baseRefName ?? task.pr_base_ref}
+              </span>
+              <span>from</span>
+              <span className="font-mono">{prDetail?.headRefName}</span>
+            </div>
+
+            {/* D-09: merged/closed banner. Inline, non-blocking advisory shown
+                when the PR is no longer OPEN — the discoverability path for a
+                skipped (dirty/busy) or not-yet-reaped leftover worktree. Lives
+                INSIDE this w-full shrink-0 header block (sibling of the merge
+                line) so it never joins the tabs/terminal flex chain (12-07
+                fix #6). Never a modal. Degrades: when prDetail is undefined
+                (hard reload pre-hydration, or gh down) it simply doesn't render
+                — the header keeps its task-field fallbacks. The clean
+                auto-removed case has its row deleted by the reaper, so an open
+                tab degrades to "Task not found" on the next fetch — acceptable;
+                this banner serves the skipped / not-yet-reaped window. */}
+            {prDetail && prDetail.state !== "OPEN" && (
+              <div
+                className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-400"
+                role="status"
+              >
+                <span>
+                  This PR was{" "}
+                  {prDetail.state === "MERGED" ? "merged" : "closed"}.
+                </span>
+                {task.worktree_path && (
+                  <button
+                    type="button"
+                    className="font-medium underline underline-offset-2 hover:no-underline"
+                    onClick={() => setCleanupOpen(true)}
+                  >
+                    Clean up worktree
+                  </button>
+                )}
+              </div>
+            )}
+          </>
         ) : (
           <WorktreeMetaLine
             task={task}
