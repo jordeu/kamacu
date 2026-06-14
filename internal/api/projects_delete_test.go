@@ -152,3 +152,119 @@ func TestManagedDeleteGateCloneUnpushed(t *testing.T) {
 	gitIn(t, clone, "commit", "-m", "clone-local-only")
 	assertBlocked(t, srv, env.db, id, clone)
 }
+
+// TestManagedDeleteAllClean (CKOUT-03 all-clear): a managed project with a clean
+// clone + one clean task worktree → DELETE → 204; the clone dir is gone
+// (os.RemoveAll), the worktree dir is gone, and the project + task rows are
+// deleted.
+func TestManagedDeleteAllClean(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	taskID, wt := addManagedTaskWorktree(t, srv, id, "Clean Task")
+
+	status, body := deleteProject(t, srv, id)
+	if status != http.StatusNoContent {
+		t.Fatalf("all-clean delete: status = %d, want 204; body=%v", status, body)
+	}
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatalf("clone dir still present after clean delete (err=%v); want removed", err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree dir still present after clean delete (err=%v); want removed", err)
+	}
+	if projectExists(t, env.db, id) {
+		t.Fatalf("project row still present after clean delete; want deleted")
+	}
+	var nTasks int
+	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id = ?`, taskID).Scan(&nTasks); err != nil {
+		t.Fatalf("count task row: %v", err)
+	}
+	if nTasks != 0 {
+		t.Fatalf("task row still present after clean delete = %d, want 0 (cascade)", nTasks)
+	}
+}
+
+// TestManagedDeleteOrdering: with a linked worktree, after a clean delete the
+// clone dir is FULLY gone (not a partial tree). The remove phase tears the
+// linked worktree down BEFORE os.RemoveAll(clone), so no orphaned worktree with
+// a dangling .git is left behind (Pitfall 1).
+func TestManagedDeleteOrdering(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	_, wt := addManagedTaskWorktree(t, srv, id, "Ordering Task")
+
+	// Sanity: the worktree is a genuine LINKED worktree of the clone.
+	if got := gitOut(t, clone, "worktree", "list", "--porcelain"); !containsPath(got, wt) {
+		t.Fatalf("precondition: %s is not a linked worktree of the clone:\n%s", wt, got)
+	}
+
+	status, body := deleteProject(t, srv, id)
+	if status != http.StatusNoContent {
+		t.Fatalf("ordering delete: status = %d, want 204; body=%v", status, body)
+	}
+	// The whole clone tree is gone — no partial dir, no orphaned worktree.
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatalf("clone dir not fully removed (err=%v)", err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("linked worktree dir not removed (err=%v)", err)
+	}
+}
+
+// TestFolderDeleteNeverTouchesDir (D-09 / PROJ-03): a folder (managed=0) project
+// pointing at a real dir → DELETE → 204 AND the directory still exists on disk.
+// The managed disk-removal path must never run for a folder project.
+func TestFolderDeleteNeverTouchesDir(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	repo := gitRepoWithCommit(t)
+	id := createProject(t, srv, repo) // folder path → managed=0
+
+	status, body := deleteProject(t, srv, id)
+	if status != http.StatusNoContent {
+		t.Fatalf("folder delete: status = %d, want 204; body=%v", status, body)
+	}
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatalf("folder dir removed on delete (err=%v); must NEVER be touched (D-09)", err)
+	}
+	if projectExists(t, env.db, id) {
+		t.Fatalf("folder project row still present after delete; want deleted")
+	}
+}
+
+// TestManagedDeleteUnknownID: deleting a non-existent project → 404 (the marker
+// load short-circuits before any git/disk work).
+func TestManagedDeleteUnknownID(t *testing.T) {
+	srv, _ := newWorktreeServer(t)
+	status, body := deleteProject(t, srv, 999999)
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown id delete: status = %d, want 404; body=%v", status, body)
+	}
+}
+
+// containsPath reports whether porcelain worktree-list output references path
+// (worktree paths are emitted as "worktree <abs>" lines).
+func containsPath(porcelain, path string) bool {
+	for _, line := range splitLines(porcelain) {
+		if line == "worktree "+path {
+			return true
+		}
+	}
+	return false
+}
+
+func splitLines(s string) []string {
+	var out []string
+	cur := ""
+	for _, r := range s {
+		if r == '\n' {
+			out = append(out, cur)
+			cur = ""
+			continue
+		}
+		cur += string(r)
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
+}
