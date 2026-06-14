@@ -129,7 +129,7 @@ func main() {
 	quotaSvc := quota.New(quota.Config{ClaudeBin: *claudeBin})
 	api.UsageRoutes(mux, quotaSvc)
 	ghSvc := github.New(github.Config{})
-	api.PullRequestRoutes(mux, db, ghSvc)
+	api.PullRequestRoutes(mux, db, ghSvc, wtSvc)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

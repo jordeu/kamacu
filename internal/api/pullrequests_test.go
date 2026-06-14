@@ -560,8 +560,8 @@ func TestReviewReprovisionWhenWorktreeNull(t *testing.T) {
 
 	// Seed a failed-provision row: github_pr, pr_number 5, worktree_path NULL.
 	res, err := db.Exec(
-		`INSERT INTO tasks (project_id, title, status, source, pr_number, pr_base_ref, worktree_error)
-		 VALUES (?, '#5 Old', 'todo', 'github_pr', 5, 'trunk', 'earlier failure')`, id)
+		`INSERT INTO tasks (project_id, title, status, source, pr_number, pr_base_ref, position, worktree_error)
+		 VALUES (?, '#5 Old', 'todo', 'github_pr', 5, 'trunk', 0, 'earlier failure')`, id)
 	if err != nil {
 		t.Fatalf("seed failed row: %v", err)
 	}
