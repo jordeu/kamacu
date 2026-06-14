@@ -119,7 +119,8 @@ var ghViewFixture = []byte(`{
   "baseRefName": "prototype",
   "baseRefOid": "8ebaf1d3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "isCrossRepository": false,
-  "commits": [{"oid": "a"}, {"oid": "b"}, {"oid": "c"}]
+  "commits": [{"oid": "a"}, {"oid": "b"}, {"oid": "c"}],
+  "state": "OPEN"
 }`)
 
 func TestViewPRDecodeFlattensAuthorAndEmptyBody(t *testing.T) {
@@ -160,6 +161,9 @@ func TestViewPRDecodeFlattensAuthorAndEmptyBody(t *testing.T) {
 	}
 	if d.IsCrossRepository {
 		t.Error("IsCrossRepository = true, want false")
+	}
+	if d.State != "OPEN" {
+		t.Errorf("State = %q, want %q (plain json tag, decoded directly — D-09 banner + reaper source)", d.State, "OPEN")
 	}
 }
 

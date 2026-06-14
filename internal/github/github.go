@@ -114,6 +114,12 @@ type PRDetail struct {
 	BaseRefName       string `json:"baseRefName"`
 	BaseRefOid        string `json:"baseRefOid"`
 	IsCrossRepository bool   `json:"isCrossRepository"`
+	// State is the PR's lifecycle state: "OPEN" | "CLOSED" | "MERGED"
+	// (UPPERCASE — verified; gh has NO `merged` field, so merged is derived
+	// from State == "MERGED"). Unlike Commits/AuthorLogin it decodes DIRECTLY
+	// from the JSON, so a plain tag is correct. Drives the D-09 review banner
+	// and is the single source the reaper's PRState read mirrors (13-01).
+	State string `json:"state"`
 	// Commits is the PR's commit count, DERIVED from the length of gh's
 	// `commits` JSON array (not a scalar in the payload) — hence json:"-" so
 	// the direct unmarshal never touches it; ViewPR sets it from len(raw.Commits).
@@ -132,7 +138,7 @@ func ViewPR(ctx context.Context, repo string, n int) (PRDetail, error) {
 	}
 	out, err := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(n),
 		"-R", repo, "--json",
-		"number,title,body,author,url,headRefName,headRefOid,baseRefName,baseRefOid,isCrossRepository,commits",
+		"number,title,body,author,url,headRefName,headRefOid,baseRefName,baseRefOid,isCrossRepository,commits,state",
 	).Output()
 	if err != nil {
 		return PRDetail{}, fmt.Errorf("couldn't read PR #%d", n)
