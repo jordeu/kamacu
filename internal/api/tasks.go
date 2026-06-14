@@ -35,6 +35,13 @@ type Task struct {
 	Branch        *string `json:"branch"`
 	WorktreePath  *string `json:"worktree_path"`
 	WorktreeError *string `json:"worktree_error"`
+	// source discriminates a manual task ('manual') from a PR review
+	// ('github_pr'); the board excludes github_pr rows (GHREV-04). pr_number
+	// and pr_base_ref are NULL for manual tasks and carry the PR's number +
+	// base branch name for a review (the frontend branches on source).
+	Source    string  `json:"source"`
+	PRNumber  *int64  `json:"pr_number"`
+	PRBaseRef *string `json:"pr_base_ref"`
 }
 
 var validStatuses = map[string]bool{
@@ -51,12 +58,12 @@ type taskHandlers struct {
 	tmuxClient tmux.Client
 }
 
-const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error`
+const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.Branch, &t.WorktreePath, &t.WorktreeError)
+		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef)
 	return t, err
 }
 

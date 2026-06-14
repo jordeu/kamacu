@@ -50,7 +50,8 @@ func (h *worktreeHandlers) loadTaskRepo(id int64) (Task, string, error) {
 		   (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id)
 		 FROM tasks WHERE id = ?`, id).
 		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position,
-			&t.CreatedAt, &t.UpdatedAt, &t.Branch, &t.WorktreePath, &t.WorktreeError, &repo)
+			&t.CreatedAt, &t.UpdatedAt, &t.Branch, &t.WorktreePath, &t.WorktreeError,
+			&t.Source, &t.PRNumber, &t.PRBaseRef, &repo)
 	return t, repo, err
 }
 
