@@ -563,14 +563,17 @@ func makePRRemote(t *testing.T, prNumber int) (remote, headOID string) {
 	return remote, headOID
 }
 
-func TestCheckoutPRDetachedHead(t *testing.T) {
+// TestCheckoutPRNamedBranch is the GHREV-01 proof: the PR review worktree is on
+// the PR's REAL head branch (headRefName), NOT a detached HEAD, pinned to the PR
+// head OID.
+func TestCheckoutPRNamedBranch(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(t.TempDir())
 	remote, headOID := makePRRemote(t, 1)
 	clone := cloneRepo(t, remote)
 
 	path := svc.PathFor(clone, "pr-1", 1)
-	if err := svc.CheckoutPR(ctx, clone, path, headOID, 1); err != nil {
+	if err := svc.CheckoutPR(ctx, clone, path, headOID, "feature-x", 1); err != nil {
 		t.Fatalf("CheckoutPR: %v", err)
 	}
 
@@ -579,9 +582,10 @@ func TestCheckoutPRDetachedHead(t *testing.T) {
 	if wtSha != headOID {
 		t.Errorf("worktree HEAD = %q, want PR head OID %q", wtSha, headOID)
 	}
-	// And it must be DETACHED — no branch ref points at it.
-	if _, err := exec.Command("git", "-C", path, "symbolic-ref", "--short", "HEAD").Output(); err == nil {
-		t.Error("worktree HEAD is on a branch, want a detached HEAD (--detach)")
+	// And it must be ON the named head branch — NOT detached.
+	branch := strings.TrimSpace(gitCmd(t, path, "symbolic-ref", "--short", "HEAD"))
+	if branch != "feature-x" {
+		t.Errorf("worktree branch = %q, want %q (named head branch, GHREV-01)", branch, "feature-x")
 	}
 }
 
@@ -598,7 +602,7 @@ func TestCheckoutPRLeavesSourceHeadUnchanged(t *testing.T) {
 	shaBefore := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "HEAD"))
 
 	path := svc.PathFor(clone, "pr-7", 7)
-	if err := svc.CheckoutPR(ctx, clone, path, headOID, 7); err != nil {
+	if err := svc.CheckoutPR(ctx, clone, path, headOID, "pr-7-head", 7); err != nil {
 		t.Fatalf("CheckoutPR: %v", err)
 	}
 
@@ -612,22 +616,68 @@ func TestCheckoutPRLeavesSourceHeadUnchanged(t *testing.T) {
 	}
 }
 
-// TestCheckoutPRCreatesNoBranch: a detached worktree occupies no branch, so the
-// clone must list only its pre-existing branch(es) — no kangent-pr branch.
-func TestCheckoutPRCreatesNoBranch(t *testing.T) {
+// TestCheckoutPRBranchInNewWorktreeOnly: the named head branch IS created now
+// (GHREV-01), but it must live in the NEW worktree only — the SOURCE clone's
+// CURRENT branch is unchanged and no PRE-EXISTING ref moved. (The new named
+// branch legitimately appears in `git branch`; the invariant is the source HEAD
+// is untouched, GHREV-05.)
+func TestCheckoutPRBranchInNewWorktreeOnly(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(t.TempDir())
 	remote, headOID := makePRRemote(t, 3)
 	clone := cloneRepo(t, remote)
 
-	before := strings.TrimSpace(gitCmd(t, clone, "branch", "--list"))
+	srcBranchBefore := strings.TrimSpace(gitCmd(t, clone, "symbolic-ref", "--short", "HEAD"))
+	srcShaBefore := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "HEAD"))
+
 	path := svc.PathFor(clone, "pr-3", 3)
-	if err := svc.CheckoutPR(ctx, clone, path, headOID, 3); err != nil {
+	if err := svc.CheckoutPR(ctx, clone, path, headOID, "pr-3-head", 3); err != nil {
 		t.Fatalf("CheckoutPR: %v", err)
 	}
-	after := strings.TrimSpace(gitCmd(t, clone, "branch", "--list"))
-	if before != after {
-		t.Errorf("branch list changed after CheckoutPR: before %q, after %q (a branch leaked)", before, after)
+
+	// The new worktree is on the named branch.
+	wtBranch := strings.TrimSpace(gitCmd(t, path, "symbolic-ref", "--short", "HEAD"))
+	if wtBranch != "pr-3-head" {
+		t.Errorf("worktree branch = %q, want %q", wtBranch, "pr-3-head")
+	}
+	// The SOURCE clone's current branch and HEAD are byte-for-byte unchanged.
+	srcBranchAfter := strings.TrimSpace(gitCmd(t, clone, "symbolic-ref", "--short", "HEAD"))
+	srcShaAfter := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "HEAD"))
+	if srcBranchBefore != srcBranchAfter {
+		t.Errorf("source branch changed: before %q, after %q", srcBranchBefore, srcBranchAfter)
+	}
+	if srcShaBefore != srcShaAfter {
+		t.Errorf("source HEAD sha changed: before %q, after %q", srcShaBefore, srcShaAfter)
+	}
+}
+
+// TestCheckoutPRCollisionFallsBackToPRBranch is the GHREV-05 collision proof: a
+// fork PR whose head branch name (e.g. "master") already exists locally must
+// fall back to pr/<n> and NEVER reuse or move the pre-existing local ref.
+func TestCheckoutPRCollisionFallsBackToPRBranch(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote, headOID := makePRRemote(t, 8)
+	clone := cloneRepo(t, remote)
+
+	// Pre-create a local branch "master" pointing at the clone's current commit.
+	someCommit := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "HEAD"))
+	gitCmd(t, clone, "branch", "master", someCommit)
+
+	path := svc.PathFor(clone, "pr-8", 8)
+	if err := svc.CheckoutPR(ctx, clone, path, headOID, "master", 8); err != nil {
+		t.Fatalf("CheckoutPR: %v", err)
+	}
+
+	// The new worktree is on pr/8 — NOT the colliding "master".
+	wtBranch := strings.TrimSpace(gitCmd(t, path, "symbolic-ref", "--short", "HEAD"))
+	if wtBranch != "pr/8" {
+		t.Errorf("worktree branch = %q, want %q (collision fallback, GHREV-05)", wtBranch, "pr/8")
+	}
+	// The pre-existing local "master" ref is untouched — never reused, never moved.
+	masterAfter := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "refs/heads/master"))
+	if masterAfter != someCommit {
+		t.Errorf("local master moved: was %q, now %q (must never be reused/moved, GHREV-05)", someCommit, masterAfter)
 	}
 }
 
@@ -641,7 +691,7 @@ func TestCheckoutPRPathCollision(t *testing.T) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("pre-create leaf: %v", err)
 	}
-	err := svc.CheckoutPR(ctx, clone, path, headOID, 9)
+	err := svc.CheckoutPR(ctx, clone, path, headOID, "pr-9-head", 9)
 	if err == nil {
 		t.Fatal("CheckoutPR on existing leaf path succeeded, want error")
 	}

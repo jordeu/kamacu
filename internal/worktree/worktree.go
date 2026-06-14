@@ -177,17 +177,34 @@ func (s *Service) Create(ctx context.Context, repo, branch, path, base string) e
 	return err
 }
 
-// CheckoutPR provisions a DETACHED worktree at `path` on the PR head (D-01,
-// GHREV-01/05). headOID comes from gh pr view (NOT FETCH_HEAD — that is
-// clobbered by a later base fetch, RESEARCH Pitfall 1). The fetch is a
-// DELIBERATE, SCOPED EXCEPTION to this package's "never fetch" invariant
-// (D-24): a PR review's whole point is fetching someone else's branch.
-// refs/pull/<n>/head resolves FORK heads from the BASE repo, so forks need
-// no fork remote and no special-casing. A detached HEAD occupies no branch,
-// so it never moves the project's primary checkout HEAD and never trips the
-// "branch already checked out" lock (PITFALL 3/5). Remote is hard-coded
-// "origin" for v1.3 (RESEARCH OQ3 — every linked repo is a GitHub clone).
-func (s *Service) CheckoutPR(ctx context.Context, repo, path, headOID string, prNumber int) error {
+// branchExistsLocally reports whether refs/heads/<name> exists in repo (the
+// same show-ref --verify --quiet pattern Create uses for its branch-reuse
+// check). It is the guard that keeps CheckoutPR from ever reusing or moving an
+// existing local branch ref (GHREV-05): we only ever create a name that does
+// NOT already exist.
+func (s *Service) branchExistsLocally(ctx context.Context, repo, name string) bool {
+	_, err := gitRun(ctx, repo, "show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
+}
+
+// CheckoutPR provisions a worktree at `path` on the PR head, checked out on a
+// NAMED branch (GHREV-01: the PR's REAL head branch, headRefName), with a safe
+// pr/<n> collision fallback (GHREV-05). headOID comes from gh pr view (NOT
+// FETCH_HEAD — that is clobbered by a later base fetch, RESEARCH Pitfall 1).
+// The fetch is a DELIBERATE, SCOPED EXCEPTION to this package's "never fetch"
+// invariant (D-24): a PR review's whole point is fetching someone else's
+// branch. refs/pull/<n>/head resolves FORK heads from the BASE repo, so forks
+// need no fork remote and no special-casing. Remote is hard-coded "origin"
+// for v1.3 (RESEARCH OQ3 — every linked repo is a GitHub clone).
+//
+// Branch-name selection NEVER reuses or moves an existing local ref — that is
+// the GHREV-05 safety guarantee. The collision fallback protects the fork
+// same-name case (e.g. a fork PR whose head is "master"): we never touch the
+// project's existing local "master", so the primary checkout's HEAD is
+// unchanged. `worktree add -b <chosen>` creates the branch AND checks it out
+// in the NEW worktree in one step, pinned to headOID, so the project's primary
+// checkout HEAD/branch never move.
+func (s *Service) CheckoutPR(ctx context.Context, repo, path, headOID, headRefName string, prNumber int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := os.Stat(path); err == nil {
@@ -199,7 +216,37 @@ func (s *Service) CheckoutPR(ctx context.Context, repo, path, headOID string, pr
 	if _, err := gitRun(ctx, repo, "fetch", "origin", fmt.Sprintf("refs/pull/%d/head", prNumber)); err != nil {
 		return err
 	}
-	_, err := gitRun(ctx, repo, "worktree", "add", "--detach", path, headOID)
+
+	// Pick a branch name that does NOT already exist locally (never reuse/move
+	// an existing ref — GHREV-05). Rule order:
+	//   1. headRefName, if set and free.
+	//   2. pr/<n>, if free (the fork same-name collision fallback).
+	//   3. pr/<n>-<short headOID>, if free (double-collision resilience).
+	//   4. otherwise a clear error.
+	var chosen string
+	switch {
+	case headRefName != "" && !s.branchExistsLocally(ctx, repo, headRefName):
+		chosen = headRefName
+	default:
+		candidate := fmt.Sprintf("pr/%d", prNumber)
+		if !s.branchExistsLocally(ctx, repo, candidate) {
+			chosen = candidate
+		} else {
+			shortOID := headOID
+			if len(shortOID) > 7 {
+				shortOID = shortOID[:7]
+			}
+			candidate = fmt.Sprintf("pr/%d-%s", prNumber, shortOID)
+			if s.branchExistsLocally(ctx, repo, candidate) {
+				return fmt.Errorf("couldn't pick a branch name for PR #%d", prNumber)
+			}
+			chosen = candidate
+		}
+	}
+
+	// `worktree add -b <chosen>` creates `chosen` pinned to headOID AND checks
+	// it out in the NEW worktree only — the primary checkout never moves.
+	_, err := gitRun(ctx, repo, "worktree", "add", "-b", chosen, path, headOID)
 	return err
 }
 
