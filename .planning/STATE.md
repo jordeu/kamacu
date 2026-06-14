@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: executing
-stopped_at: Completed 13-02-PLAN.md
-last_updated: "2026-06-14T10:43:45.405Z"
+status: verifying
+stopped_at: Completed 13-03-PLAN.md (phase 13 all plans complete; human-verify approved)
+last_updated: "2026-06-14T14:45:11.885Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 19
-  completed_plans: 18
+  completed_plans: 19
   percent: 100
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 Phase: 13 (pr-worktree-auto-cleanup) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-14
 
 Progress: [██████████] 100% (12-01..12-07 implemented; phase re-verification remains)
@@ -87,6 +87,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 12-open-a-review P07 | ~3h (incl. 3 human-verify rounds) | 4 tasks | 7 files |
 | Phase 13-pr-worktree-auto-cleanup P01 | 9 min | 3 tasks | 11 files |
 | Phase 13-pr-worktree-auto-cleanup P02 | 9min | 3 tasks | 5 files |
+| Phase 13-pr-worktree-auto-cleanup P03 | 2min active (+ human-verify gate) | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -147,6 +148,8 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 13-pr-worktree-auto-cleanup]: worktree.Service.UnpushedCount (rev-list base..HEAD) + StashCount (repo-global stash list) added as the reaper's conservative-gate primitives; per-kill tmux slog.Warn dropped (best-effort, never blocked; test asserts the kill not the log)
 - [Phase 13-pr-worktree-auto-cleanup]: reconcilePRsOnce is the reaper's 2nd pass (D-01): source='github_pr' worktree tasks, MERGED/CLOSED only proceed; conservative gate (dirty + unpushed-vs-re-fetched-PR-head + repo-global stash + sessions) all from FRESH git state; force=false/stopSessions=false (never forces, never stops a live session); on a clean remove the row is FK-deleted (tmux_sessions then tasks, D-07). source='manual' never selected (D-87).
 - [Phase 13-pr-worktree-auto-cleanup]: NewWithPR is a 2nd reaper constructor (pr==nil disables the PR pass) so New(db, spy) Done-TTL tests stay unchanged; cleanupWorktreeGated exported to CleanupWorktreeGated for the cross-package reaper call (reaper->api acyclic). Rule 1 fix: the unpushed-gate fetch runs IN THE WORKTREE not the common repo dir (FETCH_HEAD is per-worktree; fetching in the repo dir left it unresolvable from the linked worktree, silently skipping every PR).
+- [Phase 13-pr-worktree-auto-cleanup]: 13-03 PR review ⋯ menu (single 'Clean up worktree', no Delete task, D-08) + inline merged/closed banner (D-09, role=status, never modal) both reuse the existing gated CleanupWorktreeDialog via setCleanupOpen(true); placed inside the shrink-0 header block (no 12-07 fix-#6 height regression); separate PR-only menu gate (isPR && task.worktree_path) leaves the manual-task menu byte-for-byte unchanged
+- [Phase 13-pr-worktree-auto-cleanup]: Phase 13 human-verified APPROVED 2026-06-14: GHCLN-01 (auto-cleanup of a clean merged worktree + row delete), GHCLN-02 (dirty/busy worktree left in place, branch kept), GHCLN-03 (manual cleanup via the ⋯ menu / banner link through the gated dialog) all confirmed end-to-end in the running app
 
 ### Pending Todos
 
@@ -169,7 +172,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T10:43:45.401Z
-Stopped at: Completed 13-02-PLAN.md
+Last session: 2026-06-14T14:44:59.265Z
+Stopped at: Completed 13-03-PLAN.md (phase 13 all plans complete; human-verify approved)
 Resume file: None
 Next: orchestrator re-runs phase 12 verification (gsd-verifier); GHREV-01/05 marked Complete

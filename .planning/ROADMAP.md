@@ -47,7 +47,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 - [x] **Phase 10: GitHub Foundations** — Schema, global toggle, project link config, and the degrade-don't-break `internal/github` base. (3/3 plans executed; gaps found in UAT — gh-gated enablement + copy) (completed 2026-06-13)
 - [x] **Phase 11: PR Review Column** — Read-only `gh`-backed Review column listing review-requested PRs with auto-poll, refresh, and PR cards. (completed 2026-06-14)
 - [x] **Phase 12: Open-a-Review** — Click a PR → worktree on the PR branch + reused task view (agent/bash/PR-base diff), board-leak-safe. *(research-flagged)* (12-01..12-05 implemented; human-verify found 5 follow-ups → gap plans 12-06/12-07 pending; NOT verified) (completed 2026-06-14)
-- [ ] **Phase 13: PR Worktree Auto-Cleanup** — Reaper reconciles PR state and gated-removes merged/closed review worktrees (branch kept). *(research-flagged)*
+- [x] **Phase 13: PR Worktree Auto-Cleanup** — Reaper reconciles PR state and gated-removes merged/closed review worktrees (branch kept). *(research-flagged)* (completed 2026-06-14)
 
 ## Phase Details
 
@@ -120,7 +120,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 **Plans**: 3 plans (2 waves — backend foundations → {reaper pass, frontend + human-verify})
 - [x] 13-01-PLAN.md — backend foundations: PR `state` through PRDetail/ViewPR + cheap github.Service.PRState; byte-equivalent `cleanupWorktreeGated` extraction (regression-guarded); worktree UnpushedCount/StashCount gate primitives; `state` on the detail wire
 - [x] 13-02-PLAN.md — reaper `reconcilePRsOnce` pass (PRStateGetter seam) + conservative gate (dirty/unpushed/stash/session) + D-07 FK-ordered row delete + main.go wiring + spy test matrix
-- [ ] 13-03-PLAN.md — frontend: PR-review `⋯` "Clean up worktree" menu + merged/closed banner (D-08/D-09) + end-to-end human-verify checkpoint
+- [x] 13-03-PLAN.md — frontend: PR-review `⋯` "Clean up worktree" menu + merged/closed banner (D-08/D-09) + end-to-end human-verify checkpoint
 **Research flag**: yes — carried forward from research SUMMARY. The gated-cleanup-helper extraction refactors live cleanup code (`cleanupWorktreeGated` extracted from `worktreeHandlers.remove`; one path, two callers — HTTP + reaper), and the unpushed-work gate beyond `git status --porcelain` (also check `git rev-list <headRefOid>..HEAD` and `git stash list`) deserves careful, regression-guarded planning. RESEARCH complete (13-RESEARCH.md): all gates verified live; the helper extraction is taken as a byte-equivalent mechanical refactor with the two new gates in the reaper only (lowest-regression reading).
 
 ## Progress
@@ -139,7 +139,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
 | 11. PR Review Column | v1.3 | 4/4 | Complete    | 2026-06-14 |
 | 12. Open-a-Review | v1.3 | 7/7 | Complete    | 2026-06-14 |
-| 13. PR Worktree Auto-Cleanup | v1.3 | 2/3 | In Progress|  |
+| 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete   | 2026-06-14 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
