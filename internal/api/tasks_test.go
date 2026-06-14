@@ -254,6 +254,68 @@ func TestTaskJSONIncludesWorktreeFields(t *testing.T) {
 	}
 }
 
+// insertPRRow inserts a source='github_pr' task row directly via the DB
+// (bypassing the create endpoint, which only makes manual tasks) and returns
+// its id. This is how a PR review row is born until the open endpoint lands
+// (Plan 12-04); this plan only needs the row to exist to prove the board-leak
+// guards and the wire shape.
+func insertPRRow(t *testing.T, db *sql.DB, projectID int64, prNumber int64, baseRef, status string) int64 {
+	t.Helper()
+	res, err := db.Exec(
+		`INSERT INTO tasks (project_id, title, description, status, position, source, pr_number, pr_base_ref)
+		 VALUES (?, ?, '', ?, 1.0, 'github_pr', ?, ?)`,
+		projectID, fmt.Sprintf("PR #%d", prNumber), status, prNumber, baseRef)
+	if err != nil {
+		t.Fatalf("insert github_pr row: %v", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("LastInsertId for github_pr row: %v", err)
+	}
+	return id
+}
+
+// TestTaskJSONIncludesSourceFields (GHREV-04, 12-02 Task 1): the Task wire
+// shape carries source/pr_number/pr_base_ref. A manual task reports
+// source="manual" with null pr fields; a directly-inserted github_pr row
+// round-trips its source/pr_number/pr_base_ref through GET /api/tasks/{id}.
+func TestTaskJSONIncludesSourceFields(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+
+	// Manual task: source="manual", pr fields null.
+	manualID := taskID(t, createTask(t, srv, pid, "Manual Task"))
+	status, body := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, manualID), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET manual task: status = %d, want 200; body=%v", status, body)
+	}
+	if body["source"] != "manual" {
+		t.Errorf("manual task source = %v, want %q", body["source"], "manual")
+	}
+	if v, ok := body["pr_number"]; !ok || v != nil {
+		t.Errorf("manual task pr_number = %v (present=%v), want null", v, ok)
+	}
+	if v, ok := body["pr_base_ref"]; !ok || v != nil {
+		t.Errorf("manual task pr_base_ref = %v (present=%v), want null", v, ok)
+	}
+
+	// github_pr row: round-trips source/pr_number/pr_base_ref.
+	prID := insertPRRow(t, db, pid, 42, "main", "todo")
+	status, body = doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, prID), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET pr task: status = %d, want 200; body=%v", status, body)
+	}
+	if body["source"] != "github_pr" {
+		t.Errorf("pr task source = %v, want %q", body["source"], "github_pr")
+	}
+	if got, _ := body["pr_number"].(float64); int64(got) != 42 {
+		t.Errorf("pr task pr_number = %v, want 42", body["pr_number"])
+	}
+	if body["pr_base_ref"] != "main" {
+		t.Errorf("pr task pr_base_ref = %v, want %q", body["pr_base_ref"], "main")
+	}
+}
+
 func TestTaskCreateDefaults(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	pid := createProject(t, srv, gitRepo(t))
