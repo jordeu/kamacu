@@ -79,7 +79,12 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 // never fails creation (RESEARCH §Submodule Handling).
 // On git failure: UPDATE worktree_error only; returns the git error so the
 // caller can populate the response without re-reading.
-func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, taskID int64, title, repoPath string) (branch, path string, provErr error) {
+//
+// managed (CKOUT-02/D-04) gates a best-effort default-branch fetch before the
+// base is resolved: a managed checkout (the app cloned and owns the dir) starts
+// new work from the freshest origin tip; a folder project (managed=false) keeps
+// ResolveBase's D-24 "no network, ever" guarantee untouched (Pitfall 5).
+func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, taskID int64, title, repoPath string, managed bool) (branch, path string, provErr error) {
 	slug := worktree.Slug(title)
 
 	// fail routes settings/expansion errors through the SAME D-25 failure
@@ -122,6 +127,23 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 	// never a crashed create.
 	err = settings.CheckRefFormat(wctx, branch)
 	if err == nil {
+		if managed {
+			// CKOUT-02/D-04: start new work from the freshest default branch.
+			// This is the SECOND deliberate, scoped exception to worktree's
+			// never-fetch invariant (the first is PR-head/base fetch in
+			// CheckoutPR/FetchRef): a managed checkout's whole point is that
+			// Kangent owns the dir and keeps it current.
+			//
+			// Best-effort (D-05): a failed fetch is DISCARDED — provisioning
+			// proceeds from the local base and NEVER blocks task creation. The
+			// error is deliberately NOT routed through the D-25
+			// worktree_error/fail path; it is a freshness convenience, not a
+			// provisioning gate. Managed-only — folder projects skip this entirely
+			// and keep ResolveBase's D-24 "no network, ever" guarantee byte-for-byte.
+			if defaultBranch, derr := defaultBranchName(wctx, wt, repoPath); derr == nil {
+				_ = wt.FetchRef(wctx, repoPath, defaultBranch) // ignore error (best-effort, D-05)
+			}
+		}
 		var base string
 		base, err = wt.ResolveBase(wctx, repoPath)
 		if err == nil {
@@ -144,6 +166,17 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 		slog.Error("recording worktree error on task", "task", taskID, "error", dbErr)
 	}
 	return "", "", err
+}
+
+// defaultBranchName resolves the managed clone's default branch name (e.g.
+// "main") for the CKOUT-02 pre-task fetch, reading the same origin/HEAD
+// symbolic ref ResolveBase reads (refs/remotes/origin/HEAD, minus the
+// "origin/" prefix). An error means origin/HEAD is absent: the caller skips the
+// fetch (do NOT fall back to a costly all-refs `fetch origin` — D-04 wants the
+// targeted default branch; a skipped fetch is fine, ResolveBase still works on
+// the local base).
+func defaultBranchName(ctx context.Context, wt *worktree.Service, repo string) (string, error) {
+	return wt.DefaultBranch(ctx, repo)
 }
 
 // listByProject handles GET /api/projects/{id}/tasks — the board fetch.
@@ -206,7 +239,8 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var repoPath string
-	if err := h.db.QueryRow(`SELECT repo_path FROM projects WHERE id = ?`, pid).Scan(&repoPath); err != nil {
+	var managedInt int
+	if err := h.db.QueryRow(`SELECT repo_path, managed FROM projects WHERE id = ?`, pid).Scan(&repoPath, &managedInt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "project not found")
 		} else {
@@ -226,7 +260,7 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// GIT-01: provision synchronously (30s cap). ALWAYS 201 with the task —
 	// git problems never block idea capture; failures land in worktree_error
 	// for the task view's Retry affordance (D-25).
-	branch, path, provErr := provisionWorktree(r.Context(), h.db, h.wt, t.ID, t.Title, repoPath)
+	branch, path, provErr := provisionWorktree(r.Context(), h.db, h.wt, t.ID, t.Title, repoPath, managedInt != 0)
 	if provErr != nil {
 		msg := provErr.Error()
 		t.WorktreeError = &msg

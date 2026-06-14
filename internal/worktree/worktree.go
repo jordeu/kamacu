@@ -9,9 +9,12 @@
 //     modes (255 vs 128 observed) and stderr is chatty on success
 //     ("Preparing worktree…"), so neither is a signal.
 //   - This package NEVER deletes branches (D-34) and never fetches (D-24) —
-//     EXCEPT CheckoutPR/FetchRef, a deliberate scoped exception for
-//     PR-head/PR-base retrieval (Phase 12, ARCHITECTURE §4): a PR review's
-//     whole point is fetching someone else's branch.
+//     EXCEPT CheckoutPR/FetchRef, deliberate scoped exceptions to the
+//     never-fetch invariant: (1) PR-head/PR-base retrieval (Phase 12,
+//     ARCHITECTURE §4) — a PR review's whole point is fetching someone else's
+//     branch; (2) the per-new-task default-branch fetch on a MANAGED checkout
+//     (Phase 14, CKOUT-02/D-04) — driven by provisionWorktree, gated on the
+//     project's managed marker so folder projects keep D-24 byte-for-byte.
 package worktree
 
 import (
@@ -147,6 +150,22 @@ func (s *Service) ResolveBase(ctx context.Context, repo string) (string, error) 
 		return "", err // unborn HEAD → D-25 failed state
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// DefaultBranch returns the repo's default branch name by reading the same
+// origin/HEAD symbolic ref ResolveBase's first leg uses, stripping the leading
+// "origin/" (e.g. refs/remotes/origin/HEAD → "main"). A managed clone always
+// has origin/HEAD set (verified: gh repo clone + file:// clone both set it), so
+// this is the precise, cheap name to feed FetchRef for the CKOUT-02 pre-task
+// fetch. Returns the bare branch name (no "origin/" prefix). An error means
+// origin/HEAD is absent — the caller skips the fetch and lets ResolveBase work
+// on the local base (this is read-only; it does NOT hit the network).
+func (s *Service) DefaultBranch(ctx context.Context, repo string) (string, error) {
+	out, err := gitRun(ctx, repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(strings.TrimSpace(out), "origin/"), nil
 }
 
 // Create makes a worktree at path on branch, branching from base.

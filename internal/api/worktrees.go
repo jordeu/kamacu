@@ -39,19 +39,24 @@ type worktreeHandlers struct {
 	tmuxClient tmux.Client
 }
 
-// loadTaskRepo fetches a task plus its project's repo_path in one query. The
-// FK guarantees the project row exists, so the scalar subquery never NULLs.
-func (h *worktreeHandlers) loadTaskRepo(id int64) (Task, string, error) {
+// loadTaskRepo fetches a task plus its project's repo_path and managed marker in
+// one query. The FK guarantees the project row exists, so the scalar subqueries
+// never NULL. managed (CKOUT-02) threads through to provisionWorktree so a
+// managed checkout's Retry/PR-review worktree fetches the latest default branch
+// first; folder projects (managed=false) skip the fetch (D-24).
+func (h *worktreeHandlers) loadTaskRepo(id int64) (Task, string, bool, error) {
 	var t Task
 	var repo string
+	var managedInt int
 	err := h.db.QueryRow(
 		`SELECT `+taskColumns+`,
-		   (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id)
+		   (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id),
+		   (SELECT managed FROM projects WHERE projects.id = tasks.project_id)
 		 FROM tasks WHERE id = ?`, id).
 		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position,
 			&t.CreatedAt, &t.UpdatedAt, &t.Branch, &t.WorktreePath, &t.WorktreeError,
-			&t.Source, &t.PRNumber, &t.PRBaseRef, &repo)
-	return t, repo, err
+			&t.Source, &t.PRNumber, &t.PRBaseRef, &repo, &managedInt)
+	return t, repo, managedInt != 0, err
 }
 
 // runningSessions counts the task's sessions that are still running.
@@ -131,7 +136,7 @@ func (h *worktreeHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	t, repo, err := h.loadTaskRepo(id)
+	t, repo, managed, err := h.loadTaskRepo(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -145,8 +150,10 @@ func (h *worktreeHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Slug recomputed from the CURRENT title; a kept branch from a previous
-	// cleanup is reused inside Create (plan 03-01's reuse path).
-	_, _, _ = provisionWorktree(r.Context(), h.db, h.wt, t.ID, t.Title, repo)
+	// cleanup is reused inside Create (plan 03-01's reuse path). managed gates
+	// the best-effort default-branch fetch (CKOUT-02) for the Retry path too —
+	// the single provisionWorktree choke point covers every worktree-creation surface.
+	_, _, _ = provisionWorktree(r.Context(), h.db, h.wt, t.ID, t.Title, repo, managed)
 	t2, err := scanTask(h.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -163,7 +170,7 @@ func (h *worktreeHandlers) get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	t, _, err := h.loadTaskRepo(id)
+	t, _, _, err := h.loadTaskRepo(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -220,7 +227,7 @@ func (h *worktreeHandlers) remove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	t, repo, err := h.loadTaskRepo(id)
+	t, repo, _, err := h.loadTaskRepo(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
