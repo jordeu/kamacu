@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -534,5 +535,159 @@ func TestCreateRawShaBase(t *testing.T) {
 	wtSha := strings.TrimSpace(gitCmd(t, path, "rev-parse", "HEAD"))
 	if wtSha != sha {
 		t.Errorf("worktree HEAD = %s, want %s", wtSha, sha)
+	}
+}
+
+// makePRRemote builds a "remote" repo on trunk with an initial commit, then a
+// SECOND commit on a side branch that it publishes as the server-side PR head
+// ref refs/pull/<n>/head (exactly how GitHub exposes a PR head — the side
+// branch itself is deleted so only the pull ref resolves the head, mirroring a
+// fork PR whose branch lives in another repo). Returns the remote path and the
+// PR head OID.
+func makePRRemote(t *testing.T, prNumber int) (remote, headOID string) {
+	t.Helper()
+	remote = makeRepoOn(t, "trunk")
+	// A divergent PR-head commit on a throwaway branch.
+	gitCmd(t, remote, "checkout", "-b", "pr-source")
+	if err := os.WriteFile(filepath.Join(remote, "pr.txt"), []byte("pr change\n"), 0o644); err != nil {
+		t.Fatalf("write pr.txt: %v", err)
+	}
+	gitCmd(t, remote, "add", "pr.txt")
+	gitCmd(t, remote, "commit", "-m", "pr head commit")
+	headOID = strings.TrimSpace(gitCmd(t, remote, "rev-parse", "HEAD"))
+	// Publish as the GitHub-style server-side pull ref, then drop the branch so
+	// ONLY refs/pull/<n>/head resolves the head (fork-PR shape).
+	gitCmd(t, remote, "update-ref", "refs/pull/"+strconv.Itoa(prNumber)+"/head", headOID)
+	gitCmd(t, remote, "checkout", "trunk")
+	gitCmd(t, remote, "branch", "-D", "pr-source")
+	return remote, headOID
+}
+
+func TestCheckoutPRDetachedHead(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote, headOID := makePRRemote(t, 1)
+	clone := cloneRepo(t, remote)
+
+	path := svc.PathFor(clone, "pr-1", 1)
+	if err := svc.CheckoutPR(ctx, clone, path, headOID, 1); err != nil {
+		t.Fatalf("CheckoutPR: %v", err)
+	}
+
+	// The worktree HEAD must equal the PR head OID exactly.
+	wtSha := strings.TrimSpace(gitCmd(t, path, "rev-parse", "HEAD"))
+	if wtSha != headOID {
+		t.Errorf("worktree HEAD = %q, want PR head OID %q", wtSha, headOID)
+	}
+	// And it must be DETACHED — no branch ref points at it.
+	if _, err := exec.Command("git", "-C", path, "symbolic-ref", "--short", "HEAD").Output(); err == nil {
+		t.Error("worktree HEAD is on a branch, want a detached HEAD (--detach)")
+	}
+}
+
+// TestCheckoutPRLeavesSourceHeadUnchanged is the GHREV-05 safety proof: opening
+// a PR review must NOT move the project's primary checkout HEAD (same property
+// for same-repo and fork PRs since the head comes from refs/pull/<n>/head).
+func TestCheckoutPRLeavesSourceHeadUnchanged(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote, headOID := makePRRemote(t, 7)
+	clone := cloneRepo(t, remote)
+
+	branchBefore := strings.TrimSpace(gitCmd(t, clone, "symbolic-ref", "--short", "HEAD"))
+	shaBefore := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "HEAD"))
+
+	path := svc.PathFor(clone, "pr-7", 7)
+	if err := svc.CheckoutPR(ctx, clone, path, headOID, 7); err != nil {
+		t.Fatalf("CheckoutPR: %v", err)
+	}
+
+	branchAfter := strings.TrimSpace(gitCmd(t, clone, "symbolic-ref", "--short", "HEAD"))
+	shaAfter := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "HEAD"))
+	if branchBefore != branchAfter {
+		t.Errorf("source branch changed: before %q, after %q (GHREV-05)", branchBefore, branchAfter)
+	}
+	if shaBefore != shaAfter {
+		t.Errorf("source HEAD sha changed: before %q, after %q (GHREV-05)", shaBefore, shaAfter)
+	}
+}
+
+// TestCheckoutPRCreatesNoBranch: a detached worktree occupies no branch, so the
+// clone must list only its pre-existing branch(es) — no kangent-pr branch.
+func TestCheckoutPRCreatesNoBranch(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote, headOID := makePRRemote(t, 3)
+	clone := cloneRepo(t, remote)
+
+	before := strings.TrimSpace(gitCmd(t, clone, "branch", "--list"))
+	path := svc.PathFor(clone, "pr-3", 3)
+	if err := svc.CheckoutPR(ctx, clone, path, headOID, 3); err != nil {
+		t.Fatalf("CheckoutPR: %v", err)
+	}
+	after := strings.TrimSpace(gitCmd(t, clone, "branch", "--list"))
+	if before != after {
+		t.Errorf("branch list changed after CheckoutPR: before %q, after %q (a branch leaked)", before, after)
+	}
+}
+
+func TestCheckoutPRPathCollision(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote, headOID := makePRRemote(t, 9)
+	clone := cloneRepo(t, remote)
+
+	path := svc.PathFor(clone, "pr-9", 9)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("pre-create leaf: %v", err)
+	}
+	err := svc.CheckoutPR(ctx, clone, path, headOID, 9)
+	if err == nil {
+		t.Fatal("CheckoutPR on existing leaf path succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error %q does not signal a path-already-exists collision", err)
+	}
+	// The pre-check must fire BEFORE git fetches — no worktree may register.
+	if list := gitCmd(t, clone, "worktree", "list", "--porcelain"); strings.Contains(list, "worktree "+path) {
+		t.Errorf("worktree %q registered despite the path pre-check:\n%s", path, list)
+	}
+}
+
+func TestFetchRef(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	// A remote on trunk with a second branch "base-branch" to fetch.
+	remote := makeRepoOn(t, "trunk")
+	gitCmd(t, remote, "checkout", "-b", "base-branch")
+	if err := os.WriteFile(filepath.Join(remote, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base.txt: %v", err)
+	}
+	gitCmd(t, remote, "add", "base.txt")
+	gitCmd(t, remote, "commit", "-m", "base branch commit")
+	baseOID := strings.TrimSpace(gitCmd(t, remote, "rev-parse", "HEAD"))
+	gitCmd(t, remote, "checkout", "trunk")
+	clone := cloneRepo(t, remote)
+
+	if err := svc.FetchRef(ctx, clone, "base-branch"); err != nil {
+		t.Fatalf("FetchRef: %v", err)
+	}
+	// After the fetch the remote-tracking ref origin/base-branch must resolve.
+	got := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "origin/base-branch"))
+	if got != baseOID {
+		t.Errorf("origin/base-branch = %q after FetchRef, want %q", got, baseOID)
+	}
+}
+
+// TestFetchRefError: a fetch of a nonexistent ref returns an error but never
+// panics — the caller (diff plan) decides to ignore it.
+func TestFetchRefError(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote := makeRepoOn(t, "trunk")
+	clone := cloneRepo(t, remote)
+
+	if err := svc.FetchRef(ctx, clone, "no-such-branch"); err == nil {
+		t.Error("FetchRef of a nonexistent ref returned nil, want an error")
 	}
 }
