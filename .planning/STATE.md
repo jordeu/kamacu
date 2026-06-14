@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Repo-First Projects
-status: planning
-stopped_at: Phase 14 context gathered
-last_updated: "2026-06-14T16:35:36.608Z"
-last_activity: 2026-06-14 — Roadmap created (Phases 14–15)
+status: executing
+stopped_at: Completed 14-01-PLAN.md
+last_updated: "2026-06-14T17:13:18.125Z"
+last_activity: 2026-06-14
 progress:
   total_phases: 2
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 4
+  completed_plans: 1
 ---
 
 # Project State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-14)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.4 Repo-First Projects — roadmap created, ready to plan Phase 14
+**Current focus:** Phase 14 — managed-checkout-foundations
 
 ## Current Position
 
 Milestone: v1.4 Repo-First Projects (Kangent-Managed Checkouts)
-Phase: 14 — Managed Checkout Foundations (not started)
-Plan: —
-Status: Roadmapped — awaiting Phase 14 planning
-Last activity: 2026-06-14 — Roadmap created (Phases 14–15)
+Phase: 14 (managed-checkout-foundations) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-06-14
 
 **v1.4 goal:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent `gh repo clone`s and manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch — folder path becomes the optional fallback (folder-only when GitHub is off). Builds on v1.3's `internal/github` + worktree/cleanup gating. Phase numbering continues from 14.
 
@@ -87,6 +87,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 13-pr-worktree-auto-cleanup P01 | 9 min | 3 tasks | 11 files |
 | Phase 13-pr-worktree-auto-cleanup P02 | 9min | 3 tasks | 5 files |
 | Phase 13-pr-worktree-auto-cleanup P03 | 2min active (+ human-verify gate) | 3 tasks | 3 files |
+| Phase 14-managed-checkout-foundations P01 | 13 min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,9 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 (Earlier v1.0–v1.3 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
 
+- [Phase 14-managed-checkout-foundations]: Schema marker is a single boolean-as-INTEGER managed column (D-06), not an enum or path-prefix derivation — the column is the single source of truth for dir ownership; path derivation is a data-loss hazard.
+- [Phase 14-managed-checkout-foundations]: github.Clone uses a package-level cloneRunner var as its test seam (Clone is a package function like ValidateRepo); exit-0-only success + os.RemoveAll on failure + trimmed stderr.
+
 ### Pending Todos
 
 - Quota poll while idle (no connected browsers) is acceptable for the first iteration with jitter + backoff; revisit before milestone close (research tech-debt note).
@@ -144,7 +148,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-14T16:35:36.604Z
-Stopped at: Phase 14 context gathered
-Resume file: .planning/phases/14-managed-checkout-foundations/14-CONTEXT.md
+Last session: 2026-06-14T17:13:09.186Z
+Stopped at: Completed 14-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation

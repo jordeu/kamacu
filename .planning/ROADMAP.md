@@ -75,7 +75,7 @@ Full details: [milestones/v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
   4. Deleting a managed-checkout project removes the managed clone from disk, gated on the same conditions as worktree cleanup (uncommitted/unpushed work or a running session blocks silent removal); deleting a folder-based (user-pointed) project never removes its directory (CKOUT-03).
 **Plans**: 4 plans
 Plans:
-- [ ] 14-01-PLAN.md — Migration 00008 managed marker, Project wire/scan, github.Clone verb, projectHandlers wiring
+- [x] 14-01-PLAN.md — Migration 00008 managed marker, Project wire/scan, github.Clone verb, projectHandlers wiring
 - [ ] 14-02-PLAN.md — Repo-first create: validate→clone→insert atomicity + reattach-on-existing
 - [ ] 14-03-PLAN.md — Best-effort default-branch fetch before managed task worktrees (folder projects unchanged)
 - [ ] 14-04-PLAN.md — Gated all-or-nothing managed-project delete (worktrees + clone); folder delete untouched
@@ -109,7 +109,7 @@ Plans:
 | 11. PR Review Column | v1.3 | 4/4 | Complete | 2026-06-14 |
 | 12. Open-a-Review | v1.3 | 7/7 | Complete | 2026-06-14 |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete | 2026-06-14 |
-| 14. Managed Checkout Foundations | v1.4 | 0/4 | Planned | - |
+| 14. Managed Checkout Foundations | v1.4 | 1/4 | In Progress|  |
 | 15. Repo-First Creation Flow | v1.4 | 0/? | Not started | - |
 
 ---
