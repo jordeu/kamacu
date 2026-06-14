@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Repo-First Projects
-status: roadmapped
-stopped_at: v1.4 roadmapped 2026-06-14 — 2 phases (14–15), 10 requirements mapped (coarse granularity); ready to plan Phase 14
-last_updated: "2026-06-14T15:40:00.000Z"
-last_activity: 2026-06-14
+status: planning
+stopped_at: Phase 14 context gathered
+last_updated: "2026-06-14T16:35:36.608Z"
+last_activity: 2026-06-14 — Roadmap created (Phases 14–15)
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
-  percent: 0
 ---
 
 # Project State
@@ -145,7 +144,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-14T15:40:00.000Z
-Stopped at: v1.4 roadmap created — ROADMAP.md (Phases 14–15), REQUIREMENTS.md traceability (10/10 mapped), STATE.md updated
-Resume file: None
+Last session: 2026-06-14T16:35:36.604Z
+Stopped at: Phase 14 context gathered
+Resume file: .planning/phases/14-managed-checkout-foundations/14-CONTEXT.md
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
