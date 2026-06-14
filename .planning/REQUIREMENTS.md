@@ -19,7 +19,7 @@ Requirements for the Repo-First Projects (Kangent-Managed Checkouts) milestone. 
 
 - [x] **CKOUT-01**: Creating a project from a repo `gh repo clone`s it into `~/.kangent/repos/<owner>/<name>` and checks out the repo's auto-detected default branch (main/master); that managed clone becomes the project's repo root for all worktree operations.
 - [x] **CKOUT-02**: Task and PR-review worktrees branch off the managed checkout; before creating a new task's worktree, Kangent fetches the latest default branch so new work starts from latest.
-- [ ] **CKOUT-03**: Deleting a managed-checkout project removes the managed clone from disk, gated on the same conditions as worktree cleanup (uncommitted/unpushed work or running sessions block silent removal); folder-based (user-pointed) project directories are never removed.
+- [x] **CKOUT-03**: Deleting a managed-checkout project removes the managed clone from disk, gated on the same conditions as worktree cleanup (uncommitted/unpushed work or running sessions block silent removal); folder-based (user-pointed) project directories are never removed.
 - [ ] **CKOUT-04**: Provisioning degrades-don't-break — a clone failure (auth, network, or missing repo) surfaces inline and leaves no half-created project (no orphan DB row, no partial directory).
 - [x] **CKOUT-05**: Re-adding a repo whose managed directory already exists on disk reattaches to / reuses the existing checkout rather than failing or cloning over it.
 
@@ -62,7 +62,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RPROJ-05 | Phase 14 | Complete |
 | CKOUT-01 | Phase 14 | Complete |
 | CKOUT-02 | Phase 14 | Complete |
-| CKOUT-03 | Phase 14 | Pending |
+| CKOUT-03 | Phase 14 | Complete |
 | CKOUT-04 | Phase 15 | Pending |
 | CKOUT-05 | Phase 14 | Complete |
 
