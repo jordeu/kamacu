@@ -80,16 +80,16 @@ One place to see and drive all agent work: every task gets its own isolated work
 - ✓ Collapsible per-project "Review" column listing `user-review-requested:@me draft:false` open PRs via one cached `gh pr list` call (server-side `statusCheckRollup` → pass/fail/pending/none), 60s visibility-paused auto-poll + manual refresh, inline loading/empty/degraded states, default-collapsed, never blocking the board — Phase 11 (GHCOL-01..06)
 - ✓ Open-a-Review: clicking a PR card opens a task-like review workspace (`source='github_pr'` task reusing TaskPage/agent/bash/diff) backed by a worktree on the PR's real head branch (fetch `refs/pull/<n>/head`, `pr/<n>` collision fallback, primary checkout HEAD provably unchanged); open-or-reattach (no duplicates); diff vs the PR's own base merge-base matching GitHub; PR reviews never leak onto the kanban board — Phase 12 (GHREV-01..05)
 - ✓ PR worktree auto-cleanup: the reaper reconciles PR state (`gh pr view --json state`) and gated-removes a merged/closed worktree only when pristine + idle (dirty/unpushed/stash/session all skip), always keeping the branch; manual cleanup from the review view via the same gated `CleanupWorktreeGated` flow + a merged/closed banner — Phase 13 (GHCLN-01/02/03)
+- ✓ Managed-checkout backend: `github.Clone` (`gh repo clone`, exit-0-only) provisions a gh-validated repo into `~/.kangent/repos/<owner>/<name>` recorded as the project repo root with a `managed` marker (migration 00008, existing folder rows backfill to never-touch); atomic clone-then-create (failed clone → no row, no dir); reattach-on-origin-match / error-on-mismatch — Phase 14 (CKOUT-01, RPROJ-05, CKOUT-05)
+- ✓ Managed-checkout worktree freshness + gated delete: managed task/PR-review worktrees best-effort `fetch origin <default>` before `ResolveBase` (folder projects keep the D-24 no-network path); deleting a managed project is all-or-nothing gated (dirty/unpushed via `origin/<default>..HEAD`/stash/session across every worktree + the clone root → 409 reason list, removes nothing) then unlinks worktrees → `os.RemoveAll` clone → deletes row; folder-project delete byte-for-byte unchanged — Phase 14 (CKOUT-02, CKOUT-03)
 
 ### Active
 
-**v1.4 Repo-First Projects** (REQ-IDs in REQUIREMENTS.md):
-- [ ] Add a project from a GitHub repo (`owner/name`) when GitHub is on — Kangent `gh repo clone`s it into `~/.kangent/repos/<owner>/<name>` on the auto-detected default branch
-- [ ] Project name auto-derived from the repo (editable); GitHub link + description auto-filled
-- [ ] Repo-first by default when GitHub is on, folder optional; folder-only when GitHub is off; existing folder-based projects untouched
-- [ ] Task/PR-review worktrees branch off the managed checkout, fetching the latest default branch before each new task worktree
-- [ ] Gated removal of the managed checkout on project delete (dirty/unpushed/running-session gates); folder-based dirs never touched
-- [ ] Degrade-don't-break provisioning: clone failures surface inline with no half-created project; re-adding an existing managed dir reattaches
+**v1.4 Repo-First Projects — Phase 15 (Repo-First Creation Flow)** (REQ-IDs in REQUIREMENTS.md):
+- [ ] When GitHub is on, the "Add project" form defaults to entering a GitHub `owner/name` (driving the Phase-14 clone primitive) rather than a folder picker (RPROJ-01)
+- [ ] A valid repo prefills the editable project name and auto-fills the GitHub link + description (RPROJ-02)
+- [ ] Folder is the optional alternative when GitHub is on; folder-only with no repo-first UI when off; existing folder-based projects untouched (RPROJ-03, RPROJ-04)
+- [ ] A clone failure surfaces inline in the Add-project flow with no half-created project (CKOUT-04)
 
 ### Out of Scope
 
@@ -118,6 +118,8 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 **Phase 12 (Open-a-Review) complete (2026-06-14)** — 7 plans (5 original + 2 gap-closure after the human-verify checkpoint). The milestone headline: clicking a PR card opens it as a task-like review workspace — a `tasks` row with `source='github_pr'` rendered through the same `TaskPage`/`TaskTabs` shell. `worktree.CheckoutPR` fetches `refs/pull/<n>/head` and `git worktree add -b <branch> <path> <headOID>` on the PR's **real head branch** with a `pr/<n>` collision fallback (the named-branch path *supersedes* the original detached D-01 after human-verify, and preserves GHREV-05 — an existing local ref is never reused/moved, main checkout HEAD provably unchanged). Open-or-reattach `POST .../pull-requests/{n}/review` (find by project+pr_number) + read-only `GET .../pull-requests/{n}` (live `gh pr view` re-hydration on F5). Diff branches on `pr_base_ref` (fetch + merge-base `origin/<base>`, renderer reused). Board-leak guard: `source='manual'` on all 5 board/position queries + `/move` 409. Frontend: read-only single-line clickable GitHub-style header (`#<n> @<author> wants to merge <N> commits into <base> from <head>`), read-only PR-body Description, Agent-tab-first, seed prefilled-once-per-session from the configurable `pr_review_seed` Settings field. 5/5 success criteria verified; human-verify approved end-to-end.
 
 **Phase 13 (PR Worktree Auto-Cleanup) complete (2026-06-14) — v1.3 fully implemented** — 3 plans. The reaper (the Phase 9 Done-TTL goroutine) gains a second `reconcilePRsOnce` pass: per tick, each `source='github_pr'` task with a worktree is checked via `github.PRState` (`gh pr view --json state` → OPEN/CLOSED/MERGED); a MERGED/CLOSED PR's worktree is auto-removed **only when pristine and idle** (conservative gate: uncommitted / unpushed via `rev-list FETCH_HEAD..HEAD` re-fetched in the worktree / stash / running session — skip on any), and on success the task row is deleted (FK-ordered `tmux_sessions` before `tasks`). The gated-cleanup logic was extracted byte-equivalent into `CleanupWorktreeGated` (shared by the HTTP handler + reaper; reaper passes `force=false`, never stops sessions); the branch ref is never deleted. Manual cleanup (GHCLN-03) re-adds a PR `⋯` "Clean up worktree" item + a merged/closed banner in the review view. 18/18 must-haves verified; human-verify approved end-to-end. **v1.3 (GitHub PR Review) shipped 2026-06-14** — milestone audit passed (20/20 requirements, 6/6 integration seams, 4/4 E2E flows), archived to `milestones/v1.3-*`.
+
+**v1.4 in progress — Phase 14 (Managed Checkout Foundations) complete (2026-06-14)** — 4 plans, the backend capability for Kangent-managed checkouts. Migration 00008 adds the `managed` marker (existing folder projects backfill to never-touch). `github.Clone` wraps `gh repo clone` (exit-0-only, test-seam) into `~/.kangent/repos/<owner>/<name>`; `createByRepo` does gh-validate → clone → INSERT atomically (failed clone leaves no row, no dir) with reattach-on-origin-match. Managed task/PR worktrees best-effort fetch the default branch before `ResolveBase` (folder projects keep the D-24 no-network path); managed-project delete is all-or-nothing gated (dirty/unpushed/stash/session across every worktree + clone root) then unlinks worktrees → removes the clone dir → deletes the row, while folder-project delete stays byte-for-byte unchanged. 5/5 requirements verified (CKOUT-01/02/03/05, RPROJ-05); `go build`/`vet`/`test ./...` all green. Phase 15 (the repo-first Add-project UI) is next.
 
 ## Next Milestone
 
@@ -187,4 +189,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-14 — v1.4 Repo-First Projects milestone started*
+*Last updated: 2026-06-14 — Phase 14 (Managed Checkout Foundations) complete; v1.4 Phase 15 next*
