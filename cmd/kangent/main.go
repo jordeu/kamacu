@@ -164,16 +164,23 @@ func main() {
 	// only become orphaned through paths Kangent already controls, D-99).
 	sweepOrphanTmux(context.Background(), db, tmuxClient)
 
-	// Done-TTL session reaper (REAP-01): the app's first background goroutine.
-	// It kills bash + tmux + agent sessions of tasks left in Done past the
-	// configured done_session_ttl, clocked from done_at, keeping each agent
-	// resumable (claude_session_id/transcript untouched, D-96) and never
-	// touching worktrees (D-87). No graceful shutdown exists — process death
-	// stops it — so context.Background() is the correct process-lifetime scope,
-	// consistent with the rest of the app. *session.Manager satisfies the
-	// reaper's SessionStopper (StopAllForTask + ListByTask).
-	go reaper.New(db, mgr).Run(context.Background())
-	slog.Info("Done-TTL reaper started")
+	// Background reaper (REAP-01 + GHCLN-01/02): the app's background goroutine.
+	// It runs TWO passes per tick:
+	//   1. Done-TTL: kills bash + tmux + agent sessions of tasks left in Done
+	//      past the configured done_session_ttl, clocked from done_at, keeping
+	//      each agent resumable (claude_session_id/transcript untouched, D-96)
+	//      and never touching worktrees (D-87).
+	//   2. PR reconcile (13-02): for each source='github_pr' task that still
+	//      owns a worktree, read the PR's state via ghSvc (the PRStateGetter);
+	//      a MERGED/CLOSED PR with a pristine, idle worktree is auto-removed and
+	//      its row deleted (D-07), gated conservatively (dirty/unpushed/stash/
+	//      session) and NEVER forced (force=false, stopSessions=false, D-05).
+	//      ghSvc is the SAME *github.Service the PR routes use — no new construction.
+	// No graceful shutdown exists — process death stops it — so context.Background()
+	// is the correct process-lifetime scope. *session.Manager satisfies the
+	// reaper's SessionStopper; *github.Service satisfies its PRStateGetter via PRState.
+	go reaper.NewWithPR(db, mgr, wtSvc, tmuxClient, ghSvc).Run(context.Background())
+	slog.Info("session reaper started (Done-TTL + PR reconcile)")
 
 	slog.Info("kangent listening", "url", "http://"+*addr)
 	if err := http.ListenAndServe(*addr, hostCheck(mux)); err != nil {
