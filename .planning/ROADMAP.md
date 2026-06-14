@@ -46,7 +46,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 
 - [x] **Phase 10: GitHub Foundations** — Schema, global toggle, project link config, and the degrade-don't-break `internal/github` base. (3/3 plans executed; gaps found in UAT — gh-gated enablement + copy) (completed 2026-06-13)
 - [x] **Phase 11: PR Review Column** — Read-only `gh`-backed Review column listing review-requested PRs with auto-poll, refresh, and PR cards. (completed 2026-06-14)
-- [ ] **Phase 12: Open-a-Review** — Click a PR → worktree on the PR branch + reused task view (agent/bash/PR-base diff), board-leak-safe. *(research-flagged)*
+- [ ] **Phase 12: Open-a-Review** — Click a PR → worktree on the PR branch + reused task view (agent/bash/PR-base diff), board-leak-safe. *(research-flagged)* (12-01..12-05 implemented; human-verify found 5 follow-ups → gap plans 12-06/12-07 pending; NOT verified)
 - [ ] **Phase 13: PR Worktree Auto-Cleanup** — Reaper reconciles PR state and gated-removes merged/closed review worktrees (branch kept). *(research-flagged)*
 
 ## Phase Details
@@ -103,7 +103,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 - [x] 12-02-PLAN.md — board-leak audit: source='manual' on 5 board/position queries + /move 409 guard + source/pr_number/pr_base_ref on the Task wire shape
 - [x] 12-03-PLAN.md — diff base branched on source/pr_base_ref (fetch base + merge-base origin/<base>, reuse diff.Compute)
 - [x] 12-04-PLAN.md — POST .../pull-requests/{n}/review open-or-reattach endpoint (ViewPR + CheckoutPR, find-by project+pr_number) + main.go wiring
-- [ ] 12-05-PLAN.md — frontend: PR card open trigger + useOpenReview + TaskPage source branches (read-only title/meta/Description) + seeded Start + human-verify checkpoint
+- [x] 12-05-PLAN.md — frontend: PR card open trigger + useOpenReview + TaskPage source branches (read-only title/meta/Description) + seeded Start + human-verify checkpoint
 **UI hint**: yes
 **Research flag**: yes — carried forward from research SUMMARY. The PR-branch worktree checkout is the milestone's risk center (`gh pr checkout` is not worktree-aware — cli/cli#972; fails on `/`-branches — cli/cli#3231; fork same-name fast-forward — cli/cli#8383). The `git fetch refs/pull/<n>/head` + `worktree add` path is verified end-to-end, but the named-branch-vs-`--detach` choice and the per-query `WHERE source='manual'` audit of EVERY `tasks` SELECT (the single highest-risk board-leak regression) warrant a focused spike. `/gsd:plan-phase` should decide on `/gsd:research-phase`. Carry these as success criteria: "primary checkout HEAD unchanged after opening a fork PR with a colliding branch name" (above, #5); "Kangent's review diff matches GitHub's Files-changed" (above, #3).
 
@@ -133,7 +133,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 5/5 | Complete | 2026-06-13 |
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
 | 11. PR Review Column | v1.3 | 4/4 | Complete    | 2026-06-14 |
-| 12. Open-a-Review | v1.3 | 4/5 | In Progress|  |
+| 12. Open-a-Review | v1.3 | 5/5 | Gaps pending (12-06/12-07); NOT verified | 2026-06-14 |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 0/? | Not started | - |
 
 ---

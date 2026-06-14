@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: GitHub PR Review
-status: executing
-stopped_at: Completed 12-04-PLAN.md
-last_updated: "2026-06-14T06:05:16.696Z"
+status: verifying
+stopped_at: 12-05 tasks done; human-verify found 5 follow-ups -> gap plans 12-06/12-07 pending; phase NOT verified
+last_updated: "2026-06-14T06:50:42.576Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 14
-  completed_plans: 13
-  percent: 100
+  completed_plans: 14
+  percent: 90
 ---
 
 # Project State
@@ -25,12 +25,22 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 ## Current Position
 
-Phase: 12 (open-a-review) — EXECUTING
-Plan: 5 of 5
-Status: Ready to execute
+Phase: 12 (open-a-review) — EXECUTING (NOT verified)
+Plan: 12-05 tasks done; gap plans 12-06 (backend) + 12-07 (frontend) pending
+Status: Human-verify surfaced 5 follow-ups; phase blocked on gap closure
 Last activity: 2026-06-14
 
-Progress: [██████████] 100% (4/4 plans in Phase 11)
+Progress: [█████████░] ~90% (12-01..12-05 implemented; 12-06/12-07 gap plans + phase verification remain)
+
+**12-05 human-verify outcome (NOT approved) — 5 follow-ups → gap plans 12-06/12-07:**
+
+1. PR worktree is detached HEAD; want the PR's real head branch checked out (fallback `pr/<n>` on collision). [12-06]
+2. Bash terminal in the PR review opens empty with excessive height forcing scroll (layout/fit regression). [12-07]
+3. Seed prompt re-injected on every open (per-mount ref) — inject only once, at first agent Start. [12-07]
+4. Make the review prompt configurable via a Settings field (default = current template, `<n>`/`<title>` placeholders). [12-06 key + 12-07 field]
+5. Show a GitHub-style merge line: "<author> wants to merge <N> commits into <base> from <head>". [12-06 commits/head/base + 12-07 render]
+
+GHREV-01..05 remain Pending in REQUIREMENTS.md until the gaps land and the phase is verified.
 
 ## Performance Metrics
 
@@ -69,6 +79,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 12-open-a-review P02 | 7min | 2 tasks | 3 files |
 | Phase 12-open-a-review P03 | 4min | 1 tasks | 2 files |
 | Phase 12-open-a-review P04 | 12min | 1 tasks | 3 files |
+| Phase 12-open-a-review P05 | 18min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -121,6 +132,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - [Phase 12-open-a-review]: GHREV-04 board-leak guard at the data layer: AND source = 'manual' on the 5 board/position queries (listByProject, create top-of-ToDo, move drop-at-top, nextPosition, renumberColumn) + a /move 409 guard rejecting source != 'manual'; by-id get/update/delete/afterPosition left unfiltered so the review view deep-links its own PR row. source/pr_number/pr_base_ref added to the Task wire shape (scanTask + loadTaskRepo column-aligned)
 - [Phase 12-open-a-review]: Diff base for a github_pr review comes from its own pr_base_ref (D-12/GHREV-03): diffs.go SELECT reads source+pr_base_ref, FetchRef(base) runs before merge-base (RESEARCH Pitfall 3), then resolvePRBase prefers local refs/heads/<base> (show-ref in the worktree dir) else origin/<base> (never FETCH_HEAD); diff.Compute reused unchanged, internal/diff untouched. Manual tasks keep ResolveBase verbatim.
 - [Phase 12-open-a-review]: Open-or-reattach endpoint POST .../{n}/review: find-or-create source='github_pr' keyed by (project_id, pr_number); full row -> instant reattach (no CheckoutPR), worktree_path NULL -> re-provision in place, not found -> INSERT (position=0 sentinel, board filters exclude it). off/unlinked/unknown -> 409 BEFORE any gh/worktree spawn. Live gh pr view on EVERY open (no title/body drift) returned as {task, pr}; ViewPR fetched before INSERT so a gh failure 502s with no half-row. viewPR package seam keeps create/reattach tests hermetic (real refs/pull/<n>/head + stubbed gh).
+- [Phase 12-open-a-review]: 12-05 frontend wiring shipped (open-or-reattach at the query cache: useOpenReview.onSuccess stashes {task, pr}; TaskPage branches every delta on source==='github_pr'; one-shot seed via pasteApiRef). Human-verify NOT approved -> 5 follow-ups become gap plans 12-06/12-07; phase NOT verified, GHREV-01..05 Pending.
 
 ### Pending Todos
 
@@ -132,6 +144,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 - Plan-mode exit-plan approval → amber dot (v1.0 research OQ1): still unobserved — carry to v1.3 UAT.
 - `gh` is a soft dependency; the integration must degrade-don't-break on every failure mode (missing/unauthenticated/rate-limited). Secondary rate limits (403/`Retry-After`) are a real risk under multi-project auto-poll — bounded steady-state call rate, paused-when-hidden, backoff (Phase 11).
 - The board-leak regression (a forgotten `source='manual'` filter on any `tasks` SELECT) is the milestone's highest-severity risk — treat as a per-query checklist item in Phase 12.
+- Phase 12 NOT verified: 12-05 human-verify found 5 follow-ups routed to gap plans 12-06 (backend: named-branch PR checkout, configurable-prompt settings key, commits count + head/base) and 12-07 (frontend: PR-view terminal fit fix, once-per-review seed guard, Settings prompt field, merge-line render). GHREV-01..05 stay Pending until fixed and the phase is re-verified.
 
 ### Quick Tasks Completed
 
@@ -142,7 +155,7 @@ Open product decisions to resolve in Phase planning (from research, mostly defau
 
 ## Session Continuity
 
-Last session: 2026-06-14T06:05:16.692Z
-Stopped at: Completed 12-04-PLAN.md
+Last session: 2026-06-14T06:49:23.661Z
+Stopped at: 12-05 tasks done; human-verify found 5 follow-ups -> gap plans 12-06/12-07 pending; phase NOT verified
 Resume file: None
 Next: `/gsd:discuss-phase 11`
