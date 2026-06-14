@@ -98,7 +98,12 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
   3. The review view's diff is computed against the PR's own base branch merge-base, and Kangent's review diff matches GitHub's Files-changed for that PR (GHREV-03).
   4. PR review workspaces never appear as cards on the kanban board — they are not To Do / In Progress / In Review / Done tasks (GHREV-04).
   5. **Checkout-safety test:** the primary checkout's HEAD is unchanged after opening a fork PR whose branch name collides with a local branch — fork and same-name PRs open correctly without disturbing the main checkout (GHREV-05).
-**Plans**: TBD
+**Plans**: 5 plans (4 waves — worktree/gh leaf -> diff-base + board-leak audit -> open/reattach endpoint -> frontend wiring + human-verify)
+- [ ] 12-01-PLAN.md — worktree.CheckoutPR (detached refs/pull/<n>/head, pinned to headRefOid) + FetchRef + github.ViewPR/PRDetail
+- [ ] 12-02-PLAN.md — board-leak audit: source='manual' on 5 board/position queries + /move 409 guard + source/pr_number/pr_base_ref on the Task wire shape
+- [ ] 12-03-PLAN.md — diff base branched on source/pr_base_ref (fetch base + merge-base origin/<base>, reuse diff.Compute)
+- [ ] 12-04-PLAN.md — POST .../pull-requests/{n}/review open-or-reattach endpoint (ViewPR + CheckoutPR, find-by project+pr_number) + main.go wiring
+- [ ] 12-05-PLAN.md — frontend: PR card open trigger + useOpenReview + TaskPage source branches (read-only title/meta/Description) + seeded Start + human-verify checkpoint
 **UI hint**: yes
 **Research flag**: yes — carried forward from research SUMMARY. The PR-branch worktree checkout is the milestone's risk center (`gh pr checkout` is not worktree-aware — cli/cli#972; fails on `/`-branches — cli/cli#3231; fork same-name fast-forward — cli/cli#8383). The `git fetch refs/pull/<n>/head` + `worktree add` path is verified end-to-end, but the named-branch-vs-`--detach` choice and the per-query `WHERE source='manual'` audit of EVERY `tasks` SELECT (the single highest-risk board-leak regression) warrant a focused spike. `/gsd:plan-phase` should decide on `/gsd:research-phase`. Carry these as success criteria: "primary checkout HEAD unchanged after opening a fork PR with a colliding branch name" (above, #5); "Kangent's review diff matches GitHub's Files-changed" (above, #3).
 
@@ -128,7 +133,7 @@ Full details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 | 9. tmux Restart Resume & Cleanup Integration | v1.2 | 5/5 | Complete | 2026-06-13 |
 | 10. GitHub Foundations | v1.3 | 4/5 | Complete    | 2026-06-13 |
 | 11. PR Review Column | v1.3 | 4/4 | Complete    | 2026-06-14 |
-| 12. Open-a-Review | v1.3 | 0/? | Not started | - |
+| 12. Open-a-Review | v1.3 | 0/5 | Planned | - |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 0/? | Not started | - |
 
 ---
