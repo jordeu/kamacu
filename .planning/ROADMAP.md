@@ -57,7 +57,7 @@ Full details: [milestones/v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
 
 ### 🚧 v1.4 Repo-First Projects (Phases 14–15)
 
-- [ ] **Phase 14: Managed Checkout Foundations** — The `gh`-validated clone/provisioning primitive, a schema marker distinguishing Kangent-managed checkouts from user-pointed folders, branch-fresh task worktrees off the managed clone, reattach-on-existing, and gated removal on project delete.
+- [ ] **Phase 14: Managed Checkout Foundations** — The `gh`-validated clone/provisioning primitive, a schema marker distinguishing Kangent-managed checkouts from user-pointed folders, branch-fresh task worktrees off the managed clone, reattach-on-existing, and gated removal on project delete. (4 plans, planned 2026-06-14)
 - [ ] **Phase 15: Repo-First Creation Flow** — The "Add project" surface defaults to entering a GitHub `owner/name` when integration is on (folder optional; folder-only when off), auto-derives name/link/description, and surfaces clone failures inline with no half-created project.
 
 ## Phase Details
@@ -73,7 +73,12 @@ Full details: [milestones/v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
   2. A task (or PR-review) worktree created for a managed-checkout project branches off that managed clone, and Kangent fetches the latest default branch first so new work starts from latest — existing folder-based projects' worktree behavior is unchanged (CKOUT-02).
   3. Re-provisioning a managed checkout whose directory already exists on disk reattaches to / reuses the existing clone rather than failing or cloning over it (CKOUT-05).
   4. Deleting a managed-checkout project removes the managed clone from disk, gated on the same conditions as worktree cleanup (uncommitted/unpushed work or a running session blocks silent removal); deleting a folder-based (user-pointed) project never removes its directory (CKOUT-03).
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 14-01-PLAN.md — Migration 00008 managed marker, Project wire/scan, github.Clone verb, projectHandlers wiring
+- [ ] 14-02-PLAN.md — Repo-first create: validate→clone→insert atomicity + reattach-on-existing
+- [ ] 14-03-PLAN.md — Best-effort default-branch fetch before managed task worktrees (folder projects unchanged)
+- [ ] 14-04-PLAN.md — Gated all-or-nothing managed-project delete (worktrees + clone); folder delete untouched
 
 ### Phase 15: Repo-First Creation Flow
 **Goal**: When GitHub integration is on, a user adds a project by naming a GitHub repo — name/link/description auto-fill from the repo and a folder path is the optional alternative — and a failed clone surfaces inline leaving no half-created project; when integration is off the Add-project flow is folder-only, exactly as before v1.4.
@@ -104,7 +109,7 @@ Full details: [milestones/v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
 | 11. PR Review Column | v1.3 | 4/4 | Complete | 2026-06-14 |
 | 12. Open-a-Review | v1.3 | 7/7 | Complete | 2026-06-14 |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete | 2026-06-14 |
-| 14. Managed Checkout Foundations | v1.4 | 0/? | Not started | - |
+| 14. Managed Checkout Foundations | v1.4 | 0/4 | Planned | - |
 | 15. Repo-First Creation Flow | v1.4 | 0/? | Not started | - |
 
 ---
