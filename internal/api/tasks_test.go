@@ -72,6 +72,169 @@ func branchList(t *testing.T, repo, pattern string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// gitOut runs git in dir like gitIn (throwaway identity + host-config
+// isolation) but returns trimmed combined output — for rev-parse reads the
+// file:// fetch tests assert on. (gitIn, in worktrees_test.go, returns nothing.)
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	full := append([]string{"-C", dir, "-c", "user.name=test", "-c", "user.email=test@test"}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// makeOriginAndClone builds a source repo on `main` with one commit and a
+// file:// clone of it (origin/HEAD set, like a real gh repo clone). It returns
+// the origin and clone dirs. The clone becomes a managed project's repo_path.
+func makeOriginAndClone(t *testing.T) (origin, clone string) {
+	t.Helper()
+	origin = t.TempDir()
+	gitIn(t, origin, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(origin, "file.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatalf("write origin file: %v", err)
+	}
+	gitIn(t, origin, "add", "file.txt")
+	gitIn(t, origin, "commit", "-m", "c1")
+
+	parent := t.TempDir()
+	clone = filepath.Join(parent, "clone")
+	gitIn(t, parent, "clone", "file://"+origin, clone)
+	return origin, clone
+}
+
+// advanceOrigin pushes a new commit onto origin's main and returns the new tip
+// SHA. The clone does NOT see it until something fetches.
+func advanceOrigin(t *testing.T, origin string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(origin, "file.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("write origin file v2: %v", err)
+	}
+	gitIn(t, origin, "add", "file.txt")
+	gitIn(t, origin, "commit", "-m", "c2")
+	return gitOut(t, origin, "rev-parse", "HEAD")
+}
+
+// cloneOriginMainSHA returns the clone's remote-tracking origin/main SHA — the
+// ref the managed pre-task fetch advances and ResolveBase reads.
+func cloneOriginMainSHA(t *testing.T, clone string) string {
+	t.Helper()
+	return gitOut(t, clone, "rev-parse", "origin/main")
+}
+
+// insertProjectRow inserts a project directly (bypassing the create endpoint —
+// the repo-first managed create path is plan 02's surface; this keeps the
+// pre-task-fetch tests independent of it) with the given managed marker and
+// returns its id.
+func insertProjectRow(t *testing.T, db *sql.DB, repoPath string, managed bool) int64 {
+	t.Helper()
+	m := 0
+	if managed {
+		m = 1
+	}
+	res, err := db.Exec(
+		`INSERT INTO projects (name, repo_path, managed) VALUES (?, ?, ?)`,
+		filepath.Base(repoPath), repoPath, m)
+	if err != nil {
+		t.Fatalf("insert project row (managed=%v): %v", managed, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("LastInsertId for project: %v", err)
+	}
+	return id
+}
+
+// TestManagedTaskWorktreeFetchesLatest (CKOUT-02/D-04): creating a task on a
+// MANAGED project fetches the latest default branch before resolving the base,
+// so the clone's origin/main advances to the origin tip pushed AFTER the clone.
+func TestManagedTaskWorktreeFetchesLatest(t *testing.T) {
+	// The API server's git fetch inherits the test process env; isolate host
+	// git config so the file:// fetch is deterministic.
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newTestServer(t)
+	origin, clone := makeOriginAndClone(t)
+	pid := insertProjectRow(t, db, clone, true)
+
+	// Push a NEW commit to origin AFTER the clone; the clone is now stale.
+	newTip := advanceOrigin(t, origin)
+	if cloneOriginMainSHA(t, clone) == newTip {
+		t.Fatalf("clone already at origin tip before any fetch — fixture bug")
+	}
+
+	body := createTask(t, srv, pid, "Fresh Work")
+	if body["worktree_error"] != nil {
+		t.Fatalf("worktree_error = %v, want null", body["worktree_error"])
+	}
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("worktree_path empty — provisioning failed: %v", body)
+	}
+
+	// The managed pre-task fetch advanced the clone's origin/main to the tip
+	// pushed after the clone — proving the fetch ran before ResolveBase.
+	if got := cloneOriginMainSHA(t, clone); got != newTip {
+		t.Errorf("clone origin/main = %s, want fetched tip %s (managed pre-task fetch did not run)", got, newTip)
+	}
+}
+
+// TestFolderTaskWorktreeNoFetch (D-24): creating a task on a FOLDER project
+// (managed=0) performs NO fetch — the clone's origin/main does NOT move even
+// though origin advanced. Folder local-only behavior is preserved byte-for-byte.
+func TestFolderTaskWorktreeNoFetch(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newTestServer(t)
+	origin, clone := makeOriginAndClone(t)
+	pid := insertProjectRow(t, db, clone, false) // folder project
+
+	before := cloneOriginMainSHA(t, clone)
+	advanceOrigin(t, origin) // origin moves; a folder project must NOT chase it
+
+	body := createTask(t, srv, pid, "Local Work")
+	if body["worktree_error"] != nil {
+		t.Fatalf("worktree_error = %v, want null", body["worktree_error"])
+	}
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("worktree_path empty — provisioning failed: %v", body)
+	}
+
+	if after := cloneOriginMainSHA(t, clone); after != before {
+		t.Errorf("folder project origin/main moved %s -> %s — a fetch happened (D-24 violated)", before, after)
+	}
+}
+
+// TestManagedFetchBestEffortDoesNotBlock (D-05): a managed project whose origin
+// is unreachable still provisions a worktree — the failed best-effort fetch is
+// discarded and ResolveBase proceeds from the local base. Task creation never
+// blocks on a failed fetch.
+func TestManagedFetchBestEffortDoesNotBlock(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newTestServer(t)
+	origin, clone := makeOriginAndClone(t)
+	pid := insertProjectRow(t, db, clone, true) // managed → fetch attempted
+
+	// Make origin unreachable: remove it. The clone's `fetch origin main` now
+	// fails, but provisioning must still succeed from the local base.
+	if err := os.RemoveAll(origin); err != nil {
+		t.Fatalf("remove origin: %v", err)
+	}
+
+	body := createTask(t, srv, pid, "Offline Work")
+	// A failed fetch must NOT land in worktree_error (it is not a provisioning
+	// gate, D-05) and must NOT block the worktree.
+	if body["worktree_error"] != nil {
+		t.Errorf("worktree_error = %v, want null — a failed best-effort fetch must not block (D-05)", body["worktree_error"])
+	}
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("worktree_path empty — a failed fetch blocked provisioning (D-05 violated): %v", body)
+	}
+}
+
 func TestTaskCreateProvisionsWorktree(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	repo := gitRepoWithCommit(t)
