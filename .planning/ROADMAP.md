@@ -58,7 +58,7 @@ Full details: [milestones/v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
 ### 🚧 v1.4 Repo-First Projects (Phases 14–15)
 
 - [x] **Phase 14: Managed Checkout Foundations** — The `gh`-validated clone/provisioning primitive, a schema marker distinguishing Kangent-managed checkouts from user-pointed folders, branch-fresh task worktrees off the managed clone, reattach-on-existing, and gated removal on project delete. (4 plans, planned 2026-06-14) (completed 2026-06-14)
-- [ ] **Phase 15: Repo-First Creation Flow** — The "Add project" surface defaults to entering a GitHub `owner/name` when integration is on (folder optional; folder-only when off), auto-derives name/link/description, and surfaces clone failures inline with no half-created project.
+- [ ] **Phase 15: Repo-First Creation Flow** — The "Add project" surface defaults to entering a GitHub `owner/name` when integration is on (folder optional; folder-only when off), auto-derives name/link/description, and surfaces clone failures inline with no half-created project. (3 plans, planned 2026-06-15)
 
 ## Phase Details
 
@@ -89,7 +89,11 @@ Plans:
   2. Entering a valid repo prefills the project name from the repo name (editable before create) and auto-fills the GitHub link and description (RPROJ-02).
   3. With GitHub integration on, the user can still create a project from a local folder — the folder path is the optional alternative, not the default — and with integration off, project creation is folder-only with no repo-first UI appearing (RPROJ-03, RPROJ-04).
   4. A clone failure (auth, network, or missing repo) surfaces inline in the Add-project flow and leaves no half-created project — no orphan DB row and no partial directory on disk (CKOUT-04).
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 15-01-PLAN.md — Backend description-capture (best-effort gh repo view) + widen useCreateProject/Project type
+- [ ] 15-02-PLAN.md — Repo-first AddProjectDialog (toggle, repo mode, name prefill, clone spinner, inline error) + embedded SPA rebuild
+- [ ] 15-03-PLAN.md — Human-verify gate: repo-first create flow end-to-end in the running app
 **UI hint**: yes
 
 ## Progress
@@ -110,7 +114,7 @@ Plans:
 | 12. Open-a-Review | v1.3 | 7/7 | Complete | 2026-06-14 |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete | 2026-06-14 |
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete    | 2026-06-14 |
-| 15. Repo-First Creation Flow | v1.4 | 0/? | Not started | - |
+| 15. Repo-First Creation Flow | v1.4 | 0/3 | Planned     | - |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
