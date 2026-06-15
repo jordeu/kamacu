@@ -15,6 +15,10 @@ export interface Project {
   repo_path: string;
   description: string;
   github_repo: string | null;
+  // Managed marker (v1.4): true when Kangent cloned and owns the checkout under
+  // ~/.kangent/repos/ (gated-remove on delete); false for user-pointed folder
+  // projects. The backend serializes this as json:"managed".
+  managed: boolean;
   created_at: string;
   updated_at: string;
 }

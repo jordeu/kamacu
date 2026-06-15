@@ -256,9 +256,15 @@ func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, r
 	if name == "" {
 		name = filepath.Base(dest) // = repo name
 	}
+	// Best-effort GitHub description capture (RPROJ-02 / D-05): persisted
+	// server-side so it surfaces (editable) in Project settings later — NOT a
+	// dialog field. Degrade-don't-break: a missing/empty/failed read yields ""
+	// (the projects.description default) and NEVER blocks create. Applies to
+	// both the clone and reattach branches (this is their single INSERT).
+	desc := github.RepoDescription(r.Context(), canonical)
 	p, err := scanProject(h.db.QueryRow(
-		`INSERT INTO projects (name, repo_path, github_repo, managed) VALUES (?, ?, ?, 1) RETURNING `+projectColumns,
-		name, dest, canonical))
+		`INSERT INTO projects (name, repo_path, github_repo, managed, description) VALUES (?, ?, ?, 1, ?) RETURNING `+projectColumns,
+		name, dest, canonical, desc))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

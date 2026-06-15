@@ -7,8 +7,11 @@ export type MoveArgs = { id: number; status: Status; afterId: number | null };
 export function useCreateProject() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name?: string; repo_path: string }) =>
-      post<Project>("/api/projects", body),
+    mutationFn: (body: {
+      name?: string;
+      repo_path?: string;
+      repo?: string;
+    }) => post<Project>("/api/projects", body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
