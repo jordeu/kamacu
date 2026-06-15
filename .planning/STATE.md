@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Repo-First Projects
 status: verifying
-stopped_at: Phase 15 context gathered
-last_updated: "2026-06-15T04:44:04.046Z"
+stopped_at: Phase 15 UI-SPEC approved
+last_updated: "2026-06-15T04:50:33.785Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 2
@@ -156,7 +156,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-15T04:44:04.043Z
-Stopped at: Phase 15 context gathered
-Resume file: .planning/phases/15-repo-first-creation-flow/15-CONTEXT.md
+Last session: 2026-06-15T04:50:33.777Z
+Stopped at: Phase 15 UI-SPEC approved
+Resume file: .planning/phases/15-repo-first-creation-flow/15-UI-SPEC.md
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
