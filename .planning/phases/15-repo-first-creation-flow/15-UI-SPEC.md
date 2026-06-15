@@ -1,10 +1,11 @@
 ---
 phase: 15
 slug: repo-first-creation-flow
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova / zinc dark (web/components.json present — initialized in Phase 1)
 created: 2026-06-15
+reviewed_at: 2026-06-15
 ---
 
 # Phase 15 — UI Design Contract
