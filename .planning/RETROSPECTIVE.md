@@ -165,6 +165,43 @@
 
 ---
 
+## Milestone: v1.4 — Repo-First Projects
+
+**Shipped:** 2026-06-15
+**Phases:** 2 | **Plans:** 7 | **Tasks:** 13
+
+### What Was Built
+- (Phase 14) Managed Checkout Foundations: migration 00008 `managed` marker (existing folder rows backfill to never-touch); `github.Clone` (`gh repo clone`, exit-0-only, remove-on-failure, faked-runner seam); a second `POST /api/projects` path that gh-validates `owner/name`, clones into `~/.kangent/repos/<owner>/<name>`, and INSERTs `managed=1`+`github_repo` ONLY after exit 0 (atomic — no orphan row/dir), with origin-matched reattach; managed worktrees best-effort-fetch the default branch before `ResolveBase` (folder projects keep the no-network path); an all-or-nothing two-pass gated managed-delete (worktrees + clone root) that removes nothing on any blocker, and never touches folder-project dirs.
+- (Phase 15) Repo-First Creation Flow: a dedicated best-effort `github.RepoDescription` (`gh repo view --json description`) captured into `projects.description` at create (degrade-don't-break, `ValidateRepo` signature untouched); the `AddProjectDialog` becomes integration-gated repo-first — a "GitHub repo | Local folder" segmented toggle (repo default, reusing `ui/tabs.tsx`), `owner/name` name-prefill, blocking "Cloning…" spinner, inline destructive-alert failure (dialog open, values preserved, no half-created project); folder mode byte-for-byte and the repo-first UI vanishes when integration is off.
+
+### What Worked
+- **Backend-primitive-first, UI-on-top phase split paid off cleanly.** Phase 14 stood up the entire managed-checkout capability (clone, marker, fetch, gated delete) and proved it with 24 real-git tests *before* any UI existed; Phase 15 then drove it through a thin dialog + one small backend touch. The integration audit confirmed the create contract matched with zero field drift — the seam was designed, not discovered.
+- **Reuse-before-invent kept the surface tiny.** v1.4 added *zero* new dependencies and *no new `ui/` file*: the segmented toggle reused the existing `tabs.tsx`, the error box reused `ProjectSettingsDialog`'s destructive-alert, the spinner reused the `DiffTab` `animate-spin` idiom, and the gated-delete reused `CleanupWorktreeGated`'s primitives. The UI-SPEC + UI-checker enforced "no new tokens" before a line was written.
+- **A small backend touch slotted into an existing atomic path without regression.** The Phase-15 description capture rode *inside* Phase-14's single clone-then-INSERT — the planner deliberately added a *separate* `RepoDescription` rather than widening the shared `ValidateRepo` (which the PATCH handler also calls), so the change couldn't ripple. The audit verified atomicity and the `ValidateRepo` signature both held.
+- **The discuss → ui-phase → plan → execute → verify → audit loop ran frictionlessly on a 2-phase milestone.** Coarse granularity (2 phases, 7 plans) matched the scope; the single human-verify gate (15-03) was the only checkpoint and passed first time with no gap-closure cycles — a contrast with v1.3's 4 gap plans.
+- **Migration numbering + degrade-don't-break carried over verbatim.** 00008 mirrored 00007's goose up/down; every new `gh` shell (clone, description) degrades to a safe default and never crashes — the v1.3 GitHub-integration discipline transferred directly.
+
+### What Was Inefficient
+- **The summary-extract one-liner misfire struck a FOURTH straight milestone.** 15-03's (a human-verify checkpoint plan) `one_liner` extracted as the literal `"Type:"`, and the milestone-complete CLI dumped it straight into MILESTONES.md as a garbage bullet — hand-curated out again. This is now a confirmed, unfixed recurring bug across v1.1–v1.4; the extractor should reject checkpoint-plan / malformed one-liners, or the curation should be built into the CLI.
+- **`milestone complete` reported `tasks: 13` while the audit/roadmap had counted 17** — the per-plan task tally the CLI derives differs from the must-have task counts; cosmetic, but worth reconciling so the shipped stats line is consistent.
+- **No new lessons surfaced — which is itself a mild signal.** v1.4 was almost pure application of established patterns (good for delivery speed), so the retrospective is thin on novel insight; the interesting risk (clone-then-create atomicity) was already de-risked by Phase 14's tests before the milestone-level audit even ran.
+
+### Patterns Established
+- **Backend-capability phase → UI-driver phase**, with the create/IPC contract verified by an integration audit rather than assumed — a repeatable shape for "add a user-facing entry point to an existing engine."
+- **Separate-function-over-widen for a shared helper:** when a new caller needs *more* from an existing shared function, add a sibling (`RepoDescription`) rather than widening the shared one (`ValidateRepo`) — keeps the blast radius to the new path.
+- **UI-SPEC "registry safety / no new tokens" as a hard gate** on a brownfield design system: the checker verifying `components.json registries: {}` and that the cited primitive already exists kept the dialog dependency-free.
+
+### Key Lessons
+1. **Split a user-facing feature into "prove the engine" then "wire the UI"** — Phase 14's 24 real-git tests made Phase 15 a low-risk thin layer, and the audit could confirm the seam rather than hope for it.
+2. **Add a sibling, don't widen a shared function** — the `RepoDescription`-vs-`ValidateRepo` call kept a cross-cutting backend touch from rippling into an unrelated handler.
+3. **The milestone-complete one-liner list is unreliable enough to treat as always-draft** — four milestones of the same misfire; hand-curation is now a standing step, not a fix-it-later.
+
+### Cost Observations
+- Orchestrated on Opus 4.8 (inherit profile) across ~1 day (2026-06-14 → 06-15); 42 commits (9 `feat`), +2,045/−62 LOC code (17 files, excl. embedded dist), zero new Go modules or npm deps.
+- Notable: smallest milestone since v1.1 (2 phases, 7 plans, 1 human gate, 0 gap-closure cycles); the independent integration checker again re-verified all seams against source before completion.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -175,6 +212,7 @@
 | v1.1 | 1 | 4 | Coarse single-phase milestone for integration-only scope; checkpoint → fresh continuation-agent flow; manifest-diff-vs-tag as the zero-dep gate |
 | v1.2 | 3 | 12 | Empirical tmux research verified on the host binary pre-planning (first novel-risk subsystem since v1.0); invisible-subsystem principle; DB-derived ghost reconcile generalized from Phase 5; post-planner ROADMAP integrity checks |
 | v1.3 | 4 | 19 | Research-flagged the integration risk center (`gh pr checkout` worktree-unawareness) and spiked it pre-planning; one shared `github.Service` across 3 phases via a compiler-enforced interface seam; byte-equivalent helper extraction with regression guard; independent integration audit before completion |
+| v1.4 | 2 | 7 | Backend-capability phase → UI-driver phase, with the create contract verified by an integration audit; reuse-before-invent kept it zero-new-dep / no-new-`ui/`-file; separate-function-over-widen for a shared helper; smallest milestone with no gap-closure cycles |
 
 ### Cumulative Quality
 
@@ -184,11 +222,13 @@
 | v1.1 | 7 (+settings) | tsc + vite build green | Held — zero new Go modules and zero new npm deps, proven by manifest diff against the v1.0 tag |
 | v1.2 | 11 (+quota, tmux, reaper) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 3 phases |
 | v1.3 | 12 (+github) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 4 phases; carried ~18–20 pre-existing react-hooks lint advisories (build green) as audited tech debt |
+| v1.4 | 12 (github extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no new `ui/` file (reused `tabs.tsx`); v1.4 added NO new lint debt (dialog eslint-clean, 0 useEffect); pre-existing advisories still carried |
 
 ### Top Lessons (Verified Across Milestones)
 
-1. **Empirical per-version tool research before planning** — re-confirmed strongly in v1.3: the `gh pr checkout` worktree-unawareness research (cli/cli#972/#3231/#8383) changed the whole checkout approach before a line was planned. Held across v1.0, v1.2, v1.3.
-2. **Build the riskiest, least-off-the-shelf subsystem first** — re-tested in v1.3 (the PR-branch worktree checkout was research-flagged and proven against real `gh`/git before Phases 12–13 rode on it), after v1.1 had no novel-risk subsystem to exercise it. Held.
-3. **Interface-first wave parallelism with disjoint file ownership** — confirmed across all milestones; zero merge conflicts in any parallel wave.
-4. **A single shared service + narrow interface seam for a cross-phase external tool** — `internal/tmux` (v1.2) and `internal/github` (v1.3) both stayed one leaf package with one constructed instance fanned out to multiple consumers; integration became compiler-enforced rather than asserted.
-5. **The milestone-complete accomplishments list needs hand-curation** — the summary-extract one-liner misfire polluted MILESTONES.md in v1.1, v1.2, and v1.3; treat the CLI output as a draft.
+1. **Empirical per-version tool research before planning** — re-confirmed strongly in v1.3 (`gh pr checkout` worktree-unawareness) and again in v1.4 (host-verified `gh repo clone` behavior contradicted the brief's "gh absent" assumption, strengthening the plan). Held across v1.0, v1.2, v1.3, v1.4.
+2. **Build the riskiest, least-off-the-shelf subsystem first** — v1.3 (PR-branch checkout) and v1.4 (managed-checkout clone/atomicity proven by Phase 14's tests before the Phase 15 UI rode on it) both confirmed it. Held.
+3. **Interface-first wave parallelism with disjoint file ownership** — confirmed across all milestones; zero merge conflicts in any parallel wave. (v1.4's tightly-coupled `projects.go` plans were deliberately run sequentially across waves instead — the same disjoint-ownership discipline, applied by serializing rather than parallelizing.)
+4. **A single shared service / leaf package + narrow seam for a cross-phase external tool** — `internal/tmux` (v1.2), `internal/github` (v1.3), and the v1.4 managed-checkout verbs all stayed one leaf package extended-not-scattered; v1.4 added the "separate-function-over-widen" corollary (add `RepoDescription`, don't widen the shared `ValidateRepo`).
+5. **The milestone-complete accomplishments list needs hand-curation** — the summary-extract one-liner misfire has now polluted MILESTONES.md in v1.1, v1.2, v1.3, AND v1.4 (15-03 → `"Type:"`); treat the CLI output as a draft every time.
+6. **Backend-capability phase → UI-driver phase** (new in v1.4) — proving the engine with tests first makes the UI a thin, low-risk layer the audit can confirm rather than hope for; expect to reuse this shape whenever adding a user-facing entry point to an existing subsystem.

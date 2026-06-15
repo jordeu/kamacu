@@ -1,5 +1,21 @@
 # Milestones
 
+## v1.4 Repo-First Projects (Shipped: 2026-06-15)
+
+**Phases completed:** 2 phases, 7 plans, 13 tasks
+
+**Delivered:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent `gh repo clone`s and manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch — with the folder path as the optional fallback (folder-only when GitHub is off). Task worktrees branch off the managed checkout; the clone is gated-removed on project delete; clone failures degrade-don't-break with no half-created project; existing folder-based projects are untouched. Audit: 10/10 requirements, 6/6 integration seams, 5/5 E2E flows.
+
+**Key accomplishments:**
+
+- **Managed Checkout Foundations (Phase 14):** migration 00008 adds the `managed` marker (existing folder rows backfill to never-touch); `github.Clone` wraps `gh repo clone` (exit-0-only, remove-on-failure, faked-runner test seam); a second `POST /api/projects` path gh-validates `owner/name` (RPROJ-05), clones into `~/.kangent/repos/<owner>/<name>`, and INSERTs `managed=1` + `github_repo` ONLY after exit 0 (atomic — no orphan row/partial dir), with origin-matched reattach (refuse-without-clobber on mismatch).
+- **Fresh worktrees off the managed clone (Phase 14):** managed task/PR-review worktrees best-effort `git fetch origin <default>` before `ResolveBase` so new work starts from the freshest tip — gated on the `managed` marker so folder projects keep their no-network guarantee, and a failed fetch is discarded so it never blocks task creation.
+- **All-or-nothing gated managed delete (Phase 14):** a two-pass delete gates every task/PR worktree AND the clone root on dirty/unpushed (`origin/<default>..HEAD`, no fetch)/stash/running-session, refuses with a 409 `{reasons:[…]}` list removing nothing, and on all-clear tears down linked worktrees → `os.RemoveAll` the clone → deletes the rows; folder (`managed=0`) delete stays byte-for-byte unchanged (never touches the dir).
+- **Repo description auto-capture (Phase 15):** repo-first create auto-captures the GitHub repo description via a best-effort `gh repo view --json description` read and persists it into `projects.description` (degrade-don't-break, never blocks; `ValidateRepo`'s shared signature untouched).
+- **Repo-first Add-project UI (Phase 15):** integration-gated "GitHub repo | Local folder" segmented toggle (repo default, reusing `ui/tabs.tsx`); the `owner/name` input prefills the editable Name; submit drives the Phase-14 atomic create with a blocking "Cloning <owner/name>…" spinner; clone failures surface inline (dialog open, values preserved, no half-created project); folder mode byte-for-byte and the whole repo-first UI vanishes when integration is off. Human-verify gate approved end-to-end.
+
+---
+
 ## v1.3 GitHub PR Review (Shipped: 2026-06-14)
 
 **Phases completed:** 4 phases, 19 plans, 46 tasks

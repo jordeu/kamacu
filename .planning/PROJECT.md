@@ -8,23 +8,30 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone: v1.4 Repo-First Projects
+## Current Milestone
+
+**v1.4 Repo-First Projects — shipped 2026-06-15.** No milestone is currently active; run `/gsd:new-milestone` to scope the next one. See the Validated requirements and Current State below for what v1.4 delivered.
+
+<details>
+<summary>Shipped milestone targets — v1.4 Repo-First Projects (2026-06-15)</summary>
 
 **Goal:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent clones and manages the checkout under `~/.kangent` on the default branch — with the folder path as the optional fallback.
 
-**Target features:**
+**Delivered features:**
 - Repo-first "Add project" when GitHub is on: enter `owner/name` → Kangent `gh repo clone`s it into `~/.kangent/repos/<owner>/<name>` on the repo's auto-detected default branch (main/master).
-- Project name auto-derived from the repo (prefilled, editable); GitHub link + description auto-filled.
+- Project name auto-derived from the repo (prefilled, editable); GitHub link auto-set + description auto-captured.
 - Folder path becomes the optional alternative when GitHub is on; folder-only when GitHub is off — existing folder-based projects untouched (backward compatible).
-- Task (and PR-review) worktrees branch off the managed checkout; fetch the latest default branch before creating each new task worktree.
-- Deleting a managed-checkout project does a gated removal of the clone (dirty / unpushed / running-session gates, like worktree cleanup); folder-based project dirs are never touched.
+- Task (and PR-review) worktrees branch off the managed checkout; best-effort fetch of the latest default branch before creating each new task worktree.
+- Deleting a managed-checkout project does an all-or-nothing gated removal of the clone (dirty / unpushed / stash / running-session gates, like worktree cleanup); folder-based project dirs are never touched.
 - Degrade-don't-break: clone failures (auth/network/bad repo) surface inline without leaving a half-created project; re-adding an existing managed dir reattaches instead of failing.
 
 **Settled decisions (milestone-time):**
 - Repo cloning uses `gh repo clone` (host auth, so private/org repos work) into an `owner/name`-namespaced dir under `~/.kangent/repos/` — collision-safe.
-- The managed clone IS the repo root that task/PR-review worktrees branch off (the user just never picks a folder); a new schema marker distinguishes Kangent-managed checkouts from user-pointed folders so delete knows what it owns.
+- The managed clone IS the repo root that task/PR-review worktrees branch off (the user just never picks a folder); the `managed` schema marker (migration 00008) distinguishes Kangent-managed checkouts from user-pointed folders so delete knows what it owns.
 - GitHub-only for the repo path (consistent with v1.3); arbitrary git URLs / other forges stay out of scope — the folder is the non-GitHub escape hatch.
-- Builds on v1.3's `internal/github` (gh auth, `ParseRepoRef`/`ValidateRepo`, repo link) and the existing worktree/cleanup gating.
+- Built on v1.3's `internal/github` (gh auth, `ParseRepoRef`/`ValidateRepo`, repo link) and the existing worktree/cleanup gating.
+
+</details>
 
 <details>
 <summary>Shipped milestone targets — v1.3 GitHub PR Review (2026-06-14)</summary>
@@ -86,7 +93,7 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Active
 
-_No phases remaining in v1.4 (all 16 phases complete). Run `/gsd:audit-milestone v1.4` then `/gsd:complete-milestone v1.4` to ship; `/gsd:new-milestone` to scope what's next._ Carried-forward candidates live in **Deferred** below and in the milestone's Future Requirements.
+_No milestone currently active. v1.4 shipped 2026-06-15 (15 phases complete across v1.0–v1.4). Run `/gsd:new-milestone` to define the next cycle (questioning → research → requirements → roadmap)._ Carried-forward candidates live in **Deferred** below and in the archived milestones' Future Requirements.
 
 ### Out of Scope
 
@@ -118,13 +125,14 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 **v1.4 in progress — Phase 14 (Managed Checkout Foundations) complete (2026-06-14)** — 4 plans, the backend capability for Kangent-managed checkouts. Migration 00008 adds the `managed` marker (existing folder projects backfill to never-touch). `github.Clone` wraps `gh repo clone` (exit-0-only, test-seam) into `~/.kangent/repos/<owner>/<name>`; `createByRepo` does gh-validate → clone → INSERT atomically (failed clone leaves no row, no dir) with reattach-on-origin-match. Managed task/PR worktrees best-effort fetch the default branch before `ResolveBase` (folder projects keep the D-24 no-network path); managed-project delete is all-or-nothing gated (dirty/unpushed/stash/session across every worktree + clone root) then unlinks worktrees → removes the clone dir → deletes the row, while folder-project delete stays byte-for-byte unchanged. 5/5 requirements verified (CKOUT-01/02/03/05, RPROJ-05); `go build`/`vet`/`test ./...` all green.
 
-**v1.4 fully implemented — Phase 15 (Repo-First Creation Flow) complete (2026-06-15)** — 3 plans. The repo-first Add-project UI on top of Phase 14's primitive: `AddProjectDialog` gains an integration-gated "GitHub repo | Local folder" segmented toggle (repo default, reusing `ui/tabs.tsx`); the `owner/name` input prefills the editable name, submit drives the atomic Phase-14 create with a blocking "Cloning…" spinner, and clone failures surface inline (dialog open, values preserved, no half-created project — Phase-14 atomicity). A dedicated best-effort `github.RepoDescription` (`gh repo view --json description`) captures the repo description into `projects.description` at create (visible/editable later in Project settings), leaving the shared `ValidateRepo` signature untouched. Integration-off renders the byte-for-byte pre-v1.4 folder-only form. 5/5 requirements verified (RPROJ-01..04, CKOUT-04); human-verify gate approved end-to-end; `go build`/`vet`/`test ./...` + `tsc` all green; embedded SPA rebuilt. **v1.4 (Repo-First Projects) complete — ready for `/gsd:audit-milestone v1.4`.**
+**v1.4 fully implemented — Phase 15 (Repo-First Creation Flow) complete (2026-06-15)** — 3 plans. The repo-first Add-project UI on top of Phase 14's primitive: `AddProjectDialog` gains an integration-gated "GitHub repo | Local folder" segmented toggle (repo default, reusing `ui/tabs.tsx`); the `owner/name` input prefills the editable name, submit drives the atomic Phase-14 create with a blocking "Cloning…" spinner, and clone failures surface inline (dialog open, values preserved, no half-created project — Phase-14 atomicity). A dedicated best-effort `github.RepoDescription` (`gh repo view --json description`) captures the repo description into `projects.description` at create (visible/editable later in Project settings), leaving the shared `ValidateRepo` signature untouched. Integration-off renders the byte-for-byte pre-v1.4 folder-only form. 5/5 requirements verified (RPROJ-01..04, CKOUT-04); human-verify gate approved end-to-end; `go build`/`vet`/`test ./...` + `tsc` all green; embedded SPA rebuilt. **v1.4 (Repo-First Projects) shipped 2026-06-15** — milestone audit passed (10/10 requirements, 6/6 integration seams, 5/5 E2E flows), archived to `milestones/v1.4-*`.
 
 ## Next Milestone
 
-**No milestone active.** v1.3 shipped 2026-06-14; run `/gsd:new-milestone` to scope the next cycle (questioning → research → requirements → roadmap).
+**No milestone active.** v1.4 shipped 2026-06-15; run `/gsd:new-milestone` to scope the next cycle (questioning → research → requirements → roadmap).
 
-Candidates carried forward live in **Deferred** below. Three banked forward investments are worth a future milestone:
+Candidates carried forward live in **Deferred** below. Banked forward investments worth a future milestone:
+- The v1.4 managed-checkout follow-ups, already scoped in `milestones/v1.4-REQUIREMENTS.md` "Future Requirements": on-demand checkout sync (CKMNT-01), non-default base branch at create (CKMNT-02), shallow/partial clone for large repos (CKMNT-03), and live clone-progress streaming + cancel (CKUX-01). The frontend `Project.managed` wire field is already in place to hang a managed-delete cleanup affordance on.
 - Per-status task timestamps (`todo_at`/`in_progress_at`/`in_review_at`/`done_at`, migration 00006) ready to power board cycle-time / dwell-time stats.
 - The background-goroutine reaper pattern (Done-TTL + PR reconcile passes) that future periodic maintenance (e.g. MAINT-01 stale-worktree purge) can model on.
 - Deferred v1.3 GitHub follow-ups already scoped in the archived `milestones/v1.3-REQUIREMENTS.md` "Future Requirements": richer PR cards (diff size, fork pill, head→base line, review-decision/labels — GHCARD-01..04), filter options (team review requests, draft PRs — GHFILT-01/02), and broader surfaces (cross-project review inbox, author-side PRs — GHWIDE-01/02).
@@ -188,4 +196,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-15 — Phase 15 complete; v1.4 (Repo-First Projects) fully implemented, ready for milestone audit*
+*Last updated: 2026-06-15 after v1.4 Repo-First Projects milestone — shipped, audited, and archived*

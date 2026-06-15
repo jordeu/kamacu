@@ -2,42 +2,38 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Repo-First Projects
-status: executing
-stopped_at: Completed 15-02-PLAN.md
-last_updated: "2026-06-15T05:27:21.605Z"
+status: shipped
+stopped_at: v1.4 shipped 2026-06-15 — audited (passed), archived, tagged. No milestone active; run /gsd:new-milestone.
+last_updated: "2026-06-15T05:40:15.440Z"
 last_activity: 2026-06-15
 progress:
   total_phases: 2
   completed_phases: 2
   total_plans: 7
   completed_plans: 7
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-14)
+See: .planning/PROJECT.md (updated 2026-06-15)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 15 — repo-first-creation-flow
+**Current focus:** Planning next milestone — run `/gsd:new-milestone`
 
 ## Current Position
 
-Milestone: v1.4 Repo-First Projects (Kangent-Managed Checkouts)
-Phase: 15
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-15
+Milestone: v1.4 Repo-First Projects — ✅ SHIPPED 2026-06-15
+Phase: none active
+Status: Milestone complete — audited (passed), archived, tagged
 
-**v1.4 goal:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent `gh repo clone`s and manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch — folder path becomes the optional fallback (folder-only when GitHub is off). Builds on v1.3's `internal/github` + worktree/cleanup gating. Phase numbering continues from 14.
+Progress: [██████████] 100% — 2 phases, 7 plans, 13 tasks
 
-**Roadmap shape (coarse, 2 phases, build order forced 14 → 15):**
+**v1.4 shipped:** Repo-first project creation — name a GitHub repo and Kangent `gh repo clone`s + manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch (folder path is the optional fallback); managed task worktrees fetch the latest default branch; managed-project delete is all-or-nothing gated; clone failures degrade-don't-break with no half-created project; folder-based projects untouched. Audit: 10/10 requirements satisfied, 6/6 integration seams wired, 5/5 E2E flows complete. Archived to `milestones/v1.4-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
 
-- **Phase 14 — Managed Checkout Foundations** (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03): the `gh`-validated clone/provisioning primitive into `~/.kangent/repos/<owner>/<name>` on the auto-detected default branch; a schema marker (migration **00008**, next after v1.3's 00007) distinguishing Kangent-managed checkouts from user-pointed folders; fresh-off-default-branch task/PR-review worktrees off the managed clone (fetch latest default branch first); reattach-on-existing-dir; gated removal of the clone on project delete (reusing `CleanupWorktreeGated`'s dirty/unpushed/stash/session gates), never touching folder-based dirs.
-- **Phase 15 — Repo-First Creation Flow** (RPROJ-01, RPROJ-02, RPROJ-03, RPROJ-04, CKOUT-04): the "Add project" surface defaults to entering `owner/name` when integration is on (folder optional; folder-only + no repo-first UI when off), name/link/description auto-fill from the repo, and clone failures surface inline with no half-created project (no orphan row, no partial dir). Sits on top of Phase 14's primitive. UI phase.
-
-Carried tech debt (non-blocking, build green): ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render lint items — a dedicated lint pass is the right home.
+**Next:** `/gsd:new-milestone` to scope the next cycle. Candidates in `milestones/v1.4-REQUIREMENTS.md` Future Requirements: CKMNT-01/02/03 (sync / non-default base / shallow clone), CKUX-01 (live clone progress + cancel). Carried tech debt (non-blocking, build green): ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render items — a dedicated lint pass is the right home (v1.4 added none).
 
 ## Performance Metrics
 
