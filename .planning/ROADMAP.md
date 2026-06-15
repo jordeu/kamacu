@@ -114,7 +114,7 @@ Plans:
 | 12. Open-a-Review | v1.3 | 7/7 | Complete | 2026-06-14 |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete | 2026-06-14 |
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete    | 2026-06-14 |
-| 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete   | 2026-06-15 |
+| 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete    | 2026-06-15 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
