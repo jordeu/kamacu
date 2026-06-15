@@ -74,6 +74,102 @@ func TestAvailable(t *testing.T) {
 	_ = Available()
 }
 
+// TestRepoDescription exercises the four degrade-don't-break cases of the
+// best-effort RepoDescription read (D-05): a verified repo's description rides
+// through, while an empty description, an absent gh, and a failing runner all
+// yield "" with NO error in the public signature — the caller (createByRepo)
+// must never have to handle a description error or let one block create.
+func TestRepoDescription(t *testing.T) {
+	tests := []struct {
+		name      string
+		available bool
+		runner    func(ctx context.Context, canonical string) string
+		want      string
+	}{
+		{
+			name:      "verified repo with a description",
+			available: true,
+			runner:    func(context.Context, string) string { return "hello world" },
+			want:      "hello world",
+		},
+		{
+			name:      "repo with an empty description",
+			available: true,
+			runner:    func(context.Context, string) string { return "" },
+			want:      "",
+		},
+		{
+			name:      "gh absent never invokes the runner",
+			available: false,
+			// If gh is reported absent, RepoDescription must short-circuit and
+			// never call the runner — fail loudly if it does.
+			runner: func(context.Context, string) string {
+				t.Fatal("descriptionRunner called while gh is absent")
+				return "should not happen"
+			},
+			want: "",
+		},
+		{
+			name:      "runner failure degrades to empty",
+			available: true,
+			// A production ghDescription maps any gh/parse failure to "" itself,
+			// so the runner-level contract is already error-free; this case
+			// asserts RepoDescription faithfully returns whatever (possibly "")
+			// the runner yields on a degraded read.
+			runner: func(context.Context, string) string { return "" },
+			want:   "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer SetAvailableForTest(tt.available)()
+			defer SetDescriptionRunnerForTest(tt.runner)()
+
+			got := RepoDescription(context.Background(), "cli/cli")
+			if got != tt.want {
+				t.Errorf("RepoDescription() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRepoDescriptionFakeGH stubs `gh` with a tiny script that echoes a
+// `--json description` payload, exercising the production ghDescription runner
+// (exec + decode) end-to-end without the real gh CLI or network. Mirrors
+// TestViewPRFakeGH's restricted-PATH technique.
+func TestRepoDescriptionFakeGH(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "gh")
+	const payload = `{"description":"a managed checkout"}`
+	script := "#!/bin/sh\necho '" + payload + "'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	got := RepoDescription(context.Background(), "cli/cli")
+	if got != "a managed checkout" {
+		t.Errorf("RepoDescription() = %q, want %q", got, "a managed checkout")
+	}
+}
+
+// TestRepoDescriptionFakeGHEmpty asserts a repo with no description (gh emits
+// `{"description":""}`) reads back as "" with no error — the natural default
+// that lands in projects.description.
+func TestRepoDescriptionFakeGHEmpty(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "gh")
+	script := "#!/bin/sh\necho '{\"description\":\"\"}'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	if got := RepoDescription(context.Background(), "cli/cli"); got != "" {
+		t.Errorf("RepoDescription() = %q, want empty", got)
+	}
+}
+
 // TestViewPRNoGH forces gh to be unresolvable (an empty PATH) and asserts
 // ViewPR degrades to a typed error + an empty PRDetail (degrade-don't-break) —
 // it must NEVER panic and never return partial data.
