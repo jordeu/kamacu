@@ -165,6 +165,96 @@ func TestCreateRepoSuccess(t *testing.T) {
 	}
 }
 
+// repoSuccessSeams installs the verified-clone seams shared by the
+// description-capture tests: gh present, validate returns the canonical casing,
+// and clone does a real `git init` at dest. Returns a single restore func that
+// tears all three down (defer it once).
+func repoSuccessSeams(t *testing.T) func() {
+	t.Helper()
+	restoreAvail := github.SetAvailableForTest(true)
+	restoreValidate := github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return "Octocat/Hello-World", true, nil
+	})
+	restoreClone := github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		if out, err := exec.Command("git", "init", dest).CombinedOutput(); err != nil {
+			return string(out), err
+		}
+		return "", nil
+	})
+	return func() {
+		restoreClone()
+		restoreValidate()
+		restoreAvail()
+	}
+}
+
+// TestCreateRepoCapturesDescription (RPROJ-02 / D-05): a repo-first create
+// captures the GitHub repo's description (best-effort, server-side — never a
+// dialog field) and persists it into projects.description, surfaced in the
+// create response AND read back from the DB row.
+func TestCreateRepoCapturesDescription(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer repoSuccessSeams(t)()
+	defer github.SetDescriptionRunnerForTest(func(_ context.Context, canonical string) string {
+		return "hello world"
+	})()
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "octocat/hello-world"})
+	if status != http.StatusCreated {
+		t.Fatalf("repo create: status = %d, want 201; body=%v", status, body)
+	}
+	if body["description"] != "hello world" {
+		t.Errorf("response description = %v, want %q", body["description"], "hello world")
+	}
+	// DB row persisted the captured description.
+	wantPath := filepath.Join(base, "Octocat", "Hello-World")
+	var desc string
+	if err := db.QueryRow(`SELECT description FROM projects WHERE repo_path = ?`, wantPath).Scan(&desc); err != nil {
+		t.Fatalf("read back description: %v", err)
+	}
+	if desc != "hello world" {
+		t.Errorf("DB description = %q, want %q", desc, "hello world")
+	}
+}
+
+// TestCreateRepoEmptyDescriptionStill201 (D-05 degrade-don't-break): an empty
+// description read (or gh absent) must NEVER change the create outcome — still
+// 201, row still managed=1 + github_repo=canonical, description "".
+func TestCreateRepoEmptyDescriptionStill201(t *testing.T) {
+	srv, db, base := newRepoTestServer(t)
+	defer repoSuccessSeams(t)()
+	defer github.SetDescriptionRunnerForTest(func(_ context.Context, canonical string) string {
+		return "" // empty / degraded read
+	})()
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "octocat/hello-world"})
+	if status != http.StatusCreated {
+		t.Fatalf("repo create with empty description: status = %d, want 201; body=%v", status, body)
+	}
+	if body["description"] != "" {
+		t.Errorf("response description = %v, want empty", body["description"])
+	}
+	if body["managed"] != true {
+		t.Errorf("managed = %v, want true (create unaffected by empty description)", body["managed"])
+	}
+	if body["github_repo"] != "Octocat/Hello-World" {
+		t.Errorf("github_repo = %v, want canonical Octocat/Hello-World", body["github_repo"])
+	}
+	// DB row: empty description, still managed=1.
+	wantPath := filepath.Join(base, "Octocat", "Hello-World")
+	var desc string
+	var managed int
+	if err := db.QueryRow(`SELECT description, managed FROM projects WHERE repo_path = ?`, wantPath).Scan(&desc, &managed); err != nil {
+		t.Fatalf("read back row: %v", err)
+	}
+	if desc != "" {
+		t.Errorf("DB description = %q, want empty", desc)
+	}
+	if managed != 1 {
+		t.Errorf("DB managed = %d, want 1", managed)
+	}
+}
+
 // TestCreateRepoCloneAtomicity (CKOUT-04 / D-01): a clone failure leaves zero
 // new rows and no directory at dest — never a half-created project.
 func TestCreateRepoCloneAtomicity(t *testing.T) {
