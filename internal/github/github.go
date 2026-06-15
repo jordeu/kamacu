@@ -117,6 +117,51 @@ func ghValidate(ctx context.Context, parsed string) (canonical string, verified 
 	return resp.NameWithOwner, true, nil
 }
 
+// descriptionRunner is the overridable seam behind RepoDescription's
+// gh-read leg, mirroring validateRunner = ghValidate. Production points at
+// ghDescription (real `gh repo view … --json description`); tests swap in a
+// fake so the create-by-repo path can inject a description WITHOUT a live gh or
+// network. It is reached ONLY when Available() is true.
+var descriptionRunner = ghDescription
+
+// RepoDescription is a best-effort, error-free read of a verified repo's
+// GitHub description (D-05 / RPROJ-02). It rides the existing `gh repo view`
+// surface but is DELIBERATELY separate from ValidateRepo — its signature must
+// never widen, since the PATCH update handler shares it. The public contract is
+// degrade-don't-break: the caller (createByRepo) gets a plain string and NEVER
+// has to handle a description error, so a missing/empty/failed read simply
+// yields "" (the projects.description default) and never blocks create:
+//
+//   - gh absent (Available() false)        → ""  (runner never invoked)
+//   - gh present, repo has a description   → the description string
+//   - gh present, empty description        → ""  (the natural default)
+//   - gh nonzero exit / parse failure      → ""  (degrade-don't-break)
+func RepoDescription(ctx context.Context, canonical string) string {
+	if !Available() {
+		return ""
+	}
+	return descriptionRunner(ctx, canonical)
+}
+
+// ghDescription is the production descriptionRunner: it shells out to
+// `gh repo view <canonical> --json description` with an arg array (NEVER
+// `sh -c`) and returns the repo's description, mapping EVERY failure (gh
+// nonzero exit, parse error) to "" so RepoDescription's public signature can
+// stay error-free. An empty description reads back as "" naturally.
+func ghDescription(ctx context.Context, canonical string) string {
+	out, runErr := exec.CommandContext(ctx, "gh", "repo", "view", canonical, "--json", "description").Output()
+	if runErr != nil {
+		return ""
+	}
+	var resp struct {
+		Description string `json:"description"`
+	}
+	if jsonErr := json.Unmarshal(out, &resp); jsonErr != nil {
+		return ""
+	}
+	return resp.Description
+}
+
 // PRDetail is a fresh, full PR-metadata read for opening a review (RESEARCH
 // §1). It is read on the OPEN click (not per-poll), so the Description tab
 // gets `body` (the Phase 11 list omits it) and the freshest head/base OIDs.

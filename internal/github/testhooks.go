@@ -29,6 +29,18 @@ func SetValidateRunnerForTest(fake func(ctx context.Context, parsed string) (can
 	return func() { validateRunner = prev }
 }
 
+// SetDescriptionRunnerForTest overrides RepoDescription's gh-read leg and
+// returns a restore func. The fake receives the already-canonicalized
+// owner/name and returns the description string exactly as ghDescription would
+// (degrade-don't-break: it returns "" — never an error). It is only reached
+// when Available() is true, so pair it with SetAvailableForTest(true) to drive
+// the captured-description path deterministically off any host.
+func SetDescriptionRunnerForTest(fake func(ctx context.Context, canonical string) string) (restore func()) {
+	prev := descriptionRunner
+	descriptionRunner = fake
+	return func() { descriptionRunner = prev }
+}
+
 // SetAvailableForTest overrides Available's PATH-lookup seam and returns a
 // restore func, so tests can force gh present/absent without touching the host
 // PATH (the create-by-repo gh-absent reject and verified paths both rely on it).
