@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Repo-First Projects
-status: verifying
-stopped_at: Phase 15 UI-SPEC approved
-last_updated: "2026-06-15T04:50:33.785Z"
-last_activity: 2026-06-14
+status: executing
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-06-15T05:08:54.805Z"
+last_activity: 2026-06-15
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 7
+  completed_plans: 5
 ---
 
 # Project State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-14)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 14 — managed-checkout-foundations
+**Current focus:** Phase 15 — repo-first-creation-flow
 
 ## Current Position
 
 Milestone: v1.4 Repo-First Projects (Kangent-Managed Checkouts)
-Phase: 15
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-14
+Phase: 15 (repo-first-creation-flow) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-06-15
 
 **v1.4 goal:** When GitHub integration is on, add a project by naming a GitHub repo — Kangent `gh repo clone`s and manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch — folder path becomes the optional fallback (folder-only when GitHub is off). Builds on v1.3's `internal/github` + worktree/cleanup gating. Phase numbering continues from 14.
 
@@ -91,6 +91,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 14-managed-checkout-foundations P02 | 9 min | 2 tasks | 4 files |
 | Phase 14-managed-checkout-foundations P03 | 7 min | 2 tasks | 4 files |
 | Phase 14-managed-checkout-foundations P04 | 7 min | 2 tasks | 2 files |
+| Phase 15 P01 | 5 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -134,6 +135,8 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 - [Phase 14-managed-checkout-foundations]: CKOUT-02: provisionWorktree does a managed-only, best-effort (error-discarded, D-05) default-branch fetch via worktree.DefaultBranch+FetchRef immediately before ResolveBase; folder projects skip it (D-24 preserved). The git read lives in worktree.DefaultBranch, not the api layer.
 - [Phase 14-managed-checkout-foundations]: CKOUT-03 gated delete: projectHandlers.delete branches on the managed marker — folder (managed=0) delete is byte-for-byte unchanged (dir never touched, D-09); managed (managed=1) runs a two-pass all-or-nothing gate (dirty/unpushed/stash/sessions over every task+PR worktree AND the clone root), 409 {reasons:[{kind,target}]} on any blocker (removes nothing), and on all-clear removes linked worktrees first then os.RemoveAll(clone) then FK-ordered rows (204).
 - [Phase 14-managed-checkout-foundations]: Managed-delete unpushed gate base is origin/<default>..HEAD with NO fetch (network-free, conservative); one base shared by the clone root + all task worktrees (they branch off it); an unresolvable default branch is a conservative blocker. Clone root removed only via os.RemoveAll, never git worktree remove (refuses the main worktree, exit 128).
+- [Phase 15]: RPROJ-02 description capture rides a DEDICATED github.RepoDescription(ctx, canonical) string (best-effort, error-free public signature: gh-absent/empty/nonzero/parse-fail all map to ""), NOT a widening of the shared ValidateRepo — its (ctx, ref) (canonical, verified, err) signature stays so the PATCH update handler is untouched.
+- [Phase 15]: createByRepo persists the captured description into projects.description at the repo-first INSERT (folder-create INSERT unchanged); description is server-side-only at create (D-05), surfaced editable later in Project settings, never a field in the Add dialog. Frontend: useCreateProject body widened to { name?; repo_path?; repo? }; Project type gains managed: boolean.
 
 ### Pending Todos
 
@@ -156,7 +159,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-15T04:50:33.777Z
-Stopped at: Phase 15 UI-SPEC approved
-Resume file: .planning/phases/15-repo-first-creation-flow/15-UI-SPEC.md
+Last session: 2026-06-15T05:08:43.189Z
+Stopped at: Completed 15-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation

@@ -91,7 +91,7 @@ Plans:
   4. A clone failure (auth, network, or missing repo) surfaces inline in the Add-project flow and leaves no half-created project — no orphan DB row and no partial directory on disk (CKOUT-04).
 **Plans**: 3 plans
 Plans:
-- [ ] 15-01-PLAN.md — Backend description-capture (best-effort gh repo view) + widen useCreateProject/Project type
+- [x] 15-01-PLAN.md — Backend description-capture (best-effort gh repo view) + widen useCreateProject/Project type
 - [ ] 15-02-PLAN.md — Repo-first AddProjectDialog (toggle, repo mode, name prefill, clone spinner, inline error) + embedded SPA rebuild
 - [ ] 15-03-PLAN.md — Human-verify gate: repo-first create flow end-to-end in the running app
 **UI hint**: yes
@@ -114,7 +114,7 @@ Plans:
 | 12. Open-a-Review | v1.3 | 7/7 | Complete | 2026-06-14 |
 | 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete | 2026-06-14 |
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete    | 2026-06-14 |
-| 15. Repo-First Creation Flow | v1.4 | 0/3 | Planned     | - |
+| 15. Repo-First Creation Flow | v1.4 | 1/3 | In Progress|  |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*

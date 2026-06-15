@@ -10,7 +10,7 @@ Requirements for the Repo-First Projects (Kangent-Managed Checkouts) milestone. 
 ### Repo-First Project Creation
 
 - [ ] **RPROJ-01**: When GitHub integration is on, the "Add project" flow defaults to repo-first — the user enters a GitHub repo (`owner/name`) instead of picking a local folder.
-- [ ] **RPROJ-02**: Entering a valid repo auto-derives the project name (prefilled from the repo name, editable before create) and auto-fills the GitHub link and description.
+- [x] **RPROJ-02**: Entering a valid repo auto-derives the project name (prefilled from the repo name, editable before create) and auto-fills the GitHub link and description.
 - [ ] **RPROJ-03**: The user can still create a project from a local folder when GitHub is on — the folder path is the optional alternative, not the default.
 - [ ] **RPROJ-04**: When GitHub integration is off, project creation is folder-only (exactly as before v1.4) and no repo-first UI appears.
 - [x] **RPROJ-05**: The repo is validated via `gh` before any clone is attempted; an invalid or inaccessible repo is rejected inline without creating a project.
@@ -56,7 +56,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | RPROJ-01 | Phase 15 | Pending |
-| RPROJ-02 | Phase 15 | Pending |
+| RPROJ-02 | Phase 15 | Complete |
 | RPROJ-03 | Phase 15 | Pending |
 | RPROJ-04 | Phase 15 | Pending |
 | RPROJ-05 | Phase 14 | Complete |
