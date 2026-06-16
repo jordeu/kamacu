@@ -4,8 +4,8 @@ milestone: v1.4
 milestone_name: Repo-First Projects
 status: shipped
 stopped_at: v1.4 shipped 2026-06-15 — audited (passed), archived, tagged. No milestone active; run /gsd:new-milestone.
-last_updated: "2026-06-15T05:40:15.440Z"
-last_activity: 2026-06-15
+last_updated: "2026-06-16T04:40:25.000Z"
+last_activity: 2026-06-16
 progress:
   total_phases: 2
   completed_phases: 2
@@ -155,10 +155,11 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 |---|-------------|------|--------|-----------|
 | 260613-osu | Warn when a linked GitHub repo cannot be verified (surface verify_state) — completes GHPRJ-03 soft-save-with-warning | 2026-06-13 | 41f3d50 | [260613-osu-warn-when-a-linked-github-repo-cannot-be](./quick/260613-osu-warn-when-a-linked-github-repo-cannot-be/) |
 | 260613-ph5 | Make GitHub repo-link validation MANDATORY (hard-block invalid repos with highlighted error) — supersedes 260613-osu's soft verify_state advisory; reverses D-11 for the repo-link UX per user decision | 2026-06-13 | 9ea0df6 | [260613-ph5-make-github-repo-link-validation-mandato](./quick/260613-ph5-make-github-repo-link-validation-mandato/) |
+| 260616-8l7 | Fix Review-column refresh showing stale RED dots: `reduceChecks` now dedupes superseded check runs (keeps the latest run per check name, matching GitHub's rollup state) so a re-run/concurrency-cancelled FAILURE no longer paints a green PR red. Initial cache attempt-floor diagnosis was wrong and discarded (service.go unchanged). Code + tests done; Task 3 human-verify pending (user verifies against live instance). | 2026-06-16 | ccdb2d5 | [260616-8l7-the-refresh-button-at-review-column-seem](./quick/260616-8l7-the-refresh-button-at-review-column-seem/) |
 
 ## Session Continuity
 
-Last session: 2026-06-15T05:14:55.984Z
-Stopped at: Completed 15-02-PLAN.md
-Resume file: None
+Last session: 2026-06-16T04:40:25Z
+Stopped at: Quick task 260616-8l7 — real fix (superseded check-run dedup in reduceChecks) implemented + tested + binary rebuilt; awaiting human-verify (Task 3, blocking) against the live instance. Prior cache-floor diagnosis was wrong and reset out of the branch.
+Resume file: .planning/quick/260616-8l7-the-refresh-button-at-review-column-seem/260616-8l7-PLAN.md (Task 3 human-verify gate)
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
