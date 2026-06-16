@@ -66,6 +66,69 @@ func TestReduceChecks(t *testing.T) {
 	}
 }
 
+// TestReduceChecksSupersededRuns is the regression guard for the real
+// refresh-button bug: gh's statusCheckRollup returns EVERY historical run of a
+// check (original, re-run, concurrency-cancelled), and a stale superseded
+// FAILURE/CANCELLED entry must NOT paint the dot red. latestPerCheck keeps only
+// the most recent run per check name; reduceChecks tallies that. These cases
+// prove the dedup picks by run TIMESTAMP (not "any success wins"), matching
+// GitHub's rollup state — verified live against seqeralabs/fusion #1461 (pass),
+// #1459 (pass), #1352 (fail).
+func TestReduceChecksSupersededRuns(t *testing.T) {
+	const (
+		tEarly = "2026-06-15T14:18:57Z"
+		tLate  = "2026-06-16T03:35:03Z"
+	)
+	tests := []struct {
+		name   string
+		rollup []checkEntry
+		want   string
+	}{
+		// fusion #1461: an old "Unit tests" FAILURE superseded by a re-run
+		// SUCCESS → GitHub shows SUCCESS. The latest run wins.
+		{"superseded failure ignored", []checkEntry{
+			{Typename: "CheckRun", Name: "Unit tests", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: tEarly},
+			{Typename: "CheckRun", Name: "Unit tests", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: tLate},
+		}, "pass"},
+
+		// fusion #1459: every job has a concurrency-CANCELLED attempt plus a
+		// later SUCCESS re-run → GitHub shows SUCCESS.
+		{"all cancelled superseded by reruns", []checkEntry{
+			{Typename: "CheckRun", Name: "build", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: tEarly},
+			{Typename: "CheckRun", Name: "build", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: tLate},
+			{Typename: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: tEarly},
+			{Typename: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: tLate},
+		}, "pass"},
+
+		// fusion #1352: a genuinely failing check with only ONE run (not
+		// superseded) → GitHub shows FAILURE. Must stay "fail".
+		{"genuine single failure stays fail", []checkEntry{
+			{Typename: "CheckRun", Name: "Analysis [golangci-lint]", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: tEarly},
+			{Typename: "CheckRun", Name: "Unit tests", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: tEarly},
+		}, "fail"},
+
+		// Critical: proves we take the LATEST run, not "any success wins". A
+		// SUCCESS superseded by a later FAILURE re-run → "fail".
+		{"latest run is the failure", []checkEntry{
+			{Typename: "CheckRun", Name: "Unit tests", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: tEarly},
+			{Typename: "CheckRun", Name: "Unit tests", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: tLate},
+		}, "fail"},
+
+		// A completed SUCCESS superseded by a still-running re-run → "pending".
+		{"pending rerun supersedes completed", []checkEntry{
+			{Typename: "CheckRun", Name: "Unit tests", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: tEarly},
+			{Typename: "CheckRun", Name: "Unit tests", Status: "IN_PROGRESS", StartedAt: tLate},
+		}, "pending"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reduceChecks(tt.rollup); got != tt.want {
+				t.Errorf("reduceChecks(%+v) = %q, want %q", tt.rollup, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestReduceChecksSkippedHeavy is the explicit Pitfall-1 regression guard:
 // a rollup dominated by SKIPPED entries (the cli/cli sample was ~30% SKIPPED)
 // with the rest SUCCESS must reduce to "pass", never "fail".

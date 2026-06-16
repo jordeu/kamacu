@@ -38,11 +38,72 @@ type PRSummary struct {
 // API — uses status+conclusion) and StatusContext (legacy commit statuses,
 // e.g. Prow tide / EasyCLA — uses state, no conclusion). Both decode into this
 // one struct; reduceChecks branches on Typename.
+//
+// The rollup contains EVERY historical run of a check — original runs,
+// re-runs, AND concurrency-cancelled attempts — so identity (Name/Context) and
+// run timestamps (StartedAt/CompletedAt/CreatedAt) are decoded too. GitHub's
+// own rollup state keeps only the LATEST run per check name; latestPerCheck
+// reproduces that before reduceChecks tallies, so a stale superseded
+// FAILURE/CANCELLED entry does not paint the dot red. No change to the
+// `gh … --json statusCheckRollup` flags is needed: these sub-fields already
+// ride along (CheckRun carries name/startedAt/completedAt; StatusContext
+// carries context/createdAt).
 type checkEntry struct {
-	Typename   string `json:"__typename"`
-	Status     string `json:"status"`     // CheckRun
-	Conclusion string `json:"conclusion"` // CheckRun
-	State      string `json:"state"`      // StatusContext
+	Typename    string `json:"__typename"`
+	Status      string `json:"status"`     // CheckRun
+	Conclusion  string `json:"conclusion"` // CheckRun
+	State       string `json:"state"`      // StatusContext
+	Name        string `json:"name"`        // CheckRun identity
+	Context     string `json:"context"`     // StatusContext identity
+	StartedAt   string `json:"startedAt"`   // CheckRun run time
+	CompletedAt string `json:"completedAt"` // CheckRun run time
+	CreatedAt   string `json:"createdAt"`   // StatusContext run time
+}
+
+// identity collapses re-runs: gh returns every historical run of a check, but
+// GitHub's rollup state keeps only the latest run per name. CheckRun keys on
+// name, StatusContext on context (kept in separate namespaces).
+func (c checkEntry) identity() string {
+	if c.Typename == "StatusContext" {
+		return "ctx:" + c.Context
+	}
+	return "run:" + c.Name
+}
+
+// ranAt is the run's ordering timestamp (ISO 8601 sorts lexically == chrono).
+// A later run supersedes earlier ones of the same identity.
+func (c checkEntry) ranAt() string {
+	if c.StartedAt != "" {
+		return c.StartedAt
+	}
+	if c.CompletedAt != "" {
+		return c.CompletedAt
+	}
+	return c.CreatedAt // StatusContext
+}
+
+// latestPerCheck keeps only the most recent run of each check identity. Without
+// it a stale superseded FAILURE/CANCELLED entry (from a re-run or a
+// concurrency-cancelled attempt) paints the dot red even though CI is green —
+// e.g. seqeralabs/fusion #1461 (old "Unit tests" FAILURE + re-run SUCCESS) and
+// #1459 (every job CANCELLED by concurrency + a SUCCESS re-run) are both green
+// on GitHub but reduced to "fail" before this fix.
+//
+// The returned slice order is nondeterministic (map iteration); that is fine
+// because reduceChecks only ORs booleans over it — do NOT add anything that
+// depends on the order here.
+func latestPerCheck(rollup []checkEntry) []checkEntry {
+	latest := make(map[string]checkEntry, len(rollup))
+	for _, c := range rollup {
+		if prev, ok := latest[c.identity()]; !ok || c.ranAt() > prev.ranAt() {
+			latest[c.identity()] = c
+		}
+	}
+	out := make([]checkEntry, 0, len(latest))
+	for _, c := range latest {
+		out = append(out, c)
+	}
+	return out
 }
 
 // prRaw is the lenient decode shape for ONE PR from `gh pr list --json …`.
@@ -73,10 +134,17 @@ type prRaw struct {
 // (Pitfall 1): SKIPPED/NEUTRAL/STALE map to NON-failing — real PRs are full
 // of them, and treating them as failures would paint nearly every dot red.
 // Aggregate precedence is fail > pending > pass.
+//
+// Before tallying, latestPerCheck collapses superseded re-runs: gh returns
+// every historical run of a check (original, re-run, concurrency-cancelled),
+// and GitHub's own rollup state keeps only the latest run per name. Skipping
+// this dedup lets one stale superseded FAILURE/CANCELLED entry paint the dot
+// red even when CI is green (seqeralabs/fusion #1461, #1459).
 func reduceChecks(rollup []checkEntry) string {
 	if len(rollup) == 0 {
 		return "none" // render nothing (D-04)
 	}
+	rollup = latestPerCheck(rollup) // collapse superseded re-runs (latest run per name wins)
 	anyFail, anyPending := false, false
 	for _, c := range rollup {
 		var sig string // "ok" | "pending" | "fail"
