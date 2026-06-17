@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Sharper Review Column
-status: defining-requirements
-stopped_at: v1.5 started 2026-06-17 — milestone scoped, defining requirements → roadmap.
+status: roadmap-complete
+stopped_at: v1.5 roadmap created 2026-06-17 — 1 phase (16), all 9 requirements mapped. Ready to plan Phase 16.
 last_updated: "2026-06-17T00:00:00.000Z"
 last_activity: 2026-06-17
 progress:
-  total_phases: 0
+  total_phases: 1
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,19 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-15)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.5 Sharper Review Column — defining requirements → roadmap
+**Current focus:** v1.5 Sharper Review Column — roadmap complete (Phase 16), ready to plan
 
 ## Current Position
 
-Milestone: v1.5 Sharper Review Column — scoping
-Phase: Not started (defining requirements)
+Milestone: v1.5 Sharper Review Column
+Phase: 16 — Sharper Review Column (not started; roadmap complete)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-17 — Milestone v1.5 started
+Status: Roadmap complete — ready to plan Phase 16
+Last activity: 2026-06-17 — Roadmap created (1 phase, 9/9 requirements mapped)
 
 **v1.5 goal:** Make the Review column convey two independent signals at a glance — your agent's state and the PR's CI state — and stop losing sight of PRs after you review them. Four targets: (1) agent-state dot on PR cards with an open review session; (2) colored left-border highlight for open-session cards; (3) CI status as icons (green check / red cross / orange circle), freeing the dot for agent state; (4) a "Recently Reviewed" bottom section (`reviewed-by:@me state:open`, approve OR request-changes) that holds reviewed PRs until merged or closed, with top-section precedence (no duplicates).
 
-**Next:** define `.planning/REQUIREMENTS.md` → spawn roadmapper → `/gsd:plan-phase 16`.
+**Phase 16 (Sharper Review Column)** — single cohesive, all-internal, reuse-heavy phase carrying all 9 requirements (SIGNL-01/02/03, CHECK-01/02, REVWD-01/02/03/04). Natural plan-level seam (not a phase split): a data plan (second `reviewed-by:@me state:open` `gh pr list` search cloned from `prlist.go`, fronted by the same per-repo TTL cache `Service`; two-list top-precedence dedup; per-PR open-session/agent state joined from the `source='github_pr'` task via `GET /api/agents/status`) and a rendering plan (CI dot → green-check/red-cross/orange-circle icons with `none` rendering nothing; reused `StatusDot` + D-44 left border on cards in both sections; the Recently Reviewed section reusing the column's refresh/visibility-paused poll/loading/degraded/empty behavior). Touched files concentrate in `PRCard.tsx` + `ReviewColumn.tsx` (+ the `internal/github` list path and `usePullRequests`).
+
+**Next:** `/gsd:plan-phase 16`.
 
 **Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render items in `PRCard.tsx`/`ReviewColumn.tsx` — exactly the files v1.5 touches, a natural moment to clear them.
 

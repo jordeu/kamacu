@@ -58,21 +58,21 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SIGNL-01 | TBD | Pending |
-| SIGNL-02 | TBD | Pending |
-| SIGNL-03 | TBD | Pending |
-| CHECK-01 | TBD | Pending |
-| CHECK-02 | TBD | Pending |
-| REVWD-01 | TBD | Pending |
-| REVWD-02 | TBD | Pending |
-| REVWD-03 | TBD | Pending |
-| REVWD-04 | TBD | Pending |
+| SIGNL-01 | Phase 16 | Pending |
+| SIGNL-02 | Phase 16 | Pending |
+| SIGNL-03 | Phase 16 | Pending |
+| CHECK-01 | Phase 16 | Pending |
+| CHECK-02 | Phase 16 | Pending |
+| REVWD-01 | Phase 16 | Pending |
+| REVWD-02 | Phase 16 | Pending |
+| REVWD-03 | Phase 16 | Pending |
+| REVWD-04 | Phase 16 | Pending |
 
 **Coverage:**
 - v1.5 requirements: 9 total
-- Mapped to phases: 0 (set by roadmapper)
-- Unmapped: 9 ⚠️ (resolved at roadmap creation)
+- Mapped to phases: 9 (all → Phase 16, Sharper Review Column)
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-17*
-*Last updated: 2026-06-17 after initial definition*
+*Last updated: 2026-06-17 — roadmap created; all 9 requirements mapped to Phase 16*
