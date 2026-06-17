@@ -7,17 +7,15 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatAgo } from "@/lib/time";
-import { useAgentStatuses } from "@/api/agents";
-import { StatusDot } from "@/components/StatusDot";
+import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
 import { useOpenReview, type PRSummary } from "@/api/pullRequests";
 
-/** CI status → bare lucide glyph (CHECK-01/02, D-01/D-02/D-03). Replaces the
- *  old colored dot so the colored-dot vocabulary is freed for agent state.
- *  pass → green Check, fail → red X, running → STATIC amber Circle (no spinner).
- *  "none" never reaches here — the icon is rendered conditionally on
- *  `pr.checks !== "none"`, which preserves the no-icon/no-gutter behavior. Note
- *  the CI amber is `text-amber-500` (a half-step deeper than the dot/border
- *  `amber-400`) so the two ambers are not pixel-identical (UI-SPEC §Color). */
+/** CI status → bare lucide glyph (CHECK-01/02, D-01/D-02/D-03). The card's ONLY
+ *  mark: pass → green Check, fail → red X, running → STATIC amber Circle (no
+ *  spinner). "none" never reaches here — the icon is rendered conditionally on
+ *  `pr.checks !== "none"`, preserving the no-icon/no-gutter behavior. The CI
+ *  amber is `text-amber-500` (a half-step deeper than the rail's `amber-400`)
+ *  so the two ambers are never pixel-identical (UI-SPEC §Color). */
 function checksIcon(
   checks: Exclude<PRSummary["checks"], "none">,
 ): { Icon: typeof Check; className: string; tooltip: string } {
@@ -31,12 +29,34 @@ function checksIcon(
   }
 }
 
-/** Presentational variant of TaskCard's CardRow/CardShell (D-01). The body is
- *  now the OPEN trigger (Phase 12 D-02): clicking/Enter/Space opens or reattaches
- *  the PR review and routes to its task-like view (UI-SPEC §A). The ↗ external
- *  link stops propagation so it opens GitHub only; the checks dot stays
- *  non-interactive (a click on it falls through to open). It is NOT a dnd item
- *  (cursor-pointer, never cursor-grab — D-13). */
+/** Agent session state → left-rail color + label (SIGNL-01/02, D-04/D-06/D-07).
+ *  Checkpoint redesign (2026-06-17): agent state is shown ONLY by a colored left
+ *  rail — the old `StatusDot` was removed because a filled dot sitting beside the
+ *  line-art CI glyph read as two clashing marks. Any rail = an open review
+ *  session; the rail COLOR is the agent state, mirroring StatusDot's `dotMeta`
+ *  palette (working green, waiting amber + pulse, idle blue, exited gray). The
+ *  two signals now live on fully separate channels: left edge = your agent,
+ *  right glyph = the PR's CI — nothing sits side-by-side, nothing misaligns. */
+function agentRail(
+  status: AgentStatusEntry["status"],
+): { barClass: string; pulse: boolean; label: string } {
+  switch (status) {
+    case "working":
+      return { barClass: "bg-green-500", pulse: false, label: "working" };
+    case "waiting":
+      return { barClass: "bg-amber-400", pulse: true, label: "waiting for input" };
+    case "idle":
+      return { barClass: "bg-blue-500/60", pulse: false, label: "idle" };
+    case "exited":
+      return { barClass: "bg-zinc-600", pulse: false, label: "exited" };
+  }
+}
+
+/** Presentational variant of TaskCard (D-01/D-13). The body is the OPEN trigger
+ *  (Phase 12 D-02): clicking/Enter/Space opens or reattaches the PR review and
+ *  routes to its task-like view. The ↗ external link stops propagation so it
+ *  opens GitHub only. It is NOT a dnd item (cursor-pointer, never cursor-grab —
+ *  D-13). Agent state shows as a left rail; CI as a single right glyph. */
 export function PRCard({
   pr,
   projectId,
@@ -48,12 +68,13 @@ export function PRCard({
   const openReview = useOpenReview(projectId);
 
   // Shared 5s agent-status poll (the same query task cards use). The matched
-  // entry is the linked review session (source='github_pr'); a single lookup
-  // drives BOTH the StatusDot and the left-border class (D-08/D-15).
+  // entry is the linked review session (source='github_pr'); it drives the left
+  // rail — the card's sole agent-state signal (D-08/D-15).
   const { data: agents } = useAgentStatuses();
   const entry = agents?.find(
     (e) => e.projectId === projectId && e.prNumber === pr.number,
   );
+  const rail = entry ? agentRail(entry.status) : null;
 
   // Hoisted out of the meta-line render to clear the carried Date.now()-in-render
   // advisory (D-50, non-blocking lint cleanup).
@@ -73,7 +94,12 @@ export function PRCard({
     <div
       role="button"
       tabIndex={0}
-      aria-label={`Open review for PR #${pr.number}`}
+      aria-label={
+        rail
+          ? `Open review for PR #${pr.number} — agent ${rail.label}`
+          : `Open review for PR #${pr.number}`
+      }
+      title={rail ? `Agent ${rail.label}` : undefined}
       aria-busy={openReview.isPending}
       onClick={open}
       onKeyDown={(e) => {
@@ -83,25 +109,32 @@ export function PRCard({
         }
       }}
       className={cn(
-        "rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-        // Session-border state matrix (D-06/D-07): keyed ONLY on `entry`. This
-        // intentionally diverges from TaskCard's waiting-only D-44 rule — any
-        // open session gets an always-on blue left edge; waiting shifts it amber.
-        // The border itself is STATIC (the pulse lives on the StatusDot).
-        entry && entry.status === "waiting" && "border-l-2 border-l-amber-400",
-        entry && entry.status !== "waiting" && "border-l-2 border-l-blue-500/60",
+        "relative overflow-hidden rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
         openReview.isPending && "opacity-60",
       )}
     >
+      {/* Agent-state left rail (SIGNL-01/02, D-04/D-06/D-07) — the card's ONLY
+          agent signal (the dot was removed in the checkpoint redesign). Any rail
+          = an open session; its color is the agent state; waiting pulses (the
+          attention cue, the old dot's `animate-pulse` moved here). No session →
+          no rail, no gutter, identical to a plain card. aria-hidden: state is
+          exposed via the card's aria-label/title. */}
+      {rail && (
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-y-0 left-0 w-[3px]",
+            rail.barClass,
+            rail.pulse && "animate-pulse motion-reduce:animate-none",
+          )}
+        />
+      )}
       {/* Row 1: title (flex-1 owns extra width) + right-aligned cluster. Locked
-          order: [title]·[StatusDot if session]·[CI icon if checks≠none]·[↗]. */}
+          order (redesigned): [title]·[CI icon if checks≠none]·[↗]. */}
       <div className="flex gap-2">
         <span className="line-clamp-2 flex-1 text-sm font-medium">
           {pr.title}
         </span>
-        {/* Agent dot — the "mine" signal, read first (SIGNL-01). No entry → no
-            dot, no gutter (the dotless-card rule, matches TaskCard). */}
-        {entry && <StatusDot entry={entry} className="mt-[6px]" />}
         {pr.checks !== "none" && (() => {
           // none → render nothing: no icon, no reserved gutter, no layout shift
           // (CHECK-02, the dotless-card rule echoed from TaskCard).
@@ -138,8 +171,7 @@ export function PRCard({
         #{pr.number} · @{pr.author} · updated {formatAgo(pr.updatedAt, now)}{" "}
         ago
       </div>
-      {/* In-flight + error feedback (UI-SPEC §F). The endpoint is synchronous;
-          this primarily covers the open mutation while it provisions. */}
+      {/* In-flight + error feedback (UI-SPEC §F). */}
       {openReview.isPending && (
         <div className="mt-1 text-xs text-muted-foreground">
           Setting up the review worktree…
