@@ -1,26 +1,33 @@
-import { ExternalLink } from "lucide-react";
+import { Check, X, Circle, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { formatAgo } from "@/lib/time";
+import { useAgentStatuses } from "@/api/agents";
+import { StatusDot } from "@/components/StatusDot";
 import { useOpenReview, type PRSummary } from "@/api/pullRequests";
 
-/** Checks-dot visual language echoed from StatusDot's dotMeta (D-03). A small
- *  local 3-way switch keeps this independent of the agent-status-shaped
- *  StatusDot. "none" never reaches here — the dot is rendered conditionally. */
-function checksDot(
+/** CI status → bare lucide glyph (CHECK-01/02, D-01/D-02/D-03). Replaces the
+ *  old colored dot so the colored-dot vocabulary is freed for agent state.
+ *  pass → green Check, fail → red X, running → STATIC amber Circle (no spinner).
+ *  "none" never reaches here — the icon is rendered conditionally on
+ *  `pr.checks !== "none"`, which preserves the no-icon/no-gutter behavior. Note
+ *  the CI amber is `text-amber-500` (a half-step deeper than the dot/border
+ *  `amber-400`) so the two ambers are not pixel-identical (UI-SPEC §Color). */
+function checksIcon(
   checks: Exclude<PRSummary["checks"], "none">,
-): { className: string; tooltip: string } {
+): { Icon: typeof Check; className: string; tooltip: string } {
   switch (checks) {
     case "pass":
-      return { className: "bg-green-500", tooltip: "Checks passing" };
+      return { Icon: Check, className: "text-green-500", tooltip: "Checks passing" };
     case "fail":
-      return { className: "bg-red-500", tooltip: "Checks failing" };
+      return { Icon: X, className: "text-red-500", tooltip: "Checks failing" };
     case "pending":
-      return { className: "bg-amber-400", tooltip: "Checks running" };
+      return { Icon: Circle, className: "text-amber-500", tooltip: "Checks running" };
   }
 }
 
@@ -39,6 +46,18 @@ export function PRCard({
 }) {
   const navigate = useNavigate();
   const openReview = useOpenReview(projectId);
+
+  // Shared 5s agent-status poll (the same query task cards use). The matched
+  // entry is the linked review session (source='github_pr'); a single lookup
+  // drives BOTH the StatusDot and the left-border class (D-08/D-15).
+  const { data: agents } = useAgentStatuses();
+  const entry = agents?.find(
+    (e) => e.projectId === projectId && e.prNumber === pr.number,
+  );
+
+  // Hoisted out of the meta-line render to clear the carried Date.now()-in-render
+  // advisory (D-50, non-blocking lint cleanup).
+  const now = Date.now();
 
   const open = () => {
     // In-flight guard (RESEARCH Pitfall 5): a double-click must not fire two
@@ -63,27 +82,38 @@ export function PRCard({
           open();
         }
       }}
-      className={`rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500${
-        openReview.isPending ? " opacity-60" : ""
-      }`}
+      className={cn(
+        "rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+        // Session-border state matrix (D-06/D-07): keyed ONLY on `entry`. This
+        // intentionally diverges from TaskCard's waiting-only D-44 rule — any
+        // open session gets an always-on blue left edge; waiting shifts it amber.
+        // The border itself is STATIC (the pulse lives on the StatusDot).
+        entry && entry.status === "waiting" && "border-l-2 border-l-amber-400",
+        entry && entry.status !== "waiting" && "border-l-2 border-l-blue-500/60",
+        openReview.isPending && "opacity-60",
+      )}
     >
-      {/* Row 1: title (flex-1 owns extra width) + right-aligned dot/↗ cluster. */}
+      {/* Row 1: title (flex-1 owns extra width) + right-aligned cluster. Locked
+          order: [title]·[StatusDot if session]·[CI icon if checks≠none]·[↗]. */}
       <div className="flex gap-2">
         <span className="line-clamp-2 flex-1 text-sm font-medium">
           {pr.title}
         </span>
+        {/* Agent dot — the "mine" signal, read first (SIGNL-01). No entry → no
+            dot, no gutter (the dotless-card rule, matches TaskCard). */}
+        {entry && <StatusDot entry={entry} className="mt-[6px]" />}
         {pr.checks !== "none" && (() => {
-          // none → render nothing: no dot, no reserved gutter, no layout shift
-          // (D-04, the dotless-card rule echoed from TaskCard).
-          const { className, tooltip } = checksDot(pr.checks);
+          // none → render nothing: no icon, no reserved gutter, no layout shift
+          // (CHECK-02, the dotless-card rule echoed from TaskCard).
+          const { Icon, className, tooltip } = checksIcon(pr.checks);
           return (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex shrink-0">
-                  <span
+                  <Icon
                     role="img"
                     aria-label={tooltip}
-                    className={`size-2 rounded-full shrink-0 mt-[6px] ${className}`}
+                    className={`size-3.5 shrink-0 mt-[6px] ${className}`}
                   />
                 </span>
               </TooltipTrigger>
@@ -105,7 +135,7 @@ export function PRCard({
       </div>
       {/* Row 2: meta line — #number · @author · updated Xh ago (D-02 minimal). */}
       <div className="truncate text-xs text-muted-foreground">
-        #{pr.number} · @{pr.author} · updated {formatAgo(pr.updatedAt, Date.now())}{" "}
+        #{pr.number} · @{pr.author} · updated {formatAgo(pr.updatedAt, now)}{" "}
         ago
       </div>
       {/* In-flight + error feedback (UI-SPEC §F). The endpoint is synchronous;
