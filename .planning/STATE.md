@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Sharper Review Column
-status: planning
-stopped_at: Phase 16 UI-SPEC approved
-last_updated: "2026-06-17T07:24:22.458Z"
-last_activity: 2026-06-17 — Roadmap created (1 phase, 9/9 requirements mapped)
+status: executing
+stopped_at: Completed 16-01-PLAN.md
+last_updated: "2026-06-17T09:07:26.150Z"
+last_activity: 2026-06-17
 progress:
   total_phases: 1
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-15)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.5 Sharper Review Column — roadmap complete (Phase 16), ready to plan
+**Current focus:** Phase 16 — sharper-review-column
 
 ## Current Position
 
 Milestone: v1.5 Sharper Review Column
-Phase: 16 — Sharper Review Column (not started; roadmap complete)
-Plan: —
-Status: Roadmap complete — ready to plan Phase 16
-Last activity: 2026-06-17 — Roadmap created (1 phase, 9/9 requirements mapped)
+Phase: 16 (sharper-review-column) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-06-17
 
 **v1.5 goal:** Make the Review column convey two independent signals at a glance — your agent's state and the PR's CI state — and stop losing sight of PRs after you review them. Four targets: (1) agent-state dot on PR cards with an open review session; (2) colored left-border highlight for open-session cards; (3) CI status as icons (green check / red cross / orange circle), freeing the dot for agent state; (4) a "Recently Reviewed" bottom section (`reviewed-by:@me state:open`, approve OR request-changes) that holds reviewed PRs until merged or closed, with top-section precedence (no duplicates).
 
@@ -92,6 +92,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 14-managed-checkout-foundations P04 | 7 min | 2 tasks | 2 files |
 | Phase 15 P01 | 5 min | 2 tasks | 7 files |
 | Phase 15-repo-first-creation-flow P02 | 3 min | 2 tasks | 2 files |
+| Phase 16 P01 | 10 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,8 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 - [Phase 15]: createByRepo persists the captured description into projects.description at the repo-first INSERT (folder-create INSERT unchanged); description is server-side-only at create (D-05), surfaced editable later in Project settings, never a field in the Add dialog. Frontend: useCreateProject body widened to { name?; repo_path?; repo? }; Project type gains managed: boolean.
 - [Phase 15-repo-first-creation-flow]: RPROJ-01/03/04: Add-project dialog gains an integration-gated 'GitHub repo' | 'Local folder' segmented toggle (repo default) reusing ui/tabs.tsx as a controlled segmented control; folder-only byte-for-byte when github_integration is off (repo branch never mounts).
 - [Phase 15-repo-first-creation-flow]: RPROJ-02/CKOUT-04: repo mode prefills the editable Name from a pure local owner/name parse (nameEdited guard, no gh call, D-09), submit POSTs { repo } with a blocking 'Cloning <owner/name>…' Loader2 spinner; failures surface in the mirrored destructive-alert box, dialog open, values+mode preserved, no half-created-project copy (Phase-14 atomicity). web/dist rebuilt; only index.html committed (hashed assets gitignored).
+- [Phase 16]: Refactored runGH into listPRs(ctx, repo, repoDir, search): one gh-list primitive both review queues share; fetchLists runs both searches in one cache cycle and degrades both together (D-12); dedupeReviewed drops reviewed PRs whose number is in awaiting (top precedence, D-14)
+- [Phase 16]: Result widened with reviewed array sharing state/stale/fetchedAt; repoEntry caches both lists (cachedAwaiting/cachedReviewed + hasCache) under one TTL/floor; /api/agents/status entries gain prNumber/source via SELECT widening (no migration — columns from 00007), D-15
 
 ### Pending Todos
 
@@ -162,7 +165,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-17T07:24:22.455Z
-Stopped at: Phase 16 UI-SPEC approved
-Resume file: .planning/phases/16-sharper-review-column/16-UI-SPEC.md
+Last session: 2026-06-17T09:07:18.003Z
+Stopped at: Completed 16-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation

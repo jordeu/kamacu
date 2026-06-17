@@ -11,7 +11,7 @@ Requirements for the Sharper Review Column milestone. Each maps to a roadmap pha
 
 The Review column must show two independent signals per PR — *your* agent's state and the PR's CI state — without the two being confused for each other.
 
-- [ ] **SIGNL-01**: When an open review session exists for a PR, its card shows the agent status dot (working / waiting / idle / exited) using the same palette and semantics as task cards (reused `StatusDot`)
+- [x] **SIGNL-01**: When an open review session exists for a PR, its card shows the agent status dot (working / waiting / idle / exited) using the same palette and semantics as task cards (reused `StatusDot`)
 - [ ] **SIGNL-02**: A PR card with an open review session is highlighted with a colored left border (the same visual language as the waiting-task card border, D-44) so open-session PRs are distinguishable at a glance
 - [ ] **SIGNL-03**: The agent dot and open-session border apply to PR cards in both the "awaiting your review" and "Recently Reviewed" sections
 
@@ -22,10 +22,10 @@ The Review column must show two independent signals per PR — *your* agent's st
 
 ### Recently Reviewed
 
-- [ ] **REVWD-01**: A "Recently Reviewed" section appears at the bottom of the Review column, listing open PRs the user has reviewed — approve OR request-changes — via `reviewed-by:@me state:open`, rendered as the same PR cards (click to open/reattach the review)
-- [ ] **REVWD-02**: A reviewed PR stays in Recently Reviewed until its PR is merged or closed, then it leaves the list
-- [ ] **REVWD-03**: A PR appears in exactly one section — the top "awaiting your review" section takes precedence, so a re-requested PR returns to the top and is never duplicated in Recently Reviewed
-- [ ] **REVWD-04**: The Recently Reviewed section shares the Review column's manual refresh + visibility-paused auto-poll and reuses the same loading / degraded states; when it holds no PRs it is quietly omitted (no blank section, no fabricated count)
+- [x] **REVWD-01**: A "Recently Reviewed" section appears at the bottom of the Review column, listing open PRs the user has reviewed — approve OR request-changes — via `reviewed-by:@me state:open`, rendered as the same PR cards (click to open/reattach the review)
+- [x] **REVWD-02**: A reviewed PR stays in Recently Reviewed until its PR is merged or closed, then it leaves the list
+- [x] **REVWD-03**: A PR appears in exactly one section — the top "awaiting your review" section takes precedence, so a re-requested PR returns to the top and is never duplicated in Recently Reviewed
+- [x] **REVWD-04**: The Recently Reviewed section shares the Review column's manual refresh + visibility-paused auto-poll and reuses the same loading / degraded states; when it holds no PRs it is quietly omitted (no blank section, no fabricated count)
 
 ## Future Requirements
 
@@ -58,15 +58,15 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SIGNL-01 | Phase 16 | Pending |
+| SIGNL-01 | Phase 16 | Complete |
 | SIGNL-02 | Phase 16 | Pending |
 | SIGNL-03 | Phase 16 | Pending |
 | CHECK-01 | Phase 16 | Pending |
 | CHECK-02 | Phase 16 | Pending |
-| REVWD-01 | Phase 16 | Pending |
-| REVWD-02 | Phase 16 | Pending |
-| REVWD-03 | Phase 16 | Pending |
-| REVWD-04 | Phase 16 | Pending |
+| REVWD-01 | Phase 16 | Complete |
+| REVWD-02 | Phase 16 | Complete |
+| REVWD-03 | Phase 16 | Complete |
+| REVWD-04 | Phase 16 | Complete |
 
 **Coverage:**
 - v1.5 requirements: 9 total

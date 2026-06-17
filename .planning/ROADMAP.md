@@ -88,7 +88,7 @@ Full details: [milestones/v1.4-ROADMAP.md](milestones/v1.4-ROADMAP.md)
   - Touched files concentrate in `web/src/components/board/PRCard.tsx` and `web/src/components/board/ReviewColumn.tsx` (plus the `internal/github` list path and the `usePullRequests` hook). The two carried `Date.now()`-in-render lint advisories live in exactly these two files — clearing them here is a natural, non-blocking moment (build gate is already green; do not let it block the phase).
 **Plans**: 2 plans
 Plans:
-- [ ] 16-01-PLAN.md — Data layer: second reviewed-by:@me search + one-cycle cache + server-side dedup (D-12/13/14), pr_number/source on agent status (D-15), extended web/src/api types
+- [x] 16-01-PLAN.md — Data layer: second reviewed-by:@me search + one-cycle cache + server-side dedup (D-12/13/14), pr_number/source on agent status (D-15), extended web/src/api types
 - [ ] 16-02-PLAN.md — Rendering: CI icons (CHECK-01/02), agent dot + blue/amber session border on PRCard (SIGNL-01/02/03), Recently reviewed section in ReviewColumn (REVWD-01/03/04)
 **UI hint**: yes
 
@@ -111,7 +111,7 @@ Plans:
 | 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete | 2026-06-14 |
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete | 2026-06-14 |
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
-| 16. Sharper Review Column | v1.5 | 0/? | Not started | - |
+| 16. Sharper Review Column | v1.5 | 1/2 | In Progress|  |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
