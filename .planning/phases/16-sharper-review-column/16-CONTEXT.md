@@ -22,14 +22,15 @@ Out of scope (other phases / deferred): in-app review actions, time-windowed/cap
 - **D-02:** `none` (no checks) renders **nothing** — no icon, no reserved gutter, no layout shift. Preserves the existing dotless behavior (the `pr.checks !== "none"` conditional render stays; only the rendered element changes from dot → icon).
 - **D-03:** Icon size ~14px (`size-3.5`), keeping a tooltip ("Checks passing/failing/running") like the current dot. The server-side `checks` reduction (`pass|fail|pending|none` from `reduceChecks`) is unchanged — this is a pure frontend swap of the rendered element.
 
-### Agent-state dot on PR cards (SIGNL-01/03)
-- **D-04:** A PR card shows the **reused `StatusDot`** (and `dotMeta`) — identical palette/semantics to task cards (working=green, waiting=pulsing amber, idle=gray, exited=gray/red per `dotMeta`) — whenever the PR has a linked review session, i.e. an agent-status entry exists for its `source='github_pr'` task. No entry (agent never started / no review opened) → no dot, exactly like a dotless task card.
-- **D-05:** The dot applies to PR cards in **both** the awaiting-review and Recently-reviewed sections (SIGNL-03) — it is a property of the `PRCard`, so both sections get it for free.
+### Agent-state on PR cards — left rail, NOT a dot (SIGNL-01/02/03)
 
-### Open-session emphasis — the left border (SIGNL-02/03)
-- **D-06:** **Always-on** session border: any PR with an open review session gets a distinct colored **left** border *regardless of agent state*, so open-session PRs stand out at a glance even when the agent is idle/working. This intentionally **diverges from the task-card D-44 rule** (which tints the border amber only while waiting) — the milestone's explicit goal is "which PRs am I working on," which a waiting-only border would hide.
-- **D-07:** Border color language: **blue** left accent (e.g. `border-l-2 border-l-blue-500/…`) = "I have a session here"; when the agent is **waiting** the left border shifts to the **pulsing-amber** language (`border-l-amber-400`) = "needs my input." No session → border unchanged (`border-border`). Two distinguishable edges (blue = session, amber = waiting) preserve the established "waiting = amber" meaning. Exact Tailwind classes are Claude's discretion; the intent (blue-for-session, amber-for-waiting, left edge) is locked.
-- **D-08:** Border + dot key on the **same** signal (presence of the linked agent entry), so they always appear together and apply in both sections.
+> **Checkpoint redesign (2026-06-17, human-verify gate):** the original design put the reused `StatusDot` (a filled dot) next to the line-art CI glyph. At the gate the user found the dot+glyph pairing visually clashing (different styles, slight misalignment). Chosen fix: **drop the dot; the left rail carries the full agent state via its color.** The two signals now live on fully separate channels — left edge = your agent, right glyph = the PR's CI. D-04/D-06/D-07 below are the redesigned decisions; they supersede the dot.
+
+- **D-04:** A PR card shows agent state as a colored **left rail**, not a `StatusDot`. Rail color mirrors `dotMeta`'s palette: working `bg-green-500`, waiting `bg-amber-400` (the rail **pulses** — the old dot's `animate-pulse` moved here), idle `bg-blue-500/60`, exited `bg-zinc-600`. Any rail = the PR has a linked review session (an agent-status entry for its `source='github_pr'` task); no entry → no rail, no gutter, identical to a plain card. State is exposed accessibly via the card's `aria-label`/`title` (the rail is `aria-hidden`).
+- **D-05:** The rail applies to PR cards in **both** the awaiting-review and Recently-reviewed sections (SIGNL-03) — it is a property of the `PRCard`, so both sections get it for free.
+- **D-06:** **Always-on** rail for any open session *regardless of agent state*, so open-session PRs stand out at a glance even when the agent is idle/working. This intentionally **diverges from the task-card D-44 rule** (which tints the border amber only while waiting); here the rail is the sole agent signal and encodes the full state by color.
+- **D-07:** Implemented as a 3px `absolute inset-y-0 left-0` span on a `relative overflow-hidden` card (a positioned rail, not a CSS border) so that **only the rail pulses** when waiting (`animate-pulse motion-reduce:animate-none`), never the whole card. "waiting = amber" is preserved; the rail amber is `amber-400` while the CI 'running' glyph is `amber-500` (a half-step deeper) so the two ambers never read as one.
+- **D-08:** The rail keys on presence of the linked agent entry and applies in both sections (a property of `PRCard`).
 
 ### Recently Reviewed section (REVWD-01/02/03/04)
 - **D-09:** A **"Recently reviewed" labeled subheader/divider** rendered **below** the awaiting-review list, inside the **same** scroll area of the existing Review column — **not** independently collapsible (the whole column already collapses as one). Cards are the same `PRCard` (click to open/reattach the review).
@@ -44,7 +45,7 @@ Out of scope (other phases / deferred): in-app review actions, time-windowed/cap
 
 ### Claude's Discretion
 - Exact Tailwind class values for the icons and the blue/amber left border (intent is locked in D-01/D-07).
-- Card row element ordering — recommended: `[title flex-1] · [agent StatusDot if session] · [CI icon if checks≠none] · [↗ external link]` (matches the milestone preview `┃ title  ● ✓ ↗`).
+- Card row element ordering (redesigned): `[title flex-1] · [CI icon if checks≠none] · [↗ external link]` — the agent dot was removed; agent state is the left rail (D-04). Matches the redesign preview `┃ title  ✓ ↗`.
 - The exact JSON field name for the reviewed array (`reviewed` suggested) and the agent-entry field names (`prNumber`/`source` suggested).
 - Whether the Recently-reviewed subheader shows its own count.
 - **Lint cleanup (non-blocking):** the two carried `Date.now()`-in-render advisories live in exactly the touched files (`PRCard.tsx`/`ReviewColumn.tsx`) — clean them up while here if cheap; do NOT let them block the phase (gating build is already green).

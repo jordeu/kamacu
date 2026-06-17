@@ -14,6 +14,9 @@ reviewed_at: 2026-06-17
 >
 > **This phase modifies two existing components — it does NOT introduce a new design system.** Every token below is read out of the live codebase (`web/src/index.css`, `PRCard.tsx`, `ReviewColumn.tsx`, `StatusDot.tsx`, `TaskCard.tsx`, `Column.tsx`). The contract's job is to *pin the exact values* for the locked decisions in `16-CONTEXT.md` (D-01 through D-15) and to fill the genuinely-unspecified gaps (icon sizing/alignment, the full session-border state matrix, the Recently-reviewed subheader, the complete state matrix). Do not invent values not derivable from existing patterns.
 
+> ### ⟳ Checkpoint redesign (2026-06-17) — agent state is a left RAIL, not a dot
+> At the Phase-16 human-verify gate, the user found the original design — a reused `StatusDot` (filled dot) sitting **next to** the line-art CI glyph — visually clashing (two different mark styles, slight baseline misalignment). **Resolution (user-chosen): drop the dot entirely; the colored left rail carries the full agent state.** The two signals now occupy fully separate channels — **left edge = your agent, right glyph = the PR's CI** — so nothing sits side-by-side and there is nothing to misalign. This supersedes the dot wherever it appears below (Color §2/§3, Card Row Contract, the state matrix, Interaction & Copy rows). The change strictly *reduces* visual element count and complexity; it does not introduce a new color, size, or component. Sections updated in place; stale dot references in non-normative notes are annotated.
+
 ---
 
 ## Design System
@@ -84,8 +87,8 @@ Dark-only zinc ramp from `.dark` in `index.css`. The 60/30/10 split for the Revi
    - running/pending → `Circle` (thin outline, no fill), `text-amber-500`, tooltip "Checks running" — **static, NO spinner / NO `animate-spin`**
    - `none` → renders nothing (no icon, no gutter)
    - Size `size-3.5` (14px). (D-01/D-02/D-03)
-2. **Agent status dot** (one per card, only when a linked agent-status entry exists) — the reused `StatusDot`, palette unchanged: working `bg-green-500`, waiting `bg-amber-400 animate-pulse`, idle `bg-zinc-400`, exited `bg-zinc-600` (clean/stop) or `bg-red-500` (nonzero exit). 8px (`size-2`). (D-04/D-05)
-3. **Open-session left border** (the only border-color change) — see the state matrix below: blue for "I have a session here," pulsing amber for "needs my input." (D-06/D-07)
+2. **Agent-state left rail** (one per card, only when a linked agent-status entry exists) — a 3px positioned left edge whose **color is the agent state**: working `bg-green-500`, waiting `bg-amber-400` (**pulses** — `animate-pulse motion-reduce:animate-none`), idle `bg-blue-500/60`, exited `bg-zinc-600`. Replaces the old `StatusDot` (see Redesign note at top). `aria-hidden`; state surfaced via the card `aria-label`/`title`. (D-04/D-05/D-06/D-07)
+3. *(Folded into §2 — the rail IS the open-session signal; there is no separate dot and no CSS border-color change.)* See the rail state matrix below for per-state colors. (D-06/D-07)
 4. **Stale footer** — existing `text-amber-400` "error · N old" line (unchanged).
 5. **Degraded warning** — existing `TriangleAlert` `text-amber-400` (unchanged).
 6. **Focus ring** — existing `focus-visible:ring-blue-500` on the card button (unchanged). Note: this blue focus ring already exists and is distinct from the new blue session border (ring vs. left edge) — both may appear together without conflict.
@@ -102,31 +105,33 @@ Dark-only zinc ramp from `.dark` in `index.css`. The 60/30/10 split for the Revi
 Single row, `flex gap-2`, left-to-right:
 
 ```
-[ title  flex-1 line-clamp-2 ] · [ StatusDot  if session ] · [ CI icon  if checks≠none ] · [ ↗ external link ]
+[ agent rail  left edge, if session ]  [ title  flex-1 line-clamp-2 ] · [ CI icon  if checks≠none ] · [ ↗ external link ]
 ```
 
-- Mirrors the milestone preview `┃ title  ● ✓ ↗`.
-- **Order is fixed:** agent dot *before* CI icon (dot is the "mine" signal, icon is the "its CI" signal — read self-state first). Both sit in the right-aligned cluster after the `flex-1` title.
-- Each trailing element is independently conditional; any combination of {dot present/absent} × {icon present/absent} must render with no gutter and no shift.
+- Mirrors the redesign preview `┃ title  ✓ ↗` (the `┃` is the rail at the card's left edge, not an inline mark).
+- **The agent dot was removed** (redesign). The only trailing marks after the `flex-1` title are the CI icon and the ↗ link; agent state is the left rail, which is a sibling absolutely-positioned at the card's left edge, outside the row flow.
+- Each trailing element is independently conditional; {CI icon present/absent} must render with no gutter and no shift. The rail likewise reserves no horizontal space (it overlays the left edge of a `relative overflow-hidden` card).
 - The ↗ link stays last, `stopPropagation` on click (opens GitHub only), `text-muted-foreground hover:text-foreground`, `size-3.5`, `mt-[2px]`.
-- Dot and icon are non-interactive (a click on them falls through to the card's open-review handler); each is wrapped in a `Tooltip` for its label.
+- The CI icon is non-interactive (a click falls through to the card's open-review handler) and is wrapped in a `Tooltip` for its label. The rail is `aria-hidden`; its state is read out via the card's `aria-label`/`title`.
 - Row 2 (meta line) is unchanged.
 
-### Session-border state matrix (D-06/D-07 — the one genuinely-new visual; fills the "exact token" gap)
+### Agent-state rail matrix (D-04/D-06/D-07 — the one genuinely-new visual; redesigned, replaces the dot)
 
-The card root keeps `rounded-md border bg-card px-3 py-2`. The **left edge** is driven *only* by the linked agent-status entry (`entry` = the agent-status row whose `prNumber === pr.number && projectId === projectId`). This **intentionally diverges from TaskCard's D-44** (which tints amber only on waiting and otherwise uses `border-border` all around).
+The card root is `relative overflow-hidden rounded-md border border-border bg-card px-3 py-2` (all four edges stay default 1px `border-border`). The **agent state** is a separate `aria-hidden` span — `pointer-events-none absolute inset-y-0 left-0 w-[3px]` — rendered **only** when the linked agent-status entry exists (`entry` = the agent-status row whose `prNumber === pr.number && projectId === projectId`). Its background color is the agent state. `overflow-hidden` clips the rail to the card's rounded corners. This **intentionally diverges from TaskCard's D-44** (which tints a border amber only on waiting).
 
-| Session state | Left edge | Other 3 edges | Meaning |
-|---------------|-----------|---------------|---------|
-| No entry (no open session) | `border-border` (default, 1px) | `border-border` | dotless / unchanged — identical to a plain card |
-| Entry exists, `status !== "waiting"` (working / idle / exited) | `border-l-2 border-l-blue-500/60` | `border-border` | "I have a review session here" — always-on, regardless of agent state |
-| Entry exists, `status === "waiting"` | `border-l-2 border-l-amber-400` | `border-border` | "needs my input" — preserves the established waiting = amber meaning; pairs with the pulsing-amber dot |
+| Session state | Rail (left, 3px) | Meaning |
+|---------------|------------------|---------|
+| No entry (no open session) | *(no rail rendered)* | unchanged — identical to a plain card, no gutter |
+| Entry exists, `working` | `bg-green-500` | agent actively working |
+| Entry exists, `idle` | `bg-blue-500/60` | session open, agent idle — the calm "you have a session here" state |
+| Entry exists, `waiting` | `bg-amber-400` + `animate-pulse motion-reduce:animate-none` | "needs my input" — the rail **pulses** (the attention cue, the old dot's pulse relocated to the rail) |
+| Entry exists, `exited` | `bg-zinc-600` | session ended (muted gray) |
 
 Notes:
-- Border thickness steps from 1px → 2px **only on the left** when a session exists; the other three edges stay 1px `border-border` so the card does not appear boxed-in. Achieve with `border border-border` as the base and override the left with `border-l-2 border-l-{color}`.
-- The blue at `/60` opacity keeps the session edge present-but-quiet (it is an ambient "you're working here" cue, not an alarm); the waiting amber is full-opacity to read as the louder "act now" state. The waiting **border itself does not pulse** — the pulse lives on the `StatusDot` (`animate-pulse`), which the waiting card always shows; a pulsing border + pulsing dot would double-flash. (If the executor prefers the border to also pulse to match D-44's "waiting language," that is acceptable *only* via `animate-pulse motion-reduce:animate-none` to honor reduced-motion — but the dot pulse is the canonical waiting motion; default to a static amber border.)
-- `motion-reduce`: the dot's pulse already carries `motion-reduce:animate-none` (inherited from `dotMeta`). No new motion is introduced by the border.
-- Border + dot key on the **same** signal (the entry), so they always appear and disappear together (D-08), in **both** sections (D-05/SIGNL-03 — it's a property of `PRCard`, so the Recently-reviewed list gets it for free).
+- The rail is the **sole** agent signal (no dot). It reserves **no** horizontal space — it overlays the card's left edge, so a card with vs. without a session has zero layout shift (the dotless discipline still holds).
+- Only the **waiting** rail animates (`animate-pulse`), and only the rail — not the whole card — because the animation lives on the 3px span, not the card root. `motion-reduce:animate-none` honors reduced-motion.
+- Amber discipline: the waiting **rail** is `amber-400`; the CI 'running' **glyph** is `amber-500` (a half-step deeper). Different channel (left edge vs. inline glyph), different shape, and only the rail pulses — they never read as one signal even when both amber appear on the same card.
+- The rail keys on the linked `entry`, so it appears/disappears with the session and applies in **both** sections (D-05/SIGNL-03 — a property of `PRCard`, so the Recently-reviewed list gets it for free).
 
 ---
 
@@ -174,7 +179,7 @@ The column reuses its existing loading/degraded/empty branches (`ReviewStates` i
 | Click / Enter / Space on a card (either section) | Open-or-reattach the review via `useOpenReview` → navigate to `/projects/{id}/tasks/{task.id}` (unchanged; reused verbatim by reviewed cards). In-flight guard prevents double-open. |
 | Click ↗ external link | `stopPropagation` → opens the PR on GitHub in a new tab only (unchanged). |
 | Hover / focus a card | `hover:bg-[#27272a]`, `focus-visible:ring-2 focus-visible:ring-blue-500` (unchanged). Coexists with the new blue session left-border (ring is on focus, border is on session — different triggers, different edges). |
-| Hover a dot / CI icon | Tooltip with the status label; the glyph is non-interactive and click falls through to open. |
+| Hover the CI icon | Tooltip with the CI status label; the glyph is non-interactive and click falls through to open. (No agent dot to hover — agent state is the left rail, read via the card's `aria-label`/`title`.) |
 | Manual refresh (header `RefreshCw`) | Re-fetches `?refresh=1`; the single response repopulates **both** lists (REVWD-04). |
 | Auto-poll | 60s, visibility-paused (`refetchIntervalInBackground:false`); both lists share it. Agent dots/borders ride the separate shared 5s `useAgentStatuses()` poll (unchanged cadence — waiting surfaces within 5s). |
 
@@ -195,7 +200,7 @@ The column reuses its existing loading/degraded/empty branches (`ReviewStates` i
 | In-flight open | `Setting up the review worktree…` (unchanged) |
 | Open failure | `Couldn't open this review.` in `text-red-500` (unchanged) |
 | CI icon tooltips | `Checks passing` / `Checks failing` / `Checks running` (preserved from the dot's existing tooltips) |
-| Agent dot tooltips | `Working` / `Waiting for input` / `Idle` / `Exited (code N)` / `Exited` (from `dotMeta`, unchanged) |
+| Agent state (rail) | exposed via the card `aria-label`/`title`: `Agent working` / `Agent waiting for input` / `Agent idle` / `Agent exited` (no dot, no per-mark tooltip) |
 
 **Destructive actions in this phase:** none. No new confirmations. (In-app approve/request-changes/merge is project-wide out of scope; the column is read-only signaling.)
 
@@ -217,8 +222,8 @@ No `npx shadcn add` runs in this phase. No third-party registry is declared, so 
 ## Implementation Notes for the Executor (non-normative — token sources)
 
 - The CI icon swap replaces the `checksDot` `bg-*` dot in `PRCard.tsx` (lines ~14–93) with a lucide glyph keyed the same 3-way (`pass`/`fail`/`pending`), keeping the `pr.checks !== "none"` conditional and the `Tooltip` wrapper. Size `size-3.5`, align with `mt-[…]` to sit on the title's first line as the dot did.
-- The agent dot/border come from `useAgentStatuses()` (shared 5s query) + the reused `StatusDot`. `AgentStatusEntry` gains `prNumber`/`source` (D-15) so `PRCard` can `data?.find(e => e.projectId === projectId && e.prNumber === pr.number)`. The found `entry` drives BOTH the `<StatusDot entry={entry} className="mt-[6px]" />` and the left-border class — one lookup, two visuals (D-08).
-- The left border replaces the current static `border border-border` on the card root with: base `border border-border` + a conditional left override (`border-l-2 border-l-amber-400` when waiting, `border-l-2 border-l-blue-500/60` when any other session state, nothing extra when no entry). Mirror the `cn(...)` conditional shape from `TaskCard.tsx` but with the diverged three-way (D-06/D-07).
+- The agent rail comes from `useAgentStatuses()` (shared 5s query). `AgentStatusEntry` gains `prNumber`/`source` (D-15) so `PRCard` can `data?.find(e => e.projectId === projectId && e.prNumber === pr.number)`. The found `entry` → `agentRail(entry.status)` → `{barClass, pulse, label}` drives the rail span and the card's `aria-label`/`title` (redesign — no `StatusDot`).
+- The rail is a sibling span on a `relative overflow-hidden` card: `pointer-events-none absolute inset-y-0 left-0 w-[3px]` + `barClass` (`bg-green-500` / `bg-amber-400` / `bg-blue-500/60` / `bg-zinc-600`) + `animate-pulse motion-reduce:animate-none` only when waiting. No CSS border-color change; the card keeps `border border-border` on all four edges.
 - The Recently-reviewed list comes from `data.reviewed` (D-13). Render it in `ReviewStates` after the awaiting `prs.map` and the stale footer, gated on `data.reviewed?.length`.
 - Lint cleanup (non-blocking, Claude's discretion): the two carried `Date.now()`-in-render advisories live in exactly these two files — `formatAgo(pr.updatedAt, Date.now())` in `PRCard.tsx` and `formatAgo(data.fetchedAt, Date.now())` in `ReviewColumn.tsx`. Clean if cheap; do not let it block the phase.
 
@@ -233,4 +238,4 @@ No `npx shadcn add` runs in this phase. No third-party registry is declared, so 
 - [ ] Dimension 5 Spacing: PASS
 - [ ] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** verified 6/6 by gsd-ui-checker (2026-06-17, pre-redesign). The agent-dot→rail redesign was applied at the human-verify gate (2026-06-17); it removes one mark and one component (`StatusDot`) and introduces no new color/size/component, so it strictly reduces complexity — re-verification was not separately run.
