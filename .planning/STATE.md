@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Sharper Review Column
 status: planning
-stopped_at: Phase 16 context gathered
-last_updated: "2026-06-17T07:14:20.343Z"
+stopped_at: Phase 16 UI-SPEC approved
+last_updated: "2026-06-17T07:24:22.458Z"
 last_activity: 2026-06-17 — Roadmap created (1 phase, 9/9 requirements mapped)
 progress:
   total_phases: 1
@@ -162,7 +162,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-17T07:14:20.339Z
-Stopped at: Phase 16 context gathered
-Resume file: .planning/phases/16-sharper-review-column/16-CONTEXT.md
+Last session: 2026-06-17T07:24:22.455Z
+Stopped at: Phase 16 UI-SPEC approved
+Resume file: .planning/phases/16-sharper-review-column/16-UI-SPEC.md
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
