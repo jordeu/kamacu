@@ -1,10 +1,11 @@
 ---
 phase: 16
 slug: sharper-review-column
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-06-17
+reviewed_at: 2026-06-17
 ---
 
 # Phase 16 — UI Design Contract
