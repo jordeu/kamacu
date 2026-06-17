@@ -279,6 +279,75 @@ func TestAgentStatusExitedResumable(t *testing.T) {
 	}
 }
 
+// setTaskPRLink stamps tasks.source + tasks.pr_number for a task (the
+// github_pr review-task shape the agent-status PR join reads, D-15).
+func setTaskPRLink(t *testing.T, db *sql.DB, taskID int64, source string, prNumber *int64) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE tasks SET source = ?, pr_number = ? WHERE id = ?`, source, prNumber, taskID); err != nil {
+		t.Fatalf("set source/pr_number: %v", err)
+	}
+}
+
+// TestAgentStatusPRLinkFields proves D-15: every agent-status entry carries
+// prNumber + source. A source='manual' task serializes prNumber:null +
+// source:"manual"; a source='github_pr', pr_number=42 task (a PR review
+// session) serializes its real number + source:"github_pr". Both ride the
+// DB-derived (post-restart) pass with an empty manager + transcript fixtures,
+// the same seam the resumable tests use.
+func TestAgentStatusPRLinkFields(t *testing.T) {
+	srv, _, db := newAgentServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+
+	// A normal manual task.
+	manualBody := createTask(t, srv, pid, "Manual Work")
+	manualID := taskID(t, manualBody)
+	manualCSID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0b01"
+	setTaskClaudeSession(t, db, manualID, manualCSID)
+	setTaskPRLink(t, db, manualID, "manual", nil)
+
+	// A PR review task (source='github_pr', pr_number=42).
+	prBody := createTask(t, srv, pid, "PR Review")
+	prID := taskID(t, prBody)
+	prCSID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0b02"
+	setTaskClaudeSession(t, db, prID, prCSID)
+	pr42 := int64(42)
+	setTaskPRLink(t, db, prID, "github_pr", &pr42)
+
+	globRoot := t.TempDir()
+	writeTranscriptFixture(t, globRoot, manualCSID)
+	writeTranscriptFixture(t, globRoot, prCSID)
+
+	// Fresh manager == post-restart: both surface via the DB-derived pass.
+	entries := statusEntriesDirect(t, session.NewManager(), db, globRoot)
+	byTask := make(map[int64]map[string]any, len(entries))
+	for _, e := range entries {
+		tid, _ := e["taskId"].(float64)
+		byTask[int64(tid)] = e
+	}
+
+	manual, ok := byTask[manualID]
+	if !ok {
+		t.Fatalf("manual task entry missing: %v", entries)
+	}
+	if v, present := manual["prNumber"]; !present || v != nil {
+		t.Errorf("manual prNumber = %v (present=%v), want explicit null", v, present)
+	}
+	if manual["source"] != "manual" {
+		t.Errorf("manual source = %v, want %q", manual["source"], "manual")
+	}
+
+	pr, ok := byTask[prID]
+	if !ok {
+		t.Fatalf("github_pr task entry missing: %v", entries)
+	}
+	if pr["prNumber"] != float64(42) {
+		t.Errorf("github_pr prNumber = %v, want 42", pr["prNumber"])
+	}
+	if pr["source"] != "github_pr" {
+		t.Errorf("github_pr source = %v, want %q", pr["source"], "github_pr")
+	}
+}
+
 // TestAgentStatusEmptyList: zero agents marshal as JSON [] — never null
 // (the sessions list convention; the 04-03 frontend polls this every 5s).
 func TestAgentStatusEmptyList(t *testing.T) {

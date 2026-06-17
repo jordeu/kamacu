@@ -30,10 +30,12 @@ type prFake struct {
 	lastDir  string
 }
 
-func (f *prFake) run(ctx context.Context, repo, repoDir string) ([]github.PRSummary, string, error) {
+func (f *prFake) run(ctx context.Context, repo, repoDir string) (github.PRLists, string, error) {
 	f.calls.Add(1)
 	f.lastRepo, f.lastDir = repo, repoDir
-	return []github.PRSummary{{Number: 7, Title: "fake", Author: "octocat", Checks: "pass"}}, "ok", nil
+	return github.PRLists{
+		Awaiting: []github.PRSummary{{Number: 7, Title: "fake", Author: "octocat", Checks: "pass"}},
+	}, "ok", nil
 }
 
 // newPRTestDB opens + migrates an isolated temp DB and returns the handle.

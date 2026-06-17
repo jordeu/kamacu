@@ -31,6 +31,8 @@ type agentStatusEntry struct {
 	ExitCode      *int   `json:"exitCode"`
 	StopRequested bool   `json:"stopRequested"`
 	Resumable     bool   `json:"resumable"` // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
+	PRNumber      *int64 `json:"prNumber"`  // null for source='manual'; the PR number for a github_pr review task (D-15)
+	Source        string `json:"source"`    // "manual" | "github_pr"
 }
 
 // status handles GET /api/agents/status — one entry per task, newest agent
@@ -53,11 +55,24 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		order = append(order, info.TaskID)
 	}
 
-	// taskMeta carries the per-task DB columns the resumable derivation needs.
+	// taskMeta carries the per-task DB columns the resumable derivation needs,
+	// plus the PR linkage (pr_number/source, D-15) joined onto every entry.
 	type taskMeta struct {
 		projectID int64
 		csid      sql.NullString
 		wtp       sql.NullString
+		prNumber  sql.NullInt64
+		source    string
+	}
+
+	// prNumberOf converts a nullable PR number column into the *int64 the wire
+	// contract wants (null for manual tasks, the number for github_pr tasks).
+	prNumberOf := func(n sql.NullInt64) *int64 {
+		if !n.Valid {
+			return nil
+		}
+		v := n.Int64
+		return &v
 	}
 
 	entries := []agentStatusEntry{} // [] when empty — never null
@@ -71,7 +86,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for i, id := range order {
 			args[i] = id
 		}
-		rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path FROM tasks WHERE id IN (`+placeholders+`)`, args...)
+		rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path, pr_number, source FROM tasks WHERE id IN (`+placeholders+`)`, args...)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -80,7 +95,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var id int64
 			var m taskMeta
-			if err := rows.Scan(&id, &m.projectID, &m.csid, &m.wtp); err != nil {
+			if err := rows.Scan(&id, &m.projectID, &m.csid, &m.wtp, &m.prNumber, &m.source); err != nil {
 				rows.Close()
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -108,6 +123,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 				ExitCode:      info.ExitCode,
 				StopRequested: info.StopRequested,
 				Resumable:     resumable,
+				PRNumber:      prNumberOf(m.prNumber),
+				Source:        m.source,
 			})
 		}
 	}
@@ -120,7 +137,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	// migration. Emit ONLY when resumable (transcript exists) — non-resumable
 	// past sessions get no dot and the plain pre-start state (D-57 only
 	// constrains resumable tasks).
-	rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path FROM tasks
+	rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path, pr_number, source FROM tasks
 		WHERE claude_session_id IS NOT NULL AND worktree_path IS NOT NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -130,7 +147,9 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, pid int64
 		var csid, wtp sql.NullString
-		if err := rows.Scan(&id, &pid, &csid, &wtp); err != nil {
+		var prNumber sql.NullInt64
+		var source string
+		if err := rows.Scan(&id, &pid, &csid, &wtp, &prNumber, &source); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -140,6 +159,10 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		if !transcriptExists(a.globRoot, csid.String) {
 			continue
 		}
+		// A post-restart PR-review session (github_pr task carrying a
+		// claude_session_id + worktree_path) legitimately surfaces here with its
+		// prNumber — that is correct and desired: the PR card's dot/border
+		// survive a restart (D-15).
 		entries = append(entries, agentStatusEntry{
 			TaskID:        id,
 			ProjectID:     pid,
@@ -148,6 +171,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			ExitCode:      nil,
 			StopRequested: false,
 			Resumable:     true,
+			PRNumber:      prNumberOf(prNumber),
+			Source:        source,
 		})
 	}
 	if err := rows.Err(); err != nil {
