@@ -202,6 +202,41 @@
 
 ---
 
+## Milestone: v1.5 — Sharper Review Column
+
+**Shipped:** 2026-06-17
+**Phases:** 1 | **Plans:** 2 | **Tasks:** 6
+
+### What Was Built
+- (Phase 16, plan 16-01) Data layer: a second `reviewed-by:@me draft:false` `gh` search riding the existing per-repo TTL cache in ONE cycle (a `PRLists` combined runner, degrade-together), server-side top-precedence `dedupeReviewed`, a widened `{prs, reviewed, state, stale, fetchedAt}` Result, and `pr_number`/`source` joined onto `/api/agents/status` entries (no migration — columns pre-existed from 00007) — plus the matching frontend wire types. Zero visual change in this plan.
+- (Phase 16, plan 16-02) Rendering: CI status as a bare lucide glyph (green `Check` / red `X` / static amber `Circle`; `none` renders nothing), agent state as a 3px colored **left rail** (working green / waiting amber-pulse / idle blue / exited gray), and a quiet-omitted "Recently reviewed" subsection reusing the same `PRCard`, server-deduped against the awaiting list.
+
+### What Worked
+- **The data→rendering plan split made the wire contract explicit and verifiable.** 16-01 shipped the `reviewed` array + `prNumber`/`source` fields with tests and zero UI; 16-02 consumed them. The integration checker traced all four seams to source (endpoint serializes the whole `Result`, the agent-status SELECT is a real join, `dedupeReviewed` is invoked on the production path) — designed, not hoped.
+- **Reuse kept the milestone tiny and low-risk.** The reviewed search cloned the existing `user-review-requested:@me` path (same reducer, same cache `Service`); no new endpoint, no second poll, no new dependency, no migration. The whole milestone concentrated in two frontend files + the `internal/github`/`internal/api` list paths.
+- **The human-verify gate did its job — it caught a design problem the contract missed.** The planned reused `StatusDot` dot beside the line-art CI glyph looked wrong on sight; the gate turned that into a clean, user-chosen redesign (agent state → left rail) rather than shipping a clash. The redesign *reduced* element count (one mark per card, two separate channels) and introduced no new token.
+- **The checkpoint redesign was absorbed without derailing the flow.** Code, the design contract (16-CONTEXT.md D-04/06/07, 16-UI-SPEC.md), the SUMMARY, and PROJECT.md were all revised to match; re-verification (verifier 10/10 + integration 4/4) ran against the *shipped* rail, not the stale dot — the docs never lied about what shipped.
+
+### What Was Inefficient
+- **The clash was foreseeable before implementation.** The UI-SPEC + UI-checker approved a dot-next-to-glyph layout that the user rejected the moment they saw it rendered. A 30-second visual mock (even ASCII, as was used to *choose* the redesign) during ui-phase would have surfaced "filled dot vs line glyph" before a line of code — the design-contract review validated tokens/spacing but not the *gestalt* of two adjacent marks.
+- **Post-redesign doc churn touched five files** (CONTEXT, UI-SPEC, PRCard, SUMMARY, PROJECT) to keep the record honest. Worth it, but a sign that locking visual specifics pre-prototype front-loads rework when the gate flips them.
+- **Minor record inconsistencies persisted:** 16-02's SUMMARY used `provides:` rather than a `requirements_completed` frontmatter field (the audit had to read the IDs from prose), and stale "dot/border" comments remain in `ReviewColumn.tsx`/`agentRail` JSDoc (flagged non-blocking by the integration checker).
+
+### Patterns Established
+- **Agent-state-as-edge-rail:** encode a per-card status as a colored left rail (color = state, pulse for the attention state) when an inline mark would compete with another inline signal. A reusable "two independent signals, two physical channels (edge vs glyph)" card pattern.
+- **Revise-the-contract-on-checkpoint-redesign:** when a human-verify gate drives a design change, update CONTEXT.md/UI-SPEC.md (not just the code) and re-run the verifier against the shipped design, so the planning record matches reality.
+
+### Key Lessons
+1. **Prototype the *look* of adjacent signals before locking the spec** — token/spacing review passes a layout the eye rejects; a cheap visual mock during ui-phase catches gestalt clashes the checker can't.
+2. **A human-verify gate is worth most when it can change the design, not just bless it** — here it converted a flawed spec into a better-shipped result; budget for the redesign + doc revision rather than treating the gate as a rubber stamp.
+3. **Keep the design contract authoritative after a redesign** — revise CONTEXT/UI-SPEC/SUMMARY in lockstep with the code so downstream audits verify what actually shipped.
+
+### Cost Observations
+- Orchestrated on Opus 4.8 (inherit profile) in ~1 day (2026-06-17); single phase, 2 plans, 1 human-verify gate (which drove the rail redesign), 0 gap-closure cycles. No new Go modules or npm deps; no migration.
+- Notable: the smallest milestone to date (1 phase), yet the human gate produced the milestone's defining decision (dot → rail) — the value was in the gate, not the volume.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -213,6 +248,7 @@
 | v1.2 | 3 | 12 | Empirical tmux research verified on the host binary pre-planning (first novel-risk subsystem since v1.0); invisible-subsystem principle; DB-derived ghost reconcile generalized from Phase 5; post-planner ROADMAP integrity checks |
 | v1.3 | 4 | 19 | Research-flagged the integration risk center (`gh pr checkout` worktree-unawareness) and spiked it pre-planning; one shared `github.Service` across 3 phases via a compiler-enforced interface seam; byte-equivalent helper extraction with regression guard; independent integration audit before completion |
 | v1.4 | 2 | 7 | Backend-capability phase → UI-driver phase, with the create contract verified by an integration audit; reuse-before-invent kept it zero-new-dep / no-new-`ui/`-file; separate-function-over-widen for a shared helper; smallest milestone with no gap-closure cycles |
+| v1.5 | 1 | 2 | Data→rendering plan split with the wire contract verified by an integration audit; reuse-before-invent (cloned the existing `gh` search + cache — no new endpoint/poll/dep/migration); the human-verify gate DROVE a design redesign (agent dot → left rail), not just blessed it; revise-the-contract-on-redesign keeps CONTEXT/UI-SPEC honest |
 
 ### Cumulative Quality
 
@@ -223,6 +259,7 @@
 | v1.2 | 11 (+quota, tmux, reaper) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 3 phases |
 | v1.3 | 12 (+github) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 4 phases; carried ~18–20 pre-existing react-hooks lint advisories (build green) as audited tech debt |
 | v1.4 | 12 (github extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no new `ui/` file (reused `tabs.tsx`); v1.4 added NO new lint debt (dialog eslint-clean, 0 useEffect); pre-existing advisories still carried |
+| v1.5 | 12 (github + api list paths extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no migration; cleared the `PRCard` `Date.now()`-in-render advisory (the `ReviewColumn` one may remain); pre-existing react-hooks advisories still carried |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -232,3 +269,4 @@
 4. **A single shared service / leaf package + narrow seam for a cross-phase external tool** — `internal/tmux` (v1.2), `internal/github` (v1.3), and the v1.4 managed-checkout verbs all stayed one leaf package extended-not-scattered; v1.4 added the "separate-function-over-widen" corollary (add `RepoDescription`, don't widen the shared `ValidateRepo`).
 5. **The milestone-complete accomplishments list needs hand-curation** — the summary-extract one-liner misfire has now polluted MILESTONES.md in v1.1, v1.2, v1.3, AND v1.4 (15-03 → `"Type:"`); treat the CLI output as a draft every time.
 6. **Backend-capability phase → UI-driver phase** (new in v1.4) — proving the engine with tests first makes the UI a thin, low-risk layer the audit can confirm rather than hope for; expect to reuse this shape whenever adding a user-facing entry point to an existing subsystem.
+7. **A human-verify gate should be able to change the design, not just approve it** (new in v1.5) — token/spacing review can pass a layout the eye rejects (v1.5's dot-next-to-glyph clash); when the gate flips a visual decision, revise the design contract (CONTEXT/UI-SPEC) alongside the code and re-verify against what actually shipped. A cheap visual mock during ui-phase would catch such gestalt clashes pre-build. (Note: the summary-extract one-liner misfire did NOT recur in v1.5 — both plans produced clean one-liners.)
