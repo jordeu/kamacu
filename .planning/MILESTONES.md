@@ -1,5 +1,18 @@
 # Milestones
 
+## v1.5 Sharper Review Column (Shipped: 2026-06-17)
+
+**Phases completed:** 1 phases, 2 plans, 6 tasks
+
+**Delivered:** The Review column now carries two independent at-a-glance signals per PR — your agent's session state (a colored left rail: green working / pulsing-amber waiting / blue idle / gray exited) and the PR's CI state (a bare glyph: green check / red cross / static amber circle; no-checks renders nothing) — split onto separate visual channels so they never confuse, plus a "Recently reviewed" section that keeps PRs you've reviewed (`reviewed-by:@me`, approve or request-changes) visible until they merge or close. Audit: 9/9 requirements, 4/4 integration seams, 3/3 E2E flows. Milestone-time redesign: the originally-planned agent dot was replaced by the left rail at the human-verify gate (a dot beside the CI glyph clashed).
+
+**Key accomplishments:**
+
+- Second `reviewed-by:@me draft:false` gh search riding the existing per-repo TTL cache, a `PRLists` combined runner with server-side top-precedence dedup, a widened `{prs, reviewed, state, stale, fetchedAt}` Result, and `/api/agents/status` entries carrying `prNumber`/`source` — plus the matching frontend wire types — with zero visual changes.
+- The Review column's two at-a-glance signals split onto separate channels: your agent's state as a 3px colored LEFT RAIL (working green / waiting amber-pulse / idle blue / exited gray) and the PR's CI as a bare lucide glyph (green Check / red X / static amber Circle, `none` renders nothing) — plus a quiet-omitted "Recently reviewed" subsection reusing the same PRCard, all server-deduped against the awaiting list.
+
+---
+
 ## v1.4 Repo-First Projects (Shipped: 2026-06-15)
 
 **Phases completed:** 2 phases, 7 plans, 13 tasks

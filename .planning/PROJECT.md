@@ -8,21 +8,26 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone: v1.5 Sharper Review Column
+## Current Milestone
+
+**No milestone active.** v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones/v1.5-*`); run `/gsd:new-milestone` to scope the next cycle. See the Validated requirements and Current State below for what shipped.
+
+<details>
+<summary>Shipped milestone targets — v1.5 Sharper Review Column (2026-06-17)</summary>
 
 **Goal:** Make the Review column convey two independent signals at a glance — your agent's state and the PR's CI state — and stop losing sight of PRs after you review them.
 
-**Target features:**
-- **Agent-state dot on PR cards** — the same working/waiting/idle/exited dot task cards use, shown on a PR card when an open review session exists for it (palette/semantics reused from `StatusDot`).
-- **Open-session highlight** — a PR with an open review session gets a colored left border (the same language as the waiting-task border, D-44) so it's scannable.
-- **CI status as icons** — replace the CI colored dot with a green check (passing), red cross (failing), and orange circle (running/pending), freeing the colored-dot vocabulary for agent state; no-checks (`none`) keeps rendering nothing.
-- **"Recently Reviewed" section** — a second section at the bottom of the column listing open PRs you've reviewed (approve OR request-changes), staying until the PR is merged or closed; the top section remains "awaiting your review", and a PR appears in only one section (top wins; re-requested PRs return to the top).
+**Delivered features:**
+- **Agent state on PR cards** — a colored **left rail** (green working / pulsing-amber waiting / blue idle / gray exited) marks any PR with an open review session; redesigned from a `StatusDot` dot to a rail at the human-verify gate so it never clashes with the CI mark.
+- **CI status as icons** — bare glyphs: green check (passing) / red cross (failing) / static amber circle (running); no-checks (`none`) renders nothing.
+- **"Recently reviewed" section** — open PRs you've reviewed (`reviewed-by:@me`, approve OR request-changes) stay visible until merged/closed; the top section remains "awaiting your review"; a PR appears in only one section (top wins; server-side deduped); quietly omitted when empty.
 
-**Key milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):**
-- Two queries drive the two sections: `user-review-requested:@me draft:false` (top, existing) and `reviewed-by:@me state:open` (bottom, new), de-duplicated with top precedence.
-- Recently-Reviewed is bounded naturally by open state (a card leaves on merge OR close) — no separate time window in v1.5.
-- The agent dot + open-session border apply to cards in BOTH sections; CI icons apply everywhere a card renders.
-- All-internal milestone: reuses the existing `internal/github` query/cache machinery, the `StatusDot` component, the `source='github_pr'` task↔PR link, and the reaper's merge/close detection. No new external surface beyond a second `gh pr list` search.
+**Settled decisions (milestone-time):**
+- Two searches drive the two sections (`user-review-requested:@me draft:false` + `reviewed-by:@me`) from ONE cached `gh` cycle, server-side top-precedence deduped; `--state open` bounds the reviewed list (drops on merge/close) — no separate time window.
+- Agent state is a **left rail, not a dot** (user-directed redesign at the human-verify gate): the two signals split onto separate visual channels (left edge = your agent, right glyph = the PR's CI).
+- All-internal milestone: reuses `internal/github` query/cache, the `source='github_pr'` task↔PR link + `/api/agents/status`, and the reaper's merge/close detection. No new external surface beyond the second `gh pr list` search.
+
+</details>
 
 **v1.4 Repo-First Projects — shipped 2026-06-15.** See the Validated requirements and Current State below for what v1.4 delivered.
 
@@ -110,7 +115,7 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Active
 
-_No milestone currently active. v1.5 Sharper Review Column shipped 2026-06-17 (Phase 16). Run `/gsd:new-milestone` to scope the next cycle, or `/gsd:complete-milestone` to archive v1.5 first._
+_No milestone currently active. v1.5 Sharper Review Column shipped 2026-06-17 (Phase 16) — audited and archived to `milestones/v1.5-*`. Run `/gsd:new-milestone` to scope the next cycle._
 
 Carried-forward candidates from earlier milestones live in **Deferred** below and in the archived milestones' Future Requirements.
 
@@ -146,11 +151,11 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 **v1.4 fully implemented — Phase 15 (Repo-First Creation Flow) complete (2026-06-15)** — 3 plans. The repo-first Add-project UI on top of Phase 14's primitive: `AddProjectDialog` gains an integration-gated "GitHub repo | Local folder" segmented toggle (repo default, reusing `ui/tabs.tsx`); the `owner/name` input prefills the editable name, submit drives the atomic Phase-14 create with a blocking "Cloning…" spinner, and clone failures surface inline (dialog open, values preserved, no half-created project — Phase-14 atomicity). A dedicated best-effort `github.RepoDescription` (`gh repo view --json description`) captures the repo description into `projects.description` at create (visible/editable later in Project settings), leaving the shared `ValidateRepo` signature untouched. Integration-off renders the byte-for-byte pre-v1.4 folder-only form. 5/5 requirements verified (RPROJ-01..04, CKOUT-04); human-verify gate approved end-to-end; `go build`/`vet`/`test ./...` + `tsc` all green; embedded SPA rebuilt. **v1.4 (Repo-First Projects) shipped 2026-06-15** — milestone audit passed (10/10 requirements, 6/6 integration seams, 5/5 E2E flows), archived to `milestones/v1.4-*`.
 
-**v1.5 Sharper Review Column — Phase 16 complete (2026-06-17), milestone fully implemented** — 2 plans, 2 waves (data → rendering). The Review column now carries two independent at-a-glance signals per PR. Backend (`internal/github` + `internal/api`): a second `reviewed-by:@me draft:false` search rides ONE cache cycle alongside the existing `user-review-requested:@me` call (`fetchLists`, degrade-together), server-side top-precedence `dedupeReviewed`, the `{prs, reviewed}` endpoint response, and `pr_number`+`source` joined onto `/api/agents/status` entries (no migration — columns pre-exist in 00007). Frontend (`PRCard`/`ReviewColumn`): CI status as a bare lucide glyph (green `Check` / red `X` / static amber `Circle`; `none` renders nothing), agent state as an always-on colored **left rail** (green working / pulsing-amber waiting / blue idle / gray exited) — **redesigned from a `StatusDot` to a rail at the human-verify gate** per user feedback (a dot beside the line-art glyph clashed), so the two signals split cleanly by channel (left edge = your agent, right glyph = the PR's CI); and a quietly-omitted "Recently reviewed" subsection holding reviewed-still-open PRs until merge/close. 10/10 must-haves verified; human-verify approved end-to-end (incl. the redesign); `go test ./...` (12 pkgs) + `tsc -b && vite build` green; embedded SPA rebuilt. Not yet audited/archived — run `/gsd:complete-milestone`.
+**v1.5 Sharper Review Column — Phase 16 complete (2026-06-17), milestone fully implemented** — 2 plans, 2 waves (data → rendering). The Review column now carries two independent at-a-glance signals per PR. Backend (`internal/github` + `internal/api`): a second `reviewed-by:@me draft:false` search rides ONE cache cycle alongside the existing `user-review-requested:@me` call (`fetchLists`, degrade-together), server-side top-precedence `dedupeReviewed`, the `{prs, reviewed}` endpoint response, and `pr_number`+`source` joined onto `/api/agents/status` entries (no migration — columns pre-exist in 00007). Frontend (`PRCard`/`ReviewColumn`): CI status as a bare lucide glyph (green `Check` / red `X` / static amber `Circle`; `none` renders nothing), agent state as an always-on colored **left rail** (green working / pulsing-amber waiting / blue idle / gray exited) — **redesigned from a `StatusDot` to a rail at the human-verify gate** per user feedback (a dot beside the line-art glyph clashed), so the two signals split cleanly by channel (left edge = your agent, right glyph = the PR's CI); and a quietly-omitted "Recently reviewed" subsection holding reviewed-still-open PRs until merge/close. 10/10 must-haves verified; human-verify approved end-to-end (incl. the redesign); `go test ./...` (12 pkgs) + `tsc -b && vite build` green; embedded SPA rebuilt. **v1.5 (Sharper Review Column) shipped 2026-06-17** — milestone audit passed (9/9 requirements, 4/4 integration seams, 3/3 E2E flows), archived to `milestones/v1.5-*`.
 
 ## Next Milestone
 
-**v1.5 Sharper Review Column is the active milestone** (defined 2026-06-17 — see Current Milestone above). Candidates NOT pulled into v1.5 remain parked below for a future cycle.
+**No milestone active.** v1.5 Sharper Review Column shipped 2026-06-17; run `/gsd:new-milestone` to scope the next cycle. Candidates NOT pulled into v1.5 remain parked below.
 
 Candidates carried forward live in **Deferred** below. Banked forward investments worth a future milestone:
 - The v1.4 managed-checkout follow-ups, already scoped in `milestones/v1.4-REQUIREMENTS.md` "Future Requirements": on-demand checkout sync (CKMNT-01), non-default base branch at create (CKMNT-02), shallow/partial clone for large repos (CKMNT-03), and live clone-progress streaming + cancel (CKUX-01). The frontend `Project.managed` wire field is already in place to hang a managed-delete cleanup affordance on.
@@ -198,6 +203,8 @@ Parked candidates: browser notifications on waiting/finished (NOTF-01), one-clic
 | PR review worktree checks out the PR's **real head branch** (named, `pr/<n>` fallback on collision), not detached (v1.3, Phase 12, supersedes D-01) | User-directed during the Phase 12 human-verify — a detached HEAD reads as "not checked out"; a named branch matches GHREV-01's wording. Collision fallback keeps GHREV-05 safety (never reuse/move an existing ref; main checkout HEAD unchanged) | ✓ Good — `worktree add -b`, collision-checked; fork same-name `master` lands on `pr/<n>` |
 | Configurable PR-review seed prompt via a global Settings field (v1.3, Phase 12) | User-requested during human-verify — was deferred at discuss-time, pulled in once the feature was live | ✓ Good — `pr_review_seed` KV key (default template, `<n>`/`<title>` placeholders), prefilled once per agent session, never auto-sent |
 | PR worktrees auto-removed on merge/close, but only when pristine+idle; branch always kept (v1.3, Phase 13, GHCLN-01/02) | Closes the loop without ever bulldozing work — the reaper detects merge/close server-side; any dirty/unpushed/stashed/busy worktree is left for manual cleanup | ✓ Good — second reaper pass + shared `CleanupWorktreeGated` (force=false); auto deletes the row, manual keeps it nulled |
+| Agent state on PR cards is a colored **left rail**, not a `StatusDot` dot (v1.5, Phase 16, supersedes the planned SIGNL-01/02 dot) | User-directed at the human-verify gate: a filled dot beside the line-art CI glyph clashed (different styles, misaligned). The rail carries the full state by color and splits the two signals onto separate channels (left edge = your agent, right glyph = the PR's CI) | ✓ Good — `agentRail()` 3px span; green working / pulsing-amber waiting / blue idle / gray exited; no dot, zero layout shift |
+| Two PR lists from one cached `gh` cycle: `user-review-requested:@me` (awaiting) + `reviewed-by:@me` (recently reviewed), server-side top-precedence deduped (v1.5, Phase 16, REVWD-01/03/04) | Keeps reviewed-but-unmerged PRs in view without a second poll or N+1; `--state open` bounds the list (drops on merge/close) so no retention bookkeeping; one classified state/stale degrades both together | ✓ Good — `fetchLists`/`dedupeReviewed` in the existing `Service`; both lists ride one `repoEntry` |
 
 ## Evolution
 
@@ -217,4 +224,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-17 — Phase 16 complete; v1.5 Sharper Review Column fully implemented (awaiting milestone audit/archive)*
+*Last updated: 2026-06-17 after v1.5 Sharper Review Column milestone — shipped, audited, and archived*

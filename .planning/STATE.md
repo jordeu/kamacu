@@ -2,41 +2,40 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Sharper Review Column
-status: verifying
-stopped_at: Completed 16-02-PLAN.md — phase 16 plans complete (2/2), ready for phase verification
-last_updated: "2026-06-17T10:07:31.961Z"
+status: shipped
+stopped_at: v1.5 Sharper Review Column shipped 2026-06-17 — audited (passed), archived, tagged. No milestone active; run /gsd:new-milestone.
+last_updated: "2026-06-17T12:30:00.000Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 1
   completed_phases: 1
   total_plans: 2
   completed_plans: 2
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-15)
+See: .planning/PROJECT.md (updated 2026-06-17)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 16 — sharper-review-column
+**Current focus:** Planning next milestone — run `/gsd:new-milestone`
 
 ## Current Position
 
-Milestone: v1.5 Sharper Review Column
-Phase: 16
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-17
+Milestone: v1.5 Sharper Review Column — ✅ SHIPPED 2026-06-17
+Phase: none active
+Status: Milestone complete — audited (passed), archived, tagged
 
-**v1.5 goal:** Make the Review column convey two independent signals at a glance — your agent's state and the PR's CI state — and stop losing sight of PRs after you review them. Four targets: (1) agent-state dot on PR cards with an open review session; (2) colored left-border highlight for open-session cards; (3) CI status as icons (green check / red cross / orange circle), freeing the dot for agent state; (4) a "Recently Reviewed" bottom section (`reviewed-by:@me state:open`, approve OR request-changes) that holds reviewed PRs until merged or closed, with top-section precedence (no duplicates).
+Progress: [██████████] 100% — 1 phase (16), 2 plans, 6 tasks
 
-**Phase 16 (Sharper Review Column)** — single cohesive, all-internal, reuse-heavy phase carrying all 9 requirements (SIGNL-01/02/03, CHECK-01/02, REVWD-01/02/03/04). Natural plan-level seam (not a phase split): a data plan (second `reviewed-by:@me state:open` `gh pr list` search cloned from `prlist.go`, fronted by the same per-repo TTL cache `Service`; two-list top-precedence dedup; per-PR open-session/agent state joined from the `source='github_pr'` task via `GET /api/agents/status`) and a rendering plan (CI dot → green-check/red-cross/orange-circle icons with `none` rendering nothing; reused `StatusDot` + D-44 left border on cards in both sections; the Recently Reviewed section reusing the column's refresh/visibility-paused poll/loading/degraded/empty behavior). Touched files concentrate in `PRCard.tsx` + `ReviewColumn.tsx` (+ the `internal/github` list path and `usePullRequests`).
+**v1.5 shipped:** The Review column now carries two independent at-a-glance signals per PR — your agent's session state (a colored left rail: green working / pulsing-amber waiting / blue idle / gray exited) and the PR's CI state (a bare glyph: green check / red cross / static amber circle; none renders nothing) — split onto separate visual channels so they never confuse, plus a "Recently reviewed" section (`reviewed-by:@me`, approve or request-changes; server-deduped, quietly omitted when empty) that keeps reviewed PRs visible until they merge or close. Milestone-time redesign: the planned agent dot became a colored left rail at the human-verify gate (a dot beside the CI glyph clashed). Audit: 9/9 requirements, 4/4 integration seams, 3/3 E2E flows. Archived to `milestones/v1.5-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
 
-**Next:** `/gsd:plan-phase 16`.
+**Next:** `/gsd:new-milestone` to scope the next cycle.
 
-**Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render items in `PRCard.tsx`/`ReviewColumn.tsx` — exactly the files v1.5 touches, a natural moment to clear them.
+**Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories; the v1.3 `Date.now()`-in-render advisory in `PRCard.tsx` was cleared in v1.5 (the `ReviewColumn.tsx` one may remain); plus a cosmetic stale "dot/border" comment in `ReviewColumn.tsx` / the `agentRail` JSDoc. A dedicated lint/comment-sweep is the right home.
 
 ## Performance Metrics
 
