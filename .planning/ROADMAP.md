@@ -68,7 +68,7 @@ Full details: [milestones/v1.4-ROADMAP.md](milestones/v1.4-ROADMAP.md)
 
 ### 🚧 v1.5 Sharper Review Column (Phase 16) — ACTIVE
 
-- [ ] **Phase 16: Sharper Review Column** — Agent-state dot + open-session border on PR cards, CI status as icons, and a "Recently Reviewed" bottom section that holds reviewed PRs until merged/closed
+- [x] **Phase 16: Sharper Review Column** — Agent-state dot + open-session border on PR cards, CI status as icons, and a "Recently Reviewed" bottom section that holds reviewed PRs until merged/closed (completed 2026-06-17)
 
 ## Phase Details
 
@@ -111,7 +111,7 @@ Plans:
 | 13. PR Worktree Auto-Cleanup | v1.3 | 3/3 | Complete | 2026-06-14 |
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete | 2026-06-14 |
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
-| 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
+| 16. Sharper Review Column | v1.5 | 2/2 | Complete    | 2026-06-17 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*

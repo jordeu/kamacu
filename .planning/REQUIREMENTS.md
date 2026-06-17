@@ -11,8 +11,8 @@ Requirements for the Sharper Review Column milestone. Each maps to a roadmap pha
 
 The Review column must show two independent signals per PR — *your* agent's state and the PR's CI state — without the two being confused for each other.
 
-- [x] **SIGNL-01**: When an open review session exists for a PR, its card shows the agent status dot (working / waiting / idle / exited) using the same palette and semantics as task cards (reused `StatusDot`)
-- [x] **SIGNL-02**: A PR card with an open review session is highlighted with a colored left border (the same visual language as the waiting-task card border, D-44) so open-session PRs are distinguishable at a glance
+- [x] **SIGNL-01**: When an open review session exists for a PR, its card shows the agent state (working / waiting / idle / exited) via a colored left rail using the `dotMeta` palette — redesigned from a `StatusDot` to a rail at the Phase-16 human-verify gate
+- [x] **SIGNL-02**: A PR card with an open review session is highlighted by an always-on colored left rail (color = agent state; waiting pulses) so open-session PRs are distinguishable at a glance
 - [x] **SIGNL-03**: The agent dot and open-session border apply to PR cards in both the "awaiting your review" and "Recently Reviewed" sections
 
 ### CI Status

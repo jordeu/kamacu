@@ -4,7 +4,7 @@ milestone: v1.5
 milestone_name: Sharper Review Column
 status: verifying
 stopped_at: Completed 16-02-PLAN.md — phase 16 plans complete (2/2), ready for phase verification
-last_updated: "2026-06-17T10:00:41.605Z"
+last_updated: "2026-06-17T10:07:31.961Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 1
@@ -25,8 +25,8 @@ See: .planning/PROJECT.md (updated 2026-06-15)
 ## Current Position
 
 Milestone: v1.5 Sharper Review Column
-Phase: 16 (sharper-review-column) — EXECUTING
-Plan: 2 of 2
+Phase: 16
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-06-17
 
