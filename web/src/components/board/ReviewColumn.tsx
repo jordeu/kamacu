@@ -68,8 +68,12 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
   const { data } = usePullRequests(projectId);
   const refresh = useRefreshPullRequests(projectId);
   const prs = data?.prs ?? [];
+  // Recently-reviewed list (REVWD-01) — already deduped against `prs` and sorted
+  // most-recently-updated-first server-side (16-01); rendered verbatim.
+  const reviewed = data?.reviewed ?? [];
   // count only when the server reports a clean read; null while loading/degraded
-  // so the header/badge never shows a fabricated 0 (D-07).
+  // so the header/badge never shows a fabricated 0 (D-07). The header count stays
+  // the AWAITING count — reviewed never rolls into it (UI-SPEC §Recently Reviewed).
   const count = data?.state === "ok" ? prs.length : null;
 
   // --- Collapsed rail (GHCOL-06) — a slim w-10 strip, clickable to expand. ---
@@ -138,7 +142,12 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-md bg-[#101013] p-3">
-        <ReviewStates data={data} prs={prs} projectId={projectId} />
+        <ReviewStates
+          data={data}
+          prs={prs}
+          reviewed={reviewed}
+          projectId={projectId}
+        />
       </div>
     </div>
   );
@@ -152,13 +161,16 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
 function ReviewStates({
   data,
   prs,
+  reviewed,
   projectId,
 }: {
   data: ReturnType<typeof usePullRequests>["data"];
   prs: import("@/api/pullRequests").PRSummary[];
+  reviewed: import("@/api/pullRequests").PRSummary[];
   projectId: number;
 }) {
   // Loading — first fetch unresolved. Quiet skeletons, no spinner, no overlay.
+  // (reviewed is [] here, so reviewedSection below yields null — no shimmer.)
   if (data === undefined) {
     return (
       <>
@@ -168,12 +180,37 @@ function ReviewStates({
     );
   }
 
+  // Hoisted to clear the carried Date.now()-in-render advisory (D-50, non-blocking).
+  const now = Date.now();
+
   const stale = data.stale === true;
   const staleFooter = stale ? (
     <div className="text-xs text-amber-400">
-      error · {formatAgo(data.fetchedAt, Date.now())} old
+      error · {formatAgo(data.fetchedAt, now)} old
     </div>
   ) : null;
+
+  // "Recently reviewed" subsection (REVWD-01/03/04) — a hairline-divided label
+  // row + the reviewed PRCards, rendered below the awaiting list inside the same
+  // scroll area. Quietly omitted when empty (D-11): no divider, no label, no
+  // "(0)". Reviewed cards reuse PRCard verbatim, so they get the dot/border/CI
+  // icon for free (SIGNL-03/D-05). Server order is preserved — do NOT re-sort.
+  const reviewedSection =
+    reviewed.length > 0 ? (
+      <>
+        <div className="mt-2 flex items-baseline gap-2 border-t border-border pt-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Recently reviewed
+          </span>
+          <span className="text-xs font-medium text-muted-foreground">
+            {reviewed.length}
+          </span>
+        </div>
+        {reviewed.map((pr) => (
+          <PRCard key={`reviewed-${pr.number}`} pr={pr} projectId={projectId} />
+        ))}
+      </>
+    ) : null;
 
   // Degraded — gh missing / unauthenticated / error, AND no cached prs to show.
   // (`disabled` never reaches here — the render gate returns null first.) A
@@ -212,15 +249,22 @@ function ReviewStates({
     );
   }
 
-  // Empty — clean read, zero PRs. Quiet, no illustration.
+  // Empty — clean read, zero AWAITING PRs. The "caught up" copy STAYS even when
+  // reviewed has items (UI-SPEC §State Matrix: do NOT suppress the empty block);
+  // the reviewedSection renders below it (quiet-omitted if reviewed is empty too).
   if (data.state === "ok" && prs.length === 0) {
     return (
-      <div className="flex flex-col gap-1 py-6 text-center">
-        <div className="text-sm text-muted-foreground">You're all caught up</div>
-        <div className="text-xs text-muted-foreground">
-          No PRs are waiting for your review.
+      <>
+        <div className="flex flex-col gap-1 py-6 text-center">
+          <div className="text-sm text-muted-foreground">
+            You're all caught up
+          </div>
+          <div className="text-xs text-muted-foreground">
+            No PRs are waiting for your review.
+          </div>
         </div>
-      </div>
+        {reviewedSection}
+      </>
     );
   }
 
@@ -234,6 +278,7 @@ function ReviewStates({
         <PRCard key={pr.number} pr={pr} projectId={projectId} />
       ))}
       {staleFooter}
+      {reviewedSection}
     </>
   );
 }
