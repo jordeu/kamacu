@@ -144,3 +144,82 @@ func TestReduceChecksSkippedHeavy(t *testing.T) {
 		t.Errorf("skipped-heavy rollup reduceChecks = %q, want pass (SKIPPED must never paint red)", got)
 	}
 }
+
+// TestDedupeReviewed pins the server-side single-section rule (REVWD-03/D-14):
+// any PR Number present in the awaiting-review list (`prs`, top precedence) is
+// removed from the reviewed list before it ships, a non-overlapping reviewed PR
+// is kept, the reviewed order is preserved, and an empty awaiting leaves the
+// reviewed list intact. Pure function, no gh — so this is a fast table guard.
+func TestDedupeReviewed(t *testing.T) {
+	pr := func(n int) PRSummary { return PRSummary{Number: n} }
+	numbers := func(in []PRSummary) []int {
+		out := make([]int, 0, len(in))
+		for _, p := range in {
+			out = append(out, p.Number)
+		}
+		return out
+	}
+	eq := func(a, b []int) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	tests := []struct {
+		name     string
+		awaiting []PRSummary
+		reviewed []PRSummary
+		want     []int
+	}{
+		{
+			name:     "overlapping PR dropped from reviewed (top precedence)",
+			awaiting: []PRSummary{pr(7)},
+			reviewed: []PRSummary{pr(7), pr(3)},
+			want:     []int{3},
+		},
+		{
+			name:     "non-overlapping reviewed kept",
+			awaiting: []PRSummary{pr(7)},
+			reviewed: []PRSummary{pr(3), pr(5)},
+			want:     []int{3, 5},
+		},
+		{
+			name:     "reviewed order preserved after dedup",
+			awaiting: []PRSummary{pr(2)},
+			reviewed: []PRSummary{pr(9), pr(2), pr(4), pr(1)},
+			want:     []int{9, 4, 1},
+		},
+		{
+			name:     "empty awaiting leaves reviewed intact",
+			awaiting: nil,
+			reviewed: []PRSummary{pr(9), pr(4)},
+			want:     []int{9, 4},
+		},
+		{
+			name:     "empty reviewed stays empty",
+			awaiting: []PRSummary{pr(1)},
+			reviewed: nil,
+			want:     []int{},
+		},
+		{
+			name:     "all reviewed overlap → empty",
+			awaiting: []PRSummary{pr(1), pr(2)},
+			reviewed: []PRSummary{pr(1), pr(2)},
+			want:     []int{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := numbers(dedupeReviewed(tt.awaiting, tt.reviewed))
+			if !eq(got, tt.want) {
+				t.Errorf("dedupeReviewed numbers = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

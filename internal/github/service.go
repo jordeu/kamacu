@@ -20,29 +20,36 @@ type Result struct {
 	State     string      `json:"state"`
 	Stale     bool        `json:"stale"`
 	FetchedAt *time.Time  `json:"fetchedAt"` // last SUCCESSFUL fetch; null until first success
-	PRs       []PRSummary `json:"prs"`       // null when no data to show
+	PRs       []PRSummary `json:"prs"`       // awaiting-review queue; null when no data to show
+	Reviewed  []PRSummary `json:"reviewed"`  // reviewed-by:@me, deduped against PRs (D-13/D-14); null when no data
 }
 
 // repoEntry is the per-repo cache state. Unlike quota (one global account /
 // one entry), each linked project is a distinct repo, so the Service holds one
 // of these per canonical owner/name. Two timestamps are deliberate (Pitfall 3):
 // fetchedAt drives the 60s success-TTL and the wire FetchedAt; lastAttempt
-// drives the 10s hard floor that binds EVERY attempt, even force.
+// drives the 10s hard floor that binds EVERY attempt, even force. Both review
+// queues (awaiting + reviewed) cache under this ONE entry — one fetchedAt, one
+// TTL/floor — so the two sections always reflect the same gh snapshot (D-12).
 type repoEntry struct {
-	cached      []PRSummary
-	fetchedAt   time.Time // zero until first success
-	lastAttempt time.Time // set on EVERY attempt (binds even force)
-	failures    int       // consecutive; >= maxFailures drops cached
-	lastErr     string    // "" | "no_gh" | "auth_required" | "error"
-	inflight    bool      // in-flight dedup
+	cachedAwaiting []PRSummary // last-good user-review-requested:@me list
+	cachedReviewed []PRSummary // last-good reviewed-by:@me list (deduped)
+	hasCache       bool        // true once a success has cached; gates the TTL serve
+	fetchedAt      time.Time   // zero until first success
+	lastAttempt    time.Time   // set on EVERY attempt (binds even force)
+	failures       int         // consecutive; >= maxFailures drops cached
+	lastErr        string      // "" | "no_gh" | "auth_required" | "error"
+	inflight       bool        // in-flight dedup
 }
 
 // Config is the public construction seam. Zero values select production
 // defaults. Tests inject a fixed clock (Now) and a fake runner (Runner) that
 // counts calls — the analogue of quota's CredentialsPath/BaseURL test seam.
+// Runner now returns BOTH review queues in one call (PRLists) so a single
+// cached cycle drives both sections (D-12).
 type Config struct {
-	Now    func() time.Time                                                             // default: time.Now
-	Runner func(ctx context.Context, repo, repoDir string) ([]PRSummary, string, error) // default: runGH
+	Now    func() time.Time                                                       // default: time.Now
+	Runner func(ctx context.Context, repo, repoDir string) (PRLists, string, error) // default: fetchLists
 }
 
 // Service is the demand-driven, per-repo PR-list cache. Like quota.Service it
@@ -54,12 +61,12 @@ type Config struct {
 type Service struct {
 	mu      sync.Mutex
 	now     func() time.Time
-	runner  func(ctx context.Context, repo, repoDir string) ([]PRSummary, string, error)
+	runner  func(ctx context.Context, repo, repoDir string) (PRLists, string, error)
 	entries map[string]*repoEntry // keyed by canonical owner/name
 }
 
 // New builds a Service from cfg, applying production defaults (time.Now,
-// runGH) for zero values.
+// fetchLists) for zero values.
 func New(cfg Config) *Service {
 	now := cfg.Now
 	if now == nil {
@@ -67,7 +74,7 @@ func New(cfg Config) *Service {
 	}
 	runner := cfg.Runner
 	if runner == nil {
-		runner = runGH
+		runner = fetchLists
 	}
 	return &Service{
 		now:     now,
@@ -105,7 +112,7 @@ func (s *Service) Get(ctx context.Context, repo, repoDir string, force bool) Res
 	now := s.now()
 
 	// Serve the cache without fetching when any gate holds.
-	if (!force && e.cached != nil && now.Sub(e.fetchedAt) < cacheTTL) ||
+	if (!force && e.hasCache && now.Sub(e.fetchedAt) < cacheTTL) ||
 		now.Sub(e.lastAttempt) < attemptFloor ||
 		e.inflight {
 		res := e.resultLocked()
@@ -119,14 +126,16 @@ func (s *Service) Get(ctx context.Context, repo, repoDir string, force bool) Res
 	e.lastAttempt = now
 	s.mu.Unlock()
 
-	prs, state, _ := s.runner(ctx, repo, repoDir)
+	lists, state, _ := s.runner(ctx, repo, repoDir)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e.inflight = false
 	switch state {
 	case "ok":
-		e.cached = prs
+		e.cachedAwaiting = lists.Awaiting
+		e.cachedReviewed = lists.Reviewed
+		e.hasCache = true
 		e.fetchedAt = s.now()
 		e.failures = 0
 		e.lastErr = ""
@@ -137,26 +146,31 @@ func (s *Service) Get(ctx context.Context, repo, repoDir string, force bool) Res
 }
 
 // recordFailureLocked increments the consecutive-failure counter, remembers
-// which degraded state to report, and drops the cached PRs once maxFailures is
-// reached. Caller holds the Service mu.
+// which degraded state to report, and drops BOTH cached lists once maxFailures
+// is reached (one gh failure degrades both sections together, D-12). Caller
+// holds the Service mu.
 func (e *repoEntry) recordFailureLocked(state string) {
 	e.failures++
 	e.lastErr = state
 	if e.failures >= maxFailures {
-		e.cached = nil
+		e.cachedAwaiting = nil
+		e.cachedReviewed = nil
+		e.hasCache = false
 	}
 }
 
-// resultLocked materializes the Result for the current entry state. Caller
-// holds the Service mu.
+// resultLocked materializes the Result for the current entry state. Both
+// review queues ride the same fetchedAt and the same Stale flag — they are one
+// cached snapshot. Caller holds the Service mu.
 func (e *repoEntry) resultLocked() Result {
 	state := "ok"
 	if e.lastErr != "" {
 		state = e.lastErr
 	}
-	res := Result{State: state, Stale: e.lastErr != "" && e.cached != nil}
-	if e.cached != nil {
-		res.PRs = e.cached
+	res := Result{State: state, Stale: e.lastErr != "" && e.hasCache}
+	if e.hasCache {
+		res.PRs = e.cachedAwaiting
+		res.Reviewed = e.cachedReviewed
 		ft := e.fetchedAt
 		res.FetchedAt = &ft
 	}

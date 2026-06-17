@@ -188,21 +188,34 @@ func reduceChecks(rollup []checkEntry) string {
 	}
 }
 
-// runGH is the single I/O primitive of Phase 11's backend: it shells out to
-// `gh pr list` for the review-requested queue and classifies the outcome into
-// a typed state. It NEVER spawns when gh is absent (returns "no_gh") and NEVER
+// The two review-queue searches that drive the column's two sections (D-12).
+// Both ride ONE cached Service cycle via fetchLists; the only thing that
+// differs between them is this --search argument.
+const (
+	searchAwaiting = "user-review-requested:@me draft:false" // top section (existing)
+	searchReviewed = "reviewed-by:@me draft:false"           // Recently reviewed (new, D-12)
+)
+
+// listPRs is the single I/O primitive of the backend: it shells out to
+// `gh pr list` for ONE search and classifies the outcome into a typed state.
+// It NEVER spawns when gh is absent (returns "no_gh") and NEVER
 // shell-interpolates — the command is an arg array with cmd.Dir set so gh
-// resolves the right host/account (Pitfall 6 / D-00b). The return contract mirrors the
-// quota fetcher: (prs, state, err) where state is one of
+// resolves the right host/account (Pitfall 6 / D-00b). The return contract
+// mirrors the quota fetcher: (prs, state, err) where state is one of
 // "ok"|"no_gh"|"auth_required"|"error" and err is always nil for classified
 // degrades (the Service switches on state, never on err).
-func runGH(ctx context.Context, repo, repoDir string) (prs []PRSummary, state string, _ error) {
+//
+// search is the --search argument (searchAwaiting or searchReviewed). Every
+// other concern — the --json field set, the belt-and-suspenders draft filter,
+// reduceChecks, the UpdatedAt sort, and the auth/error classification — is
+// identical for both queues, so it lives here exactly once.
+func listPRs(ctx context.Context, repo, repoDir, search string) (prs []PRSummary, state string, _ error) {
 	if !Available() {
 		return nil, "no_gh", nil // never spawn (D-00c)
 	}
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
 		"-R", repo,
-		"--search", "user-review-requested:@me draft:false",
+		"--search", search,
 		"--state", "open",
 		"--json", "number,title,author,updatedAt,url,isDraft,statusCheckRollup,headRefName,headRefOid,baseRefName,isCrossRepository,additions,deletions",
 	)
@@ -254,10 +267,58 @@ func runGH(ctx context.Context, repo, repoDir string) (prs []PRSummary, state st
 			IsCrossRepository: r.IsCrossRepository,
 		})
 	}
-	// Most-recently-updated first (D-14). ISO 8601 strings sort lexically the
-	// same as chronologically, so a string compare is correct here.
+	// Most-recently-updated first (D-10/D-14). ISO 8601 strings sort lexically
+	// the same as chronologically, so a string compare is correct here.
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].UpdatedAt > out[j].UpdatedAt
 	})
 	return out, "ok", nil
+}
+
+// PRLists carries the two review queues fetched in one cache cycle (D-12):
+// Awaiting (user-review-requested:@me) and Reviewed (reviewed-by:@me, already
+// deduped against Awaiting). The Service caches BOTH under one repoEntry, one
+// fetchedAt, one TTL/floor — so the column's two sections always reflect the
+// same gh snapshot.
+type PRLists struct {
+	Awaiting []PRSummary // user-review-requested:@me (top section)
+	Reviewed []PRSummary // reviewed-by:@me, deduped against Awaiting (D-14)
+}
+
+// fetchLists is the production runner the Service calls: it runs BOTH searches
+// in one cycle and applies top-precedence dedup (D-14). If EITHER search
+// degrades, the whole cycle reports that degraded state with both lists empty —
+// never a partial result, so a single gh failure degrades both sections
+// together (REVWD-04/D-12). err is always nil; the caller switches on state.
+func fetchLists(ctx context.Context, repo, repoDir string) (PRLists, string, error) {
+	awaiting, st, _ := listPRs(ctx, repo, repoDir, searchAwaiting)
+	if st != "ok" {
+		return PRLists{}, st, nil
+	}
+	reviewed, st2, _ := listPRs(ctx, repo, repoDir, searchReviewed)
+	if st2 != "ok" {
+		return PRLists{}, st2, nil
+	}
+	reviewed = dedupeReviewed(awaiting, reviewed)
+	return PRLists{Awaiting: awaiting, Reviewed: reviewed}, "ok", nil
+}
+
+// dedupeReviewed drops any reviewed PR whose Number appears in awaiting — the
+// top "awaiting your review" section takes precedence (REVWD-03/D-14), so a
+// re-requested PR shows up there and never duplicates in Recently reviewed.
+// The surviving reviewed order is preserved (it was already
+// most-recently-updated-first from listPRs).
+func dedupeReviewed(awaiting, reviewed []PRSummary) []PRSummary {
+	seen := make(map[int]struct{}, len(awaiting))
+	for _, p := range awaiting {
+		seen[p.Number] = struct{}{}
+	}
+	out := make([]PRSummary, 0, len(reviewed))
+	for _, p := range reviewed {
+		if _, dup := seen[p.Number]; dup {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
