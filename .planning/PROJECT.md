@@ -8,9 +8,23 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone
+## Current Milestone: v1.5 Sharper Review Column
 
-**v1.4 Repo-First Projects — shipped 2026-06-15.** No milestone is currently active; run `/gsd:new-milestone` to scope the next one. See the Validated requirements and Current State below for what v1.4 delivered.
+**Goal:** Make the Review column convey two independent signals at a glance — your agent's state and the PR's CI state — and stop losing sight of PRs after you review them.
+
+**Target features:**
+- **Agent-state dot on PR cards** — the same working/waiting/idle/exited dot task cards use, shown on a PR card when an open review session exists for it (palette/semantics reused from `StatusDot`).
+- **Open-session highlight** — a PR with an open review session gets a colored left border (the same language as the waiting-task border, D-44) so it's scannable.
+- **CI status as icons** — replace the CI colored dot with a green check (passing), red cross (failing), and orange circle (running/pending), freeing the colored-dot vocabulary for agent state; no-checks (`none`) keeps rendering nothing.
+- **"Recently Reviewed" section** — a second section at the bottom of the column listing open PRs you've reviewed (approve OR request-changes), staying until the PR is merged or closed; the top section remains "awaiting your review", and a PR appears in only one section (top wins; re-requested PRs return to the top).
+
+**Key milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):**
+- Two queries drive the two sections: `user-review-requested:@me draft:false` (top, existing) and `reviewed-by:@me state:open` (bottom, new), de-duplicated with top precedence.
+- Recently-Reviewed is bounded naturally by open state (a card leaves on merge OR close) — no separate time window in v1.5.
+- The agent dot + open-session border apply to cards in BOTH sections; CI icons apply everywhere a card renders.
+- All-internal milestone: reuses the existing `internal/github` query/cache machinery, the `StatusDot` component, the `source='github_pr'` task↔PR link, and the reaper's merge/close detection. No new external surface beyond a second `gh pr list` search.
+
+**v1.4 Repo-First Projects — shipped 2026-06-15.** See the Validated requirements and Current State below for what v1.4 delivered.
 
 <details>
 <summary>Shipped milestone targets — v1.4 Repo-First Projects (2026-06-15)</summary>
@@ -93,7 +107,15 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Active
 
-_No milestone currently active. v1.4 shipped 2026-06-15 (15 phases complete across v1.0–v1.4). Run `/gsd:new-milestone` to define the next cycle (questioning → research → requirements → roadmap)._ Carried-forward candidates live in **Deferred** below and in the archived milestones' Future Requirements.
+**v1.5 Sharper Review Column** (requirements defined in `.planning/REQUIREMENTS.md`):
+
+- [ ] Agent-state dot (working/waiting/idle/exited) on a PR card when an open review session exists for it
+- [ ] Open-session PR cards highlighted with a colored left border (waiting-task border language)
+- [ ] CI status shown as icons — green check (pass) / red cross (fail) / orange circle (running); no-checks renders nothing
+- [ ] "Recently Reviewed" section listing open PRs you've reviewed (approve or request-changes), until merged or closed
+- [ ] Single-section rule — a PR awaiting review (top) is never duplicated in Recently Reviewed (bottom); re-requested PRs return to the top
+
+Carried-forward candidates from earlier milestones live in **Deferred** below and in the archived milestones' Future Requirements.
 
 ### Out of Scope
 
@@ -129,7 +151,7 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**No milestone active.** v1.4 shipped 2026-06-15; run `/gsd:new-milestone` to scope the next cycle (questioning → research → requirements → roadmap).
+**v1.5 Sharper Review Column is the active milestone** (defined 2026-06-17 — see Current Milestone above). Candidates NOT pulled into v1.5 remain parked below for a future cycle.
 
 Candidates carried forward live in **Deferred** below. Banked forward investments worth a future milestone:
 - The v1.4 managed-checkout follow-ups, already scoped in `milestones/v1.4-REQUIREMENTS.md` "Future Requirements": on-demand checkout sync (CKMNT-01), non-default base branch at create (CKMNT-02), shallow/partial clone for large repos (CKMNT-03), and live clone-progress streaming + cancel (CKUX-01). The frontend `Project.managed` wire field is already in place to hang a managed-delete cleanup affordance on.
@@ -196,4 +218,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-15 after v1.4 Repo-First Projects milestone — shipped, audited, and archived*
+*Last updated: 2026-06-17 — started milestone v1.5 Sharper Review Column*

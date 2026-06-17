@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Repo-First Projects
-status: shipped
-stopped_at: v1.4 shipped 2026-06-15 — audited (passed), archived, tagged. No milestone active; run /gsd:new-milestone.
-last_updated: "2026-06-16T04:40:25.000Z"
-last_activity: 2026-06-16
+milestone: v1.5
+milestone_name: Sharper Review Column
+status: defining-requirements
+stopped_at: v1.5 started 2026-06-17 — milestone scoped, defining requirements → roadmap.
+last_updated: "2026-06-17T00:00:00.000Z"
+last_activity: 2026-06-17
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,19 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-15)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Planning next milestone — run `/gsd:new-milestone`
+**Current focus:** v1.5 Sharper Review Column — defining requirements → roadmap
 
 ## Current Position
 
-Milestone: v1.4 Repo-First Projects — ✅ SHIPPED 2026-06-15
-Phase: none active
-Status: Milestone complete — audited (passed), archived, tagged
+Milestone: v1.5 Sharper Review Column — scoping
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-17 — Milestone v1.5 started
 
-Progress: [██████████] 100% — 2 phases, 7 plans, 13 tasks
+**v1.5 goal:** Make the Review column convey two independent signals at a glance — your agent's state and the PR's CI state — and stop losing sight of PRs after you review them. Four targets: (1) agent-state dot on PR cards with an open review session; (2) colored left-border highlight for open-session cards; (3) CI status as icons (green check / red cross / orange circle), freeing the dot for agent state; (4) a "Recently Reviewed" bottom section (`reviewed-by:@me state:open`, approve OR request-changes) that holds reviewed PRs until merged or closed, with top-section precedence (no duplicates).
 
-**v1.4 shipped:** Repo-first project creation — name a GitHub repo and Kangent `gh repo clone`s + manages the checkout under `~/.kangent/repos/<owner>/<name>` on the default branch (folder path is the optional fallback); managed task worktrees fetch the latest default branch; managed-project delete is all-or-nothing gated; clone failures degrade-don't-break with no half-created project; folder-based projects untouched. Audit: 10/10 requirements satisfied, 6/6 integration seams wired, 5/5 E2E flows complete. Archived to `milestones/v1.4-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
+**Next:** define `.planning/REQUIREMENTS.md` → spawn roadmapper → `/gsd:plan-phase 16`.
 
-**Next:** `/gsd:new-milestone` to scope the next cycle. Candidates in `milestones/v1.4-REQUIREMENTS.md` Future Requirements: CKMNT-01/02/03 (sync / non-default base / shallow clone), CKUX-01 (live clone progress + cancel). Carried tech debt (non-blocking, build green): ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render items — a dedicated lint pass is the right home (v1.4 added none).
+**Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories + two v1.3 `Date.now()`-in-render items in `PRCard.tsx`/`ReviewColumn.tsx` — exactly the files v1.5 touches, a natural moment to clear them.
 
 ## Performance Metrics
 
