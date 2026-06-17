@@ -86,7 +86,10 @@ Full details: [milestones/v1.4-ROADMAP.md](milestones/v1.4-ROADMAP.md)
   - All-internal, reuse-heavy. Reuses: the `internal/github` `gh pr list` + reducer + per-repo TTL cache `Service` (a second `reviewed-by:@me state:open` search clones the existing `user-review-requested:@me` path in `prlist.go`); the `StatusDot` component + `GET /api/agents/status`; the `source='github_pr'` task↔PR link (a PR's open-session/agent state is the agent status of its linked `source='github_pr'` task); and the reaper's existing merge/close detection (bounds Recently Reviewed by open state — no new time window). No new external surface beyond the second `gh pr list` search.
   - Natural plan-level seam (NOT a phase boundary): a data plan (second query + cache wiring + two-list top-precedence dedup + exposing/joining open-session agent state per PR) and a rendering plan (CI icons replacing the dot, agent dot + open-session border on cards, the Recently Reviewed section with its reuse of the column's poll/refresh/loading/degraded/empty behavior). Cohesive enough to live in one phase; keep the seam as plan structure.
   - Touched files concentrate in `web/src/components/board/PRCard.tsx` and `web/src/components/board/ReviewColumn.tsx` (plus the `internal/github` list path and the `usePullRequests` hook). The two carried `Date.now()`-in-render lint advisories live in exactly these two files — clearing them here is a natural, non-blocking moment (build gate is already green; do not let it block the phase).
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 16-01-PLAN.md — Data layer: second reviewed-by:@me search + one-cycle cache + server-side dedup (D-12/13/14), pr_number/source on agent status (D-15), extended web/src/api types
+- [ ] 16-02-PLAN.md — Rendering: CI icons (CHECK-01/02), agent dot + blue/amber session border on PRCard (SIGNL-01/02/03), Recently reviewed section in ReviewColumn (REVWD-01/03/04)
 **UI hint**: yes
 
 ## Progress
