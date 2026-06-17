@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Sharper Review Column
-status: roadmap-complete
-stopped_at: v1.5 roadmap created 2026-06-17 — 1 phase (16), all 9 requirements mapped. Ready to plan Phase 16.
-last_updated: "2026-06-17T00:00:00.000Z"
-last_activity: 2026-06-17
+status: planning
+stopped_at: Phase 16 context gathered
+last_updated: "2026-06-17T07:14:20.343Z"
+last_activity: 2026-06-17 — Roadmap created (1 phase, 9/9 requirements mapped)
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
-  percent: 0
 ---
 
 # Project State
@@ -163,7 +162,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-16T04:40:25Z
-Stopped at: Quick task 260616-8l7 — real fix (superseded check-run dedup in reduceChecks) implemented + tested + binary rebuilt; awaiting human-verify (Task 3, blocking) against the live instance. Prior cache-floor diagnosis was wrong and reset out of the branch.
-Resume file: .planning/quick/260616-8l7-the-refresh-button-at-review-column-seem/260616-8l7-PLAN.md (Task 3 human-verify gate)
+Last session: 2026-06-17T07:14:20.339Z
+Stopped at: Phase 16 context gathered
+Resume file: .planning/phases/16-sharper-review-column/16-CONTEXT.md
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
