@@ -12,13 +12,13 @@ Requirements for the Sharper Review Column milestone. Each maps to a roadmap pha
 The Review column must show two independent signals per PR — *your* agent's state and the PR's CI state — without the two being confused for each other.
 
 - [x] **SIGNL-01**: When an open review session exists for a PR, its card shows the agent status dot (working / waiting / idle / exited) using the same palette and semantics as task cards (reused `StatusDot`)
-- [ ] **SIGNL-02**: A PR card with an open review session is highlighted with a colored left border (the same visual language as the waiting-task card border, D-44) so open-session PRs are distinguishable at a glance
-- [ ] **SIGNL-03**: The agent dot and open-session border apply to PR cards in both the "awaiting your review" and "Recently Reviewed" sections
+- [x] **SIGNL-02**: A PR card with an open review session is highlighted with a colored left border (the same visual language as the waiting-task card border, D-44) so open-session PRs are distinguishable at a glance
+- [x] **SIGNL-03**: The agent dot and open-session border apply to PR cards in both the "awaiting your review" and "Recently Reviewed" sections
 
 ### CI Status
 
-- [ ] **CHECK-01**: A PR's CI status renders as an icon — green check (passing), red cross (failing), orange circle (running/pending) — replacing the previous colored CI dot, so the colored-dot vocabulary is reserved for agent state
-- [ ] **CHECK-02**: A PR with no checks (`none`) renders no CI indicator (no icon, no reserved gutter, no layout shift) — preserving the existing dotless behavior
+- [x] **CHECK-01**: A PR's CI status renders as an icon — green check (passing), red cross (failing), orange circle (running/pending) — replacing the previous colored CI dot, so the colored-dot vocabulary is reserved for agent state
+- [x] **CHECK-02**: A PR with no checks (`none`) renders no CI indicator (no icon, no reserved gutter, no layout shift) — preserving the existing dotless behavior
 
 ### Recently Reviewed
 
@@ -59,10 +59,10 @@ Which phases cover which requirements. Populated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | SIGNL-01 | Phase 16 | Complete |
-| SIGNL-02 | Phase 16 | Pending |
-| SIGNL-03 | Phase 16 | Pending |
-| CHECK-01 | Phase 16 | Pending |
-| CHECK-02 | Phase 16 | Pending |
+| SIGNL-02 | Phase 16 | Complete |
+| SIGNL-03 | Phase 16 | Complete |
+| CHECK-01 | Phase 16 | Complete |
+| CHECK-02 | Phase 16 | Complete |
 | REVWD-01 | Phase 16 | Complete |
 | REVWD-02 | Phase 16 | Complete |
 | REVWD-03 | Phase 16 | Complete |

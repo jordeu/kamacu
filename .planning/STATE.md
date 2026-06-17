@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Sharper Review Column
-status: executing
-stopped_at: Completed 16-01-PLAN.md
-last_updated: "2026-06-17T09:07:26.150Z"
+status: verifying
+stopped_at: Completed 16-02-PLAN.md — phase 16 plans complete (2/2), ready for phase verification
+last_updated: "2026-06-17T10:00:41.605Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-15)
 Milestone: v1.5 Sharper Review Column
 Phase: 16 (sharper-review-column) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-17
 
 **v1.5 goal:** Make the Review column convey two independent signals at a glance — your agent's state and the PR's CI state — and stop losing sight of PRs after you review them. Four targets: (1) agent-state dot on PR cards with an open review session; (2) colored left-border highlight for open-session cards; (3) CI status as icons (green check / red cross / orange circle), freeing the dot for agent state; (4) a "Recently Reviewed" bottom section (`reviewed-by:@me state:open`, approve OR request-changes) that holds reviewed PRs until merged or closed, with top-section precedence (no duplicates).
@@ -93,6 +93,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 15 P01 | 5 min | 2 tasks | 7 files |
 | Phase 15-repo-first-creation-flow P02 | 3 min | 2 tasks | 2 files |
 | Phase 16 P01 | 10 min | 3 tasks | 9 files |
+| Phase 16-sharper-review-column P02 | ~40 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 - [Phase 15-repo-first-creation-flow]: RPROJ-02/CKOUT-04: repo mode prefills the editable Name from a pure local owner/name parse (nameEdited guard, no gh call, D-09), submit POSTs { repo } with a blocking 'Cloning <owner/name>…' Loader2 spinner; failures surface in the mirrored destructive-alert box, dialog open, values+mode preserved, no half-created-project copy (Phase-14 atomicity). web/dist rebuilt; only index.html committed (hashed assets gitignored).
 - [Phase 16]: Refactored runGH into listPRs(ctx, repo, repoDir, search): one gh-list primitive both review queues share; fetchLists runs both searches in one cache cycle and degrades both together (D-12); dedupeReviewed drops reviewed PRs whose number is in awaiting (top precedence, D-14)
 - [Phase 16]: Result widened with reviewed array sharing state/stale/fetchedAt; repoEntry caches both lists (cachedAwaiting/cachedReviewed + hasCache) under one TTL/floor; /api/agents/status entries gain prNumber/source via SELECT widening (no migration — columns from 00007), D-15
+- [Phase 16-sharper-review-column]: 16-02 checkpoint redesign (APPROVED): agent state on PR cards is shown by a 3px colored LEFT RAIL via agentRail() (working green / waiting amber-pulse / idle blue / exited gray), NOT a StatusDot — the dot was dropped at the human-verify gate because it clashed with the line-art CI glyph beside it. Rail = open session; color = agent state; the waiting pulse moved onto the rail. CI is a bare lucide glyph (green Check / red X / static amber Circle; none renders nothing). The two signals split by channel: left edge = your agent, right glyph = the PR's CI. This unifies SIGNL-01+SIGNL-02 onto one control.
 
 ### Pending Todos
 
@@ -165,7 +167,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-17T09:07:18.003Z
-Stopped at: Completed 16-01-PLAN.md
+Last session: 2026-06-17T10:00:32.703Z
+Stopped at: Completed 16-02-PLAN.md — phase 16 plans complete (2/2), ready for phase verification
 Resume file: None
 Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
