@@ -9,6 +9,8 @@ export interface AgentStatusEntry {
   exitCode: number | null;
   stopRequested: boolean;
   resumable: boolean;
+  prNumber: number | null; // null for source='manual' (D-15)
+  source: "manual" | "github_pr";
 }
 
 /** Single source of truth for card dots, the Agent tab dot, and sidebar

@@ -26,6 +26,7 @@ export interface PullRequestsResponse {
   stale: boolean;
   fetchedAt: string | null;
   prs: PRSummary[] | null;
+  reviewed: PRSummary[] | null; // reviewed-by:@me, deduped against prs server-side (D-13/D-14)
 }
 
 /** Per-project PR review poll. refetchIntervalInBackground:false pauses the
