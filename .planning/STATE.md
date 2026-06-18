@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Global Active Sessions Bar
 status: executing
-stopped_at: Completed 17-01-PLAN.md
-last_updated: "2026-06-18T06:24:52.029Z"
+stopped_at: Paused at 17-02-PLAN.md Task 3 (human-verify checkpoint)
+last_updated: "2026-06-18T06:29:56.537Z"
 last_activity: 2026-06-18
 progress:
   total_phases: 1
@@ -158,7 +158,7 @@ Standing decisions still relevant to v1.6:
 
 ## Session Continuity
 
-Last session: 2026-06-18T06:24:44.166Z
-Stopped at: Completed 17-01-PLAN.md
+Last session: 2026-06-18T06:29:56.534Z
+Stopped at: Paused at 17-02-PLAN.md Task 3 (human-verify checkpoint)
 Resume file: None
 Next: `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10); start with the SBAR-10 backend JOIN (task title + project name onto `/api/agents/status`), then the persistent collapsible bottom bar in `AppLayout.tsx` reusing `useAgentStatuses()`
