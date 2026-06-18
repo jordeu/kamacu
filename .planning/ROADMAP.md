@@ -92,7 +92,10 @@ Full details: [milestones/v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
   3. Expanding the bar lists every active agent session as a row (project name · task or PR title · live state), ordered attention-first (waiting → working → idle) (SBAR-04, SBAR-05).
   4. Clicking a session row navigates the user straight into that task's full-page agent view, including when the session belongs to a different project than the one currently open (SBAR-06).
   5. The collapse/expand choice persists across page reloads (default collapsed), and the bar reflects sessions appearing/exiting within ~5s off the existing agent-status poll — each row's project name and task/PR title coming from the one extended request, with no per-session fetch and no new DB migration (SBAR-07, SBAR-08, SBAR-10).
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 17-01-PLAN.md — Extend /api/agents/status with taskTitle + projectName (JOIN, both passes) + TS wire type (SBAR-10)
+- [ ] 17-02-PLAN.md — Global Active Sessions Bar UI: collapsed counts + waiting emphasis, expand overlay list, cross-project nav, persistence (SBAR-01..09)
 **UI hint**: yes
 
 ## Progress
