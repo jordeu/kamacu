@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
+import { ActiveSessionsBar } from "@/components/layout/ActiveSessionsBar";
 
 const SIDEBAR_STORAGE_KEY = "kangent.sidebar";
 
@@ -66,6 +67,11 @@ export function AppLayout() {
           <CollapsedSidebarTrigger />
           <Outlet />
         </main>
+        {/* D-13: mounted once outside <main>/<Outlet/> so the bar is present on
+            every route. It is `fixed inset-x-0 bottom-0` (overlay) — a single
+            mount renders it over every route without changing <main>'s layout
+            or height, so the xterm terminals never reflow (D-03). */}
+        <ActiveSessionsBar />
       </SidebarProvider>
     </TooltipProvider>
   );
