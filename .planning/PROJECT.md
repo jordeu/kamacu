@@ -8,17 +8,26 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone: v1.6 Global Active Sessions Bar
+## Current Milestone
+
+**No milestone active.** v1.6 Global Active Sessions Bar shipped 2026-06-18 (audited passed, archived to `milestones/v1.6-*`); run `/gsd:new-milestone` to scope the next cycle. See the Validated requirements and Current State below for what shipped.
+
+<details>
+<summary>Shipped milestone targets — v1.6 Global Active Sessions Bar (2026-06-18)</summary>
 
 **Goal:** A persistent bottom status bar that shows every active Claude agent session across all projects at a glance — collapsed for global stats, expanded to browse and jump straight into any session.
 
-**Target features:**
-- Persistent **bottom status bar** in the app shell, present app-wide regardless of the current project/view.
-- Tracks **agent sessions only** (working / waiting / idle; PR-review agent sessions included) across all projects, driven by an extended `/api/agents/status` feed (adds task title + project name).
-- **Collapsed (default):** global stats — counts per state with waiting emphasized (pulsing amber) + a total.
-- **Expanded:** a list of all active sessions (project · task/PR title · live state), attention-sorted (waiting first); clicking a row jumps into that task's full-page agent view (cross-project).
-- **In-bar alerting only** for sessions needing input (pulsing-amber highlight + count badge) — no browser/OS notifications, no tab-title/favicon changes this milestone.
-- Additive: the per-project sidebar "N waiting" chips stay; collapse/expand state persists (localStorage), default collapsed.
+**Delivered features:**
+- Persistent **bottom status bar** (`ActiveSessionsBar`, mounted in `AppLayout` outside `<Outlet/>`) present app-wide on every route.
+- Tracks **agent sessions only** (working / waiting / idle; PR-review agent sessions included), driven by the existing 5s `/api/agents/status` poll widened with task title + project name (JOIN on both passes, no new endpoint, no migration).
+- **Collapsed (default):** per-state colored counts (reused `dotMeta()`) + total, with the waiting count amber + pulsing only when > 0; quiet "No active sessions" zero state.
+- **Expanded:** a flat attention-first list (waiting→working→idle), each row `project · task/PR title · state` (PR rows get a `#n` badge), current-task row highlighted; the panel floats UP over content as an overlay so the xterm terminals never reflow; clicking a row jumps into that task's full-page agent view (cross-project).
+- **In-bar alerting only** (pulsing-amber + count) — no browser/OS notifications, no tab-title/favicon changes.
+- Additive: the per-project sidebar "N waiting" chips stay; collapse/expand persists (localStorage), default collapsed; live-only (exited drops off).
+
+**Settled decisions (milestone-time):** placement = bottom bar; agent sessions only; in-bar alerting only (browser notifications deferred to SBAR-FUT-03); expand overlays-up (not push, chosen to protect terminal layout — D-03); flat attention-first list (grouping deferred); the sole backend change is a JOIN onto the existing query (no migration). Audit passed (10/10 requirements, 6/6 integration seams, 1/1 E2E flow).
+
+</details>
 
 _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones/v1.5-*`). Shipped-milestone history is in the collapsible blocks below._
 
@@ -127,7 +136,7 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-_No milestone currently active. v1.6 Global Active Sessions Bar shipped 2026-06-18 (Phase 17) — verified (11/11 must-haves, human-verify approved). Run `/gsd:complete-milestone` to archive, or `/gsd:new-milestone` to scope the next cycle._
+_No milestone currently active. v1.6 Global Active Sessions Bar shipped 2026-06-18 (Phase 17) — verified (11/11 must-haves, human-verify approved), audited (passed), and archived to `milestones/v1.6-*`. Run `/gsd:new-milestone` to scope the next cycle._
 
 Carried-forward candidates from earlier milestones live in **Deferred** below and in the archived milestones' Future Requirements.
 
@@ -169,7 +178,7 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**v1.6 Global Active Sessions Bar is now active** (scoped 2026-06-18 — see Current Milestone above). Candidates NOT pulled into v1.6 remain parked below for a future cycle.
+**No milestone active.** v1.6 Global Active Sessions Bar shipped 2026-06-18; run `/gsd:new-milestone` to scope the next cycle. Candidates NOT pulled into v1.6 remain parked below.
 
 Candidates carried forward live in **Deferred** below. Banked forward investments worth a future milestone:
 - The v1.4 managed-checkout follow-ups, already scoped in `milestones/v1.4-REQUIREMENTS.md` "Future Requirements": on-demand checkout sync (CKMNT-01), non-default base branch at create (CKMNT-02), shallow/partial clone for large repos (CKMNT-03), and live clone-progress streaming + cancel (CKUX-01). The frontend `Project.managed` wire field is already in place to hang a managed-delete cleanup affordance on.
@@ -219,6 +228,9 @@ Parked candidates: browser notifications on waiting/finished (NOTF-01), one-clic
 | PR worktrees auto-removed on merge/close, but only when pristine+idle; branch always kept (v1.3, Phase 13, GHCLN-01/02) | Closes the loop without ever bulldozing work — the reaper detects merge/close server-side; any dirty/unpushed/stashed/busy worktree is left for manual cleanup | ✓ Good — second reaper pass + shared `CleanupWorktreeGated` (force=false); auto deletes the row, manual keeps it nulled |
 | Agent state on PR cards is a colored **left rail**, not a `StatusDot` dot (v1.5, Phase 16, supersedes the planned SIGNL-01/02 dot) | User-directed at the human-verify gate: a filled dot beside the line-art CI glyph clashed (different styles, misaligned). The rail carries the full state by color and splits the two signals onto separate channels (left edge = your agent, right glyph = the PR's CI) | ✓ Good — `agentRail()` 3px span; green working / pulsing-amber waiting / blue idle / gray exited; no dot, zero layout shift |
 | Two PR lists from one cached `gh` cycle: `user-review-requested:@me` (awaiting) + `reviewed-by:@me` (recently reviewed), server-side top-precedence deduped (v1.5, Phase 16, REVWD-01/03/04) | Keeps reviewed-but-unmerged PRs in view without a second poll or N+1; `--state open` bounds the list (drops on merge/close) so no retention bookkeeping; one classified state/stale degrades both together | ✓ Good — `fetchLists`/`dedupeReviewed` in the existing `Service`; both lists ride one `repoEntry` |
+| Global sessions bar mounts in the app shell (`AppLayout`, bottom, outside `<Outlet/>`) and is a 4th consumer of the existing 5s `/api/agents/status` poll — the only backend change is a JOIN of `tasks.title`+`projects.name` onto both query passes (v1.6, Phase 17, SBAR-01/08/10) | Reusing the single status feed (no new endpoint, no new migration, no second poll) keeps the bar cheap and consistent with the card dots/sidebar chips; columns already existed (mirrors v1.5's `prNumber`/`source` widening) | ✓ Good — one query fans out to 6 consumers; tests cover both passes |
+| Expanded sessions panel floats UP over content as a fixed overlay, not a docked "push content up" layout (v1.6, Phase 17, D-03) | A docked panel would resize the height-sensitive xterm terminals on every expand/collapse; an overlay never reflows `<main>`. User-confirmed at the human-verify gate (critical no-reflow check passed) | ✓ Good — `fixed inset-x-0 bottom-0`; terminal proven not to reflow |
+| Sessions bar shows LIVE sessions only (working/waiting/idle); exited/resumable drop off immediately; in-bar alerting only (no browser/OS notifications) (v1.6, Phase 17, D-09/D-14) | Keeps "active sessions" honest (exited stays discoverable on the card); browser notifications (NOTF-01) deliberately deferred to keep the milestone tight | ✓ Good — client live-filter; SBAR-FUT-03 parks notifications |
 
 ## Evolution
 
@@ -238,4 +250,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-18 after completing Phase 17 — v1.6 Global Active Sessions Bar fully implemented*
+*Last updated: 2026-06-18 after v1.6 Global Active Sessions Bar milestone — shipped, audited, and archived*

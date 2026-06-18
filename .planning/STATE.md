@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Global Active Sessions Bar
-status: verifying
-stopped_at: Completed 17-02-PLAN.md (plan 2/2); phase 17 ready for verification
-last_updated: "2026-06-18T06:46:13.540Z"
+status: shipped
+stopped_at: v1.6 Global Active Sessions Bar shipped 2026-06-18 — audited (passed), archived to milestones/v1.6-*, tagged. No milestone active; run /gsd:new-milestone.
+last_updated: "2026-06-18T07:18:57.000Z"
 last_activity: 2026-06-18
 progress:
   total_phases: 1
   completed_phases: 1
   total_plans: 2
   completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -20,21 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 17 — global-active-sessions-bar
+**Current focus:** Planning next milestone — run `/gsd:new-milestone`
 
 ## Current Position
 
-Milestone: v1.6 Global Active Sessions Bar
-Phase: 17
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-18
+Milestone: v1.6 Global Active Sessions Bar — ✅ SHIPPED 2026-06-18
+Phase: none active
+Status: Milestone complete — audited (passed), archived, tagged
 
-**v1.6 goal:** A persistent **bottom status bar** showing every active Claude agent session across all projects — collapsed for global stats, expanded to browse and click into any session. Scoping decisions (settled with the user 2026-06-18, treat as constraints): **agent sessions only** (working/waiting/idle; PR-review agent sessions included), **in-bar alerting only** (pulsing-amber highlight + count; NO browser/OS notifications or tab/favicon changes this milestone), the per-project sidebar "N waiting" chips are **retained** (bar is additive). Built on the existing `/api/agents/status` 5s poll, extended with task title + project name (columns exist — no new migration expected).
+Progress: [██████████] 100% — 1 phase (17), 2 plans, 5 tasks
 
-**Roadmap shape:** One phase, Phase 17, covers all ten requirements. Coarse granularity + scope notes: this is a small, cohesive, mostly-frontend milestone built on existing infra. The single backend touch (SBAR-10 — JOIN task title + project name onto the existing `/api/agents/status` query) is a small first wave; the rest is the new bottom bar in the app shell (`web/src/components/layout/AppLayout.tsx`) reusing `useAgentStatuses()` (`web/src/api/agents.ts`, already a 5s poll). No split — the backend feed extension and its sole frontend consumer are tightly coupled.
+**v1.6 shipped:** A persistent bottom status bar (`ActiveSessionsBar`, mounted in `AppLayout` outside `<Outlet/>`, every route) showing every LIVE Claude agent session across all projects — collapsed per-state colored counts (reused `dotMeta()`) + total with the waiting count amber-pulsing only when > 0; expanded an overlay floating UP over content (terminals never reflow) listing live sessions attention-first, each row `project · task/PR title` (+ `#n` PR badge) click-through to that task's agent view cross-project, current-row highlighted; collapse persisted in localStorage (default collapsed); live-only. The sole backend change was a JOIN of `tasks.title`+`projects.name` onto both passes of the existing `/api/agents/status` query (no endpoint, no migration); the bar is the 4th consumer of the existing 5s poll. Audit: 10/10 requirements, 6/6 integration seams, 1/1 E2E flow. Archived to `milestones/v1.6-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
 
-**Next:** `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10). Likely waves: (1) extend `/api/agents/status` with `taskTitle` + `projectName` via JOIN (SBAR-10), then (2) the persistent collapsible bottom bar — collapsed stats with waiting emphasis (SBAR-01/02/03/09), expanded attention-sorted list with cross-project click-through (SBAR-04/05/06), localStorage collapse persistence + 5s freshness (SBAR-07/08).
+**Next:** `/gsd:new-milestone` to scope the next cycle.
 
 **Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories; the v1.3 `Date.now()`-in-render advisory in `PRCard.tsx` was cleared in v1.5 (the `ReviewColumn.tsx` one may remain); plus a cosmetic stale "dot/border" comment in `ReviewColumn.tsx` / the `agentRail` JSDoc. A dedicated lint/comment-sweep is the right home.
 

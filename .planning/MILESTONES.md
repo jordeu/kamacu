@@ -1,5 +1,16 @@
 # Milestones
 
+## v1.6 Global Active Sessions Bar (Shipped: 2026-06-18)
+
+**Phases completed:** 1 phases, 2 plans, 5 tasks
+
+**Key accomplishments:**
+
+- The agent-status feed now carries `taskTitle` + `projectName` on every entry (both the manager-derived and post-restart passes) via a `JOIN projects`, and the TS `AgentStatusEntry` type exposes them — the sole backend change for the Global Active Sessions Bar (SBAR-10), with no new endpoint and no new migration.
+- A persistent, collapsible bottom bar (`ActiveSessionsBar.tsx`) mounted globally in `AppLayout` shows every LIVE Claude agent session across all projects — collapsed it renders per-state counts (working/waiting/idle) + total with the waiting count amber-pulsing only when > 0; expanded it floats a panel UP over content (a fixed overlay that never reflows the xterm terminals) listing live sessions attention-first (waiting → working → idle), each row click-through to that task's agent view including cross-project, with collapse state persisted in localStorage and ~5s freshness off the existing poll. Covers SBAR-01..SBAR-09.
+
+---
+
 ## v1.5 Sharper Review Column (Shipped: 2026-06-17)
 
 **Phases completed:** 1 phases, 2 plans, 6 tasks
