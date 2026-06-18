@@ -346,6 +346,21 @@ func TestAgentStatusPRLinkFields(t *testing.T) {
 	if pr["source"] != "github_pr" {
 		t.Errorf("github_pr source = %v, want %q", pr["source"], "github_pr")
 	}
+
+	// SBAR-10: the DB-derived (post-restart) pass carries the task title +
+	// project name on both entries (manual + github_pr).
+	if manual["taskTitle"] != "Manual Work" {
+		t.Errorf("manual taskTitle = %v, want %q", manual["taskTitle"], "Manual Work")
+	}
+	if manual["projectName"] == "" || manual["projectName"] == nil {
+		t.Errorf("manual projectName = %v, want non-empty", manual["projectName"])
+	}
+	if pr["taskTitle"] != "PR Review" {
+		t.Errorf("github_pr taskTitle = %v, want %q", pr["taskTitle"], "PR Review")
+	}
+	if pr["projectName"] == "" || pr["projectName"] == nil {
+		t.Errorf("github_pr projectName = %v, want non-empty", pr["projectName"])
+	}
 }
 
 // TestAgentStatusEmptyList: zero agents marshal as JSON [] — never null
@@ -409,6 +424,13 @@ func TestAgentStatusSingleEntry(t *testing.T) {
 	}
 	if entry["stopRequested"] != false {
 		t.Errorf("stopRequested = %v, want false", entry["stopRequested"])
+	}
+	// SBAR-10: the manager-derived pass carries the task title + project name.
+	if entry["taskTitle"] != "Status Me" {
+		t.Errorf("taskTitle = %v, want %q", entry["taskTitle"], "Status Me")
+	}
+	if entry["projectName"] == "" || entry["projectName"] == nil {
+		t.Errorf("projectName = %v, want non-empty project name", entry["projectName"])
 	}
 }
 

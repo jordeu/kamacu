@@ -11,6 +11,8 @@ export interface AgentStatusEntry {
   resumable: boolean;
   prNumber: number | null; // null for source='manual' (D-15)
   source: "manual" | "github_pr";
+  taskTitle: string; // tasks.title — bar row label (SBAR-10)
+  projectName: string; // projects.name — bar row label (SBAR-10)
 }
 
 /** Single source of truth for card dots, the Agent tab dot, and sidebar
