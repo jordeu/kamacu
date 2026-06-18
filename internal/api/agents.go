@@ -30,9 +30,11 @@ type agentStatusEntry struct {
 	Status        string `json:"status"` // working | idle | waiting | exited (Info.AgentStatus)
 	ExitCode      *int   `json:"exitCode"`
 	StopRequested bool   `json:"stopRequested"`
-	Resumable     bool   `json:"resumable"` // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
-	PRNumber      *int64 `json:"prNumber"`  // null for source='manual'; the PR number for a github_pr review task (D-15)
-	Source        string `json:"source"`    // "manual" | "github_pr"
+	Resumable     bool   `json:"resumable"`   // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
+	PRNumber      *int64 `json:"prNumber"`    // null for source='manual'; the PR number for a github_pr review task (D-15)
+	Source        string `json:"source"`      // "manual" | "github_pr"
+	TaskTitle     string `json:"taskTitle"`   // tasks.title — the bar's row label (SBAR-10)
+	ProjectName   string `json:"projectName"` // projects.name — the bar's row label (SBAR-10)
 }
 
 // status handles GET /api/agents/status — one entry per task, newest agent
@@ -58,11 +60,13 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	// taskMeta carries the per-task DB columns the resumable derivation needs,
 	// plus the PR linkage (pr_number/source, D-15) joined onto every entry.
 	type taskMeta struct {
-		projectID int64
-		csid      sql.NullString
-		wtp       sql.NullString
-		prNumber  sql.NullInt64
-		source    string
+		projectID   int64
+		csid        sql.NullString
+		wtp         sql.NullString
+		prNumber    sql.NullInt64
+		source      string
+		title       string
+		projectName string
 	}
 
 	// prNumberOf converts a nullable PR number column into the *int64 the wire
@@ -86,7 +90,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for i, id := range order {
 			args[i] = id
 		}
-		rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path, pr_number, source FROM tasks WHERE id IN (`+placeholders+`)`, args...)
+		rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, tasks.claude_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
+			FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id IN (`+placeholders+`)`, args...)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -95,7 +100,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var id int64
 			var m taskMeta
-			if err := rows.Scan(&id, &m.projectID, &m.csid, &m.wtp, &m.prNumber, &m.source); err != nil {
+			if err := rows.Scan(&id, &m.projectID, &m.csid, &m.wtp, &m.prNumber, &m.source, &m.title, &m.projectName); err != nil {
 				rows.Close()
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -125,6 +130,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 				Resumable:     resumable,
 				PRNumber:      prNumberOf(m.prNumber),
 				Source:        m.source,
+				TaskTitle:     m.title,
+				ProjectName:   m.projectName,
 			})
 		}
 	}
@@ -137,8 +144,9 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	// migration. Emit ONLY when resumable (transcript exists) — non-resumable
 	// past sessions get no dot and the plain pre-start state (D-57 only
 	// constrains resumable tasks).
-	rows, err := a.db.Query(`SELECT id, project_id, claude_session_id, worktree_path, pr_number, source FROM tasks
-		WHERE claude_session_id IS NOT NULL AND worktree_path IS NOT NULL`)
+	rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, tasks.claude_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
+		FROM tasks JOIN projects ON projects.id = tasks.project_id
+		WHERE tasks.claude_session_id IS NOT NULL AND tasks.worktree_path IS NOT NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -149,7 +157,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		var csid, wtp sql.NullString
 		var prNumber sql.NullInt64
 		var source string
-		if err := rows.Scan(&id, &pid, &csid, &wtp, &prNumber, &source); err != nil {
+		var title, projectName string
+		if err := rows.Scan(&id, &pid, &csid, &wtp, &prNumber, &source, &title, &projectName); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -173,6 +182,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			Resumable:     true,
 			PRNumber:      prNumberOf(prNumber),
 			Source:        source,
+			TaskTitle:     title,
+			ProjectName:   projectName,
 		})
 	}
 	if err := rows.Err(); err != nil {
