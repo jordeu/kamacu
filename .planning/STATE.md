@@ -1,39 +1,39 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Sharper Review Column
-status: shipped
-stopped_at: v1.5 Sharper Review Column shipped 2026-06-17 — audited (passed), archived, tagged. No milestone active; run /gsd:new-milestone.
-last_updated: "2026-06-17T12:30:00.000Z"
-last_activity: 2026-06-17
+milestone: v1.6
+milestone_name: Global Active Sessions Bar
+status: defining_requirements
+stopped_at: v1.6 Global Active Sessions Bar started 2026-06-18 — PROJECT.md updated, defining requirements. Next: research decision → requirements → roadmap.
+last_updated: "2026-06-18T05:35:31.000Z"
+last_activity: 2026-06-18
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-17)
+See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Planning next milestone — run `/gsd:new-milestone`
+**Current focus:** v1.6 Global Active Sessions Bar — defining requirements
 
 ## Current Position
 
-Milestone: v1.5 Sharper Review Column — ✅ SHIPPED 2026-06-17
-Phase: none active
-Status: Milestone complete — audited (passed), archived, tagged
+Milestone: v1.6 Global Active Sessions Bar
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-18 — Milestone v1.6 started
 
-Progress: [██████████] 100% — 1 phase (16), 2 plans, 6 tasks
+**v1.6 goal:** A persistent **bottom status bar** showing every active Claude agent session across all projects — collapsed for global stats, expanded to browse and click into any session. Scoping decisions (settled with the user 2026-06-18, treat as constraints): **agent sessions only** (working/waiting/idle; PR-review agent sessions included), **in-bar alerting only** (pulsing-amber highlight + count; NO browser/OS notifications or tab/favicon changes this milestone), the per-project sidebar "N waiting" chips are **retained** (bar is additive). Built on the existing `/api/agents/status` 5s poll, extended with task title + project name (columns exist — no new migration expected).
 
-**v1.5 shipped:** The Review column now carries two independent at-a-glance signals per PR — your agent's session state (a colored left rail: green working / pulsing-amber waiting / blue idle / gray exited) and the PR's CI state (a bare glyph: green check / red cross / static amber circle; none renders nothing) — split onto separate visual channels so they never confuse, plus a "Recently reviewed" section (`reviewed-by:@me`, approve or request-changes; server-deduped, quietly omitted when empty) that keeps reviewed PRs visible until they merge or close. Milestone-time redesign: the planned agent dot became a colored left rail at the human-verify gate (a dot beside the CI glyph clashed). Audit: 9/9 requirements, 4/4 integration seams, 3/3 E2E flows. Archived to `milestones/v1.5-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
-
-**Next:** `/gsd:new-milestone` to scope the next cycle.
+**Next:** research decision → requirements → roadmap.
 
 **Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories; the v1.3 `Date.now()`-in-render advisory in `PRCard.tsx` was cleared in v1.5 (the `ReviewColumn.tsx` one may remain); plus a cosmetic stale "dot/border" comment in `ReviewColumn.tsx` / the `agentRail` JSDoc. A dedicated lint/comment-sweep is the right home.
 

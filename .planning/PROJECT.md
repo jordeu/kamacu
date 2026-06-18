@@ -8,9 +8,19 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone
+## Current Milestone: v1.6 Global Active Sessions Bar
 
-**No milestone active.** v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones/v1.5-*`); run `/gsd:new-milestone` to scope the next cycle. See the Validated requirements and Current State below for what shipped.
+**Goal:** A persistent bottom status bar that shows every active Claude agent session across all projects at a glance — collapsed for global stats, expanded to browse and jump straight into any session.
+
+**Target features:**
+- Persistent **bottom status bar** in the app shell, present app-wide regardless of the current project/view.
+- Tracks **agent sessions only** (working / waiting / idle; PR-review agent sessions included) across all projects, driven by an extended `/api/agents/status` feed (adds task title + project name).
+- **Collapsed (default):** global stats — counts per state with waiting emphasized (pulsing amber) + a total.
+- **Expanded:** a list of all active sessions (project · task/PR title · live state), attention-sorted (waiting first); clicking a row jumps into that task's full-page agent view (cross-project).
+- **In-bar alerting only** for sessions needing input (pulsing-amber highlight + count badge) — no browser/OS notifications, no tab-title/favicon changes this milestone.
+- Additive: the per-project sidebar "N waiting" chips stay; collapse/expand state persists (localStorage), default collapsed.
+
+_v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones/v1.5-*`). Shipped-milestone history is in the collapsible blocks below._
 
 <details>
 <summary>Shipped milestone targets — v1.5 Sharper Review Column (2026-06-17)</summary>
@@ -115,7 +125,14 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ### Active
 
-_No milestone currently active. v1.5 Sharper Review Column shipped 2026-06-17 (Phase 16) — audited and archived to `milestones/v1.5-*`. Run `/gsd:new-milestone` to scope the next cycle._
+**v1.6 Global Active Sessions Bar** (in progress — detailed REQ-IDs in `.planning/REQUIREMENTS.md`):
+
+- [ ] Persistent bottom status bar in the app shell, visible app-wide across all projects
+- [ ] Tracks all active agent sessions (working/waiting/idle), including PR-review sessions, via an extended `/api/agents/status` feed (task title + project name)
+- [ ] Collapsed default view: global per-state counts with waiting emphasized
+- [ ] Expanded view: full session list (project · title · state), attention-sorted, click-to-enter (cross-project navigation)
+- [ ] In-bar highlight + count for sessions needing input (no browser/OS notifications this milestone)
+- [ ] Per-project sidebar waiting chips retained; bar collapse/expand persists (localStorage)
 
 Carried-forward candidates from earlier milestones live in **Deferred** below and in the archived milestones' Future Requirements.
 
@@ -155,7 +172,7 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**No milestone active.** v1.5 Sharper Review Column shipped 2026-06-17; run `/gsd:new-milestone` to scope the next cycle. Candidates NOT pulled into v1.5 remain parked below.
+**v1.6 Global Active Sessions Bar is now active** (scoped 2026-06-18 — see Current Milestone above). Candidates NOT pulled into v1.6 remain parked below for a future cycle.
 
 Candidates carried forward live in **Deferred** below. Banked forward investments worth a future milestone:
 - The v1.4 managed-checkout follow-ups, already scoped in `milestones/v1.4-REQUIREMENTS.md` "Future Requirements": on-demand checkout sync (CKMNT-01), non-default base branch at create (CKMNT-02), shallow/partial clone for large repos (CKMNT-03), and live clone-progress streaming + cancel (CKUX-01). The frontend `Project.managed` wire field is already in place to hang a managed-delete cleanup affordance on.
@@ -224,4 +241,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-17 after v1.5 Sharper Review Column milestone — shipped, audited, and archived*
+*Last updated: 2026-06-18 after starting milestone v1.6 Global Active Sessions Bar*
