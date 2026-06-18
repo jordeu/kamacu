@@ -18,7 +18,7 @@ A persistent bottom status bar giving a single, app-wide view of every active Cl
 - [ ] **SBAR-07**: User can collapse and expand the bar, and that choice persists across page reloads (default collapsed).
 - [ ] **SBAR-08**: The bar reflects session changes within ~5s using the existing agent-status poll — sessions appear when started and drop off when they exit.
 - [ ] **SBAR-09**: When there are no active agent sessions, the bar stays present and shows a quiet zero/empty state (the affordance is always discoverable, never blocks the view).
-- [ ] **SBAR-10**: The agent-status feed carries each session's task title and project name so the bar renders every row's label from one existing request (no per-session fetch, no new DB migration).
+- [x] **SBAR-10**: The agent-status feed carries each session's task title and project name so the bar renders every row's label from one existing request (no per-session fetch, no new DB migration).
 
 ## Future Requirements
 
@@ -61,7 +61,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | SBAR-07 | Phase 17 | Pending |
 | SBAR-08 | Phase 17 | Pending |
 | SBAR-09 | Phase 17 | Pending |
-| SBAR-10 | Phase 17 | Pending |
+| SBAR-10 | Phase 17 | Complete |
 
 **Coverage:**
 - v1.6 requirements: 10 total

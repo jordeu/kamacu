@@ -94,7 +94,7 @@ Full details: [milestones/v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
   5. The collapse/expand choice persists across page reloads (default collapsed), and the bar reflects sessions appearing/exiting within ~5s off the existing agent-status poll — each row's project name and task/PR title coming from the one extended request, with no per-session fetch and no new DB migration (SBAR-07, SBAR-08, SBAR-10).
 **Plans**: 2 plans
 Plans:
-- [ ] 17-01-PLAN.md — Extend /api/agents/status with taskTitle + projectName (JOIN, both passes) + TS wire type (SBAR-10)
+- [x] 17-01-PLAN.md — Extend /api/agents/status with taskTitle + projectName (JOIN, both passes) + TS wire type (SBAR-10)
 - [ ] 17-02-PLAN.md — Global Active Sessions Bar UI: collapsed counts + waiting emphasis, expand overlay list, cross-project nav, persistence (SBAR-01..09)
 **UI hint**: yes
 
@@ -118,7 +118,7 @@ Plans:
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete | 2026-06-14 |
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
-| 17. Global Active Sessions Bar | v1.6 | 0/0 | Not started | - |
+| 17. Global Active Sessions Bar | v1.6 | 1/2 | In Progress|  |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*

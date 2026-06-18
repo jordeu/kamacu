@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Global Active Sessions Bar
-status: planning
-stopped_at: Phase 17 UI-SPEC approved
-last_updated: "2026-06-18T05:59:59.939Z"
-last_activity: 2026-06-18 — v1.6 roadmap created (Phase 17, SBAR-01..SBAR-10)
+status: executing
+stopped_at: Completed 17-01-PLAN.md
+last_updated: "2026-06-18T06:24:52.029Z"
+last_activity: 2026-06-18
 progress:
   total_phases: 1
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.6 Global Active Sessions Bar — roadmap complete, ready to plan Phase 17
+**Current focus:** Phase 17 — global-active-sessions-bar
 
 ## Current Position
 
 Milestone: v1.6 Global Active Sessions Bar
-Phase: Phase 17 — Global Active Sessions Bar (not started)
-Plan: —
-Status: Roadmap complete — ready to plan
-Last activity: 2026-06-18 — v1.6 roadmap created (Phase 17, SBAR-01..SBAR-10)
+Phase: 17 (global-active-sessions-bar) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-06-18
 
 **v1.6 goal:** A persistent **bottom status bar** showing every active Claude agent session across all projects — collapsed for global stats, expanded to browse and click into any session. Scoping decisions (settled with the user 2026-06-18, treat as constraints): **agent sessions only** (working/waiting/idle; PR-review agent sessions included), **in-bar alerting only** (pulsing-amber highlight + count; NO browser/OS notifications or tab/favicon changes this milestone), the per-project sidebar "N waiting" chips are **retained** (bar is additive). Built on the existing `/api/agents/status` 5s poll, extended with task title + project name (columns exist — no new migration expected).
 
@@ -99,6 +99,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 15-repo-first-creation-flow P02 | 3 min | 2 tasks | 2 files |
 | Phase 16 P01 | 10 min | 3 tasks | 9 files |
 | Phase 16-sharper-review-column P02 | ~40 min | 3 tasks | 4 files |
+| Phase 17-global-active-sessions-bar P01 | 9 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -134,6 +135,8 @@ Standing decisions still relevant to v1.6:
 
 (Earlier v1.0–v1.5 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
 
+- [Phase 17-global-active-sessions-bar]: SBAR-10: taskTitle + projectName added to /api/agents/status via a JOIN onto the existing query (both manager-derived and DB-derived passes) — no new endpoint, no new migration; TS AgentStatusEntry extended to match
+
 ### Pending Todos
 
 - Quota poll while idle (no connected browsers) is acceptable for the first iteration with jitter + backoff; revisit before milestone close (research tech-debt note).
@@ -155,7 +158,7 @@ Standing decisions still relevant to v1.6:
 
 ## Session Continuity
 
-Last session: 2026-06-18T05:59:59.935Z
-Stopped at: Phase 17 UI-SPEC approved
-Resume file: .planning/phases/17-global-active-sessions-bar/17-UI-SPEC.md
+Last session: 2026-06-18T06:24:44.166Z
+Stopped at: Completed 17-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10); start with the SBAR-10 backend JOIN (task title + project name onto `/api/agents/status`), then the persistent collapsible bottom bar in `AppLayout.tsx` reusing `useAgentStatuses()`
