@@ -40,6 +40,13 @@ export function ActiveSessionsBar() {
       localStorage.setItem(storageKey, next ? "1" : "0");
       return next;
     });
+  // --- Unconditional collapse used when a row is opened (SBAR-06): the expanded
+  // list has served its purpose, so dismiss it and persist collapsed ("1") so the
+  // state survives a reload. Distinct from `toggle`, which flips relative state. ---
+  const collapse = () => {
+    setCollapsed(true);
+    localStorage.setItem(storageKey, "1");
+  };
 
   // --- Data — the single existing 5s poll (D-12); no new hook. ---
   const { data } = useAgentStatuses();
@@ -97,11 +104,12 @@ export function ActiveSessionsBar() {
                   key={entry.taskId}
                   entry={entry}
                   isCurrent={String(entry.taskId) === openTaskId}
-                  onOpen={() =>
+                  onOpen={() => {
                     navigate(
                       `/projects/${entry.projectId}/tasks/${entry.taskId}`,
-                    )
-                  }
+                    );
+                    collapse();
+                  }}
                 />
               ))}
             </div>
