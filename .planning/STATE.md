@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Global Active Sessions Bar
 status: planning
-stopped_at: Phase 17 context gathered
-last_updated: "2026-06-18T05:54:14.644Z"
+stopped_at: Phase 17 UI-SPEC approved
+last_updated: "2026-06-18T05:59:59.939Z"
 last_activity: 2026-06-18 — v1.6 roadmap created (Phase 17, SBAR-01..SBAR-10)
 progress:
   total_phases: 1
@@ -155,7 +155,7 @@ Standing decisions still relevant to v1.6:
 
 ## Session Continuity
 
-Last session: 2026-06-18T05:54:14.640Z
-Stopped at: Phase 17 context gathered
-Resume file: .planning/phases/17-global-active-sessions-bar/17-CONTEXT.md
+Last session: 2026-06-18T05:59:59.935Z
+Stopped at: Phase 17 UI-SPEC approved
+Resume file: .planning/phases/17-global-active-sessions-bar/17-UI-SPEC.md
 Next: `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10); start with the SBAR-10 backend JOIN (task title + project name onto `/api/agents/status`), then the persistent collapsible bottom bar in `AppLayout.tsx` reusing `useAgentStatuses()`
