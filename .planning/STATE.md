@@ -5,7 +5,7 @@ milestone_name: Global Active Sessions Bar
 status: shipped
 stopped_at: v1.6 Global Active Sessions Bar shipped 2026-06-18 — audited (passed), archived to milestones/v1.6-*, tagged. No milestone active; run /gsd:new-milestone.
 last_updated: "2026-06-18T07:18:57.000Z"
-last_activity: 2026-06-18
+last_activity: 2026-06-18 - Completed quick task 260618-mlu: auto-collapse active sessions bar on row open
 progress:
   total_phases: 1
   completed_phases: 1
@@ -157,6 +157,7 @@ Standing decisions still relevant to v1.6:
 | 260613-osu | Warn when a linked GitHub repo cannot be verified (surface verify_state) — completes GHPRJ-03 soft-save-with-warning | 2026-06-13 | 41f3d50 | [260613-osu-warn-when-a-linked-github-repo-cannot-be](./quick/260613-osu-warn-when-a-linked-github-repo-cannot-be/) |
 | 260613-ph5 | Make GitHub repo-link validation MANDATORY (hard-block invalid repos with highlighted error) — supersedes 260613-osu's soft verify_state advisory; reverses D-11 for the repo-link UX per user decision | 2026-06-13 | 9ea0df6 | [260613-ph5-make-github-repo-link-validation-mandato](./quick/260613-ph5-make-github-repo-link-validation-mandato/) |
 | 260616-8l7 | Fix Review-column refresh showing stale RED dots: `reduceChecks` now dedupes superseded check runs (keeps the latest run per check name, matching GitHub's rollup state) so a re-run/concurrency-cancelled FAILURE no longer paints a green PR red. Initial cache attempt-floor diagnosis was wrong and discarded (service.go unchanged). Code + tests done; Task 3 human-verify pending (user verifies against live instance). | 2026-06-16 | ccdb2d5 | [260616-8l7-the-refresh-button-at-review-column-seem](./quick/260616-8l7-the-refresh-button-at-review-column-seem/) |
+| 260618-mlu | Auto-collapse the Active Sessions bottom bar when a session row (task/PR) is opened from the expanded list: added a `collapse()` helper that sets collapsed + persists "1", and the `SessionRow` `onOpen` now navigates AND collapses (covers click + Enter/Space via the existing handler). One-file change to `ActiveSessionsBar.tsx`; build+lint green. Task 2 human-verify (runtime click-through) pending. | 2026-06-18 | d3f7795 | [260618-mlu-when-the-status-bottom-bar-is-expanded-a](./quick/260618-mlu-when-the-status-bottom-bar-is-expanded-a/) |
 
 ## Session Continuity
 
