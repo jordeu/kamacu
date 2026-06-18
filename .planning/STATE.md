@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Global Active Sessions Bar
-status: defining_requirements
-stopped_at: v1.6 Global Active Sessions Bar started 2026-06-18 — PROJECT.md updated, defining requirements. Next: research decision → requirements → roadmap.
-last_updated: "2026-06-18T05:35:31.000Z"
+status: roadmap_complete
+stopped_at: v1.6 roadmap created 2026-06-18 — single phase (Phase 17), all 10 requirements (SBAR-01..SBAR-10) mapped. Next: /gsd:plan-phase 17.
+last_updated: "2026-06-18T06:10:00.000Z"
 last_activity: 2026-06-18
 progress:
-  total_phases: 0
+  total_phases: 1
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,23 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.6 Global Active Sessions Bar — defining requirements
+**Current focus:** v1.6 Global Active Sessions Bar — roadmap complete, ready to plan Phase 17
 
 ## Current Position
 
 Milestone: v1.6 Global Active Sessions Bar
-Phase: Not started (defining requirements)
+Phase: Phase 17 — Global Active Sessions Bar (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-18 — Milestone v1.6 started
+Status: Roadmap complete — ready to plan
+Last activity: 2026-06-18 — v1.6 roadmap created (Phase 17, SBAR-01..SBAR-10)
 
 **v1.6 goal:** A persistent **bottom status bar** showing every active Claude agent session across all projects — collapsed for global stats, expanded to browse and click into any session. Scoping decisions (settled with the user 2026-06-18, treat as constraints): **agent sessions only** (working/waiting/idle; PR-review agent sessions included), **in-bar alerting only** (pulsing-amber highlight + count; NO browser/OS notifications or tab/favicon changes this milestone), the per-project sidebar "N waiting" chips are **retained** (bar is additive). Built on the existing `/api/agents/status` 5s poll, extended with task title + project name (columns exist — no new migration expected).
 
-**Next:** research decision → requirements → roadmap.
+**Roadmap shape:** One phase, Phase 17, covers all ten requirements. Coarse granularity + scope notes: this is a small, cohesive, mostly-frontend milestone built on existing infra. The single backend touch (SBAR-10 — JOIN task title + project name onto the existing `/api/agents/status` query) is a small first wave; the rest is the new bottom bar in the app shell (`web/src/components/layout/AppLayout.tsx`) reusing `useAgentStatuses()` (`web/src/api/agents.ts`, already a 5s poll). No split — the backend feed extension and its sole frontend consumer are tightly coupled.
+
+**Next:** `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10). Likely waves: (1) extend `/api/agents/status` with `taskTitle` + `projectName` via JOIN (SBAR-10), then (2) the persistent collapsible bottom bar — collapsed stats with waiting emphasis (SBAR-01/02/03/09), expanded attention-sorted list with cross-project click-through (SBAR-04/05/06), localStorage collapse persistence + 5s freshness (SBAR-07/08).
 
 **Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories; the v1.3 `Date.now()`-in-render advisory in `PRCard.tsx` was cleared in v1.5 (the `ReviewColumn.tsx` one may remain); plus a cosmetic stale "dot/border" comment in `ReviewColumn.tsx` / the `agentRail` JSDoc. A dedicated lint/comment-sweep is the right home.
 
 ## Performance Metrics
+
+**Velocity (v1.5):**
+
+- Plans completed: 2 across 1 phase (16); 6 tasks
+- Headline: two independent at-a-glance signals per PR card (agent left rail + CI glyph) + "Recently reviewed" section
 
 **Velocity (v1.3):**
 
@@ -110,51 +117,34 @@ Notable standing decisions for future work:
 - D-51 reversed in v1.1 (AGENT-02): `--dangerously-skip-permissions` is the default extra-param; removable per-settings. Documented side effect: amber waiting dot rarely fires while active.
 - Settings are global-only, read-at-use, absent-row-=-code-default; per-project overrides deferred (SET-FUT-01); additional shells are future data, not code (SHELL-FUT-01).
 
-v1.4 milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):
+v1.6 milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):
 
-- **Repo cloning uses `gh repo clone`** (host auth, so private/org repos work) into an `owner/name`-namespaced dir under `~/.kangent/repos/` — collision-safe. GitHub-only for the repo path (consistent with v1.3); arbitrary git URLs / other forges stay out of scope — the folder is the non-GitHub escape hatch.
-- **The managed clone IS the repo root** that task/PR-review worktrees branch off (the user just never picks a folder). A **new schema marker** distinguishes Kangent-managed checkouts from user-pointed folders so delete/cleanup knows what it owns — this needs a migration (**00008**, next after v1.3's 00007), landed in Phase 14 so Phase 15 needs no further migration.
-- **Repo-first when on, folder-only when off:** with `github_integration` on, "Add project" defaults to `owner/name`; folder becomes the optional alternative. With the toggle off, creation is folder-only exactly as before v1.4. Existing folder-based projects are untouched (backward compatible).
-- **Freshness:** before each new task worktree on a managed checkout, fetch the latest default branch so new work starts from latest.
-- **Gated delete:** deleting a managed-checkout project removes the clone, gated like worktree cleanup (dirty / unpushed / stash / running-session) via the v1.3 shared `CleanupWorktreeGated`; folder-based dirs are never removed (cleanup is local-directory-only; the app never mutates the remote).
-- **Degrade-don't-break provisioning:** clone failures (auth/network/bad repo) surface inline with no half-created project (no orphan row, no partial dir); re-adding an existing managed dir reattaches/reuses rather than re-cloning.
-- **Builds directly on v1.3's `internal/github`** (gh auth, `ParseRepoRef`/`ValidateRepo`, `Available`, the project `github_repo` link) and the existing worktree provisioning + gated cleanup — an internally-focused milestone, no new external surface beyond `gh repo clone`.
+- **Agent sessions only** in the bar (working/waiting/idle; PR-review agent sessions included) — the bar reads the existing `/api/agents/status` feed, which is agent-only. bash/tmux sessions stay out (SBAR-FUT-05).
+- **In-bar alerting only**: a pulsing-amber highlight + waiting count. NO browser/OS notifications, NO tab-title/favicon changes this milestone (SBAR-FUT-03/04).
+- **Active (live-PTY) sessions only**: exited sessions drop off the bar (they still surface on cards + via Resume). Keeps "active sessions" honest.
+- **Additive, not a replacement**: the per-project sidebar "N waiting" chips are kept; the bar is a new app-wide surface alongside them.
+- **Default collapsed, persisted in localStorage** (mirrors the sidebar/Review-column collapse pattern; absent key reads as collapsed).
+- **No new DB migration**: SBAR-10's task title + project name come from a JOIN onto the existing status query — the columns already exist. The `/api/agents/status` SELECT was already widened in v1.5 (Phase 16) to carry `prNumber`/`source`; this milestone adds `taskTitle` + `projectName` the same way.
+- **No new endpoint**: the bar reuses `useAgentStatuses()` (`web/src/api/agents.ts`, 5s poll); the only backend change is the JOIN onto the existing handler.
 
-Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride the same machinery):
+Standing decisions still relevant to v1.6:
 
-- **Model a PR review as a `tasks` row with `source='github_pr'`**; the board excludes them via `WHERE source='manual'`. v1.4's CKOUT-02 freshness/branching must keep this guard intact for PR-review worktrees off the managed clone.
-- **Never use `gh pr checkout`** — use `git fetch <remote> refs/pull/<n>/head:<localBranch>` + `git worktree add`; the fetch is a scoped exception to worktree's "never fetch" invariant. v1.4's per-new-task default-branch fetch is a second deliberate, scoped fetch.
-- **`CleanupWorktreeGated`** (force=false) is the shared gated-removal path (dirty + unpushed via `rev-list` + stash + sessions); v1.4's managed-clone delete reuses these gates.
-- **Global `github_integration` toggle** (settings KV, default `on`), read-at-use in API gating and via `useSettings()` in the frontend; when off the app is byte-for-byte unchanged. v1.4 gates the repo-first Add-project UI on this same value (RPROJ-04).
+- The `/api/agents/status` feed is the single source of truth for card dots, the Agent-tab dot, and sidebar waiting chips (research Pattern 4) — one query, no per-project fan-out. The bar becomes a fourth consumer of the same query.
+- `source='manual'` vs `source='github_pr'` distinguishes board tasks from PR-review workspaces; PR-review agent sessions ARE in scope for the bar (their title is the PR title).
+- The app shell is `web/src/components/layout/AppLayout.tsx` (sidebar + `<Outlet/>` today); collapse-state-in-localStorage is the established pattern there (`kangent.sidebar`).
 
-(Earlier v1.0–v1.3 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
-
-- [Phase 14-managed-checkout-foundations]: Schema marker is a single boolean-as-INTEGER managed column (D-06), not an enum or path-prefix derivation — the column is the single source of truth for dir ownership; path derivation is a data-loss hazard.
-- [Phase 14-managed-checkout-foundations]: github.Clone uses a package-level cloneRunner var as its test seam (Clone is a package function like ValidateRepo); exit-0-only success + os.RemoveAll on failure + trimmed stderr.
-- [Phase 14-managed-checkout-foundations]: Phase 14 sets github_repo=canonical at create-by-repo INSERT (research OQ1) so Phase 15's form relies on it.
-- [Phase 14-managed-checkout-foundations]: create-by-repo tests use github package-level validateRunner/availableRunner seams + exported SetXForTest setters so they are deterministic regardless of host gh.
-- [Phase 14-managed-checkout-foundations]: CKOUT-02: provisionWorktree does a managed-only, best-effort (error-discarded, D-05) default-branch fetch via worktree.DefaultBranch+FetchRef immediately before ResolveBase; folder projects skip it (D-24 preserved). The git read lives in worktree.DefaultBranch, not the api layer.
-- [Phase 14-managed-checkout-foundations]: CKOUT-03 gated delete: projectHandlers.delete branches on the managed marker — folder (managed=0) delete is byte-for-byte unchanged (dir never touched, D-09); managed (managed=1) runs a two-pass all-or-nothing gate (dirty/unpushed/stash/sessions over every task+PR worktree AND the clone root), 409 {reasons:[{kind,target}]} on any blocker (removes nothing), and on all-clear removes linked worktrees first then os.RemoveAll(clone) then FK-ordered rows (204).
-- [Phase 14-managed-checkout-foundations]: Managed-delete unpushed gate base is origin/<default>..HEAD with NO fetch (network-free, conservative); one base shared by the clone root + all task worktrees (they branch off it); an unresolvable default branch is a conservative blocker. Clone root removed only via os.RemoveAll, never git worktree remove (refuses the main worktree, exit 128).
-- [Phase 15]: RPROJ-02 description capture rides a DEDICATED github.RepoDescription(ctx, canonical) string (best-effort, error-free public signature: gh-absent/empty/nonzero/parse-fail all map to ""), NOT a widening of the shared ValidateRepo — its (ctx, ref) (canonical, verified, err) signature stays so the PATCH update handler is untouched.
-- [Phase 15]: createByRepo persists the captured description into projects.description at the repo-first INSERT (folder-create INSERT unchanged); description is server-side-only at create (D-05), surfaced editable later in Project settings, never a field in the Add dialog. Frontend: useCreateProject body widened to { name?; repo_path?; repo? }; Project type gains managed: boolean.
-- [Phase 15-repo-first-creation-flow]: RPROJ-01/03/04: Add-project dialog gains an integration-gated 'GitHub repo' | 'Local folder' segmented toggle (repo default) reusing ui/tabs.tsx as a controlled segmented control; folder-only byte-for-byte when github_integration is off (repo branch never mounts).
-- [Phase 15-repo-first-creation-flow]: RPROJ-02/CKOUT-04: repo mode prefills the editable Name from a pure local owner/name parse (nameEdited guard, no gh call, D-09), submit POSTs { repo } with a blocking 'Cloning <owner/name>…' Loader2 spinner; failures surface in the mirrored destructive-alert box, dialog open, values+mode preserved, no half-created-project copy (Phase-14 atomicity). web/dist rebuilt; only index.html committed (hashed assets gitignored).
-- [Phase 16]: Refactored runGH into listPRs(ctx, repo, repoDir, search): one gh-list primitive both review queues share; fetchLists runs both searches in one cache cycle and degrades both together (D-12); dedupeReviewed drops reviewed PRs whose number is in awaiting (top precedence, D-14)
-- [Phase 16]: Result widened with reviewed array sharing state/stale/fetchedAt; repoEntry caches both lists (cachedAwaiting/cachedReviewed + hasCache) under one TTL/floor; /api/agents/status entries gain prNumber/source via SELECT widening (no migration — columns from 00007), D-15
-- [Phase 16-sharper-review-column]: 16-02 checkpoint redesign (APPROVED): agent state on PR cards is shown by a 3px colored LEFT RAIL via agentRail() (working green / waiting amber-pulse / idle blue / exited gray), NOT a StatusDot — the dot was dropped at the human-verify gate because it clashed with the line-art CI glyph beside it. Rail = open session; color = agent state; the waiting pulse moved onto the rail. CI is a bare lucide glyph (green Check / red X / static amber Circle; none renders nothing). The two signals split by channel: left edge = your agent, right glyph = the PR's CI. This unifies SIGNL-01+SIGNL-02 onto one control.
+(Earlier v1.0–v1.5 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
 
 ### Pending Todos
 
 - Quota poll while idle (no connected browsers) is acceptable for the first iteration with jitter + backoff; revisit before milestone close (research tech-debt note).
-- Lint-cleanup pass: ~18–20 pre-existing react-hooks eslint errors + two v1.3 `Date.now()`-in-render advisories (`PRCard.tsx`/`ReviewColumn.tsx`) — gating build green, but a dedicated pass is the right home.
-- Phase 14 open product questions to resolve at plan time: exact schema-marker shape (a `managed`/`source` flag on `projects` vs a separate column distinguishing clone-owned from user-pointed paths); whether reattach (CKOUT-05) validates the existing dir's remote matches `owner/name` before reusing; how a gated-blocked managed-clone delete surfaces to the user (mirror the worktree CleanupWorktreeDialog variants).
+- Lint-cleanup pass: ~18–20 pre-existing react-hooks eslint errors + a possibly-remaining v1.3 `Date.now()`-in-render advisory in `ReviewColumn.tsx` — gating build green, but a dedicated pass is the right home.
+- v1.6 plan-time questions: where exactly the JOIN lives (handler SQL vs a store method); how the bar's fixed bottom strip coexists with the existing full-height `<main>` overflow layout (reserve bottom space vs overlay); whether the expanded list scrolls with a cap or grows unbounded; cross-project navigation route shape (the task agent route already exists — confirm it accepts a project switch).
 
 ### Blockers/Concerns
 
-- `gh` is a soft dependency; provisioning must degrade-don't-break on every failure mode (missing/unauthenticated/network/bad-repo). CKOUT-04's "no half-created project" guarantee (no orphan row, no partial dir) is the milestone's highest-severity correctness item — treat clone as a transaction: validate (RPROJ-05) → clone to a staging/namespaced dir → only then commit the project row; roll back the dir on any failure.
-- The CKOUT-03 gated delete must never remove a folder-based (user-pointed) directory — the schema marker is the single source of truth for "Kangent owns this dir." A missing/incorrect marker check is a data-loss risk (deleting a user's working checkout).
-- Plan-mode exit-plan approval → amber dot (v1.0 research OQ1): still unobserved — carry to v1.4 UAT.
+- Plan-mode exit-plan approval → amber waiting dot (v1.0 research OQ1): still unobserved — note that with `--dangerously-skip-permissions` on by default, the waiting state (the bar's headline alert) rarely fires; confirm the amber-emphasis path is exercisable during UAT (may need a session run without the skip flag).
+- The bar must never block the view (SBAR-09) — a fixed bottom strip changes the available height for every page; verify the board, task view (xterm fit/resize), and settings all still fit and the terminal still resizes correctly.
 
 ### Quick Tasks Completed
 
@@ -166,7 +156,7 @@ Standing v1.3 decisions still relevant to v1.4 (managed-checkout worktrees ride 
 
 ## Session Continuity
 
-Last session: 2026-06-17T10:00:32.703Z
-Stopped at: Completed 16-02-PLAN.md — phase 16 plans complete (2/2), ready for phase verification
+Last session: 2026-06-18T06:10:00.000Z
+Stopped at: v1.6 roadmap created — single phase (Phase 17: Global Active Sessions Bar), all 10 requirements (SBAR-01..SBAR-10) mapped, coverage 10/10
 Resume file: None
-Next: `/gsd:plan-phase 14` — Managed Checkout Foundations (CKOUT-01, RPROJ-05, CKOUT-02, CKOUT-05, CKOUT-03); migration 00008 schema marker is the foundation
+Next: `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10); start with the SBAR-10 backend JOIN (task title + project name onto `/api/agents/status`), then the persistent collapsible bottom bar in `AppLayout.tsx` reusing `useAgentStatuses()`

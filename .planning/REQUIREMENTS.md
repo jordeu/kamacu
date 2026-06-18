@@ -52,22 +52,22 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SBAR-01 | — | Pending |
-| SBAR-02 | — | Pending |
-| SBAR-03 | — | Pending |
-| SBAR-04 | — | Pending |
-| SBAR-05 | — | Pending |
-| SBAR-06 | — | Pending |
-| SBAR-07 | — | Pending |
-| SBAR-08 | — | Pending |
-| SBAR-09 | — | Pending |
-| SBAR-10 | — | Pending |
+| SBAR-01 | Phase 17 | Pending |
+| SBAR-02 | Phase 17 | Pending |
+| SBAR-03 | Phase 17 | Pending |
+| SBAR-04 | Phase 17 | Pending |
+| SBAR-05 | Phase 17 | Pending |
+| SBAR-06 | Phase 17 | Pending |
+| SBAR-07 | Phase 17 | Pending |
+| SBAR-08 | Phase 17 | Pending |
+| SBAR-09 | Phase 17 | Pending |
+| SBAR-10 | Phase 17 | Pending |
 
 **Coverage:**
 - v1.6 requirements: 10 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 10 ⚠️ (resolved at roadmap creation)
+- Mapped to phases: 10 (all → Phase 17) ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-18*
-*Last updated: 2026-06-18 after initial definition*
+*Last updated: 2026-06-18 after roadmap creation (all SBAR-01..SBAR-10 → Phase 17)*
