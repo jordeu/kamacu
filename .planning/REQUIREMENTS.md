@@ -9,15 +9,15 @@ A persistent bottom status bar giving a single, app-wide view of every active Cl
 
 ### Global Sessions Bar
 
-- [ ] **SBAR-01**: User sees a persistent status bar pinned to the bottom of the app on every screen (board, task view, settings), regardless of which project is open.
-- [ ] **SBAR-02**: Collapsed by default, the bar shows global counts of active agent sessions broken down by state (working / waiting / idle) plus a total.
-- [ ] **SBAR-03**: When one or more sessions are waiting for input, the bar highlights it prominently (pulsing-amber emphasis + count) so the user notices without expanding.
-- [ ] **SBAR-04**: User can expand the bar to see every active agent session as a row showing its project name, task (or PR) title, and live state.
-- [ ] **SBAR-05**: In the expanded list, sessions are ordered attention-first (waiting → working → idle) so the ones needing input are at the top.
-- [ ] **SBAR-06**: User can click a session row to jump straight into that task's full-page agent view — including when the session belongs to a different project than the one currently open (cross-project navigation).
-- [ ] **SBAR-07**: User can collapse and expand the bar, and that choice persists across page reloads (default collapsed).
-- [ ] **SBAR-08**: The bar reflects session changes within ~5s using the existing agent-status poll — sessions appear when started and drop off when they exit.
-- [ ] **SBAR-09**: When there are no active agent sessions, the bar stays present and shows a quiet zero/empty state (the affordance is always discoverable, never blocks the view).
+- [x] **SBAR-01**: User sees a persistent status bar pinned to the bottom of the app on every screen (board, task view, settings), regardless of which project is open.
+- [x] **SBAR-02**: Collapsed by default, the bar shows global counts of active agent sessions broken down by state (working / waiting / idle) plus a total.
+- [x] **SBAR-03**: When one or more sessions are waiting for input, the bar highlights it prominently (pulsing-amber emphasis + count) so the user notices without expanding.
+- [x] **SBAR-04**: User can expand the bar to see every active agent session as a row showing its project name, task (or PR) title, and live state.
+- [x] **SBAR-05**: In the expanded list, sessions are ordered attention-first (waiting → working → idle) so the ones needing input are at the top.
+- [x] **SBAR-06**: User can click a session row to jump straight into that task's full-page agent view — including when the session belongs to a different project than the one currently open (cross-project navigation).
+- [x] **SBAR-07**: User can collapse and expand the bar, and that choice persists across page reloads (default collapsed).
+- [x] **SBAR-08**: The bar reflects session changes within ~5s using the existing agent-status poll — sessions appear when started and drop off when they exit.
+- [x] **SBAR-09**: When there are no active agent sessions, the bar stays present and shows a quiet zero/empty state (the affordance is always discoverable, never blocks the view).
 - [x] **SBAR-10**: The agent-status feed carries each session's task title and project name so the bar renders every row's label from one existing request (no per-session fetch, no new DB migration).
 
 ## Future Requirements
@@ -52,15 +52,15 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SBAR-01 | Phase 17 | Pending |
-| SBAR-02 | Phase 17 | Pending |
-| SBAR-03 | Phase 17 | Pending |
-| SBAR-04 | Phase 17 | Pending |
-| SBAR-05 | Phase 17 | Pending |
-| SBAR-06 | Phase 17 | Pending |
-| SBAR-07 | Phase 17 | Pending |
-| SBAR-08 | Phase 17 | Pending |
-| SBAR-09 | Phase 17 | Pending |
+| SBAR-01 | Phase 17 | Complete |
+| SBAR-02 | Phase 17 | Complete |
+| SBAR-03 | Phase 17 | Complete |
+| SBAR-04 | Phase 17 | Complete |
+| SBAR-05 | Phase 17 | Complete |
+| SBAR-06 | Phase 17 | Complete |
+| SBAR-07 | Phase 17 | Complete |
+| SBAR-08 | Phase 17 | Complete |
+| SBAR-09 | Phase 17 | Complete |
 | SBAR-10 | Phase 17 | Complete |
 
 **Coverage:**

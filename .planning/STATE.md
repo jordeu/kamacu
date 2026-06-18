@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Global Active Sessions Bar
-status: executing
-stopped_at: Paused at 17-02-PLAN.md Task 3 (human-verify checkpoint)
-last_updated: "2026-06-18T06:29:56.537Z"
+status: verifying
+stopped_at: Completed 17-02-PLAN.md (plan 2/2); phase 17 ready for verification
+last_updated: "2026-06-18T06:39:42.534Z"
 last_activity: 2026-06-18
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 Milestone: v1.6 Global Active Sessions Bar
 Phase: 17 (global-active-sessions-bar) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-18
 
 **v1.6 goal:** A persistent **bottom status bar** showing every active Claude agent session across all projects — collapsed for global stats, expanded to browse and click into any session. Scoping decisions (settled with the user 2026-06-18, treat as constraints): **agent sessions only** (working/waiting/idle; PR-review agent sessions included), **in-bar alerting only** (pulsing-amber highlight + count; NO browser/OS notifications or tab/favicon changes this milestone), the per-project sidebar "N waiting" chips are **retained** (bar is additive). Built on the existing `/api/agents/status` 5s poll, extended with task title + project name (columns exist — no new migration expected).
@@ -100,6 +100,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 16 P01 | 10 min | 3 tasks | 9 files |
 | Phase 16-sharper-review-column P02 | ~40 min | 3 tasks | 4 files |
 | Phase 17-global-active-sessions-bar P01 | 9 min | 2 tasks | 3 files |
+| Phase 17-global-active-sessions-bar P02 | 9min active (+ human-verify gate) | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -136,6 +137,8 @@ Standing decisions still relevant to v1.6:
 (Earlier v1.0–v1.5 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
 
 - [Phase 17-global-active-sessions-bar]: SBAR-10: taskTitle + projectName added to /api/agents/status via a JOIN onto the existing query (both manager-derived and DB-derived passes) — no new endpoint, no new migration; TS AgentStatusEntry extended to match
+- [Phase 17-global-active-sessions-bar]: Active Sessions Bar is a fixed-to-viewport-bottom overlay (no reserved space, D-03): expand/collapse never resizes or reflows the xterm terminal; mounted once in AppLayout outside <Outlet/> so it is global across all routes
+- [Phase 17-global-active-sessions-bar]: Bar reuses useAgentStatuses() as a fourth consumer of the single 5s poll (no new hook), filtered live-only (working/waiting/idle); stable attention-rank sort avoids 5s jitter; all status colors from dotMeta(); collapse persisted under global key kangent:sessions-bar-collapsed (default collapsed)
 
 ### Pending Todos
 
@@ -158,7 +161,7 @@ Standing decisions still relevant to v1.6:
 
 ## Session Continuity
 
-Last session: 2026-06-18T06:29:56.534Z
-Stopped at: Paused at 17-02-PLAN.md Task 3 (human-verify checkpoint)
+Last session: 2026-06-18T06:39:42.530Z
+Stopped at: Completed 17-02-PLAN.md (plan 2/2); phase 17 ready for verification
 Resume file: None
 Next: `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10); start with the SBAR-10 backend JOIN (task title + project name onto `/api/agents/status`), then the persistent collapsible bottom bar in `AppLayout.tsx` reusing `useAgentStatuses()`

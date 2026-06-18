@@ -78,7 +78,7 @@ Full details: [milestones/v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
 
 ### 🚧 v1.6 Global Active Sessions Bar (Phase 17) — IN PROGRESS
 
-- [ ] **Phase 17: Global Active Sessions Bar** — a persistent bottom bar showing every active agent session across all projects: collapsed stats (per-state counts, waiting emphasized), expanded attention-sorted session list with cross-project click-through, all driven by the existing 5s agent-status poll extended with task title + project name.
+- [x] **Phase 17: Global Active Sessions Bar** — a persistent bottom bar showing every active agent session across all projects: collapsed stats (per-state counts, waiting emphasized), expanded attention-sorted session list with cross-project click-through, all driven by the existing 5s agent-status poll extended with task title + project name. (completed 2026-06-18)
 
 ## Phase Details
 
@@ -95,7 +95,7 @@ Full details: [milestones/v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
 **Plans**: 2 plans
 Plans:
 - [x] 17-01-PLAN.md — Extend /api/agents/status with taskTitle + projectName (JOIN, both passes) + TS wire type (SBAR-10)
-- [ ] 17-02-PLAN.md — Global Active Sessions Bar UI: collapsed counts + waiting emphasis, expand overlay list, cross-project nav, persistence (SBAR-01..09)
+- [x] 17-02-PLAN.md — Global Active Sessions Bar UI: collapsed counts + waiting emphasis, expand overlay list, cross-project nav, persistence (SBAR-01..09)
 **UI hint**: yes
 
 ## Progress
@@ -118,7 +118,7 @@ Plans:
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete | 2026-06-14 |
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
-| 17. Global Active Sessions Bar | v1.6 | 1/2 | In Progress|  |
+| 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete   | 2026-06-18 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
