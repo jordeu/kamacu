@@ -237,6 +237,40 @@
 
 ---
 
+## Milestone: v1.6 — Global Active Sessions Bar
+
+**Shipped:** 2026-06-18
+**Phases:** 1 | **Plans:** 2 | **Tasks:** 5
+
+### What Was Built
+- (Phase 17, plan 17-01) Backend: the existing `GET /api/agents/status` query widened with a `JOIN projects` on BOTH passes (manager-derived + DB-derived/post-restart) to carry `tasks.title` + `projects.name` on every entry; the Go `agentStatusEntry` struct + the TS `AgentStatusEntry` type gained `taskTitle`/`projectName`. The sole backend change (SBAR-10) — no new endpoint, no migration (columns pre-existed; mirrors v1.5's `prNumber`/`source` widening).
+- (Phase 17, plan 17-02) Frontend: `ActiveSessionsBar.tsx` mounted once in `AppLayout` outside `<Outlet/>` (every route). Collapsed = per-state colored counts (reused `dotMeta()`) + total, waiting amber-pulsing only when > 0, quiet "No active sessions" zero state; expanded = a fixed overlay floating UP over content (terminals never reflow) listing live sessions attention-first, each row `project · title` (+ `#n` PR badge) click-through to that task's agent view cross-project, current-row highlighted; collapse persisted in localStorage (default collapsed); live-only filter.
+
+### What Worked
+- **Reuse made it a ~300-LOC, two-file milestone.** The bar became the 4th consumer of the one existing 5s `useAgentStatuses()` poll (alongside card dots, agent tab, sidebar chips), pulled status colors from `dotMeta()`, and mirrored `ReviewColumn`'s collapse/overlay/scroll idioms. The only backend change was a JOIN — no endpoint, no migration, no new dependency, no second poll.
+- **The data→UI plan split made the wire contract explicit.** 17-01 shipped `taskTitle`/`projectName` with tests on BOTH query passes and zero UI; 17-02 consumed a typed feed. The integration checker traced all 6 seams (json-tag↔TS parity, JOIN on both passes, single poll, shell mount, dotMeta reuse, cross-project nav with the entry's own ids) to source.
+- **Front-loaded decisions made research skippable and planning concrete.** discuss-phase locked all four interaction areas (D-01..D-14) and ui-phase produced an approved spec before planning; the planner wrote exact tokens/dimensions into task actions, so the executor made no ad-hoc styling calls and the plan-checker passed on the first iteration.
+- **The human-verify gate confirmed the one thing tests can't.** The critical D-03 check (xterm terminal does NOT reflow when the overlay expands/collapses) passed against a live instance — the exact risk the overlay-not-docked decision was made to avoid.
+
+### What Was Inefficient
+- **A `--help` probe to a gsd-tools subcommand silently EXECUTED an archive.** `milestone complete --help` has no help handler — the first positional is the version, so it archived a `--help` milestone (garbage `--help-*` files, a bogus MILESTONES entry, a STATE mutation). Caught immediately and fully reverted (tracked files via `git checkout`, untracked via `rm`) because nothing had been committed, but it was avoidable churn.
+- **The research gate fired for a milestone with nothing to research.** With CONTEXT.md + UI-SPEC fully pinning the build on existing infra, both the milestone-level and phase-level research prompts were ceremony — answered "skip" correctly, but they're friction for purely-internal reuse work.
+
+### Patterns Established
+- **Extend-the-shared-feed, don't add a surface:** when a new view needs existing server state, widen the one cached/polled endpoint and become an Nth consumer (TanStack Query dedupes the shared key) rather than adding an endpoint or a second poll. Keeps cost flat and behavior consistent across consumers.
+- **Overlay-not-dock for terminal-adjacent chrome:** UI that can expand near a height-sensitive embed (xterm) should float over content (`fixed`, absolute panel) instead of resizing the layout, so the embed never reflows.
+
+### Key Lessons
+1. **Never probe a mutating CLI with `--help` unless help is known to exist** — gsd-tools subcommands treat the first token as a positional arg; verify with a dry-run/echo or read the tool source before invoking, especially for archive/delete/complete verbs.
+2. **For internal reuse milestones, the value is in discuss + ui-phase, not research** — locking interaction + visual contracts up front let planning and execution run clean on the first pass; research can be skipped without cost when the build is fully determined by existing assets.
+3. **Put the human gate on the property that automation can't prove** — here, "the terminal doesn't reflow" was the whole reason for the overlay decision, and only a live check could confirm it.
+
+### Cost Observations
+- Orchestrated on Opus 4.8 (inherit profile), same-day (~1.5h wall, 2026-06-18). 1 phase, 2 plans, 5 tasks, 1 human-verify gate, 0 gap-closure cycles. No new Go modules or npm deps; no migration; ~298 source insertions across 5 files.
+- Notable: tied for the smallest milestone (1 phase) and the leanest by surface area — a pure extend-and-reuse milestone whose only self-inflicted cost was a reverted tooling misstep, not implementation rework.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -249,6 +283,7 @@
 | v1.3 | 4 | 19 | Research-flagged the integration risk center (`gh pr checkout` worktree-unawareness) and spiked it pre-planning; one shared `github.Service` across 3 phases via a compiler-enforced interface seam; byte-equivalent helper extraction with regression guard; independent integration audit before completion |
 | v1.4 | 2 | 7 | Backend-capability phase → UI-driver phase, with the create contract verified by an integration audit; reuse-before-invent kept it zero-new-dep / no-new-`ui/`-file; separate-function-over-widen for a shared helper; smallest milestone with no gap-closure cycles |
 | v1.5 | 1 | 2 | Data→rendering plan split with the wire contract verified by an integration audit; reuse-before-invent (cloned the existing `gh` search + cache — no new endpoint/poll/dep/migration); the human-verify gate DROVE a design redesign (agent dot → left rail), not just blessed it; revise-the-contract-on-redesign keeps CONTEXT/UI-SPEC honest |
+| v1.6 | 1 | 2 | Extend-the-shared-feed (bar = 4th consumer of the one 5s `/api/agents/status` poll; sole backend change a JOIN — no endpoint/poll/dep/migration); data→UI plan split with all 6 seams integration-audited; overlay-not-dock to protect terminal layout, confirmed by the human gate's no-reflow check; research correctly skipped — discuss + ui-phase fully determined the build |
 
 ### Cumulative Quality
 
@@ -260,6 +295,7 @@
 | v1.3 | 12 (+github) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across all 4 phases; carried ~18–20 pre-existing react-hooks lint advisories (build green) as audited tech debt |
 | v1.4 | 12 (github extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no new `ui/` file (reused `tabs.tsx`); v1.4 added NO new lint debt (dialog eslint-clean, 0 useEffect); pre-existing advisories still carried |
 | v1.5 | 12 (github + api list paths extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no migration; cleared the `PRCard` `Date.now()`-in-render advisory (the `ReviewColumn` one may remain); pre-existing react-hooks advisories still carried |
+| v1.6 | 11 (api `agents` JOIN extended; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no migration (JOIN onto existing columns); no new `ui/` primitive (reused `dotMeta()`/`ReviewColumn` idioms); pre-existing react-hooks advisories still carried |
 
 ### Top Lessons (Verified Across Milestones)
 
