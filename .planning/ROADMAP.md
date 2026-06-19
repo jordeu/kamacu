@@ -9,6 +9,7 @@
 - ✅ **v1.4 Repo-First Projects** — Phases 14–15 (shipped 2026-06-15) — see [milestones/v1.4-ROADMAP.md](milestones/v1.4-ROADMAP.md)
 - ✅ **v1.5 Sharper Review Column** — Phase 16 (shipped 2026-06-17) — see [milestones/v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
 - ✅ **v1.6 Global Active Sessions Bar** — Phase 17 (shipped 2026-06-18) — see [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
+- 🚧 **v1.7 Project Icons in Collapsed Sidebar** — Phases 18–19 (in progress)
 
 ## Phases
 
@@ -85,6 +86,36 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
 
 </details>
 
+### 🚧 v1.7 Project Icons in Collapsed Sidebar (Phases 18–19) — IN PROGRESS
+
+- [ ] **Phase 18: Project Icon Data Foundation** - Add `icon_letters` + `icon_color` to projects (migration 00009 with backfill), derive default letters from the name, assign a stable random color from a curated palette at creation, and extend the project PATCH path to edit both.
+- [ ] **Phase 19: Sidebar Avatars & Settings Editors** - One shared monogram avatar component shown both as a clickable collapsed-rail icon (active state, name tooltip, amber waiting badge) and beside the name when expanded, plus letters + swatch editors in Project settings.
+
+## Phase Details
+
+### Phase 18: Project Icon Data Foundation
+**Goal**: Every project — newly added or pre-existing — has two persisted properties (two uppercase letters + a curated-palette background color) that are sensible by default and editable over the API, so the frontend has stable identity data to render avatars from.
+**Depends on**: Nothing in v1.7 (builds on the existing `projects` table, `internal/api/projects.go` model, and the `useUpdateProjectSettings` PATCH path)
+**Requirements**: ICON-01, ICON-02, ICON-03, ICON-04
+**Success Criteria** (what must be TRUE):
+  1. Adding a new project (folder or managed-repo) automatically gives it two uppercase letters derived from its name — first letters of the first two words for multi-word names ("My Cool App" → "MC"), first two letters for single-word names ("kangent" → "KA") — with no extra user action (ICON-01, ICON-02).
+  2. A new project is assigned a background color picked at random from a curated, dark-theme-friendly palette (legible against the avatar text), and that color stays the same for the project across server restarts (ICON-03).
+  3. After the migration runs, every project that existed before this feature has non-empty letters (derived from its name) and an assigned palette color — no project is left blank (ICON-04).
+  4. The project's letters and color survive a server restart (stored in SQLite) and can be read and updated through the project API (the PATCH path now accepts `icon_letters` + `icon_color`), so the Phase 19 editors have a wire path (ICON-04).
+**Plans**: TBD
+
+### Phase 19: Sidebar Avatars & Settings Editors
+**Goal**: The user can identify and switch between projects directly from the collapsed sidebar via colored monogram avatars (which also appear beside the name when expanded), and can edit a project's letters and color from Project settings.
+**Depends on**: Phase 18 (renders and edits the `icon_letters` + `icon_color` data and PATCH path it establishes)
+**Requirements**: ICON-05, ICON-06, ICON-07, ICON-08, ICON-09, ICON-10, ICON-11, ICON-12
+**Success Criteria** (what must be TRUE):
+  1. When the sidebar is collapsed, the user sees a vertical rail of project monogram avatars (instead of an empty, off-screen sidebar) and can click any avatar to switch to that project without first expanding the sidebar (ICON-05, ICON-06).
+  2. In the collapsed rail, the currently-open project's avatar is visually marked active, hovering an avatar shows the full project name in a tooltip, and a project with one or more agents waiting shows the amber waiting indicator as a badge overlaid on its avatar (ICON-07, ICON-08, ICON-09).
+  3. The same monogram avatar appears beside the project name in the expanded sidebar, with the existing name display and waiting-count chip behavior preserved (ICON-10).
+  4. In Project settings the user can edit the two letters (input normalized/validated to at most two uppercase characters) and change the color by picking from the curated palette swatches, with the current color clearly indicated; saved changes are reflected in both the collapsed rail and the expanded sidebar (ICON-11, ICON-12).
+**Plans**: TBD
+**UI hint**: yes
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -105,7 +136,9 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
 | 14. Managed Checkout Foundations | v1.4 | 4/4 | Complete | 2026-06-14 |
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
-| 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete    | 2026-06-18 |
+| 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
+| 18. Project Icon Data Foundation | v1.7 | 0/? | Not started | - |
+| 19. Sidebar Avatars & Settings Editors | v1.7 | 0/? | Not started | - |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
@@ -115,3 +148,4 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
 *v1.4 shipped 2026-06-15 — 2 phases (14–15), 7 plans, 13 tasks, 10 requirements*
 *v1.5 shipped 2026-06-17 — 1 phase (16), 2 plans, 6 tasks, 9 requirements*
 *v1.6 shipped 2026-06-18 — 1 phase (17), 2 plans, 5 tasks, 10 requirements (SBAR-01..SBAR-10)*
+*v1.7 in progress — 2 phases (18–19), 12 requirements (ICON-01..ICON-12)*

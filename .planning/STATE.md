@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-06-19T03:33:22.851Z"
 last_activity: 2026-06-19
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,19 +17,24 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-18)
+See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Planning next milestone — run `/gsd:new-milestone`
+**Current focus:** v1.7 Project Icons in Collapsed Sidebar — roadmap created (Phases 18–19); next run `/gsd:plan-phase 18`
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 18 — Project Icon Data Foundation (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-19 — Milestone v1.7 started
+Status: Roadmap created — ready to plan Phase 18
+Last activity: 2026-06-19 — Roadmap for v1.7 created (Phases 18–19, 12 requirements mapped)
 
 ## Performance Metrics
+
+**Velocity (v1.6):**
+
+- Plans completed: 2 across 1 phase (17); 5 tasks
+- Headline: a persistent global bottom bar showing every live agent session across all projects (collapsed counts + expanded attention-sorted cross-project list)
 
 **Velocity (v1.5):**
 
@@ -109,38 +114,35 @@ Notable standing decisions for future work:
 - D-51 reversed in v1.1 (AGENT-02): `--dangerously-skip-permissions` is the default extra-param; removable per-settings. Documented side effect: amber waiting dot rarely fires while active.
 - Settings are global-only, read-at-use, absent-row-=-code-default; per-project overrides deferred (SET-FUT-01); additional shells are future data, not code (SHELL-FUT-01).
 
-v1.6 milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):
+v1.7 milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):
 
-- **Agent sessions only** in the bar (working/waiting/idle; PR-review agent sessions included) — the bar reads the existing `/api/agents/status` feed, which is agent-only. bash/tmux sessions stay out (SBAR-FUT-05).
-- **In-bar alerting only**: a pulsing-amber highlight + waiting count. NO browser/OS notifications, NO tab-title/favicon changes this milestone (SBAR-FUT-03/04).
-- **Active (live-PTY) sessions only**: exited sessions drop off the bar (they still surface on cards + via Resume). Keeps "active sessions" honest.
-- **Additive, not a replacement**: the per-project sidebar "N waiting" chips are kept; the bar is a new app-wide surface alongside them.
-- **Default collapsed, persisted in localStorage** (mirrors the sidebar/Review-column collapse pattern; absent key reads as collapsed).
-- **No new DB migration**: SBAR-10's task title + project name come from a JOIN onto the existing status query — the columns already exist. The `/api/agents/status` SELECT was already widened in v1.5 (Phase 16) to carry `prNumber`/`source`; this milestone adds `taskTitle` + `projectName` the same way.
-- **No new endpoint**: the bar reuses `useAgentStatuses()` (`web/src/api/agents.ts`, 5s poll); the only backend change is the JOIN onto the existing handler.
+- **Default letters (ICON-02):** word initials for multi-word names, else first two letters; uppercased; max 2 chars.
+- **Default color (ICON-03/12):** random from a CURATED dark-theme-friendly palette (not arbitrary hex); editing = pick a preset swatch. Define the curated palette as ONE shared constant used by both the random-default assignment and the settings swatch picker.
+- **Shared avatar component (ICON-05/10):** the monogram avatar is shown in BOTH the collapsed rail AND beside the name when expanded — implement ONE shared avatar component reused in both places.
+- **Collapsed rail scope:** keeps active-project indication (ICON-07), full-name tooltip on hover (ICON-08), and the amber waiting badge overlay (ICON-09, reusing the existing per-project waiting count). It does NOT add Add/Settings icons (deferred, ICON-FUT-05).
+- **Schema (ICON-04):** new `projects.icon_letters` + `projects.icon_color` columns via migration 00009 with a backfill for existing projects (derived letters + an assigned palette color). NOTE for planning: a per-row RANDOM palette color in the backfill may be easier done in Go at migration-run time (or via SQL) than as a pure goose `.sql` statement — flag derive-defaults-for-existing-rows explicitly in the Phase 18 plan.
 
-Standing decisions still relevant to v1.6:
+v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
-- The `/api/agents/status` feed is the single source of truth for card dots, the Agent-tab dot, and sidebar waiting chips (research Pattern 4) — one query, no per-project fan-out. The bar becomes a fourth consumer of the same query.
-- `source='manual'` vs `source='github_pr'` distinguishes board tasks from PR-review workspaces; PR-review agent sessions ARE in scope for the bar (their title is the PR title).
-- The app shell is `web/src/components/layout/AppLayout.tsx` (sidebar + `<Outlet/>` today); collapse-state-in-localStorage is the established pattern there (`kangent.sidebar`).
+- Projects sidebar is `web/src/components/sidebar/ProjectSidebar.tsx`, rendering `<Sidebar>` from `web/src/components/ui/sidebar.tsx` with NO `collapsible` prop → defaults to `collapsible="offcanvas"` (collapses to `w-0`, fully off-screen), which is why there is no project reference when collapsed. The collapsed-rail feature = make the collapsed state show a thin avatar rail: either switch to `collapsible="icon"` (3rem `--sidebar-width-icon` rail, already supported by the shadcn sidebar) and style the icon state, or a custom collapsed render.
+- Open/collapsed state is controlled in `web/src/components/layout/AppLayout.tsx` via `useState` backed by `localStorage` key `kangent.sidebar` (D-04); the reopen trigger is `CollapsedSidebarTrigger` (top-left). `--sidebar-width` is `15rem`.
+- Project settings are edited in `web/src/components/sidebar/ProjectSettingsDialog.tsx` (description + github_repo), opened from `web/src/components/sidebar/ProjectMenu.tsx` — the letters + color editors go HERE.
+- Backend project model: `Project` struct + `projectColumns` + `scanProject` in `internal/api/projects.go`; the TS `Project` interface in `web/src/api/types.ts`. The partial-PATCH path for description/github_repo is `useUpdateProjectSettings` (frontend) → projects.go handler — extend it to ALSO accept `icon_letters` + `icon_color`.
+- Migrations live in `internal/store/migrations/` (embedded goose, run at startup); latest is `00008_managed_checkout.sql`. New migration = `00009_project_icons.sql`.
+- The amber waiting-count chip already exists per-project in `ProjectSidebar.tsx` (`waitingByProject` map from `useAgentStatuses()`); ICON-09 reuses that count as a badge overlay on the collapsed avatar.
+- Stack: Go stdlib mux + modernc SQLite + goose migrations; React 19 + Vite + Tailwind 4 + shadcn + TanStack Query. NO frontend test framework (no vitest): frontend phases verify via `cd web && npm run build` (tsc -b + vite build) + `npm run lint` + a human-verify checkpoint. Backend verifies via `go test ./...` / `go build` / `go vet`.
 
-(Earlier v1.0–v1.5 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
-
-- [Phase 17-global-active-sessions-bar]: SBAR-10: taskTitle + projectName added to /api/agents/status via a JOIN onto the existing query (both manager-derived and DB-derived passes) — no new endpoint, no new migration; TS AgentStatusEntry extended to match
-- [Phase 17-global-active-sessions-bar]: Active Sessions Bar is a fixed-to-viewport-bottom overlay (no reserved space, D-03): expand/collapse never resizes or reflows the xterm terminal; mounted once in AppLayout outside <Outlet/> so it is global across all routes
-- [Phase 17-global-active-sessions-bar]: Bar reuses useAgentStatuses() as a fourth consumer of the single 5s poll (no new hook), filtered live-only (working/waiting/idle); stable attention-rank sort avoids 5s jitter; all status colors from dotMeta(); collapse persisted under global key kangent:sessions-bar-collapsed (default collapsed)
+(Earlier v1.0–v1.6 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
 
 ### Pending Todos
 
-- Quota poll while idle (no connected browsers) is acceptable for the first iteration with jitter + backoff; revisit before milestone close (research tech-debt note).
 - Lint-cleanup pass: ~18–20 pre-existing react-hooks eslint errors + a possibly-remaining v1.3 `Date.now()`-in-render advisory in `ReviewColumn.tsx` — gating build green, but a dedicated pass is the right home.
-- v1.6 plan-time questions: where exactly the JOIN lives (handler SQL vs a store method); how the bar's fixed bottom strip coexists with the existing full-height `<main>` overflow layout (reserve bottom space vs overlay); whether the expanded list scrolls with a cap or grows unbounded; cross-project navigation route shape (the task agent route already exists — confirm it accepts a project switch).
+- Phase 18 plan-time question: implement the existing-row backfill color assignment in Go at migration-run time vs as goose SQL — pick whichever keeps random-per-row assignment clean (goose supports Go migrations).
+- Phase 19 plan-time question: switch `<Sidebar>` to `collapsible="icon"` and style the icon rail, vs a custom collapsed render — decide which gives the cleanest avatar rail with active/tooltip/badge.
 
 ### Blockers/Concerns
 
-- Plan-mode exit-plan approval → amber waiting dot (v1.0 research OQ1): still unobserved — note that with `--dangerously-skip-permissions` on by default, the waiting state (the bar's headline alert) rarely fires; confirm the amber-emphasis path is exercisable during UAT (may need a session run without the skip flag).
-- The bar must never block the view (SBAR-09) — a fixed bottom strip changes the available height for every page; verify the board, task view (xterm fit/resize), and settings all still fit and the terminal still resizes correctly.
+- Plan-mode exit-plan approval → amber waiting dot (v1.0 research OQ1): still unobserved — with `--dangerously-skip-permissions` on by default the waiting state rarely fires; if Phase 19 UAT needs to verify the amber waiting badge on a collapsed avatar (ICON-09), it may need a session run without the skip flag (or a manually-induced waiting state).
 
 ### Quick Tasks Completed
 
@@ -153,7 +155,7 @@ Standing decisions still relevant to v1.6:
 
 ## Session Continuity
 
-Last session: 2026-06-18T06:39:42.530Z
-Stopped at: Completed 17-02-PLAN.md (plan 2/2); phase 17 ready for verification
+Last session: 2026-06-19 — Roadmap created for v1.7 (Phases 18–19)
+Stopped at: ROADMAP.md + REQUIREMENTS.md traceability + STATE.md written; 12/12 requirements mapped, coverage validated
 Resume file: None
-Next: `/gsd:plan-phase 17` — Global Active Sessions Bar (SBAR-01..SBAR-10); start with the SBAR-10 backend JOIN (task title + project name onto `/api/agents/status`), then the persistent collapsible bottom bar in `AppLayout.tsx` reusing `useAgentStatuses()`
+Next: `/gsd:plan-phase 18` — Project Icon Data Foundation (ICON-01..04): migration 00009 adding `icon_letters` + `icon_color` with backfill, default-letter derivation, curated-palette random color assignment, and the project PATCH path to edit both. Then `/gsd:plan-phase 19` for the sidebar avatars + settings editors (ICON-05..12).

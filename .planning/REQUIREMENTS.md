@@ -62,24 +62,24 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ICON-01 | — | Pending |
-| ICON-02 | — | Pending |
-| ICON-03 | — | Pending |
-| ICON-04 | — | Pending |
-| ICON-05 | — | Pending |
-| ICON-06 | — | Pending |
-| ICON-07 | — | Pending |
-| ICON-08 | — | Pending |
-| ICON-09 | — | Pending |
-| ICON-10 | — | Pending |
-| ICON-11 | — | Pending |
-| ICON-12 | — | Pending |
+| ICON-01 | Phase 18 | Pending |
+| ICON-02 | Phase 18 | Pending |
+| ICON-03 | Phase 18 | Pending |
+| ICON-04 | Phase 18 | Pending |
+| ICON-05 | Phase 19 | Pending |
+| ICON-06 | Phase 19 | Pending |
+| ICON-07 | Phase 19 | Pending |
+| ICON-08 | Phase 19 | Pending |
+| ICON-09 | Phase 19 | Pending |
+| ICON-10 | Phase 19 | Pending |
+| ICON-11 | Phase 19 | Pending |
+| ICON-12 | Phase 19 | Pending |
 
 **Coverage:**
 - v1.7 requirements: 12 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 12 ⚠️
+- Mapped to phases: 12 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-19*
-*Last updated: 2026-06-19 at milestone v1.7 start*
+*Last updated: 2026-06-19 — roadmap created (Phases 18–19)*
