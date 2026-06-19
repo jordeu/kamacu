@@ -88,7 +88,7 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
 
 ### 🚧 v1.7 Project Icons in Collapsed Sidebar (Phases 18–19) — IN PROGRESS
 
-- [ ] **Phase 18: Project Icon Data Foundation** - Add `icon_letters` + `icon_color` to projects (migration 00009 with backfill), derive default letters from the name, assign a stable random color from a curated palette at creation, and extend the project PATCH path to edit both.
+- [x] **Phase 18: Project Icon Data Foundation** - Add `icon_letters` + `icon_color` to projects (migration 00009 with backfill), derive default letters from the name, assign a stable random color from a curated palette at creation, and extend the project PATCH path to edit both. (completed 2026-06-19)
 - [ ] **Phase 19: Sidebar Avatars & Settings Editors** - One shared monogram avatar component shown both as a clickable collapsed-rail icon (active state, name tooltip, amber waiting badge) and beside the name when expanded, plus letters + swatch editors in Project settings.
 
 ## Phase Details
@@ -114,7 +114,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 18-02-PLAN.md — Wire helpers into projects.go (struct/columns/scan, both create paths, PATCH validation) + invoke backfill at startup
+- [x] 18-02-PLAN.md — Wire helpers into projects.go (struct/columns/scan, both create paths, PATCH validation) + invoke backfill at startup
 
 ### Phase 19: Sidebar Avatars & Settings Editors
 
@@ -152,7 +152,7 @@ Plans:
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
-| 18. Project Icon Data Foundation | v1.7 | 2/3 | In Progress|  |
+| 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete   | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 0/? | Not started | - |
 
 ---
