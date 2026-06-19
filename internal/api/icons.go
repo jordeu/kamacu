@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"math/rand/v2"
 	"strings"
@@ -154,4 +155,51 @@ func validateIconColor(s string) (string, error) {
 		}
 	}
 	return "", errors.New(errIconColorOffPalette)
+}
+
+// BackfillProjectIcons fills icon_letters/icon_color for every project row left
+// blank by migration 00009 (D-08). It runs ONCE right after store.Migrate(db) at
+// startup and is IDEMPOTENT: the WHERE icon_letters = '' OR icon_color = ''
+// clause makes it a cheap no-op on subsequent boots once every row is filled. It
+// reuses the SAME deriveLetters + pickColor the create paths use, so backfill
+// behavior === create-time behavior (D-06/D-08, no divergence).
+//
+// Collect-then-update is REQUIRED: the store opens with db.SetMaxOpenConns(1)
+// (single-writer discipline, store.go), so holding the SELECT cursor open while
+// issuing UPDATEs on the same connection would deadlock. We scan every row that
+// needs filling into a slice (computing letters/color during the scan), close
+// the cursor, then run the parameterized UPDATEs. All SQL uses '?' placeholders
+// only — name/id are NEVER string-concatenated into the query (T-18-01).
+func BackfillProjectIcons(db *sql.DB) error {
+	rows, err := db.Query(`SELECT id, name FROM projects WHERE icon_letters = '' OR icon_color = ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type fill struct {
+		id      int64
+		letters string
+		color   string
+	}
+	var fills []fill
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return err
+		}
+		fills = append(fills, fill{id: id, letters: deriveLetters(name), color: pickColor()})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, f := range fills {
+		if _, err := db.Exec(
+			`UPDATE projects SET icon_letters = ?, icon_color = ? WHERE id = ?`,
+			f.letters, f.color, f.id,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
