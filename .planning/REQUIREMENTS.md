@@ -16,10 +16,10 @@ Give every project a colored monogram avatar (two uppercase letters on a backgro
 
 ### Collapsed Sidebar Rail
 
-- [ ] **ICON-05**: When the sidebar is collapsed, the user sees a vertical rail of project avatars instead of an empty / off-screen sidebar.
-- [ ] **ICON-06**: User can click a project's avatar in the collapsed rail to switch to that project, without first expanding the sidebar.
+- [x] **ICON-05**: When the sidebar is collapsed, the user sees a vertical rail of project avatars instead of an empty / off-screen sidebar.
+- [x] **ICON-06**: User can click a project's avatar in the collapsed rail to switch to that project, without first expanding the sidebar.
 - [x] **ICON-07**: The currently-open project's avatar is visually marked as active (selected) in the collapsed rail.
-- [ ] **ICON-08**: Hovering a collapsed avatar shows the full project name in a tooltip (since the text label is hidden when collapsed).
+- [x] **ICON-08**: Hovering a collapsed avatar shows the full project name in a tooltip (since the text label is hidden when collapsed).
 - [x] **ICON-09**: A project with one or more agents waiting for input shows the amber waiting indicator as a badge overlaid on its collapsed avatar.
 
 ### Expanded Sidebar
@@ -28,7 +28,7 @@ Give every project a colored monogram avatar (two uppercase letters on a backgro
 
 ### Editing in Project Settings
 
-- [ ] **ICON-11**: User can edit a project's two letters in Project settings; input is normalized/validated to at most two uppercase characters.
+- [x] **ICON-11**: User can edit a project's two letters in Project settings; input is normalized/validated to at most two uppercase characters.
 - [x] **ICON-12**: User can change a project's color in Project settings by picking from the curated palette swatches, with the current color clearly indicated.
 
 ## Future Requirements
@@ -66,13 +66,13 @@ Which phases cover which requirements. Populated during roadmap creation.
 | ICON-02 | Phase 18 | Complete |
 | ICON-03 | Phase 18 | Complete |
 | ICON-04 | Phase 18 | Complete |
-| ICON-05 | Phase 19 | Pending |
-| ICON-06 | Phase 19 | Pending |
+| ICON-05 | Phase 19 | Complete |
+| ICON-06 | Phase 19 | Complete |
 | ICON-07 | Phase 19 | Complete |
-| ICON-08 | Phase 19 | Pending |
+| ICON-08 | Phase 19 | Complete |
 | ICON-09 | Phase 19 | Complete |
 | ICON-10 | Phase 19 | Complete |
-| ICON-11 | Phase 19 | Pending |
+| ICON-11 | Phase 19 | Complete |
 | ICON-12 | Phase 19 | Complete |
 
 **Coverage:**

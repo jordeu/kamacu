@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Project Icons in Collapsed Sidebar
 status: executing
-stopped_at: Phase 19 UI-SPEC approved
-last_updated: "2026-06-19T06:43:28.315Z"
-last_activity: 2026-06-19 -- Phase 19 Plan 01 complete (ProjectAvatar + PROJECT_PALETTE)
+stopped_at: Phase 19 plans complete (3/3), pending phase verification
+last_updated: "2026-06-19T08:55:00.000Z"
+last_activity: 2026-06-19 -- Phase 19 Plans 02 + 03 complete (rail + settings editors); UAT-approved after 3 visual-revision rounds
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -25,10 +25,17 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 ## Current Position
 
-Phase: 19 (sidebar-avatars-settings-editors) — EXECUTING
-Plan: 2 of 3
-Status: Ready to execute (Plan 01 complete — avatar foundation shipped)
-Last activity: 2026-06-19 -- Phase 19 Plan 01 complete
+Phase: 19 (sidebar-avatars-settings-editors) — PLANS COMPLETE (3/3), pending phase verification
+Plan: 3 of 3 complete
+Status: All Phase 19 plans done + human-verify approved; next is phase verification (code-review + verify-phase gates)
+Last activity: 2026-06-19 -- Phase 19 Plans 02 + 03 complete; UAT-approved
+
+### Phase 19 UAT decisions (visual revisions, user-approved — treat as the new contract)
+
+- **Avatar shape (reverses D-04):** `rounded-md` square → `rounded-full` circle.
+- **Active indicator (reverses D-06):** dropped the rail-only ring on `<ProjectAvatar>` (removed the `active` prop); the selected/open project is highlighted by the rail `SidebarMenuButton`'s filled rounded-md `bg-sidebar-accent` (a 40px filled-row, the SAME treatment as the expanded selection). Dim `sidebar-ring` was invisible; a near-white ring was ugly.
+- **Palette (amends D-01/D-13):** the 9 bright Tailwind-600 hues → 9 muted desaturated hues (still ≥4.5:1 white-text contrast, ~2.7–3.4:1 vs the dark rail). Changed BOTH the Go source of truth (`internal/api/icons.go projectPalette`, a Phase 18 artifact) and the TS mirror (`web/src/lib/palette.ts`); added migration `00010_muted_palette.sql` to remap existing rows by palette position. **Cross-phase note:** a Phase 18 file was modified during Phase 19 UAT.
+- **Rail avatar size:** `size-8` → `size-6` (24px); `kangent` brand title hidden in icon mode (it was overflowing the rail).
 
 ## Performance Metrics
 
