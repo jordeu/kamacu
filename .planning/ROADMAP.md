@@ -102,7 +102,11 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
   2. A new project is assigned a background color picked at random from a curated, dark-theme-friendly palette (legible against the avatar text), and that color stays the same for the project across server restarts (ICON-03).
   3. After the migration runs, every project that existed before this feature has non-empty letters (derived from its name) and an assigned palette color — no project is left blank (ICON-04).
   4. The project's letters and color survive a server restart (stored in SQLite) and can be read and updated through the project API (the PATCH path now accepts `icon_letters` + `icon_color`), so the Phase 19 editors have a wire path (ICON-04).
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 18-01-PLAN.md — Migration 00009 + icons.go helpers (palette, deriveLetters, pickColor, validators, idempotent backfill) with table tests
+- [ ] 18-02-PLAN.md — Wire helpers into projects.go (struct/columns/scan, both create paths, PATCH validation) + invoke backfill at startup
+- [ ] 18-03-PLAN.md — Frontend wire path: add icon_letters + icon_color to the TS Project type and useUpdateProjectSettings PATCH payload
 
 ### Phase 19: Sidebar Avatars & Settings Editors
 **Goal**: The user can identify and switch between projects directly from the collapsed sidebar via colored monogram avatars (which also appear beside the name when expanded), and can edit a project's letters and color from Project settings.
@@ -137,7 +141,7 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
-| 18. Project Icon Data Foundation | v1.7 | 0/? | Not started | - |
+| 18. Project Icon Data Foundation | v1.7 | 0/3 | Planned | - |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 0/? | Not started | - |
 
 ---
