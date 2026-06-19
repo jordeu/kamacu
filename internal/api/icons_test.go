@@ -72,9 +72,9 @@ func TestValidateIconColor(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"lowercase member", "#dc2626", "#dc2626", false},
-		{"uppercase member canonicalized", "#DC2626", "#dc2626", false},
-		{"trimmed member", "  #2563eb  ", "#2563eb", false},
+		{"lowercase member", "#9e5757", "#9e5757", false},
+		{"uppercase member canonicalized", "#9E5757", "#9e5757", false},
+		{"trimmed member", "  #5e719c  ", "#5e719c", false},
 		{"off-palette hex", "#000000", "", true},
 		{"color name", "red", "", true},
 	}

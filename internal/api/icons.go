@@ -8,17 +8,21 @@ import (
 	"unicode"
 )
 
-// projectPalette is the curated dark-theme avatar palette (D-01): 9 Tailwind-600
-// hues with fixed white (#ffffff) text (chosen for AA-legible contrast on the
-// zinc-900 theme). This Go slice is the SINGLE SOURCE OF TRUTH (D-02): the
-// backend random-picks from it at project creation and the Phase 19 swatch UI
-// mirrors the identical lowercase list in TS — there is deliberately NO palette
-// endpoint. Hexes are stored/compared lowercase. Order is locked (it is the
-// order the TS mirror reproduces). Members, in order: red, orange, amber, green,
-// teal, blue, indigo, violet, pink.
+// projectPalette is the curated dark-theme avatar palette (D-01): 9 muted,
+// desaturated hues with fixed white (#ffffff) text. The hues are deliberately
+// low-saturation/mid-dark so they sit subtly on the dark sidebar (a gentle
+// difference between projects, never a bright highlight — Phase 19 UAT) while
+// every hue still clears WCAG AA (>=4.5:1) against white at monogram sizes.
+// This Go slice is the SINGLE SOURCE OF TRUTH (D-02): the backend random-picks
+// from it at project creation and the Phase 19 swatch UI mirrors the identical
+// lowercase list in TS — there is deliberately NO palette endpoint. Hexes are
+// stored/compared lowercase. Order is locked (it is the order the TS mirror
+// reproduces). Members, in order: red, orange, amber, green, teal, blue,
+// indigo, violet, pink. Migration 00010 remaps pre-existing rows from the
+// original bright palette to these muted hues by position.
 var projectPalette = []string{
-	"#dc2626", "#ea580c", "#d97706", "#16a34a", "#0d9488",
-	"#2563eb", "#4f46e5", "#7c3aed", "#db2777",
+	"#9e5757", "#9c6b4b", "#8a7345", "#4e7a54", "#46776f",
+	"#5e719c", "#6c6699", "#84689e", "#9c6188",
 }
 
 // errIconLettersRequired is the canonical reject copy for an empty/whitespace
