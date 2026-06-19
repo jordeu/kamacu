@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProjectAvatar } from "@/components/ui/ProjectAvatar";
 import { Textarea } from "@/components/ui/textarea";
 
 export interface ProjectSettingsDialogProps {
@@ -35,6 +36,18 @@ function sentenceCase(message: string): string {
   return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
+/**
+ * Mirror the server's validateIconLetters rule (internal/api/icons.go, D-10) as
+ * client-side UX: trim, keep up to 2 alphanumeric (Unicode letter or digit)
+ * runes, then uppercase — symbols/emoji/whitespace are stripped. The server
+ * stays the enforcer; this only shapes what the user can type so the avatar
+ * preview matches what will be stored.
+ */
+function normalizeIconLetters(raw: string): string {
+  const alnum = raw.match(/[\p{L}\p{N}]/gu) ?? [];
+  return alnum.slice(0, 2).join("").toUpperCase();
+}
+
 export function ProjectSettingsDialog({
   project,
   open,
@@ -45,6 +58,8 @@ export function ProjectSettingsDialog({
 
   const [description, setDescription] = useState(project.description);
   const [repo, setRepo] = useState(project.github_repo ?? "");
+  const [letters, setLetters] = useState(project.icon_letters);
+  const [color, setColor] = useState(project.icon_color);
   // Tracks whether the user has typed in the repo field, so a late-arriving
   // origin suggestion never clobbers an edit.
   const [repoEdited, setRepoEdited] = useState(false);
@@ -70,6 +85,8 @@ export function ProjectSettingsDialog({
       // Reset + prefill each time the dialog opens (RenameProjectDialog precedent).
       setDescription(project.description);
       setRepo(project.github_repo ?? "");
+      setLetters(project.icon_letters);
+      setColor(project.icon_color);
       setRepoEdited(false);
       setError(null);
     }
@@ -97,11 +114,16 @@ export function ProjectSettingsDialog({
     // and can't be hard-blocked by a transient gh hiccup.
     const repoChanged =
       integrationOn && repo.trim() !== (project.github_repo ?? "");
+    // Send each icon field ONLY when it changed (same omitted-=-untouched shape
+    // as github_repo; mutations.ts drops undefined keys). The server stays the
+    // enforcer — an empty `letters` here surfaces a 400 inline below (D-12).
+    const lettersChanged = letters !== project.icon_letters;
     try {
       await updateSettings.mutateAsync({
         id: project.id,
         description,
         github_repo: repoChanged ? repo.trim() : undefined,
+        icon_letters: lettersChanged ? letters : undefined,
       });
       // A 2xx save always closes the dialog.
       onOpenChange(false);
@@ -128,6 +150,31 @@ export function ProjectSettingsDialog({
           <DialogTitle>Project settings</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {/* Live preview (D-09): reflects the in-progress draft, not the saved
+              project, so it updates as the user edits letters/color. */}
+          <div className="flex justify-center">
+            <ProjectAvatar size="rail" letters={letters} color={color} />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label
+              htmlFor={`project-letters-${project.id}`}
+              className="text-xs font-medium"
+            >
+              Initials
+            </Label>
+            <Input
+              id={`project-letters-${project.id}`}
+              maxLength={2}
+              value={letters}
+              autoCapitalize="characters"
+              onChange={(event) => setLetters(normalizeIconLetters(event.target.value))}
+            />
+            <p className="text-xs text-muted-foreground">
+              Two letters shown on the project avatar.
+            </p>
+          </div>
+
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <Label
@@ -203,7 +250,10 @@ export function ProjectSettingsDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={updateSettings.isPending}>
+            <Button
+              type="submit"
+              disabled={updateSettings.isPending || letters.trim() === ""}
+            >
               Save changes
             </Button>
           </DialogFooter>
