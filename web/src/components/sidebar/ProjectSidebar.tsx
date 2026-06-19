@@ -57,7 +57,7 @@ export function ProjectSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarMenu className="gap-1 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2">
+        <SidebarMenu className="gap-1 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-1 group-data-[collapsible=icon]:px-1">
           {(projects ?? []).map((project) => {
             const count = waitingByProject.get(project.id) ?? 0;
             const isActive = projectId === String(project.id);
@@ -76,19 +76,20 @@ export function ProjectSidebar() {
                   asChild
                   size="sm"
                   isActive={isActive}
-                  className="min-h-7 px-3 text-sm group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-full group-data-[collapsible=icon]:p-0!"
+                  className="min-h-7 px-3 text-sm group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-md group-data-[collapsible=icon]:p-0!"
                 >
                   <Link
                     to={`/projects/${project.id}`}
                     aria-label={linkLabel}
                     aria-current={isActive ? "page" : undefined}
                   >
-                    {/* Collapsed rail (ICON-05/06/07/08/09): the size-6 avatar
-                        is centered in the icon-mode hit target; the active project
-                        is highlighted by the button's circular bg-sidebar-accent
-                        (matching the expanded rows), not a ring on the avatar.
-                        Hidden when expanded; the side=right tooltip carries the
-                        full project name. */}
+                    {/* Collapsed rail (ICON-05/06/07/08/09): the size-6 avatar is
+                        centered in a 40px rounded-md icon-mode button that fills
+                        the rail row. The active project is highlighted by that
+                        button's bg-sidebar-accent fill — the SAME filled-row
+                        treatment the expanded selection uses, not a ring on the
+                        avatar. Hidden when expanded; the side=right tooltip
+                        carries the full project name. */}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="hidden group-data-[collapsible=icon]:flex">
