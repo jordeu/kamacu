@@ -65,18 +65,18 @@ Exceptions: none (the 8px dot and 20/28/32px boxes are component sizing, not lay
 
 ## Typography
 
-The avatar monogram and editors reuse the existing zinc theme scale. Two weights only (regular 400 + bold/semibold), 3 roles in scope.
+The avatar monogram and editors reuse the existing zinc theme scale. Two weights: 400 regular + 500 medium (`font-medium`). This matches the established system — `ProjectSettingsDialog` already pairs 400 body with `text-xs font-medium` (500) labels, and the sidebar's own emphasis weight is `font-medium`. No third weight is introduced. 3 roles in scope.
 
 | Role | Size | Weight | Line Height | Tailwind | Usage |
 |------|------|--------|-------------|----------|-------|
-| Monogram (rail, 32px avatar) | 14px | 700 (bold) | 1 (centered, no wrap) | `text-sm font-bold leading-none` | Letters on `icon_color`, fixed white text (D-04). Auto-scales by size prop. |
-| Monogram (inline, 20px avatar) | 12px | 700 (bold) | 1 | `text-[10px] font-bold leading-none` | Smaller glyph for the 20px inline avatar (D-05); 10px keeps 2 chars legible inside 20px. |
+| Monogram (rail, 32px avatar) | 14px | 500 (medium) | 1 (centered, no wrap) | `text-sm font-medium leading-none` | Letters on `icon_color`, fixed white text (D-04). White `font-medium` on the saturated palette hue stays high-contrast and legible at 32px, and matches the sidebar's existing medium-weight emphasis. Auto-scales by size prop. |
+| Monogram (inline, 20px avatar) | 12px | 500 (medium) | 1 | `text-[10px] font-medium leading-none` | Smaller glyph for the 20px inline avatar (D-05); 10px keeps 2 chars legible inside 20px. |
 | Body / row label | 14px | 400 | 1.5 | `text-sm` | Project name in expanded row (existing, unchanged). |
 | Field label / help / counter | 12px | 500 (medium) | 1.5 | `text-xs font-medium` (label) / `text-xs text-muted-foreground` (help) | Settings editor labels + help text (matches existing dialog L133/L157). |
 
 **Letter color is ALWAYS `text-white` (`#ffffff`)** — fixed by D-04/D-13/Phase-18-D-01 for AA contrast against every Tailwind-600 palette hue. Never derive text color from background.
 
-**Monogram legibility rule:** background is one of the 9 curated Tailwind-600 hues only (palette membership enforced server-side, Phase 18 D-11); white-on-600 meets AA at these sizes. Do not allow off-palette backgrounds.
+**Monogram legibility rule:** background is one of the 9 curated Tailwind-600 hues only (palette membership enforced server-side, Phase 18 D-11); white `font-medium` letters on a 600-weight hue meet AA at these sizes. Do not allow off-palette backgrounds.
 
 ---
 
@@ -115,7 +115,7 @@ Fixed text on every swatch: white `#ffffff`. The TS list MUST stay byte-for-byte
 
 ### `<ProjectAvatar>` (shared, ICON-07/10)
 - **Shape:** rounded-square `rounded-md` (~4.8px at `--radius: 0.375rem`) — reads as a workspace/project icon (GitHub/Slack style), NOT a circular person avatar (D-04).
-- **Fill:** inline style `backgroundColor: project.icon_color` (a palette hex). **Letters:** `project.icon_letters`, `text-white font-bold`, centered (`flex items-center justify-center`), `leading-none`.
+- **Fill:** inline style `backgroundColor: project.icon_color` (a palette hex). **Letters:** `project.icon_letters`, `text-white font-medium`, centered (`flex items-center justify-center`), `leading-none`.
 - **Sizes (prop `size: "rail" | "inline"`):** `rail` = `size-8` + `text-sm`; `inline` = `size-5` + `text-[10px]` (D-05).
 - **Fallback:** letters are server-guaranteed non-empty (Phase 18 D-10 `?` fallback); render whatever the field holds, never blank.
 - **Reuse:** ONE component instance type, used in rail, expanded row, and settings preview (ICON-10).
