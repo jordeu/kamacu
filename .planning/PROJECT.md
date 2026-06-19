@@ -8,9 +8,19 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone
+## Current Milestone: v1.7 Project Icons in Collapsed Sidebar
 
-**No milestone active.** v1.6 Global Active Sessions Bar shipped 2026-06-18 (audited passed, archived to `milestones/v1.6-*`); run `/gsd:new-milestone` to scope the next cycle. See the Validated requirements and Current State below for what shipped.
+**Goal:** Give every project a colored monogram avatar (background color + two uppercase letters) so projects are identifiable and switchable directly from the collapsed sidebar — no expand needed.
+
+**Target features:**
+- Collapsed sidebar becomes a thin rail of clickable project icons (color + 2 letters); clicking switches project (today the offcanvas sidebar slides fully off-screen, leaving no project reference).
+- The same monogram avatar appears beside the project name in the expanded sidebar too (consistent identity in both states).
+- Default letters derive from the name (word initials, else first two — "My Cool App" → MC, "kangent" → KA); editable in Project settings.
+- Default color is assigned at random from a curated dark-theme-friendly palette; edited by picking a preset swatch in Project settings.
+- Collapsed icons keep the amber waiting-count indicator (as an overlay badge) and show the full project name on hover (tooltip).
+- New `projects.icon_letters` + `projects.icon_color` columns (migration); existing projects backfilled with derived letters + an assigned palette color.
+
+_v1.6 Global Active Sessions Bar shipped 2026-06-18 (audited passed, archived to `milestones/v1.6-*`). See the Validated requirements and Current State below for what shipped._
 
 <details>
 <summary>Shipped milestone targets — v1.6 Global Active Sessions Bar (2026-06-18)</summary>
@@ -136,7 +146,7 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-_No milestone currently active. v1.6 Global Active Sessions Bar shipped 2026-06-18 (Phase 17) — verified (11/11 must-haves, human-verify approved), audited (passed), and archived to `milestones/v1.6-*`. Run `/gsd:new-milestone` to scope the next cycle._
+**Milestone v1.7 Project Icons in Collapsed Sidebar** — scoped 2026-06-19. Give every project a colored monogram avatar (background color + two uppercase letters), shown both as the collapsed-sidebar icon (a clickable rail that today is absent — the offcanvas sidebar slides fully off-screen) and beside the name when expanded; letters default to name-derived initials and the color to a curated-palette random, both editable in Project settings; collapsed icons keep the waiting-count badge + a name tooltip. See `REQUIREMENTS.md` for the scoped REQ-IDs and `ROADMAP.md` for the phase breakdown.
 
 Carried-forward candidates from earlier milestones live in **Deferred** below and in the archived milestones' Future Requirements.
 
@@ -178,7 +188,7 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**No milestone active.** v1.6 Global Active Sessions Bar shipped 2026-06-18; run `/gsd:new-milestone` to scope the next cycle. Candidates NOT pulled into v1.6 remain parked below.
+**v1.7 Project Icons in Collapsed Sidebar — active (scoped 2026-06-19).** Candidates NOT pulled into v1.7 remain parked below.
 
 Candidates carried forward live in **Deferred** below. Banked forward investments worth a future milestone:
 - The v1.4 managed-checkout follow-ups, already scoped in `milestones/v1.4-REQUIREMENTS.md` "Future Requirements": on-demand checkout sync (CKMNT-01), non-default base branch at create (CKMNT-02), shallow/partial clone for large repos (CKMNT-03), and live clone-progress streaming + cancel (CKUX-01). The frontend `Project.managed` wire field is already in place to hang a managed-delete cleanup affordance on.
@@ -250,4 +260,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-18 after v1.6 Global Active Sessions Bar milestone — shipped, audited, and archived*
+*Last updated: 2026-06-19 — started milestone v1.7 Project Icons in Collapsed Sidebar*

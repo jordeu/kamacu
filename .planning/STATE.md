@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.6
-milestone_name: Global Active Sessions Bar
-status: shipped
-stopped_at: v1.6 Global Active Sessions Bar shipped 2026-06-18 — audited (passed), archived to milestones/v1.6-*, tagged. No milestone active; run /gsd:new-milestone.
-last_updated: "2026-06-18T07:18:57.000Z"
-last_activity: 2026-06-18 - Completed quick task 260618-mlu: auto-collapse active sessions bar on row open
+milestone: v1.7
+milestone_name: Project Icons in Collapsed Sidebar
+status: planning
+last_updated: "2026-06-19T03:33:22.851Z"
+last_activity: 2026-06-19
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,17 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 
 ## Current Position
 
-Milestone: v1.6 Global Active Sessions Bar — ✅ SHIPPED 2026-06-18
-Phase: none active
-Status: Milestone complete — audited (passed), archived, tagged
-
-Progress: [██████████] 100% — 1 phase (17), 2 plans, 5 tasks
-
-**v1.6 shipped:** A persistent bottom status bar (`ActiveSessionsBar`, mounted in `AppLayout` outside `<Outlet/>`, every route) showing every LIVE Claude agent session across all projects — collapsed per-state colored counts (reused `dotMeta()`) + total with the waiting count amber-pulsing only when > 0; expanded an overlay floating UP over content (terminals never reflow) listing live sessions attention-first, each row `project · task/PR title` (+ `#n` PR badge) click-through to that task's agent view cross-project, current-row highlighted; collapse persisted in localStorage (default collapsed); live-only. The sole backend change was a JOIN of `tasks.title`+`projects.name` onto both passes of the existing `/api/agents/status` query (no endpoint, no migration); the bar is the 4th consumer of the existing 5s poll. Audit: 10/10 requirements, 6/6 integration seams, 1/1 E2E flow. Archived to `milestones/v1.6-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md`.
-
-**Next:** `/gsd:new-milestone` to scope the next cycle.
-
-**Carried tech debt (non-blocking, build green):** ~18–20 pre-existing react-hooks eslint advisories; the v1.3 `Date.now()`-in-render advisory in `PRCard.tsx` was cleared in v1.5 (the `ReviewColumn.tsx` one may remain); plus a cosmetic stale "dot/border" comment in `ReviewColumn.tsx` / the `agentRail` JSDoc. A dedicated lint/comment-sweep is the right home.
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-19 — Milestone v1.7 started
 
 ## Performance Metrics
 
