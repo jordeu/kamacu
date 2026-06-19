@@ -128,7 +128,17 @@ Plans:
   3. The same monogram avatar appears beside the project name in the expanded sidebar, with the existing name display and waiting-count chip behavior preserved (ICON-10).
   4. In Project settings the user can edit the two letters (input normalized/validated to at most two uppercase characters) and change the color by picking from the curated palette swatches, with the current color clearly indicated; saved changes are reflected in both the collapsed rail and the expanded sidebar (ICON-11, ICON-12).
 
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+**Wave 1**
+
+- [ ] 19-01-PLAN.md — Foundation: PROJECT_PALETTE TS const (verbatim Go mirror) + shared <ProjectAvatar> primitive (rail/inline sizes, active ring, static waiting dot)
+
+**Wave 2** *(blocked on Wave 1 completion; both plans parallel — no file overlap)*
+
+- [ ] 19-02-PLAN.md — Sidebar integration: collapsible="icon" avatar rail (active ring, name tooltip, amber waiting dot) + inline avatar in expanded rows + retire floating trigger / drop pl-9 (ICON-05..10)
+- [ ] 19-03-PLAN.md — Settings editors: Initials input + 9-swatch color grid + live preview wired into the existing conditional PATCH (ICON-11/12)
+
 **UI hint**: yes
 
 ## Progress
@@ -153,7 +163,7 @@ Plans:
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete    | 2026-06-19 |
-| 19. Sidebar Avatars & Settings Editors | v1.7 | 0/? | Not started | - |
+| 19. Sidebar Avatars & Settings Editors | v1.7 | 0/3 | Planned | - |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
