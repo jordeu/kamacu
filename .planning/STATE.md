@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Project Icons in Collapsed Sidebar
-status: phase_complete
-stopped_at: Phase 19 verified (passed 9/9) — milestone v1.7 phases all complete
-last_updated: "2026-06-19T09:05:00.000Z"
-last_activity: 2026-06-19 -- Phase 19 complete & verified (rail + settings editors); code review CR-01/WR-01/03 fixed; UAT-approved
+status: Awaiting next milestone
+stopped_at: Milestone v1.7 complete & archived (tag pending push decision)
+last_updated: "2026-06-19T09:37:03.051Z"
+last_activity: 2026-06-19 — Milestone v1.7 completed and archived
 progress:
   total_phases: 2
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 19 — sidebar-avatars-settings-editors
+**Current focus:** Planning next milestone — v1.7 shipped 2026-06-19 (run `/gsd:new-milestone`)
 
 ## Current Position
 
-Phase: 19 (sidebar-avatars-settings-editors) — COMPLETE & VERIFIED (passed 9/9)
-Plan: 3 of 3 complete
-Status: Phase 19 done. Both v1.7 phases (18, 19) complete & verified — milestone v1.7 ready to ship / complete-milestone.
-Last activity: 2026-06-19 -- Phase 19 complete & verified
+Phase: Milestone v1.7 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-19 — Milestone v1.7 completed and archived
 
 ### Phase 19 UAT decisions (visual revisions, user-approved — treat as the new contract)
 
@@ -164,7 +164,11 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-06-19T06:43:19.669Z
-Stopped at: Phase 19 UI-SPEC approved
+Last session: 2026-06-19T09:37:00.000Z
+Stopped at: Milestone v1.7 complete & archived (ROADMAP/REQUIREMENTS archived, PROJECT.md evolved, RETROSPECTIVE updated, tag v1.7 pending push decision)
 Resume file: None
-Next: `/gsd:plan-phase 18` — Project Icon Data Foundation (ICON-01..04): migration 00009 adding `icon_letters` + `icon_color` with backfill, default-letter derivation, curated-palette random color assignment, and the project PATCH path to edit both. Then `/gsd:plan-phase 19` for the sidebar avatars + settings editors (ICON-05..12).
+Next: `/clear` then `/gsd:new-milestone` to scope the next milestone (questioning → research → requirements → roadmap). Banked-forward candidates: ICON-FUT-01..05 (v1.7), CKMNT/CKUX (v1.4), GHCARD/GHFILT/GHWIDE (v1.3), and the NOTF/MAINT/AGNT deferred set — see PROJECT.md "Next Milestone" + "Deferred".
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

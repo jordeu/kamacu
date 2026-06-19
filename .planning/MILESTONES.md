@@ -1,5 +1,24 @@
 # Milestones
 
+## v1.7 Project Icons in Collapsed Sidebar (Shipped: 2026-06-19)
+
+**Phases completed:** 2 phases (18–19), 6 plans, 12 tasks
+
+**Delivered:** Every project now has a colored monogram avatar (two uppercase letters on a curated-palette background) that makes projects identifiable and switchable directly from the collapsed sidebar — which previously slid fully off-screen, leaving no project reference. The avatar renders both as a clickable collapsed-rail icon (active highlight, name tooltip, amber waiting badge) and inline beside the project name when expanded; letters and color auto-derive at creation (name initials + random palette pick) and are editable from Project settings. Backend was minimal — two new `projects` columns with migration/backfill and the PATCH path to edit them — the rest was frontend.
+
+**Key accomplishments:**
+
+- Backend data foundation (Phase 18): new `internal/api/icons.go` as the single source of truth — `projectPalette`, `deriveLetters` (name → ≤2 uppercase monogram), `pickColor` (random palette member), and server-side `validateIconLetters`/`validateIconColor`; migration 00009 adds `icon_letters` + `icon_color` columns with an idempotent post-`Migrate` `BackfillProjectIcons` so every pre-existing project gets non-blank letters + a stable color; both create paths auto-assign at INSERT and the partial-PATCH handler validates+persists both (ICON-01..04).
+- Shared `<ProjectAvatar>` monogram primitive (rail|inline sizes, rail-only active state + static amber waiting dot) plus the `PROJECT_PALETTE` TS const mirroring the Go `projectPalette` byte-for-byte — the Wave-1 dependency root every Phase 19 surface consumes.
+- The collapsed sidebar is now a 3rem icon rail of per-project circular monogram avatars (filled-row active highlight, side=right name tooltip, static amber waiting badge); the same avatar appears inline beside the name when expanded; the floating re-expand trigger is retired (ICON-05..10).
+- Project settings gained a live `<ProjectAvatar>` preview, an "Initials" input (client-normalized to ≤2 uppercase alphanumerics, mirroring the server rule), and a 9-swatch `PROJECT_PALETTE` color grid with the current color ring+check-marked — wired into the existing conditional PATCH so `icon_letters`/`icon_color` are sent only when changed, with saved edits propagating to the rail + expanded sidebar (ICON-11/12).
+
+**UAT revisions shipped as the new contract:** circular avatars (reversed the planned `rounded-md` square, D-04); rail-row filled-highlight active state instead of a ring (reversed D-06); and a **muted desaturated palette** replacing the bright Tailwind-600 hues — changing both the Go source of truth and the TS mirror, plus a follow-up migration `00010_muted_palette.sql` that remapped existing rows by palette position.
+
+**Known deferred items at close:** 4 completed quick tasks (`260613-osu`, `260613-ph5`, `260616-8l7`, `260618-mlu`) from earlier milestones (v1.3/v1.5/v1.6) lingered in `.planning/quick/` and were flagged by the pre-close artifact audit; each has a `SUMMARY.md` with a completion date — verified done, not gaps (audit metadata false-positive).
+
+---
+
 ## v1.6 Global Active Sessions Bar (Shipped: 2026-06-18)
 
 **Phases completed:** 1 phases, 2 plans, 5 tasks

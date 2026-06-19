@@ -271,6 +271,40 @@
 
 ---
 
+## Milestone: v1.7 — Project Icons in Collapsed Sidebar
+
+**Shipped:** 2026-06-19
+**Phases:** 2 (18–19) | **Plans:** 6 | **Tasks:** 12
+
+### What Was Built
+- (Phase 18, plans 18-01/02/03) Backend data foundation: new `internal/api/icons.go` single source of truth — `projectPalette` (9 hexes), `deriveLetters` (name → ≤2 uppercase monogram, 7 locked cases incl. `nf-core`→`NC`, emoji-only→`?`), `pickColor` (random palette member), and server-side `validateIconLetters`/`validateIconColor`. Migration 00009 adds `icon_letters` + `icon_color` (`NOT NULL DEFAULT ''`) with an idempotent post-`Migrate` `BackfillProjectIcons`; both create paths auto-assign at INSERT; the partial-PATCH handler validates+persists both; `web/src/api/{types,mutations}.ts` carry them on the wire (ICON-01..04).
+- (Phase 19, plans 19-01/02/03) Frontend: `PROJECT_PALETTE` TS const (verbatim Go mirror) + shared `<ProjectAvatar>` primitive (rail|inline sizes); the sidebar switched to `collapsible="icon"` rendering a 3rem avatar rail (click-to-switch, name tooltip, amber waiting badge, filled-row active highlight) with the same avatar inline when expanded and the floating re-expand trigger retired; Project settings gained an "Initials" input + 9-swatch grid + live preview wired into the existing conditional PATCH (ICON-05..12).
+
+### What Worked
+- **One-source-of-truth-mirrored-to-the-client made the palette unambiguous.** The curated palette lives in Go (`icons.go`) and is mirrored byte-for-byte in TS (`lib/palette.ts`) with no endpoint — the random-default assignment and the editable swatch grid draw from the same list, so they can never disagree, and white-text contrast is curated-in.
+- **Backend-data → frontend-render phase split (now the standard shape) ran clean.** Phase 18 proved the columns/derivation/backfill/validation with table tests and HTTP spot-checks before any pixel existed; Phase 19 was a thin render+edit layer over a typed wire path. Same shape as v1.4/v1.5/v1.6.
+- **One shared `<ProjectAvatar>` for both sidebar states** kept the collapsed rail and the expanded inline icon visually identical with zero duplication — the Wave-1 dependency root both Wave-2 surfaces consumed.
+- **The idempotent startup backfill closed the "old projects are blank" gap by construction** — every pre-existing row got derived letters + a stable color on first boot after the migration, verified end-to-end.
+
+### What Was Inefficient
+- **UAT reshaped the visual contract substantially — after the build.** Three approved-spec decisions were reversed at the human-verify gate: square→circle avatars (D-04), ring→filled-row active state (D-06), and the whole palette re-muted from bright Tailwind-600 to 9 desaturated hues (D-01/D-13). The re-mute rippled into a Phase-18 file (`icons.go projectPalette`) plus a brand-new migration `00010_muted_palette.sql` to remap existing rows — i.e. a shipped data layer was edited during the next phase's UAT. A cheap visual mock during ui-phase would likely have surfaced the circle-vs-square and ring-vs-highlight gestalt (and the palette loudness) before code, exactly the v1.5/Lesson-7 prediction.
+- **The summary-extract one-liner misfire recurred again.** `milestone complete` seeded the v1.7 MILESTONES.md entry with a code-review note as its first "accomplishment" (`"1. [Rule 3 - Blocking] Restored declared frontend dependencies…"`) — hand-curated out, as in v1.1–v1.4. The CLI accomplishments list is still a draft, every time.
+
+### Patterns Established
+- **Source-of-truth-in-Go, mirrored-as-a-`const`-in-TS (no endpoint)** for a small, fixed, shared lookup (here the palette): cheaper than an API round-trip, and a provenance comment on the TS const ties it back to the Go origin. Reuse for any small enumerated set both sides must agree on.
+- **Idempotent post-`Migrate` backfill in Go** (not pure-SQL goose) when default values are computed per-row (random color, derived letters) — runs once at startup after columns exist, safe to re-run.
+
+### Key Lessons
+1. **Mock the visual gestalt during ui-phase for any net-new visual primitive** — v1.7 is the second straight milestone (after v1.5) where the human gate reversed approved shape/color decisions that token-level review had passed. A throwaway HTML/CSS sketch of the avatar (square vs circle, ring vs filled-row, the palette swatches against the dark rail) would have moved those reversals before the build instead of after. The cost of the late reversal here was concrete: a second migration and an edit to a previous phase's "done" file.
+2. **When UAT changes a data-shaping decision, expect it to reach back into a shipped phase** — re-muting the palette wasn't a CSS tweak; it changed the Go source of truth and required a remap migration for existing rows. Treat "this is just a visual change" skeptically when the visual is backed by persisted/seed data.
+3. **The Go-source → TS-mirror pattern needs a guard against drift** — today nothing fails the build if `palette.ts` and `projectPalette` diverge; a tiny test or codegen step would make the "byte-for-byte mirror" enforceable rather than convention.
+
+### Cost Observations
+- Orchestrated on Opus 4.8 (inherit profile), same-day (~5.5h wall span 06:05→11:28, 2026-06-19). 2 phases, 6 plans, 12 tasks, 1 human-verify/UAT gate that drove a multi-decision revision. Zero new Go modules or npm deps; 2 migrations (00009 + the UAT-driven 00010); ~693 source insertions across 14 files.
+- Notable: the UAT revision (not the original build) was the dominant cost — circle/highlight/palette rework plus a remap migration — reinforcing that the cheapest place to settle a net-new visual is a pre-build sketch.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -284,6 +318,7 @@
 | v1.4 | 2 | 7 | Backend-capability phase → UI-driver phase, with the create contract verified by an integration audit; reuse-before-invent kept it zero-new-dep / no-new-`ui/`-file; separate-function-over-widen for a shared helper; smallest milestone with no gap-closure cycles |
 | v1.5 | 1 | 2 | Data→rendering plan split with the wire contract verified by an integration audit; reuse-before-invent (cloned the existing `gh` search + cache — no new endpoint/poll/dep/migration); the human-verify gate DROVE a design redesign (agent dot → left rail), not just blessed it; revise-the-contract-on-redesign keeps CONTEXT/UI-SPEC honest |
 | v1.6 | 1 | 2 | Extend-the-shared-feed (bar = 4th consumer of the one 5s `/api/agents/status` poll; sole backend change a JOIN — no endpoint/poll/dep/migration); data→UI plan split with all 6 seams integration-audited; overlay-not-dock to protect terminal layout, confirmed by the human gate's no-reflow check; research correctly skipped — discuss + ui-phase fully determined the build |
+| v1.7 | 2 | 6 | Backend-data → frontend-render phase split again; Go-source-of-truth mirrored as a TS `const` with no endpoint; one shared `<ProjectAvatar>` for both sidebar states; idempotent Go backfill for computed per-row defaults; UAT reversed 3 approved visual decisions (square→circle, ring→filled-row, palette re-mute) AND reached back into a shipped phase (a 2nd migration 00010) — second straight milestone the human gate flipped shape/color, so pre-build visual mock is now the standing recommendation |
 
 ### Cumulative Quality
 
@@ -296,6 +331,7 @@
 | v1.4 | 12 (github extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no new `ui/` file (reused `tabs.tsx`); v1.4 added NO new lint debt (dialog eslint-clean, 0 useEffect); pre-existing advisories still carried |
 | v1.5 | 12 (github + api list paths extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no migration; cleared the `PRCard` `Date.now()`-in-render advisory (the `ReviewColumn` one may remain); pre-existing react-hooks advisories still carried |
 | v1.6 | 11 (api `agents` JOIN extended; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no migration (JOIN onto existing columns); no new `ui/` primitive (reused `dotMeta()`/`ReviewColumn` idioms); pre-existing react-hooks advisories still carried |
+| v1.7 | 11 (api `icons` helpers + validators table-tested; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; 2 migrations (00009 columns + the UAT-driven 00010 palette remap); one new `ui/` primitive (`ProjectAvatar.tsx`) + one `lib/` const (`palette.ts`, Go mirror); pre-existing react-hooks advisories still carried |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -303,6 +339,6 @@
 2. **Build the riskiest, least-off-the-shelf subsystem first** — v1.3 (PR-branch checkout) and v1.4 (managed-checkout clone/atomicity proven by Phase 14's tests before the Phase 15 UI rode on it) both confirmed it. Held.
 3. **Interface-first wave parallelism with disjoint file ownership** — confirmed across all milestones; zero merge conflicts in any parallel wave. (v1.4's tightly-coupled `projects.go` plans were deliberately run sequentially across waves instead — the same disjoint-ownership discipline, applied by serializing rather than parallelizing.)
 4. **A single shared service / leaf package + narrow seam for a cross-phase external tool** — `internal/tmux` (v1.2), `internal/github` (v1.3), and the v1.4 managed-checkout verbs all stayed one leaf package extended-not-scattered; v1.4 added the "separate-function-over-widen" corollary (add `RepoDescription`, don't widen the shared `ValidateRepo`).
-5. **The milestone-complete accomplishments list needs hand-curation** — the summary-extract one-liner misfire has now polluted MILESTONES.md in v1.1, v1.2, v1.3, AND v1.4 (15-03 → `"Type:"`); treat the CLI output as a draft every time.
+5. **The milestone-complete accomplishments list needs hand-curation** — the summary-extract one-liner misfire has polluted MILESTONES.md in v1.1, v1.2, v1.3, v1.4, and again in v1.7 (a code-review note `"[Rule 3 - Blocking] Restored declared frontend dependencies…"` as the first "accomplishment"); it skipped v1.5/v1.6. Treat the CLI output as a draft every time.
 6. **Backend-capability phase → UI-driver phase** (new in v1.4) — proving the engine with tests first makes the UI a thin, low-risk layer the audit can confirm rather than hope for; expect to reuse this shape whenever adding a user-facing entry point to an existing subsystem.
-7. **A human-verify gate should be able to change the design, not just approve it** (new in v1.5) — token/spacing review can pass a layout the eye rejects (v1.5's dot-next-to-glyph clash); when the gate flips a visual decision, revise the design contract (CONTEXT/UI-SPEC) alongside the code and re-verify against what actually shipped. A cheap visual mock during ui-phase would catch such gestalt clashes pre-build. (Note: the summary-extract one-liner misfire did NOT recur in v1.5 — both plans produced clean one-liners.)
+7. **A human-verify gate should be able to change the design, not just approve it** (new in v1.5, strongly re-confirmed in v1.7) — token/spacing review can pass a layout the eye rejects (v1.5's dot-next-to-glyph clash; v1.7's square-vs-circle, ring-vs-filled-row, and too-loud palette). When the gate flips a visual decision, revise the design contract (CONTEXT/UI-SPEC) alongside the code and re-verify against what actually shipped. **A cheap visual mock during ui-phase is now a standing recommendation** — v1.7 reversed three approved visual decisions at the gate AND the palette re-mute reached back into a shipped phase (a 2nd migration), the concrete cost of settling visuals after the build instead of before. Two straight milestones where the eye overruled the spec = mock the gestalt for any net-new visual primitive.
