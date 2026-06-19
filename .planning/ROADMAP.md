@@ -109,8 +109,8 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
 Plans:
 **Wave 1**
 
-- [ ] 18-01-PLAN.md — Migration 00009 + icons.go helpers (palette, deriveLetters, pickColor, validators, idempotent backfill) with table tests
-- [ ] 18-03-PLAN.md — Frontend wire path: add icon_letters + icon_color to the TS Project type and useUpdateProjectSettings PATCH payload
+- [x] 18-01-PLAN.md — Migration 00009 + icons.go helpers (palette, deriveLetters, pickColor, validators, idempotent backfill) with table tests
+- [x] 18-03-PLAN.md — Frontend wire path: add icon_letters + icon_color to the TS Project type and useUpdateProjectSettings PATCH payload
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -152,7 +152,7 @@ Plans:
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
-| 18. Project Icon Data Foundation | v1.7 | 0/3 | Planned | - |
+| 18. Project Icon Data Foundation | v1.7 | 2/3 | In Progress|  |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 0/? | Not started | - |
 
 ---
