@@ -1,40 +1,11 @@
 import { useState, type CSSProperties } from "react";
 import { Outlet } from "react-router";
-import {
-  SidebarProvider,
-  SidebarTrigger,
-  useSidebar,
-} from "@/components/ui/sidebar";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { ActiveSessionsBar } from "@/components/layout/ActiveSessionsBar";
 
 const SIDEBAR_STORAGE_KEY = "kangent.sidebar";
-
-/**
- * Reopen affordance shown only while the sidebar is collapsed — the offcanvas
- * sidebar hides its own header trigger when closed.
- */
-function CollapsedSidebarTrigger() {
-  const { open } = useSidebar();
-  if (open) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <SidebarTrigger
-          aria-label="Toggle sidebar"
-          className="absolute top-2 left-2 z-20"
-        />
-      </TooltipTrigger>
-      <TooltipContent side="right">Toggle sidebar (Ctrl+B)</TooltipContent>
-    </Tooltip>
-  );
-}
 
 export function AppLayout() {
   // D-04: collapsed state persists across reloads. The generated shadcn
@@ -57,14 +28,11 @@ export function AppLayout() {
         style={{ "--sidebar-width": "15rem" } as CSSProperties}
       >
         <ProjectSidebar />
-        <main
-          className={
-            open
-              ? "relative flex-1 overflow-hidden"
-              : "relative flex-1 overflow-hidden pl-9"
-          }
-        >
-          <CollapsedSidebarTrigger />
+        {/* The collapsed sidebar is now a 3rem icon rail (collapsible="icon")
+            that occupies layout space, so <main> needs no collapsed padding and
+            the floating re-expand trigger is retired — the rail's header
+            SidebarTrigger is the re-expand entry point (D-02). */}
+        <main className="relative flex-1 overflow-hidden">
           <Outlet />
         </main>
         {/* D-13: mounted once outside <main>/<Outlet/> so the bar is present on
