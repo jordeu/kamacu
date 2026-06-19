@@ -152,7 +152,7 @@ Plans:
 | 15. Repo-First Creation Flow | v1.4 | 3/3 | Complete | 2026-06-15 |
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
-| 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete   | 2026-06-19 |
+| 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete    | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 0/? | Not started | - |
 
 ---

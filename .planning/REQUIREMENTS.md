@@ -9,10 +9,10 @@ Give every project a colored monogram avatar (two uppercase letters on a backgro
 
 ### Project Icon Identity
 
-- [ ] **ICON-01**: Every project has a monogram avatar — two uppercase letters on a colored background — created automatically when the project is added, with no extra user action required.
-- [ ] **ICON-02**: A new project's two letters are derived from its name automatically — the first letters of the first two words for multi-word names ("My Cool App" → "MC"), or the first two letters for single-word names ("kangent" → "KA"), uppercased.
-- [ ] **ICON-03**: A new project's background color is assigned at random from a curated, dark-theme-friendly palette (legible against the avatar's text) and stays stable for that project across sessions.
-- [ ] **ICON-04**: A project's letters and color are stored in SQLite and persist across restarts; all projects that existed before this feature are backfilled with derived letters and an assigned palette color by the migration.
+- [x] **ICON-01**: Every project has a monogram avatar — two uppercase letters on a colored background — created automatically when the project is added, with no extra user action required.
+- [x] **ICON-02**: A new project's two letters are derived from its name automatically — the first letters of the first two words for multi-word names ("My Cool App" → "MC"), or the first two letters for single-word names ("kangent" → "KA"), uppercased.
+- [x] **ICON-03**: A new project's background color is assigned at random from a curated, dark-theme-friendly palette (legible against the avatar's text) and stays stable for that project across sessions.
+- [x] **ICON-04**: A project's letters and color are stored in SQLite and persist across restarts; all projects that existed before this feature are backfilled with derived letters and an assigned palette color by the migration.
 
 ### Collapsed Sidebar Rail
 
@@ -62,10 +62,10 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ICON-01 | Phase 18 | Pending |
-| ICON-02 | Phase 18 | Pending |
-| ICON-03 | Phase 18 | Pending |
-| ICON-04 | Phase 18 | Pending |
+| ICON-01 | Phase 18 | Complete |
+| ICON-02 | Phase 18 | Complete |
+| ICON-03 | Phase 18 | Complete |
+| ICON-04 | Phase 18 | Complete |
 | ICON-05 | Phase 19 | Pending |
 | ICON-06 | Phase 19 | Pending |
 | ICON-07 | Phase 19 | Pending |
