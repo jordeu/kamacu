@@ -94,29 +94,40 @@ Full details: [milestones/v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
 ## Phase Details
 
 ### Phase 18: Project Icon Data Foundation
+
 **Goal**: Every project — newly added or pre-existing — has two persisted properties (two uppercase letters + a curated-palette background color) that are sensible by default and editable over the API, so the frontend has stable identity data to render avatars from.
 **Depends on**: Nothing in v1.7 (builds on the existing `projects` table, `internal/api/projects.go` model, and the `useUpdateProjectSettings` PATCH path)
 **Requirements**: ICON-01, ICON-02, ICON-03, ICON-04
 **Success Criteria** (what must be TRUE):
+
   1. Adding a new project (folder or managed-repo) automatically gives it two uppercase letters derived from its name — first letters of the first two words for multi-word names ("My Cool App" → "MC"), first two letters for single-word names ("kangent" → "KA") — with no extra user action (ICON-01, ICON-02).
   2. A new project is assigned a background color picked at random from a curated, dark-theme-friendly palette (legible against the avatar text), and that color stays the same for the project across server restarts (ICON-03).
   3. After the migration runs, every project that existed before this feature has non-empty letters (derived from its name) and an assigned palette color — no project is left blank (ICON-04).
   4. The project's letters and color survive a server restart (stored in SQLite) and can be read and updated through the project API (the PATCH path now accepts `icon_letters` + `icon_color`), so the Phase 19 editors have a wire path (ICON-04).
+
 **Plans**: 3 plans
 Plans:
+**Wave 1**
+
 - [ ] 18-01-PLAN.md — Migration 00009 + icons.go helpers (palette, deriveLetters, pickColor, validators, idempotent backfill) with table tests
-- [ ] 18-02-PLAN.md — Wire helpers into projects.go (struct/columns/scan, both create paths, PATCH validation) + invoke backfill at startup
 - [ ] 18-03-PLAN.md — Frontend wire path: add icon_letters + icon_color to the TS Project type and useUpdateProjectSettings PATCH payload
 
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 18-02-PLAN.md — Wire helpers into projects.go (struct/columns/scan, both create paths, PATCH validation) + invoke backfill at startup
+
 ### Phase 19: Sidebar Avatars & Settings Editors
+
 **Goal**: The user can identify and switch between projects directly from the collapsed sidebar via colored monogram avatars (which also appear beside the name when expanded), and can edit a project's letters and color from Project settings.
 **Depends on**: Phase 18 (renders and edits the `icon_letters` + `icon_color` data and PATCH path it establishes)
 **Requirements**: ICON-05, ICON-06, ICON-07, ICON-08, ICON-09, ICON-10, ICON-11, ICON-12
 **Success Criteria** (what must be TRUE):
+
   1. When the sidebar is collapsed, the user sees a vertical rail of project monogram avatars (instead of an empty, off-screen sidebar) and can click any avatar to switch to that project without first expanding the sidebar (ICON-05, ICON-06).
   2. In the collapsed rail, the currently-open project's avatar is visually marked active, hovering an avatar shows the full project name in a tooltip, and a project with one or more agents waiting shows the amber waiting indicator as a badge overlaid on its avatar (ICON-07, ICON-08, ICON-09).
   3. The same monogram avatar appears beside the project name in the expanded sidebar, with the existing name display and waiting-count chip behavior preserved (ICON-10).
   4. In Project settings the user can edit the two letters (input normalized/validated to at most two uppercase characters) and change the color by picking from the curated palette swatches, with the current color clearly indicated; saved changes are reflected in both the collapsed rail and the expanded sidebar (ICON-11, ICON-12).
+
 **Plans**: TBD
 **UI hint**: yes
 
