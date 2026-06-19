@@ -44,8 +44,10 @@ export function ProjectSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="flex-row items-center justify-between">
-        <span className="px-1 text-sm font-medium">kangent</span>
+      <SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:justify-center">
+        <span className="px-1 text-sm font-medium group-data-[collapsible=icon]:hidden">
+          kangent
+        </span>
         <Tooltip>
           <TooltipTrigger asChild>
             <SidebarTrigger aria-label="Toggle sidebar" />
@@ -55,7 +57,7 @@ export function ProjectSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarMenu className="px-2">
+        <SidebarMenu className="gap-1 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2">
           {(projects ?? []).map((project) => {
             const count = waitingByProject.get(project.id) ?? 0;
             const isActive = projectId === String(project.id);
@@ -74,16 +76,17 @@ export function ProjectSidebar() {
                   asChild
                   size="sm"
                   isActive={isActive}
-                  className="min-h-7 px-3 text-sm group-data-[collapsible=icon]:px-0!"
+                  className="min-h-7 px-3 text-sm group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center"
                 >
                   <Link
                     to={`/projects/${project.id}`}
                     aria-label={linkLabel}
                     aria-current={isActive ? "page" : undefined}
                   >
-                    {/* Collapsed rail (ICON-05/06/07/08/09): the size-8 avatar
-                        fills the icon-mode hit target. Hidden when expanded; the
-                        side=right tooltip carries the full project name. */}
+                    {/* Collapsed rail (ICON-05/06/07/08/09): the size-7 avatar
+                        is centered in the icon-mode hit target with rail spacing.
+                        Hidden when expanded; the side=right tooltip carries the
+                        full project name. */}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="hidden group-data-[collapsible=icon]:flex">
