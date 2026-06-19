@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Project Icons in Collapsed Sidebar
 status: planning
-stopped_at: Phase 19 context gathered
-last_updated: "2026-06-19T05:45:50.651Z"
+stopped_at: Phase 19 UI-SPEC approved
+last_updated: "2026-06-19T06:06:06.781Z"
 last_activity: 2026-06-19
 progress:
   total_phases: 2
@@ -156,7 +156,7 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-06-19T05:45:50.641Z
-Stopped at: Phase 19 context gathered
-Resume file: .planning/phases/19-sidebar-avatars-settings-editors/19-CONTEXT.md
+Last session: 2026-06-19T06:06:06.766Z
+Stopped at: Phase 19 UI-SPEC approved
+Resume file: .planning/phases/19-sidebar-avatars-settings-editors/19-UI-SPEC.md
 Next: `/gsd:plan-phase 18` — Project Icon Data Foundation (ICON-01..04): migration 00009 adding `icon_letters` + `icon_color` with backfill, default-letter derivation, curated-palette random color assignment, and the project PATCH path to edit both. Then `/gsd:plan-phase 19` for the sidebar avatars + settings editors (ICON-05..12).
