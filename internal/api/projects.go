@@ -34,9 +34,16 @@ type Project struct {
 	// delete, pre-task fetch); false for user-pointed folder projects (never
 	// touch their dir, D-09). SQLite stores it as INTEGER 0/1; scanProject maps
 	// it to bool.
-	Managed   bool   `json:"managed"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Managed bool `json:"managed"`
+	// IconLetters + IconColor are the v1.7 avatar fields (migration 00009, D-12):
+	// both plain non-null strings (never null on the wire). New projects get them
+	// from deriveLetters(name)+pickColor() at create; pre-existing rows are filled
+	// by the startup backfill. Column ORDER here MUST match projectColumns and the
+	// scanProject Scan order (they sit between managed and the timestamps).
+	IconLetters string `json:"icon_letters"`
+	IconColor   string `json:"icon_color"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // projectHandlers carries the gated-delete dependencies (mirrors taskHandlers /
@@ -80,7 +87,7 @@ func validateRepoPath(p string) (string, error) {
 	return abs, nil
 }
 
-const projectColumns = `id, name, repo_path, description, github_repo, managed, created_at, updated_at`
+const projectColumns = `id, name, repo_path, description, github_repo, managed, icon_letters, icon_color, created_at, updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
@@ -90,7 +97,10 @@ func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	// changes"). Column ORDER must match projectColumns (managed before the
 	// timestamps).
 	var managedInt int
-	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.CreatedAt, &p.UpdatedAt)
+	// icon_letters/icon_color are TEXT NOT NULL (migration 00009) — scan straight
+	// into string (no sql.NullString needed, D-12: never null). Order MUST match
+	// projectColumns: managed, icon_letters, icon_color, then the timestamps.
+	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.IconLetters, &p.IconColor, &p.CreatedAt, &p.UpdatedAt)
 	if repo.Valid {
 		p.GithubRepo = &repo.String
 	}
@@ -171,7 +181,8 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 		name = filepath.Base(abs)
 	}
 	p, err := scanProject(h.db.QueryRow(
-		`INSERT INTO projects (name, repo_path) VALUES (?, ?) RETURNING `+projectColumns, name, abs))
+		`INSERT INTO projects (name, repo_path, icon_letters, icon_color) VALUES (?, ?, ?, ?) RETURNING `+projectColumns,
+		name, abs, deriveLetters(name), pickColor()))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -263,8 +274,8 @@ func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, r
 	// both the clone and reattach branches (this is their single INSERT).
 	desc := github.RepoDescription(r.Context(), canonical)
 	p, err := scanProject(h.db.QueryRow(
-		`INSERT INTO projects (name, repo_path, github_repo, managed, description) VALUES (?, ?, ?, 1, ?) RETURNING `+projectColumns,
-		name, dest, canonical, desc))
+		`INSERT INTO projects (name, repo_path, github_repo, managed, description, icon_letters, icon_color) VALUES (?, ?, ?, 1, ?, ?, ?) RETURNING `+projectColumns,
+		name, dest, canonical, desc, deriveLetters(name), pickColor()))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
