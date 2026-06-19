@@ -337,12 +337,15 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
 		GithubRepo  *string `json:"github_repo"`
+		IconLetters *string `json:"icon_letters"`
+		IconColor   *string `json:"icon_color"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == nil && req.Description == nil && req.GithubRepo == nil {
+	if req.Name == nil && req.Description == nil && req.GithubRepo == nil &&
+		req.IconLetters == nil && req.IconColor == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
@@ -393,6 +396,30 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 			sets = append(sets, "github_repo = ?")
 			args = append(args, canonical)
 		}
+	}
+	if req.IconLetters != nil {
+		// D-10: server is the enforcer. Validate (trim/upper/≤2/≥1); an
+		// empty/whitespace-only monogram is the lone hard error — reject 400 and
+		// leave the row untouched (mirror the github_repo reject idiom above).
+		letters, verr := validateIconLetters(*req.IconLetters)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		sets = append(sets, "icon_letters = ?")
+		args = append(args, letters)
+	}
+	if req.IconColor != nil {
+		// D-11: icon_color MUST be a curated-palette member. Off-palette
+		// (free-form hex, color name, garbage) is rejected 400 with the row
+		// untouched; on a hit the canonical lowercase palette hex is stored.
+		color, verr := validateIconColor(*req.IconColor)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		sets = append(sets, "icon_color = ?")
+		args = append(args, color)
 	}
 
 	sets = append(sets, "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
