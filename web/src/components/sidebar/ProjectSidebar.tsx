@@ -20,6 +20,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { ProjectAvatar } from "@/components/ui/ProjectAvatar";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
 import { ProjectMenu } from "@/components/sidebar/ProjectMenu";
 
@@ -42,7 +43,7 @@ export function ProjectSidebar() {
   }
 
   return (
-    <Sidebar>
+    <Sidebar collapsible="icon">
       <SidebarHeader className="flex-row items-center justify-between">
         <span className="px-1 text-sm font-medium">kangent</span>
         <Tooltip>
@@ -57,28 +58,67 @@ export function ProjectSidebar() {
         <SidebarMenu className="px-2">
           {(projects ?? []).map((project) => {
             const count = waitingByProject.get(project.id) ?? 0;
+            const isActive = projectId === String(project.id);
+            // Reuse the EXACT existing chip copy for the avatar a11y label.
+            const waitingLabel =
+              count === 1
+                ? "1 agent waiting for input"
+                : `${count} agents waiting for input`;
+            // The Link name source is its aria-label (tooltip is supplementary);
+            // append the waiting copy when present so the rail/row announces both.
+            const linkLabel =
+              count > 0 ? `${project.name}, ${waitingLabel}` : project.name;
             return (
               <SidebarMenuItem key={project.id}>
                 <SidebarMenuButton
                   asChild
                   size="sm"
-                  isActive={projectId === String(project.id)}
-                  className="min-h-7 px-3 text-sm"
+                  isActive={isActive}
+                  className="min-h-7 px-3 text-sm group-data-[collapsible=icon]:px-0!"
                 >
-                  <Link to={`/projects/${project.id}`}>
-                    <span className="min-w-0 flex-1 truncate">
+                  <Link
+                    to={`/projects/${project.id}`}
+                    aria-label={linkLabel}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    {/* Collapsed rail (ICON-05/06/07/08/09): the size-8 avatar
+                        fills the icon-mode hit target. Hidden when expanded; the
+                        side=right tooltip carries the full project name. */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="hidden group-data-[collapsible=icon]:flex">
+                          <ProjectAvatar
+                            size="rail"
+                            letters={project.icon_letters}
+                            color={project.icon_color}
+                            active={isActive}
+                            waiting={count > 0}
+                            waitingLabel={waitingLabel}
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        {project.name}
+                      </TooltipContent>
+                    </Tooltip>
+                    {/* Expanded row (ICON-10): inline avatar before the unchanged
+                        name + the existing amber count chip. No dot here (D-08).
+                        Hidden in icon mode so only the rail avatar shows. */}
+                    <ProjectAvatar
+                      size="inline"
+                      letters={project.icon_letters}
+                      color={project.icon_color}
+                      className="group-data-[collapsible=icon]:hidden"
+                    />
+                    <span className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">
                       {project.name}
                     </span>
                     {/* UI-SPEC: chip is static (never pulses) and not
                         independently clickable — the row Link is the action. */}
                     {count > 0 && (
                       <span
-                        aria-label={
-                          count === 1
-                            ? "1 agent waiting for input"
-                            : `${count} agents waiting for input`
-                        }
-                        className="ml-auto inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-amber-400/10 px-1 text-xs font-medium text-amber-400 tabular-nums"
+                        aria-label={waitingLabel}
+                        className="ml-auto inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-amber-400/10 px-1 text-xs font-medium text-amber-400 tabular-nums group-data-[collapsible=icon]:hidden"
                       >
                         {count}
                       </span>
@@ -92,7 +132,7 @@ export function ProjectSidebar() {
         </SidebarMenu>
       </SidebarContent>
 
-      <SidebarFooter className="flex-row items-center gap-2">
+      <SidebarFooter className="flex-row items-center gap-2 group-data-[collapsible=icon]:hidden">
         <Button
           variant="ghost"
           size="sm"
