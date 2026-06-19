@@ -69,6 +69,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// One-shot idempotent icon backfill (D-08): migration 00009 adds icon_letters
+	// + icon_color (NOT NULL DEFAULT ''); this fills every pre-existing blank row
+	// with derived letters + a palette color, reusing the SAME helpers the create
+	// paths use. Ordering is load-bearing — it MUST run after Migrate (the columns
+	// must exist). Cheap no-op on later boots once all rows are filled.
+	if err := api.BackfillProjectIcons(db); err != nil {
+		slog.Error("backfilling project icons", "error", err)
+		os.Exit(1)
+	}
+
 	// Kangent-managed tmux config (D-79 status off, D-80 mouse on), regenerated
 	// at every start in the data dir next to the DB — a stable path that survives
 	// reboots, so a tmux server started by a previous Kangent run still references
