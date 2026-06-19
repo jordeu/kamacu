@@ -17,13 +17,12 @@ UPDATE projects SET icon_color = '#84689e' WHERE lower(icon_color) = '#7c3aed';
 UPDATE projects SET icon_color = '#9c6188' WHERE lower(icon_color) = '#db2777';
 
 -- +goose Down
--- Reverse the positional remap back to the original bright palette.
-UPDATE projects SET icon_color = '#dc2626' WHERE lower(icon_color) = '#9e5757';
-UPDATE projects SET icon_color = '#ea580c' WHERE lower(icon_color) = '#9c6b4b';
-UPDATE projects SET icon_color = '#d97706' WHERE lower(icon_color) = '#8a7345';
-UPDATE projects SET icon_color = '#16a34a' WHERE lower(icon_color) = '#4e7a54';
-UPDATE projects SET icon_color = '#0d9488' WHERE lower(icon_color) = '#46776f';
-UPDATE projects SET icon_color = '#2563eb' WHERE lower(icon_color) = '#5e719c';
-UPDATE projects SET icon_color = '#4f46e5' WHERE lower(icon_color) = '#6c6699';
-UPDATE projects SET icon_color = '#7c3aed' WHERE lower(icon_color) = '#84689e';
-UPDATE projects SET icon_color = '#db2777' WHERE lower(icon_color) = '#9c6188';
+-- Intentional NO-OP. The Up remap is not safely reversible: once the muted
+-- palette is in icons.go, every project created or backfilled AFTER this
+-- migration is born on a muted hex via pickColor(). A positional reverse would
+-- rewrite those natively-muted rows back to bright hexes that are NO LONGER
+-- palette members (off-palette → unselectable in the settings swatch grid),
+-- because it cannot distinguish "remapped-from-bright" from "natively-muted".
+-- Leaving icon_color untouched on Down is the safe, identity-preserving choice;
+-- to restore the bright palette, revert icons.go/palette.ts instead.
+SELECT 1;

@@ -41,13 +41,18 @@ function sentenceCase(message: string): string {
 
 /**
  * Mirror the server's validateIconLetters rule (internal/api/icons.go, D-10) as
- * client-side UX: trim, keep up to 2 alphanumeric (Unicode letter or digit)
- * runes, then uppercase — symbols/emoji/whitespace are stripped. The server
+ * client-side UX: keep up to 2 "usable" runes, then uppercase — symbols, emoji,
+ * and whitespace are stripped. The usable class matches Go's
+ * `unicode.IsLetter(r) || unicode.IsDigit(r)`: `\p{L}` mirrors IsLetter and
+ * `\p{Nd}` mirrors IsDigit (decimal digits only — NOT the broader `\p{N}`, which
+ * would also admit Nl/No glyphs like Ⅻ/½/² that the server rejects). The server
  * stays the enforcer; this only shapes what the user can type so the avatar
- * preview matches what will be stored.
+ * preview matches what will be stored. (One residual edge: JS `toUpperCase()`
+ * full-folds e.g. `ß`→`SS` where Go keeps `ß`; the post-save refetch reconciles
+ * the displayed value.)
  */
 function normalizeIconLetters(raw: string): string {
-  const alnum = raw.match(/[\p{L}\p{N}]/gu) ?? [];
+  const alnum = raw.match(/[\p{L}\p{Nd}]/gu) ?? [];
   return alnum.slice(0, 2).join("").toUpperCase();
 }
 
