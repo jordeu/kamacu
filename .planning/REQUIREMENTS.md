@@ -18,18 +18,18 @@ Give every project a colored monogram avatar (two uppercase letters on a backgro
 
 - [ ] **ICON-05**: When the sidebar is collapsed, the user sees a vertical rail of project avatars instead of an empty / off-screen sidebar.
 - [ ] **ICON-06**: User can click a project's avatar in the collapsed rail to switch to that project, without first expanding the sidebar.
-- [ ] **ICON-07**: The currently-open project's avatar is visually marked as active (selected) in the collapsed rail.
+- [x] **ICON-07**: The currently-open project's avatar is visually marked as active (selected) in the collapsed rail.
 - [ ] **ICON-08**: Hovering a collapsed avatar shows the full project name in a tooltip (since the text label is hidden when collapsed).
-- [ ] **ICON-09**: A project with one or more agents waiting for input shows the amber waiting indicator as a badge overlaid on its collapsed avatar.
+- [x] **ICON-09**: A project with one or more agents waiting for input shows the amber waiting indicator as a badge overlaid on its collapsed avatar.
 
 ### Expanded Sidebar
 
-- [ ] **ICON-10**: The same monogram avatar appears beside the project name in the expanded sidebar, with the existing name display and waiting-count chip behavior preserved.
+- [x] **ICON-10**: The same monogram avatar appears beside the project name in the expanded sidebar, with the existing name display and waiting-count chip behavior preserved.
 
 ### Editing in Project Settings
 
 - [ ] **ICON-11**: User can edit a project's two letters in Project settings; input is normalized/validated to at most two uppercase characters.
-- [ ] **ICON-12**: User can change a project's color in Project settings by picking from the curated palette swatches, with the current color clearly indicated.
+- [x] **ICON-12**: User can change a project's color in Project settings by picking from the curated palette swatches, with the current color clearly indicated.
 
 ## Future Requirements
 
@@ -68,12 +68,12 @@ Which phases cover which requirements. Populated during roadmap creation.
 | ICON-04 | Phase 18 | Complete |
 | ICON-05 | Phase 19 | Pending |
 | ICON-06 | Phase 19 | Pending |
-| ICON-07 | Phase 19 | Pending |
+| ICON-07 | Phase 19 | Complete |
 | ICON-08 | Phase 19 | Pending |
-| ICON-09 | Phase 19 | Pending |
-| ICON-10 | Phase 19 | Pending |
+| ICON-09 | Phase 19 | Complete |
+| ICON-10 | Phase 19 | Complete |
 | ICON-11 | Phase 19 | Pending |
-| ICON-12 | Phase 19 | Pending |
+| ICON-12 | Phase 19 | Complete |
 
 **Coverage:**
 - v1.7 requirements: 12 total

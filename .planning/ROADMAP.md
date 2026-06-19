@@ -132,7 +132,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 19-01-PLAN.md — Foundation: PROJECT_PALETTE TS const (verbatim Go mirror) + shared <ProjectAvatar> primitive (rail/inline sizes, active ring, static waiting dot)
+- [x] 19-01-PLAN.md — Foundation: PROJECT_PALETTE TS const (verbatim Go mirror) + shared <ProjectAvatar> primitive (rail/inline sizes, active ring, static waiting dot)
 
 **Wave 2** *(blocked on Wave 1 completion; both plans parallel — no file overlap)*
 
@@ -163,7 +163,7 @@ Plans:
 | 16. Sharper Review Column | v1.5 | 2/2 | Complete | 2026-06-17 |
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete    | 2026-06-19 |
-| 19. Sidebar Avatars & Settings Editors | v1.7 | 0/3 | Planned | - |
+| 19. Sidebar Avatars & Settings Editors | v1.7 | 1/3 | In Progress|  |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*

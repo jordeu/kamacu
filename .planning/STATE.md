@@ -4,14 +4,14 @@ milestone: v1.7
 milestone_name: Project Icons in Collapsed Sidebar
 status: executing
 stopped_at: Phase 19 UI-SPEC approved
-last_updated: "2026-06-19T06:32:57.918Z"
-last_activity: 2026-06-19 -- Phase 19 planning complete
+last_updated: "2026-06-19T06:43:28.315Z"
+last_activity: 2026-06-19 -- Phase 19 Plan 01 complete (ProjectAvatar + PROJECT_PALETTE)
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 6
-  completed_plans: 3
-  percent: 50
+  completed_plans: 4
+  percent: 67
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 19 — sidebar avatars & settings editors
+**Current focus:** Phase 19 — sidebar-avatars-settings-editors
 
 ## Current Position
 
-Phase: 19
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-19 -- Phase 19 planning complete
+Phase: 19 (sidebar-avatars-settings-editors) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute (Plan 01 complete — avatar foundation shipped)
+Last activity: 2026-06-19 -- Phase 19 Plan 01 complete
 
 ## Performance Metrics
 
@@ -98,6 +98,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 16-sharper-review-column P02 | ~40 min | 3 tasks | 4 files |
 | Phase 17-global-active-sessions-bar P01 | 9 min | 2 tasks | 3 files |
 | Phase 17-global-active-sessions-bar P02 | 9min active (+ human-verify gate) | 3 tasks | 2 files |
+| Phase 19-sidebar-avatars-settings-editors P01 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -156,7 +157,7 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-06-19T06:06:06.766Z
+Last session: 2026-06-19T06:43:19.669Z
 Stopped at: Phase 19 UI-SPEC approved
-Resume file: .planning/phases/19-sidebar-avatars-settings-editors/19-UI-SPEC.md
+Resume file: None
 Next: `/gsd:plan-phase 18` — Project Icon Data Foundation (ICON-01..04): migration 00009 adding `icon_letters` + `icon_color` with backfill, default-letter derivation, curated-palette random color assignment, and the project PATCH path to edit both. Then `/gsd:plan-phase 19` for the sidebar avatars + settings editors (ICON-05..12).
