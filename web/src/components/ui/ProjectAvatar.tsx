@@ -8,29 +8,27 @@ import { cn } from "@/lib/utils";
  *  applied as a background (D-04). One component, three call sites: the collapsed
  *  rail, the expanded-row inline avatar, and the settings preview.
  *
- *  - size "rail"   → 28px circle (`size-7`, `text-xs`) — sized to sit with
- *    breathing room inside the 3rem icon rail; supports the rail-only `active`
- *    ring (D-06) and `waiting` amber dot (D-07).
- *  - size "inline" → 20px circle (`size-5`, `text-[10px]`) — `active`/`waiting`
- *    are ignored (rail-only visuals).
+ *  - size "rail"   → 24px circle (`size-6`, `text-xs`) — sits with breathing room
+ *    inside the 3rem icon rail; supports the rail-only `waiting` amber dot (D-07).
+ *  - size "inline" → 20px circle (`size-5`, `text-[10px]`) — `waiting` is ignored
+ *    (rail-only visual).
  *
  *  Shape is a full circle (`rounded-full`) per Phase 19 UAT (the original
- *  rounded-square read as too boxy). The active ring uses the near-white
- *  `sidebar-foreground` token, not the dim `sidebar-ring`, so the selected
- *  project is actually visible on the dark rail (Phase 19 UAT). The letter color
- *  is ALWAYS white — never derived from `color`; the 9 curated muted hues meet
- *  AA contrast (>=4.5:1) with white at these sizes (Phase 18 D-11 guarantees
- *  `color` is a palette member). The waiting dot is STATIC (no pulse animation),
- *  to match the existing expanded count chip (D-07). */
+ *  rounded-square read as too boxy). Active/selected state is NOT drawn on the
+ *  avatar itself — the enclosing rail `SidebarMenuButton` carries the same
+ *  `bg-sidebar-accent` highlight the expanded rows use (Phase 19 UAT: the earlier
+ *  white avatar ring read as ugly and inconsistent with the expanded state). The
+ *  letter color is ALWAYS white — never derived from `color`; the 9 curated muted
+ *  hues meet AA contrast (>=4.5:1) with white at these sizes (Phase 18 D-11
+ *  guarantees `color` is a palette member). The waiting dot is STATIC (no pulse
+ *  animation), to match the existing expanded count chip (D-07). */
 interface ProjectAvatarProps extends React.ComponentProps<"div"> {
-  /** rail = 32px (size-8/text-sm), inline = 20px (size-5/text-[10px]) — D-05. */
+  /** rail = 24px (size-6/text-xs), inline = 20px (size-5/text-[10px]) — D-05. */
   size: "rail" | "inline";
   /** project.icon_letters — server-guaranteed non-empty (Phase 18 D-10). */
   letters: string;
   /** project.icon_color — a PROJECT_PALETTE hex, applied as inline backgroundColor. */
   color: string;
-  /** Rail-only active ring around the avatar (D-06). */
-  active?: boolean;
   /** Rail-only static amber waiting dot overlay (D-07). */
   waiting?: boolean;
   /** aria-label when `waiting`, e.g. "2 agents waiting for input". */
@@ -41,15 +39,13 @@ function ProjectAvatar({
   size,
   letters,
   color,
-  active = false,
   waiting = false,
   waitingLabel,
   className,
   ...props
 }: ProjectAvatarProps) {
   const isRail = size === "rail";
-  // active/waiting are rail-only visuals (inline ignores them per D-06/D-07).
-  const showActive = isRail && active;
+  // The waiting dot is a rail-only visual (inline ignores it per D-07).
   const showWaiting = isRail && waiting;
 
   return (
@@ -59,9 +55,7 @@ function ProjectAvatar({
       style={{ backgroundColor: color }}
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full font-medium leading-none text-white",
-        isRail ? "size-7 text-xs" : "size-5 text-[10px]",
-        showActive &&
-          "ring-2 ring-sidebar-foreground ring-offset-2 ring-offset-sidebar",
+        isRail ? "size-6 text-xs" : "size-5 text-[10px]",
         showWaiting && "relative",
         className,
       )}

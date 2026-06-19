@@ -76,15 +76,17 @@ export function ProjectSidebar() {
                   asChild
                   size="sm"
                   isActive={isActive}
-                  className="min-h-7 px-3 text-sm group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center"
+                  className="min-h-7 px-3 text-sm group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-full group-data-[collapsible=icon]:p-0!"
                 >
                   <Link
                     to={`/projects/${project.id}`}
                     aria-label={linkLabel}
                     aria-current={isActive ? "page" : undefined}
                   >
-                    {/* Collapsed rail (ICON-05/06/07/08/09): the size-7 avatar
-                        is centered in the icon-mode hit target with rail spacing.
+                    {/* Collapsed rail (ICON-05/06/07/08/09): the size-6 avatar
+                        is centered in the icon-mode hit target; the active project
+                        is highlighted by the button's circular bg-sidebar-accent
+                        (matching the expanded rows), not a ring on the avatar.
                         Hidden when expanded; the side=right tooltip carries the
                         full project name. */}
                     <Tooltip>
@@ -94,7 +96,6 @@ export function ProjectSidebar() {
                             size="rail"
                             letters={project.icon_letters}
                             color={project.icon_color}
-                            active={isActive}
                             waiting={count > 0}
                             waitingLabel={waitingLabel}
                           />
