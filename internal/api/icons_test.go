@@ -28,8 +28,9 @@ func TestDeriveLetters(t *testing.T) {
 	}
 }
 
-// TestValidateIconLetters covers normalization (trim/upper/cap-2) and the lone
-// hard error (empty/whitespace-only) per D-10.
+// TestValidateIconLetters covers normalization (trim/upper/cap-2, alphanumeric-
+// only filtering matching deriveLetters) and the lone hard error (empty,
+// whitespace-only, or all-non-alphanumeric) per D-10.
 func TestValidateIconLetters(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -43,6 +44,11 @@ func TestValidateIconLetters(t *testing.T) {
 		{"digit monogram", "7e", "7E", false},
 		{"empty", "", "", true},
 		{"whitespace only", "   ", "", true},
+		// WR-01: non-alphanumeric runes are skipped (mirrors deriveLetters),
+		// not persisted, so PATCH can never store glyphs create-time can't emit.
+		{"interspersed symbol", "A!B", "AB", false},
+		{"emoji only", "💀", "", true},
+		{"symbol only", "!!", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

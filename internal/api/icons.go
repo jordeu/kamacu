@@ -121,25 +121,32 @@ func pickColor() string {
 }
 
 // validateIconLetters normalizes a user-supplied monogram for storage (D-10):
-// trim surrounding whitespace, Unicode-uppercase, and keep up to 2 runes. At
-// least one usable char is REQUIRED (an empty/whitespace-only value is the lone
-// hard error — an avatar must render). Alphanumerics are allowed so digit
-// monograms like "7E" are valid. Returns the normalized letters or the canonical
-// errIconLettersRequired error. Reused by both create and PATCH so the rule
-// never diverges.
+// trim surrounding whitespace, keep up to 2 runes of the SAME alphanumeric
+// "usable" class deriveLetters uses (isAlnum: Unicode letter or digit), then
+// Unicode-uppercase. At least one usable char is REQUIRED — an empty/whitespace-
+// only OR all-non-alphanumeric value (e.g. "💀", "!!") is the lone hard error
+// (an avatar must render). Alphanumerics are allowed so digit monograms like
+// "7E" are valid; non-alphanumerics (symbols, emoji) are skipped, mirroring
+// deriveLetters so create and PATCH cannot diverge. Returns the normalized
+// letters or the canonical errIconLettersRequired error. Reused by both create
+// and PATCH so the rule never diverges.
 func validateIconLetters(s string) (string, error) {
-	trimmed := strings.ToUpper(strings.TrimSpace(s))
-	if trimmed == "" {
-		return "", errors.New(errIconLettersRequired)
-	}
 	var b strings.Builder
-	for i, r := range []rune(trimmed) {
-		if i >= 2 {
-			break
+	kept := 0
+	for _, r := range strings.TrimSpace(s) {
+		if !isAlnum(r) {
+			continue
 		}
 		b.WriteRune(r)
+		kept++
+		if kept >= 2 {
+			break
+		}
 	}
-	return b.String(), nil
+	if kept == 0 {
+		return "", errors.New(errIconLettersRequired)
+	}
+	return strings.ToUpper(b.String()), nil
 }
 
 // validateIconColor canonicalizes a user-supplied color against the curated
