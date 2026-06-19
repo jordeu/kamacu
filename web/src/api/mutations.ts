@@ -36,17 +36,29 @@ export function useUpdateProjectSettings() {
       id,
       description,
       github_repo,
+      icon_letters,
+      icon_color,
     }: {
       id: number;
       description: string;
       github_repo?: string;
-    }) =>
-      patch<Project>(
-        `/api/projects/${id}`,
-        github_repo === undefined
-          ? { description }
-          : { description, github_repo },
-      ),
+      icon_letters?: string;
+      icon_color?: string;
+    }) => {
+      // Build the PATCH body conditionally so an `undefined` field is never
+      // sent (D-09: omitted key = untouched, matching the backend
+      // partial-PATCH contract).
+      const body: {
+        description: string;
+        github_repo?: string;
+        icon_letters?: string;
+        icon_color?: string;
+      } = { description };
+      if (github_repo !== undefined) body.github_repo = github_repo;
+      if (icon_letters !== undefined) body.icon_letters = icon_letters;
+      if (icon_color !== undefined) body.icon_color = icon_color;
+      return patch<Project>(`/api/projects/${id}`, body);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
