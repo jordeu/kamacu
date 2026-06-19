@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Check } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { useUpdateProjectSettings } from "@/api/mutations";
 import { useProjectGithubOrigin } from "@/api/queries";
@@ -16,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProjectAvatar } from "@/components/ui/ProjectAvatar";
 import { Textarea } from "@/components/ui/textarea";
+import { PROJECT_PALETTE } from "@/lib/palette";
+import { cn } from "@/lib/utils";
 
 export interface ProjectSettingsDialogProps {
   project: Project;
@@ -118,12 +121,14 @@ export function ProjectSettingsDialog({
     // as github_repo; mutations.ts drops undefined keys). The server stays the
     // enforcer — an empty `letters` here surfaces a 400 inline below (D-12).
     const lettersChanged = letters !== project.icon_letters;
+    const colorChanged = color !== project.icon_color;
     try {
       await updateSettings.mutateAsync({
         id: project.id,
         description,
         github_repo: repoChanged ? repo.trim() : undefined,
         icon_letters: lettersChanged ? letters : undefined,
+        icon_color: colorChanged ? color : undefined,
       });
       // A 2xx save always closes the dialog.
       onOpenChange(false);
@@ -173,6 +178,33 @@ export function ProjectSettingsDialog({
             <p className="text-xs text-muted-foreground">
               Two letters shown on the project avatar.
             </p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label className="text-xs font-medium">Color</Label>
+            <div className="flex flex-wrap gap-2">
+              {PROJECT_PALETTE.map((hex) => {
+                const selected = hex.toLowerCase() === color.toLowerCase();
+                return (
+                  <button
+                    key={hex}
+                    type="button"
+                    aria-label={`Set color ${hex}`}
+                    aria-pressed={selected}
+                    onClick={() => setColor(hex)}
+                    style={{ backgroundColor: hex }}
+                    className={cn(
+                      "flex size-7 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none",
+                      selected && "ring-2 ring-sidebar-ring",
+                    )}
+                  >
+                    {selected ? (
+                      <Check className="size-4 text-white" aria-hidden="true" />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
