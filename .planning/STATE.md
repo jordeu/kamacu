@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Project Icons in Collapsed Sidebar
-status: executing
-stopped_at: Phase 19 plans complete (3/3), pending phase verification
-last_updated: "2026-06-19T08:55:00.000Z"
-last_activity: 2026-06-19 -- Phase 19 Plans 02 + 03 complete (rail + settings editors); UAT-approved after 3 visual-revision rounds
+status: phase_complete
+stopped_at: Phase 19 verified (passed 9/9) — milestone v1.7 phases all complete
+last_updated: "2026-06-19T09:05:00.000Z"
+last_activity: 2026-06-19 -- Phase 19 complete & verified (rail + settings editors); code review CR-01/WR-01/03 fixed; UAT-approved
 progress:
   total_phases: 2
   completed_phases: 2
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 ## Current Position
 
-Phase: 19 (sidebar-avatars-settings-editors) — PLANS COMPLETE (3/3), pending phase verification
+Phase: 19 (sidebar-avatars-settings-editors) — COMPLETE & VERIFIED (passed 9/9)
 Plan: 3 of 3 complete
-Status: All Phase 19 plans done + human-verify approved; next is phase verification (code-review + verify-phase gates)
-Last activity: 2026-06-19 -- Phase 19 Plans 02 + 03 complete; UAT-approved
+Status: Phase 19 done. Both v1.7 phases (18, 19) complete & verified — milestone v1.7 ready to ship / complete-milestone.
+Last activity: 2026-06-19 -- Phase 19 complete & verified
 
 ### Phase 19 UAT decisions (visual revisions, user-approved — treat as the new contract)
 
