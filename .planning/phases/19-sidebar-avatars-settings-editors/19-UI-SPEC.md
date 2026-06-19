@@ -1,10 +1,11 @@
 ---
 phase: 19
 slug: sidebar-avatars-settings-editors
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-06-19
+reviewed_at: 2026-06-19
 ---
 
 # Phase 19 — UI Design Contract
