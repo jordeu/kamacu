@@ -32,7 +32,7 @@ export function AppLayout() {
             that occupies layout space, so <main> needs no collapsed padding and
             the floating re-expand trigger is retired — the rail's header
             SidebarTrigger is the re-expand entry point (D-02). */}
-        <main className="relative flex-1 overflow-hidden">
+        <main className="relative flex-1 overflow-hidden pb-9">
           <Outlet />
         </main>
         {/* D-13: mounted once outside <main>/<Outlet/> so the bar is present on

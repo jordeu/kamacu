@@ -43,7 +43,7 @@ export function ProjectSidebar() {
   }
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" className="pb-9">
       <SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:justify-center">
         <span className="px-1 text-sm font-medium group-data-[collapsible=icon]:hidden">
           kangent
