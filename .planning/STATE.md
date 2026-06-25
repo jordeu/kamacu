@@ -4,8 +4,8 @@ milestone: v1.7
 milestone_name: Project Icons in Collapsed Sidebar
 status: Awaiting next milestone
 stopped_at: Milestone v1.7 complete & archived (tag pending push decision)
-last_updated: "2026-06-19T09:37:03.051Z"
-last_activity: 2026-06-19 — Milestone v1.7 completed and archived
+last_updated: "2026-06-25T04:44:47.738Z"
+last_activity: 2026-06-25 — Completed quick task 260625-9db: bottom status bar no longer overlaps the sidebar footer / main task view
 progress:
   total_phases: 2
   completed_phases: 2
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Milestone v1.7 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-06-19 — Milestone v1.7 completed and archived
+Last activity: 2026-06-25 — Completed quick task 260625-9db: bottom status bar no longer overlaps the sidebar footer / main task view
 
 ### Phase 19 UAT decisions (visual revisions, user-approved — treat as the new contract)
 
@@ -161,6 +161,7 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 | 260613-ph5 | Make GitHub repo-link validation MANDATORY (hard-block invalid repos with highlighted error) — supersedes 260613-osu's soft verify_state advisory; reverses D-11 for the repo-link UX per user decision | 2026-06-13 | 9ea0df6 | [260613-ph5-make-github-repo-link-validation-mandato](./quick/260613-ph5-make-github-repo-link-validation-mandato/) |
 | 260616-8l7 | Fix Review-column refresh showing stale RED dots: `reduceChecks` now dedupes superseded check runs (keeps the latest run per check name, matching GitHub's rollup state) so a re-run/concurrency-cancelled FAILURE no longer paints a green PR red. Initial cache attempt-floor diagnosis was wrong and discarded (service.go unchanged). Code + tests done; Task 3 human-verify pending (user verifies against live instance). | 2026-06-16 | ccdb2d5 | [260616-8l7-the-refresh-button-at-review-column-seem](./quick/260616-8l7-the-refresh-button-at-review-column-seem/) |
 | 260618-mlu | Auto-collapse the Active Sessions bottom bar when a session row (task/PR) is opened from the expanded list: added a `collapse()` helper that sets collapsed + persists "1", and the `SessionRow` `onOpen` now navigates AND collapses (covers click + Enter/Space via the existing handler). One-file change to `ActiveSessionsBar.tsx`; build+lint green. Human-verify passed (user approved runtime click-through). | 2026-06-18 | d3f7795 | [260618-mlu-when-the-status-bottom-bar-is-expanded-a](./quick/260618-mlu-when-the-status-bottom-bar-is-expanded-a/) |
+| 260625-9db | Fix the fixed bottom status bar (`ActiveSessionsBar`, `h-9`/36px overlay) covering the sidebar footer (Add-project button unreachable) and clipping the bottom of the main task agent/shell view: reserve 36px (`pb-9`) under BOTH `<main>` (AppLayout.tsx) and the sidebar container (`<Sidebar className="pb-9">`, forwarded to the `fixed h-svh` container — TerminalPane's ResizeObserver re-fits xterm automatically). Bar overlay/expand-up behavior unchanged; no edits to the generated shadcn `sidebar.tsx` or `ActiveSessionsBar.tsx`. Build+lint green; human-verify passed (user verified runtime). | 2026-06-25 | 77fe135 | [260625-9db-the-bottom-status-bar-is-hidding-the-bot](./quick/260625-9db-the-bottom-status-bar-is-hidding-the-bot/) |
 
 ## Session Continuity
 
