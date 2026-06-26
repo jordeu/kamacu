@@ -90,3 +90,74 @@ func TestHostCheck(t *testing.T) {
 		})
 	}
 }
+
+// TestHookBaseURL proves T-hwd-03: a wildcard --addr host (0.0.0.0 / :: /
+// empty) is normalized to loopback for the agent-status hook URL — local
+// hooks must never curl a wildcard/remote-looking address — while a SPECIFIC
+// host (loopback IP, hostname, or a non-loopback IP under
+// --insecure-allow-remote) is left unchanged.
+func TestHookBaseURL(t *testing.T) {
+	tests := []struct {
+		addr string
+		want string
+	}{
+		{"0.0.0.0:7333", "http://127.0.0.1:7333"},   // IPv4 wildcard -> loopback
+		{"[::]:7333", "http://127.0.0.1:7333"},       // IPv6 wildcard -> loopback
+		{":7333", "http://127.0.0.1:7333"},           // empty host (all ifaces) -> loopback
+		{"192.168.1.5:7333", "http://192.168.1.5:7333"}, // specific reachable IP: unchanged
+		{"127.0.0.1:7333", "http://127.0.0.1:7333"},  // already loopback: unchanged
+		{"localhost:7333", "http://localhost:7333"},  // hostname: unchanged
+	}
+	for _, tt := range tests {
+		t.Run(tt.addr, func(t *testing.T) {
+			if got := hookBaseURL(tt.addr); got != tt.want {
+				t.Errorf("hookBaseURL(%q) = %q, want %q", tt.addr, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInsecureAllowRemoteRelaxesHostCheck proves the flag's effect on the
+// hostCheck wrap WITHOUT booting main() or binding a socket: it replicates
+// main's handler-selection logic (hostCheck(mux) when the flag is false, the
+// bare mux when true) and asserts that a non-loopback Host header is 403'd in
+// the default case but reaches the inner handler (200) when the flag is set.
+func TestInsecureAllowRemoteRelaxesHostCheck(t *testing.T) {
+	tests := []struct {
+		name                string
+		insecureAllowRemote bool
+		host                string
+		wantInnerRan        bool
+		wantCode            int
+	}{
+		{"default blocks non-loopback Host", false, "192.168.1.5:7333", false, http.StatusForbidden},
+		{"flag serves non-loopback Host", true, "192.168.1.5:7333", true, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			innerRan := false
+			mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				innerRan = true
+				w.WriteHeader(http.StatusOK)
+			})
+
+			// Mirror main()'s selection exactly.
+			var handler http.Handler = hostCheck(mux)
+			if tt.insecureAllowRemote {
+				handler = mux
+			}
+
+			req := httptest.NewRequest("GET", "/api/sessions", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if innerRan != tt.wantInnerRan {
+				t.Errorf("inner handler ran=%v, want %v", innerRan, tt.wantInnerRan)
+			}
+			if rec.Code != tt.wantCode {
+				t.Errorf("code = %d, want %d", rec.Code, tt.wantCode)
+			}
+		})
+	}
+}

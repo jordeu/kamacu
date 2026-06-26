@@ -39,12 +39,22 @@ func main() {
 		devOrigins = append(devOrigins, v)
 		return nil
 	})
+	insecureAllowRemote := flag.Bool("insecure-allow-remote", false, "opt-in: allow binding --addr to a non-loopback address (NO AUTH — anyone who can reach the address gets a shell)")
 	flag.Parse()
 
-	// D-21: localhost-only is enforced, not aspirational.
-	if err := ensureLoopback(*addr); err != nil {
-		slog.Error("refusing to start", "error", err)
-		os.Exit(1)
+	// D-21: localhost-only is enforced, not aspirational. The opt-in
+	// --insecure-allow-remote escape hatch bypasses the bind gate (and the
+	// hostCheck / WS Origin layers below); with the flag absent, behavior is
+	// byte-for-byte unchanged.
+	if !*insecureAllowRemote {
+		if err := ensureLoopback(*addr); err != nil {
+			slog.Error("refusing to start", "error", err)
+			os.Exit(1)
+		}
+	} else {
+		// SAFE BY DEFAULT is the headline invariant; this is the one loud,
+		// unmistakable line announcing the user opted out of it.
+		slog.Warn("SECURITY: kangent is listening with NO authentication via --insecure-allow-remote — anyone who can reach this address gets a shell on this host", "addr", *addr)
 	}
 
 	dbPath, err := settings.ExpandHome(*dbFlag)
@@ -120,9 +130,12 @@ func main() {
 
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
-		// Hooks curl localhost; addr is loopback-enforced above, and a
-		// "localhost" host also passes the port-agnostic hostCheck.
-		BaseURL:   "http://" + *addr,
+		// Hooks curl this URL and ALWAYS run on the server host. hookBaseURL
+		// normalizes a wildcard --addr host (0.0.0.0 / :: / empty) to
+		// 127.0.0.1:<port> so local hooks never target a wildcard/remote
+		// address; a specific IP (loopback or, under --insecure-allow-remote,
+		// a non-loopback IP) is left as-is.
+		BaseURL:   hookBaseURL(*addr),
 		Token:     hookToken,
 		ClaudeBin: *claudeBin,
 	})
@@ -140,7 +153,7 @@ func main() {
 	api.UsageRoutes(mux, quotaSvc)
 	ghSvc := github.New(github.Config{})
 	api.PullRequestRoutes(mux, db, ghSvc, wtSvc)
-	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns))
+	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns, *insecureAllowRemote))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -193,7 +206,14 @@ func main() {
 	slog.Info("session reaper started (Done-TTL + PR reconcile)")
 
 	slog.Info("kangent listening", "url", "http://"+*addr)
-	if err := http.ListenAndServe(*addr, hostCheck(mux)); err != nil {
+	// hostCheck (DNS-rebinding defense) wraps the mux by default; the opt-in
+	// --insecure-allow-remote path serves the mux directly so non-loopback
+	// Host headers are accepted.
+	var handler http.Handler = hostCheck(mux)
+	if *insecureAllowRemote {
+		handler = mux
+	}
+	if err := http.ListenAndServe(*addr, handler); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
@@ -278,6 +298,28 @@ func ensureLoopback(addr string) error {
 		return fmt.Errorf("--addr %q is not a loopback address; kangent serves a shell and must stay local", addr)
 	}
 	return nil
+}
+
+// hookBaseURL builds the agent-status hook base URL from the listen addr.
+// Claude Code hooks curl this URL and ALWAYS run on the server host, so a
+// wildcard bind must resolve to loopback: when the host portion is a wildcard
+// — empty (":7333"), "0.0.0.0", or "::"/"[::]" — it substitutes "127.0.0.1"
+// while preserving the port (the server also listens on loopback when bound to
+// a wildcard). A SPECIFIC host (a loopback IP, a hostname, or — under
+// --insecure-allow-remote — a reachable non-loopback IP) is left unchanged. On
+// a SplitHostPort parse error it falls back to "http://" + addr (the prior
+// behavior).
+func hookBaseURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		return "http://127.0.0.1:" + port
+	default:
+		return "http://" + addr
+	}
 }
 
 // hostCheck is middleware wrapping the entire mux, rejecting non-loopback
