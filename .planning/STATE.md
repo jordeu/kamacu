@@ -4,8 +4,8 @@ milestone: v1.7
 milestone_name: Project Icons in Collapsed Sidebar
 status: Awaiting next milestone
 stopped_at: Milestone v1.7 complete & archived (tag pending push decision)
-last_updated: "2026-06-25T04:44:47.738Z"
-last_activity: 2026-06-25 — Completed quick task 260625-9db: bottom status bar no longer overlaps the sidebar footer / main task view
+last_updated: "2026-06-26T10:53:14.362Z"
+last_activity: 2026-06-26 — Completed quick task 260626-hwd: opt-in --insecure-allow-remote flag (bind off-loopback; safe by default)
 progress:
   total_phases: 2
   completed_phases: 2
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Milestone v1.7 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-06-25 — Completed quick task 260625-9db: bottom status bar no longer overlaps the sidebar footer / main task view
+Last activity: 2026-06-26 — Completed quick task 260626-hwd: opt-in --insecure-allow-remote flag (bind off-loopback; safe by default)
 
 ### Phase 19 UAT decisions (visual revisions, user-approved — treat as the new contract)
 
@@ -155,13 +155,14 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260613-osu | Warn when a linked GitHub repo cannot be verified (surface verify_state) — completes GHPRJ-03 soft-save-with-warning | 2026-06-13 | 41f3d50 | [260613-osu-warn-when-a-linked-github-repo-cannot-be](./quick/260613-osu-warn-when-a-linked-github-repo-cannot-be/) |
-| 260613-ph5 | Make GitHub repo-link validation MANDATORY (hard-block invalid repos with highlighted error) — supersedes 260613-osu's soft verify_state advisory; reverses D-11 for the repo-link UX per user decision | 2026-06-13 | 9ea0df6 | [260613-ph5-make-github-repo-link-validation-mandato](./quick/260613-ph5-make-github-repo-link-validation-mandato/) |
-| 260616-8l7 | Fix Review-column refresh showing stale RED dots: `reduceChecks` now dedupes superseded check runs (keeps the latest run per check name, matching GitHub's rollup state) so a re-run/concurrency-cancelled FAILURE no longer paints a green PR red. Initial cache attempt-floor diagnosis was wrong and discarded (service.go unchanged). Code + tests done; Task 3 human-verify pending (user verifies against live instance). | 2026-06-16 | ccdb2d5 | [260616-8l7-the-refresh-button-at-review-column-seem](./quick/260616-8l7-the-refresh-button-at-review-column-seem/) |
-| 260618-mlu | Auto-collapse the Active Sessions bottom bar when a session row (task/PR) is opened from the expanded list: added a `collapse()` helper that sets collapsed + persists "1", and the `SessionRow` `onOpen` now navigates AND collapses (covers click + Enter/Space via the existing handler). One-file change to `ActiveSessionsBar.tsx`; build+lint green. Human-verify passed (user approved runtime click-through). | 2026-06-18 | d3f7795 | [260618-mlu-when-the-status-bottom-bar-is-expanded-a](./quick/260618-mlu-when-the-status-bottom-bar-is-expanded-a/) |
-| 260625-9db | Fix the fixed bottom status bar (`ActiveSessionsBar`, `h-9`/36px overlay) covering the sidebar footer (Add-project button unreachable) and clipping the bottom of the main task agent/shell view: reserve 36px (`pb-9`) under BOTH `<main>` (AppLayout.tsx) and the sidebar container (`<Sidebar className="pb-9">`, forwarded to the `fixed h-svh` container — TerminalPane's ResizeObserver re-fits xterm automatically). Bar overlay/expand-up behavior unchanged; no edits to the generated shadcn `sidebar.tsx` or `ActiveSessionsBar.tsx`. Build+lint green; human-verify passed (user verified runtime). | 2026-06-25 | 77fe135 | [260625-9db-the-bottom-status-bar-is-hidding-the-bot](./quick/260625-9db-the-bottom-status-bar-is-hidding-the-bot/) |
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260613-osu | Warn when a linked GitHub repo cannot be verified (surface verify_state) — completes GHPRJ-03 soft-save-with-warning | 2026-06-13 | 41f3d50 |  | [260613-osu-warn-when-a-linked-github-repo-cannot-be](./quick/260613-osu-warn-when-a-linked-github-repo-cannot-be/) |
+| 260613-ph5 | Make GitHub repo-link validation MANDATORY (hard-block invalid repos with highlighted error) — supersedes 260613-osu's soft verify_state advisory; reverses D-11 for the repo-link UX per user decision | 2026-06-13 | 9ea0df6 |  | [260613-ph5-make-github-repo-link-validation-mandato](./quick/260613-ph5-make-github-repo-link-validation-mandato/) |
+| 260616-8l7 | Fix Review-column refresh showing stale RED dots: `reduceChecks` now dedupes superseded check runs (keeps the latest run per check name, matching GitHub's rollup state) so a re-run/concurrency-cancelled FAILURE no longer paints a green PR red. Initial cache attempt-floor diagnosis was wrong and discarded (service.go unchanged). Code + tests done; Task 3 human-verify pending (user verifies against live instance). | 2026-06-16 | ccdb2d5 |  | [260616-8l7-the-refresh-button-at-review-column-seem](./quick/260616-8l7-the-refresh-button-at-review-column-seem/) |
+| 260618-mlu | Auto-collapse the Active Sessions bottom bar when a session row (task/PR) is opened from the expanded list: added a `collapse()` helper that sets collapsed + persists "1", and the `SessionRow` `onOpen` now navigates AND collapses (covers click + Enter/Space via the existing handler). One-file change to `ActiveSessionsBar.tsx`; build+lint green. Human-verify passed (user approved runtime click-through). | 2026-06-18 | d3f7795 |  | [260618-mlu-when-the-status-bottom-bar-is-expanded-a](./quick/260618-mlu-when-the-status-bottom-bar-is-expanded-a/) |
+| 260625-9db | Fix the fixed bottom status bar (`ActiveSessionsBar`, `h-9`/36px overlay) covering the sidebar footer (Add-project button unreachable) and clipping the bottom of the main task agent/shell view: reserve 36px (`pb-9`) under BOTH `<main>` (AppLayout.tsx) and the sidebar container (`<Sidebar className="pb-9">`, forwarded to the `fixed h-svh` container — TerminalPane's ResizeObserver re-fits xterm automatically). Bar overlay/expand-up behavior unchanged; no edits to the generated shadcn `sidebar.tsx` or `ActiveSessionsBar.tsx`. Build+lint green; human-verify passed (user verified runtime). | 2026-06-25 | 77fe135 |  | [260625-9db-the-bottom-status-bar-is-hidding-the-bot](./quick/260625-9db-the-bottom-status-bar-is-hidding-the-bot/) |
+| 260626-hwd | Add opt-in `--insecure-allow-remote` flag to bind kangent to a non-loopback `--addr` (e.g. `0.0.0.0:7333`). A single boolean gates all THREE loopback-enforcement layers — skips `ensureLoopback`, serves the mux without the `hostCheck` wrap, sets `InsecureSkipVerify` on the WS upgrade — plus a loud `slog.Warn` no-auth banner. Added `hookBaseURL()` to normalize a wildcard bind host (`0.0.0.0`/`::`/empty) to `127.0.0.1:<port>` for the local agent-status hook (specific IPs left as-is). SAFE BY DEFAULT: `ensureLoopback`/`hostCheck` bodies byte-for-byte unchanged (verifier md5-confirmed), only conditionally invoked; `TestEnsureLoopback`/`TestHostCheck`/`TestIntegrationEvilOriginRejected` retained & green. NO auth, NO TLS (explicit user-accepted tradeoff). `go build && vet && test ./...` green. | 2026-06-26 | ce03d84 | Verified | [260626-hwd-add-an-opt-in-insecure-allow-remote-flag](./quick/260626-hwd-add-an-opt-in-insecure-allow-remote-flag/) |
 
 ## Session Continuity
 
