@@ -16,16 +16,24 @@ import (
 // surface (Attach/Detach/WriteInput/Resize/Done/Info) — never the ring
 // directly — which is the Phase 4 seam.
 type Handler struct {
-	mgr            *session.Manager
-	originPatterns []string
+	mgr               *session.Manager
+	originPatterns    []string
+	insecureAnyOrigin bool
 }
 
 // NewHandler returns a Handler serving sessions from mgr. originPatterns is
 // the Origin allowlist passed to websocket.Accept (the request's own Host is
 // always authorized, and requests without an Origin header — non-browser
 // clients — are allowed; browsers always send Origin on WS handshakes).
-func NewHandler(mgr *session.Manager, originPatterns []string) *Handler {
-	return &Handler{mgr: mgr, originPatterns: originPatterns}
+//
+// insecureAnyOrigin is the opt-in --insecure-allow-remote escape hatch: when
+// true, Origin verification is disabled entirely (websocket.Accept is called
+// with InsecureSkipVerify, the coder/websocket-documented way to allow any
+// origin — never the "*" pattern, which accept.go explicitly warns against).
+// Leave it false to keep the loopback-only Origin allowlist (the default,
+// byte-for-byte-unchanged behavior).
+func NewHandler(mgr *session.Manager, originPatterns []string, insecureAnyOrigin bool) *Handler {
+	return &Handler{mgr: mgr, originPatterns: originPatterns, insecureAnyOrigin: insecureAnyOrigin}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -34,9 +42,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Accept FIRST in all cases: a WS close code (4404) can only be
 	// delivered after the upgrade completes. Origin verification stays ON
-	// (the library default) — Origin is matched against originPatterns.
+	// (the library default) — Origin is matched against originPatterns —
+	// UNLESS insecureAnyOrigin is set, in which case InsecureSkipVerify
+	// disables Origin verification (the --insecure-allow-remote path).
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: h.originPatterns,
+		OriginPatterns:     h.originPatterns,
+		InsecureSkipVerify: h.insecureAnyOrigin,
 	})
 	if err != nil {
 		return // Accept already wrote the HTTP error (e.g. 403 on bad Origin)

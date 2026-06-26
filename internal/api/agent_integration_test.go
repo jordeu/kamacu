@@ -72,7 +72,7 @@ func newAgentIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager
 	WorktreeRoutes(mux, db, wt, mgr, tmux.Client{})
 	HookRoutes(mux, mgr, agentLifecycleToken)
 	AgentRoutes(mux, mgr, db)
-	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil))
+	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil, false))
 	srv := httptest.NewServer(mux)
 	mgr.SetAgentConfig(session.AgentConfig{
 		BaseURL:   srv.URL, // overlay hook URLs point back at this harness

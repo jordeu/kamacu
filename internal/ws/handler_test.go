@@ -25,7 +25,7 @@ func newWSServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	t.Helper()
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/sessions/{id}/ws", NewHandler(mgr, nil))
+	mux.Handle("GET /api/sessions/{id}/ws", NewHandler(mgr, nil, false))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, mgr

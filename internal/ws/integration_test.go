@@ -26,7 +26,9 @@ import (
 
 // newTestServer builds the mux exactly as cmd/kangent/main.go does and serves
 // it over httptest. Cleanup stops every session so no bash outlives the run.
-func newTestServer(t *testing.T) (*httptest.Server, *session.Manager) {
+// insecureAnyOrigin mirrors the --insecure-allow-remote handler flag: false is
+// the default loopback-Origin behavior, true disables Origin verification.
+func newTestServer(t *testing.T, insecureAnyOrigin bool) (*httptest.Server, *session.Manager) {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -39,7 +41,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	api.SessionRoutes(mux, mgr, db, tmux.Client{})
-	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil))
+	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil, insecureAnyOrigin))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() {
@@ -105,7 +107,7 @@ func collectUntil(t *testing.T, ctx context.Context, conn *websocket.Conn, subst
 // shape: spawn (201) → attach → type → output → detach → still running →
 // reattach with replay → stop (202) → exited → delete (204) → empty list.
 func TestIntegration(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _ := newTestServer(t, false)
 	ctx := integrationCtx(t)
 
 	// Spawn: POST /api/sessions → 201 + id.
@@ -213,7 +215,7 @@ func TestIntegration(t *testing.T) {
 // (Host-header rejection lives in cmd/kangent's hostCheck middleware, which
 // is unexported — covered by its own table tests in main_test.go.)
 func TestIntegrationEvilOriginRejected(t *testing.T) {
-	srv, mgr := newTestServer(t)
+	srv, mgr := newTestServer(t, false)
 	ctx := integrationCtx(t)
 
 	sess, err := mgr.Spawn(session.SpawnOpts{})
@@ -232,4 +234,28 @@ func TestIntegrationEvilOriginRejected(t *testing.T) {
 	if resp == nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("handshake response = %+v, want HTTP 403", resp)
 	}
+}
+
+// TestIntegrationInsecureAnyOriginAccepted is the opt-in mirror of
+// TestIntegrationEvilOriginRejected: with insecureAnyOrigin=true (the
+// --insecure-allow-remote path), the SAME cross-origin upgrade that is
+// rejected above must instead SUCCEED — InsecureSkipVerify disables Origin
+// verification entirely, so a forged Origin reaches 101.
+func TestIntegrationInsecureAnyOriginAccepted(t *testing.T) {
+	srv, mgr := newTestServer(t, true)
+	ctx := integrationCtx(t)
+
+	sess, err := mgr.Spawn(session.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	url := fmt.Sprintf("%s/api/sessions/%s/ws", srv.URL, sess.Info().ID)
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{"http://evil.example"}},
+	})
+	if err != nil {
+		t.Fatalf("upgrade rejected with Origin http://evil.example, want accepted: %v", err)
+	}
+	conn.Close(websocket.StatusNormalClosure, "")
 }
