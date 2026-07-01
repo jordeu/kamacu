@@ -209,6 +209,86 @@ func TestRewriteAlreadyUnderNewRootLeftAlone(t *testing.T) {
 	}
 }
 
+// TestRewriteSkipsMetacharFalseMatch closes WR-01: SQLite LIKE treats '_' and '%'
+// as metacharacters, and the OldRoot||'/%' gate is unescaped. An OldRoot with a '_'
+// (legal in a Unix home, e.g. /home/john_doe/.kangent) makes the gate over-match a
+// row that is NOT actually prefixed by OldRoot; pre-fix, TrimPrefix is a no-op and
+// filepath.Join nests the whole absolute old path under NewRoot — silent corruption.
+// The Go-side HasPrefix recheck skips the false match while still rewriting a row
+// genuinely under OldRoot.
+func TestRewriteSkipsMetacharFalseMatch(t *testing.T) {
+	db := newMigrateTestDB(t)
+	// OldRoot contains a '_': the unescaped LIKE gate '/home/john_doe/.kangent/%'
+	// treats it as "any single char" and over-matches a different home.
+	cfg := Config{OldRoot: "/home/john_doe/.kangent", NewRoot: "/home/john_doe/.kamacu"}
+
+	// falseMatch: a DIFFERENT home (johnXdoe) — the LIKE '_' matches the 'X', so the
+	// gate selects it, but it is NOT prefixed by OldRoot. Must be left untouched.
+	falseMatch := "/home/johnXdoe/.kangent/repos/o/n"
+	res, err := db.Exec(`INSERT INTO projects (name, repo_path, managed) VALUES ('false', ?, 1)`, falseMatch)
+	if err != nil {
+		t.Fatalf("insert false-match project: %v", err)
+	}
+	falseID, _ := res.LastInsertId()
+
+	// trueMatch: genuinely under OldRoot — must still be rewritten.
+	trueMatch := "/home/john_doe/.kangent/repos/a/b"
+	res, err = db.Exec(`INSERT INTO projects (name, repo_path, managed) VALUES ('true', ?, 1)`, trueMatch)
+	if err != nil {
+		t.Fatalf("insert true-match project: %v", err)
+	}
+	trueID, _ := res.LastInsertId()
+
+	if err := rewriteManagedPaths(db, cfg); err != nil {
+		t.Fatalf("rewriteManagedPaths: %v", err)
+	}
+
+	if got := scanRepoPath(t, db, falseID); got != falseMatch {
+		t.Errorf("metachar false-match row was rewritten/corrupted: got %q, want byte-for-byte %q (WR-01)", got, falseMatch)
+	}
+	if got, want := scanRepoPath(t, db, trueID), "/home/john_doe/.kamacu/repos/a/b"; got != want {
+		t.Errorf("true under-root row not rewritten: got %q, want %q", got, want)
+	}
+}
+
+// TestRewriteWorktreeBaseRequiresSeparatorBoundary closes WR-02: the worktree_base
+// rewrite matched with a bare strings.HasPrefix, so a sibling dir that shares the
+// data-root NAME PREFIX (~/.kangent-backup, OUTSIDE the migrated root) was mis-
+// rewritten to ~/.kamacu-backup. The fix requires the prefix to be the whole value
+// or be followed by a separator, so a sibling is left untouched while the real root
+// still rewrites.
+func TestRewriteWorktreeBaseRequiresSeparatorBoundary(t *testing.T) {
+	// The raw-form branch keys on the oldDataDir="~/.kangent" const.
+	cfg := Config{OldRoot: "/home/u/.kangent", NewRoot: "/home/u/.kamacu"}
+
+	t.Run("sibling backup dir untouched", func(t *testing.T) {
+		db := newMigrateTestDB(t)
+		const sibling = "~/.kangent-backup/worktrees/" // shares the name PREFIX, not under the root
+		if _, err := db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)`, settings.KeyWorktreeBase, sibling); err != nil {
+			t.Fatalf("insert sibling setting: %v", err)
+		}
+		if err := rewriteManagedPaths(db, cfg); err != nil {
+			t.Fatalf("rewriteManagedPaths: %v", err)
+		}
+		if got := scanSetting(t, db, settings.KeyWorktreeBase); got != sibling {
+			t.Errorf("sibling backup worktree_base was rewritten: got %q, want unchanged %q (WR-02)", got, sibling)
+		}
+	})
+
+	t.Run("real root still rewritten", func(t *testing.T) {
+		db := newMigrateTestDB(t)
+		if _, err := db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)`, settings.KeyWorktreeBase, "~/.kangent/worktrees/"); err != nil {
+			t.Fatalf("insert real-root setting: %v", err)
+		}
+		if err := rewriteManagedPaths(db, cfg); err != nil {
+			t.Fatalf("rewriteManagedPaths: %v", err)
+		}
+		if got, want := scanSetting(t, db, settings.KeyWorktreeBase), "~/.kamacu/worktrees/"; got != want {
+			t.Errorf("real-root worktree_base not rewritten: got %q, want %q (boundary broke the happy path)", got, want)
+		}
+	})
+}
+
 // TestDeleteOldTmuxRows asserts every kangent-* tmux_sessions row is removed
 // while a new-socket kamacu-* row survives.
 func TestDeleteOldTmuxRows(t *testing.T) {
