@@ -401,18 +401,18 @@ export function migrateStorage() {
 
 *These four are the only non-verified judgments; all mechanics above are `[VERIFIED]` by on-host repro.*
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should the DB-file rename carry all three files or checkpoint-first?**
+1. **Should the DB-file rename carry all three files or checkpoint-first?** — **RESOLVED:** checkpoint-first (Pattern 3); adopted by 21-02 Task 2.
    - What we know: both prevent data loss (§Pitfall 1, both verified).
    - What's unclear: checkpoint-first needs an extra DB open/close before `store.Open`; rename-all-three doesn't but must order the three renames carefully for roll-forward.
    - Recommendation: **checkpoint-first** (Pattern 3) — after `TRUNCATE`, an interrupted rename cannot strand data, which is the cleanest fit for D-04 roll-forward.
 
-2. **Where exactly do the Part-2 steps live — one post-Migrate hook, or split?**
+2. **Where exactly do the Part-2 steps live — one post-Migrate hook, or split?** — **RESOLVED:** single post-`store.Migrate` hook; adopted by 21-03/21-04.
    - What we know: the DB rewrite needs schema (post-Migrate); repair needs the rewritten paths; tmux-row cleanup needs the DB.
    - Recommendation: one `migrate.CompletePaths(db)` hook called right after `store.Migrate` and before `BackfillProjectIcons`, mirroring the existing hook slot. Keeps ordering obvious and testable.
 
-3. **Live E2E must not risk the real 5.5 GB install.** (STATE.md calls for a real-install verification.)
+3. **Live E2E must not risk the real 5.5 GB install.** (STATE.md calls for a real-install verification.) — **RESOLVED:** copied-HOME UAT; adopted by 21-05.
    - Recommendation: because the D-13 gate keys on `ExpandHome("~")`, run the verification against a **copied HOME**: `cp -a ~/.kangent /tmp/kamacu-uat-home/.kangent` then `HOME=/tmp/kamacu-uat-home ./bin/kamacu`. This exercises the *real* default-path gate + real data (9 repos, 29 worktrees, tmux shells) with zero risk to `~/.kangent`. Verify: board loads, task view opens, an agent resumes, diff renders, `git status` in a migrated worktree is clean, a reopened bash tab spawns a fresh `kamacu-*` shell, and a **second boot is a clean no-op** (dir stays `~/.kamacu`, no re-migration). Then load the app and confirm `kamacu.*` localStorage keys populated from `kangent.*`.
 
 ## Environment Availability
