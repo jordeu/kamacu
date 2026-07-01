@@ -152,7 +152,24 @@ Plans:
   4. Sidebar state, collapse preferences, and panel settings carry over — browser `localStorage` keys under `kangent.*` are migrated to `kamacu.*` (MIGRATE-04)
   5. The migration is idempotent and safe: a fresh or already-migrated install starts without attempting it, and a mid-migration failure leaves the original `~/.kangent` untouched and surfaces a clear error instead of a half-migrated state (MIGRATE-05)
 
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+**Wave 1**
+
+- [ ] 21-01-PLAN.md — Client localStorage kangent.* → kamacu.* prefix-scan migration + key-literal flips (MIGRATE-04)
+- [ ] 21-02-PLAN.md — internal/migrate gate table + Part 1: preflight, atomic dir rename, WAL-safe DB rename, tmux retire (MIGRATE-01/05)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 21-03-PLAN.md — internal/migrate Part 2: managed-path rewrite (D-15), git worktree repair, tmux-row cleanup (MIGRATE-02/03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 21-04-PLAN.md — Wire Part 1/Part 2 into main.go + flip runtime socket/path/prefix literals (MIGRATE-01/03/05)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 21-05-PLAN.md — Live end-to-end migration verification against a copied HOME (human-verify) (MIGRATE-01..05)
 
 ### Phase 22: GitHub-Style Diff Review
 
@@ -227,7 +244,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
-| 21. Data Directory Migration | v1.8 | 0/TBD | Not started | - |
+| 21. Data Directory Migration | v1.8 | 0/5 | Planned | - |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
