@@ -4,8 +4,8 @@ milestone: v1.8
 milestone_name: Kamacu Rebrand & UX Polish
 status: executing
 stopped_at: Phase 21 context gathered
-last_updated: "2026-07-01T14:29:43.558Z"
-last_activity: 2026-07-01 -- Phase 21 planning complete
+last_updated: "2026-07-01T14:33:30.666Z"
+last_activity: 2026-07-01 -- Phase 21 execution started
 progress:
   total_phases: 5
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-01)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 21 — data directory migration
+**Current focus:** Phase 21 — data-directory-migration
 
 ## Current Position
 
-Phase: 21
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-07-01 -- Phase 21 planning complete
+Phase: 21 (data-directory-migration) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 21
+Last activity: 2026-07-01 -- Phase 21 execution started
 
 ### v1.8 Roadmap (Phases 20–24, continues numbering from v1.7's Phase 19)
 
