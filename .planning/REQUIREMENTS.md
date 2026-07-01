@@ -1,0 +1,138 @@
+# Requirements: Kamacu (v1.8 — Kamacu Rebrand & UX Polish)
+
+**Defined:** 2026-07-01
+**Core Value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
+
+## v1.8 Requirements
+
+Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly one roadmap phase.
+
+### Rebrand (product identity in code + UI)
+
+- [ ] **REBRAND-01**: The product name is shown as "Kamacu" everywhere the brand appears (browser tab title, sidebar brand title, page/section headers, settings/about copy)
+- [ ] **REBRAND-02**: The app builds as a `kamacu` binary and the Go module path is renamed to kamacu, with all imports updated (`make build` produces `kamacu`; `go build`/`vet`/`test ./...` green)
+- [ ] **REBRAND-03**: Remaining code identifiers, log lines, and user-facing strings that say "kangent" are updated to "kamacu" wherever the change does not affect on-disk or runtime compatibility (path/socket compatibility is handled by the Migrate category)
+
+### Migrate (one-time on-disk data migration)
+
+- [ ] **MIGRATE-01**: On first launch after upgrade, the app performs a one-time, gated migration of the data directory `~/.kangent` → `~/.kamacu` (managed repos, worktrees, and the SQLite DB)
+- [ ] **MIGRATE-02**: After the move, every task/PR git worktree stays valid — worktree links are repaired (`git worktree repair`) and the DB's stored worktree/repo paths are rewritten to the new `~/.kamacu` location
+- [ ] **MIGRATE-03**: The tmux socket (`-L kangent` → `-L kamacu`) and session prefix (`kangent-<task>-<n>` → `kamacu-<task>-<n>`) are switched for new sessions, and pre-existing live `kangent-*` sessions are reconciled (reattached or cleanly retired) without orphaning a running agent
+- [ ] **MIGRATE-04**: Browser `localStorage` keys under `kangent.*` are migrated to `kamacu.*` so sidebar state, collapse preferences, and panel settings carry over
+- [ ] **MIGRATE-05**: The migration is idempotent and safe — an already-migrated or fresh install is detected and skipped; a failure leaves the original `~/.kangent` untouched and surfaces a clear error instead of a half-migrated state
+
+### Brand (logo, favicon, docs)
+
+- [ ] **BRAND-01**: The app ships a new Kamacu logo (SVG) rendered in the UI brand area
+- [ ] **BRAND-02**: The browser tab shows a Kamacu favicon
+- [ ] **BRAND-03**: The repo has a `README.md` describing what Kamacu is, how to build and run it, and its core project → task → agent → review workflow
+
+### Diff (GitHub "Files changed"-style review)
+
+- [ ] **DIFF-01**: The diff view shows a left-hand tree of all changed files; selecting a file focuses/scrolls to its diff
+- [ ] **DIFF-02**: Each file's diff can be individually collapsed and expanded
+- [ ] **DIFF-03**: Each file has a "Viewed" checkbox; marking it viewed collapses that file, and the viewed state persists across reopening the diff view (and server restarts)
+- [ ] **DIFF-04**: When a previously-viewed file changes again, it is automatically reset to un-viewed and re-expanded on the next open; unchanged viewed files stay collapsed and viewed
+
+### Worktree Cleanup (Settings panel)
+
+- [ ] **WTREE-01**: Settings has a worktree-management section listing every worktree with its task/PR association, referenced-vs-orphaned status, and dirty / unpushed / stash flags
+- [ ] **WTREE-02**: The user can force-remove an individual worktree from the list, overriding the dirty/unpushed/stash gates, behind a confirmation
+- [ ] **WTREE-03**: A bulk "clean eligible" action removes all safely-removable worktrees (done/merged-and-pristine, or orphaned) in one action
+- [ ] **WTREE-04**: Orphaned worktrees (present on disk / in `git worktree list` but with no matching DB task) are detected, listed, and removable — reconciling the accumulation the reaper currently skips
+
+### Tabs (rename bash/tmux tabs)
+
+- [ ] **TABS-01**: The user can rename a bash/tmux tab to a custom label; the custom name persists across reopening the task and server restarts
+- [ ] **TABS-02**: New tabs keep their auto-generated default names (Bash 1, Bash 2, …) until the user renames them
+
+### Review Menu (task-view actions + review prompt)
+
+- [ ] **REVMENU-01**: The agent view's top-right Stop button is replaced by a three-dots menu with "Stop" and "Insert review prompt" actions
+- [ ] **REVMENU-02**: The PR review prompt is no longer auto-inserted into a PR-review session — it is placed into the prompt only when the user chooses "Insert review prompt"
+
+### Polish (session bar + board)
+
+- [ ] **POLISH-01**: The bottom active-sessions bar no longer shows the total-sessions count (per-state colored counts remain)
+- [ ] **POLISH-02**: The bottom active-sessions bar auto-collapses when the user clicks outside it (e.g., clicking back into the task view)
+- [ ] **POLISH-03**: The To Do column no longer shows the inline "+ New task" shortcut
+
+## Future Requirements
+
+Deferred to a later milestone. Tracked but not in this roadmap.
+
+### Diff
+
+- **DIFF-FUT-01**: "N of M files viewed" progress summary in the diff header
+- **DIFF-FUT-02**: Side-by-side (split) diff view toggle
+- **DIFF-FUT-03**: Per-file / per-line review comments or annotations
+
+### Worktree Cleanup
+
+- **WTREE-FUT-01**: Scheduled / automatic stale-worktree purge (the deferred MAINT-01), modeled on the reaper goroutine
+
+### Tabs
+
+- **TABS-FUT-01**: Drag-to-reorder tabs
+
+### Brand
+
+- **BRAND-FUT-01**: Light/dark or animated logo variants
+
+### Carried forward from prior milestones (unchanged)
+
+- v1.7 icon follow-ups (ICON-FUT-01..05), v1.4 managed-checkout follow-ups (CKMNT-01..03, CKUX-01), v1.3 GitHub follow-ups (GHCARD/GHFILT/GHWIDE), and the NOTF/AGNT deferred set remain parked in their archived milestone requirements and PROJECT.md "Deferred".
+
+## Out of Scope
+
+Explicitly excluded. Documented to prevent scope creep.
+
+| Feature | Reason |
+|---------|--------|
+| Renaming the GitHub repo / git remote from kangent → kamacu | Local product rename only; the repo/remote is the user's to rename separately if desired |
+| Permanent dual-path support (reading both `~/.kangent` and `~/.kamacu` indefinitely) | Migration is a one-time move, not a permanent dual-mount; keeps the runtime simple |
+| Auto-inserting or auto-sending any agent prompt | The milestone's intent is manual, user-triggered prompt insertion (REVMENU-02) |
+| Per-project diff-view or cleanup settings | Global behavior only for this milestone; per-project overrides stay deferred |
+| Multi-user / auth / remote deployment | Unchanged core constraint — single user at localhost |
+
+## Traceability
+
+Which phases cover which requirements. Populated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| REBRAND-01 | TBD | Pending |
+| REBRAND-02 | TBD | Pending |
+| REBRAND-03 | TBD | Pending |
+| MIGRATE-01 | TBD | Pending |
+| MIGRATE-02 | TBD | Pending |
+| MIGRATE-03 | TBD | Pending |
+| MIGRATE-04 | TBD | Pending |
+| MIGRATE-05 | TBD | Pending |
+| BRAND-01 | TBD | Pending |
+| BRAND-02 | TBD | Pending |
+| BRAND-03 | TBD | Pending |
+| DIFF-01 | TBD | Pending |
+| DIFF-02 | TBD | Pending |
+| DIFF-03 | TBD | Pending |
+| DIFF-04 | TBD | Pending |
+| WTREE-01 | TBD | Pending |
+| WTREE-02 | TBD | Pending |
+| WTREE-03 | TBD | Pending |
+| WTREE-04 | TBD | Pending |
+| TABS-01 | TBD | Pending |
+| TABS-02 | TBD | Pending |
+| REVMENU-01 | TBD | Pending |
+| REVMENU-02 | TBD | Pending |
+| POLISH-01 | TBD | Pending |
+| POLISH-02 | TBD | Pending |
+| POLISH-03 | TBD | Pending |
+
+**Coverage:**
+- v1.8 requirements: 26 total
+- Mapped to phases: 0 (roadmap pending)
+- Unmapped: 26 ⚠️
+
+---
+*Requirements defined: 2026-07-01*
+*Last updated: 2026-07-01 after initial definition*
