@@ -152,7 +152,7 @@ Plans:
   4. Sidebar state, collapse preferences, and panel settings carry over — browser `localStorage` keys under `kangent.*` are migrated to `kamacu.*` (MIGRATE-04)
   5. The migration is idempotent and safe: a fresh or already-migrated install starts without attempting it, and a mid-migration failure leaves the original `~/.kangent` untouched and surfaces a clear error instead of a half-migrated state (MIGRATE-05)
 
-**Plans**: 7 plans (5 original + 2 gap-closure)
+**Plans**: 8 plans (5 original + 3 gap-closure)
 Plans:
 **Wave 1**
 
@@ -171,10 +171,11 @@ Plans:
 
 - [x] 21-05-PLAN.md — Live end-to-end migration verification against a copied HOME (human-verify) (MIGRATE-01..05)
 
-**Gap closure** *(from 21-VERIFICATION.md — 21-05 gate failed with 2 blocking gaps)*
+**Gap closure** *(21-06/07 from 21-VERIFICATION.md — 21-05 gate failed with 2 blocking gaps; 21-08 from 21-REVIEW.md — 1 critical + 2 warning code-review findings)*
 
 - [x] 21-06-PLAN.md — Harden `repairWorktrees`: per-path `git worktree repair` with log+skip so a stale/unregistered worktree can't abort the migration (MIGRATE-02/03)
 - [x] 21-07-PLAN.md — Git-safe copied-HOME re-run smoke (rewrite the copy's DB + on-disk git link files) + real-install isolation proof + preserved human-verify (MIGRATE-01..05)
+- [ ] 21-08-PLAN.md — Code-review fixes: broaden `repairWorktrees` to folder-pointed repos (CR-01) + boundary-check the LIKE-gated path rewrites (WR-01/WR-02) (MIGRATE-02/03)
 
 ### Phase 22: GitHub-Style Diff Review
 
