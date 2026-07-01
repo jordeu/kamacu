@@ -18,14 +18,36 @@
 package migrate
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"kamacu/internal/settings"
 )
+
+// Complete is the exported Part-2 startup hook (MIGRATE-02/MIGRATE-03), called
+// from cmd/kamacu/main.go right after store.Migrate (Plan 21-04) for a DoMigrate
+// or RollForward decision. It runs the three self-gating steps in order and
+// returns the first error: rewrite the DB's stored paths under the old root
+// (D-15), repair each managed repo's git worktree link files with the rewritten
+// new paths, then delete the retired kangent-* tmux rows (D-07/D-08). Because
+// every step is idempotent, Complete is safe to re-run on the D-04 roll-forward
+// path (a crash mid-migration finishes on the next boot with no marker file).
+func Complete(ctx context.Context, db *sql.DB, cfg Config) error {
+	if err := rewriteManagedPaths(db, cfg); err != nil {
+		return err
+	}
+	if err := repairWorktrees(ctx, db, cfg); err != nil {
+		return err
+	}
+	return deleteOldTmuxRows(ctx, db)
+}
 
 // rewriteManagedPaths prefix-swaps the DB's stored absolute paths from the old
 // data root to the new one (D-15 / MIGRATE-02). ONLY managed projects and
@@ -139,4 +161,98 @@ func rewriteWorktreeBaseSetting(db *sql.DB, cfg Config) error {
 func deleteOldTmuxRows(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, `DELETE FROM tmux_sessions WHERE name LIKE 'kangent-%'`)
 	return err
+}
+
+// repairWorktrees fixes git's two-way worktree link files for every managed repo
+// after the root moved (MIGRATE-02). RESEARCH Pitfall 2 is load-bearing: a bare
+// `git worktree repair` is a NO-OP when both the main repo and its linked
+// worktrees move together (our exact case), so the NEW worktree paths must be
+// passed explicitly; and a stale (deleted) path makes git exit 1, so each path is
+// os.Stat-filtered first (projects.go:576 idiom) — git never sees a missing path.
+//
+// Runs AFTER rewriteManagedPaths, so the DB already holds new-root paths. All git
+// invocations use an arg-array exec (worktree.go invariant / ASVS V5), never a
+// shell — task-derived paths never reach a shell interpreter. Repairing a healthy
+// tree is a clean no-op, so this is idempotent for the D-04 roll-forward path.
+//
+// Cursor discipline (SetMaxOpenConns(1)): the managed repos are collected and the
+// SELECT cursor closed BEFORE the per-repo task queries run, so at most one DB
+// cursor is ever open at a time.
+func repairWorktrees(ctx context.Context, db *sql.DB, cfg Config) error {
+	rows, err := db.Query(
+		`SELECT id, repo_path FROM projects WHERE managed=1 AND repo_path LIKE ?`,
+		cfg.NewRoot+"/%")
+	if err != nil {
+		return err
+	}
+	type repo struct {
+		id       int64
+		repoPath string
+	}
+	var repos []repo
+	for rows.Next() {
+		var r repo
+		if err := rows.Scan(&r.id, &r.repoPath); err != nil {
+			rows.Close()
+			return err
+		}
+		repos = append(repos, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close() // close BEFORE the per-repo task queries (single-writer)
+
+	for _, r := range repos {
+		paths, err := existingWorktreePaths(db, r.id)
+		if err != nil {
+			return err
+		}
+		if len(paths) == 0 {
+			continue // nothing on disk to repair (all trees user-deleted)
+		}
+		args := append([]string{"-C", r.repoPath, "worktree", "repair"}, paths...)
+		cmd := exec.CommandContext(ctx, "git", args...)
+		var errb bytes.Buffer
+		cmd.Stderr = &errb
+		if err := cmd.Run(); err != nil {
+			msg := strings.TrimSpace(errb.String())
+			if msg == "" {
+				msg = err.Error()
+			}
+			return fmt.Errorf("migrate: git worktree repair in %s: %s", r.repoPath, msg)
+		}
+	}
+	return nil
+}
+
+// existingWorktreePaths returns the project's non-empty tasks.worktree_path values
+// that still exist on disk (os.Stat filter). Skipping vanished trees keeps git
+// from exiting 1 on a stale path (RESEARCH Pitfall 2/G). The cursor is fully
+// drained and closed before returning so the caller may issue the git exec (and
+// the next project's query) on the single connection.
+func existingWorktreePaths(db *sql.DB, projectID int64) ([]string, error) {
+	rows, err := db.Query(
+		`SELECT worktree_path FROM tasks
+		 WHERE project_id = ? AND worktree_path IS NOT NULL AND worktree_path != ''`,
+		projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		if _, statErr := os.Stat(p); statErr == nil {
+			paths = append(paths, p)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return paths, nil
 }
