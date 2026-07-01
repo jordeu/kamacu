@@ -173,7 +173,7 @@ Plans:
 
 **Gap closure** *(from 21-VERIFICATION.md — 21-05 gate failed with 2 blocking gaps)*
 
-- [ ] 21-06-PLAN.md — Harden `repairWorktrees`: per-path `git worktree repair` with log+skip so a stale/unregistered worktree can't abort the migration (MIGRATE-02/03)
+- [x] 21-06-PLAN.md — Harden `repairWorktrees`: per-path `git worktree repair` with log+skip so a stale/unregistered worktree can't abort the migration (MIGRATE-02/03)
 - [ ] 21-07-PLAN.md — Git-safe copied-HOME re-run smoke (rewrite the copy's DB + on-disk git link files) + real-install isolation proof + preserved human-verify (MIGRATE-01..05)
 
 ### Phase 22: GitHub-Style Diff Review
@@ -249,7 +249,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
-| 21. Data Directory Migration | v1.8 | 4/5 | In Progress|  |
+| 21. Data Directory Migration | v1.8 | 5/7 | In Progress|  |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
