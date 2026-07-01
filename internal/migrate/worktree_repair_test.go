@@ -131,6 +131,120 @@ func TestCompleteRepairsMovedWorktrees(t *testing.T) {
 	}
 }
 
+// TestCompleteRepairsFolderPointedWorktreesAndSurvivesPrune closes CR-01: a
+// folder-pointed (managed=0) project whose main repo lives OUTSIDE the data root
+// (and so does NOT move on the Part-1 rename) still has its task worktrees under
+// the global worktree_base — provisionWorktree places worktrees under worktree_base
+// for EVERY project, the managed flag only gates a best-effort fetch. When the root
+// moves, the external repo's .git/worktrees/<id>/gitdir pointers go stale. Before
+// the fix, repairWorktrees filtered managed=1 and SKIPPED this project, leaving the
+// stale pointers — a later `git worktree prune` (worktree.go:378, run after every
+// task removal) then DEREGISTERS the migrated worktrees, orphaning live checkouts
+// while the DB still points at them (sibling worktree loss). After the fix, repair
+// is gated on under-new-root worktree OWNERSHIP (not the managed flag), so the
+// external repo's moved worktrees are repaired and survive a subsequent prune.
+func TestCompleteRepairsFolderPointedWorktreesAndSurvivesPrune(t *testing.T) {
+	root := gitIntegrationSetup(t)
+	oldRoot := filepath.Join(root, ".kangent")
+	newRoot := filepath.Join(root, ".kamacu")
+
+	// An EXTERNAL repo — a SIBLING of the data root, NOT under it, so os.Rename of
+	// oldRoot does not touch it (the folder-pointed shape the managed harness omits).
+	extRepo := filepath.Join(root, "external", "o", "n")
+	if err := os.MkdirAll(extRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, extRepo, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(extRepo, "file.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, extRepo, "add", "file.txt")
+	gitTest(t, extRepo, "commit", "-m", "initial")
+
+	// TWO linked worktrees UNDER oldRoot with ABSOLUTE paths (git bakes absolute
+	// two-way pointers). Two make the sibling-loss regression concrete: prune of
+	// one stale entry drops the other.
+	wt1 := filepath.Join(oldRoot, "worktrees", "p", "slug-1")
+	wt2 := filepath.Join(oldRoot, "worktrees", "p", "slug-2")
+	if err := os.MkdirAll(filepath.Dir(wt1), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, extRepo, "worktree", "add", "-b", "task/slug-1", wt1)
+	gitTest(t, extRepo, "worktree", "add", "-b", "task/slug-2", wt2)
+
+	db := newMigrateTestDB(t)
+	// managed=0: the external, folder-pointed project. repo_path is the UNMOVED
+	// external checkout (it is NOT under the data root, so rewriteManagedPaths
+	// leaves repo_path alone — only the tasks' worktree_path values are rewritten).
+	res, err := db.Exec(`INSERT INTO projects (name, repo_path, managed) VALUES ('folder', ?, 0)`, extRepo)
+	if err != nil {
+		t.Fatalf("insert folder-pointed project: %v", err)
+	}
+	projID, _ := res.LastInsertId()
+	res, err = db.Exec(`INSERT INTO tasks (project_id, title, position, worktree_path) VALUES (?, 't1', 1, ?)`, projID, wt1)
+	if err != nil {
+		t.Fatalf("insert task 1: %v", err)
+	}
+	taskID, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO tasks (project_id, title, position, worktree_path) VALUES (?, 't2', 2, ?)`, projID, wt2); err != nil {
+		t.Fatalf("insert task 2: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO tmux_sessions (task_id, n, name) VALUES (?, 1, 'kangent-1-1')`, taskID); err != nil {
+		t.Fatalf("insert tmux row: %v", err)
+	}
+
+	// COMMIT POINT: move BOTH worktrees; extRepo (a sibling of oldRoot) stays put
+	// and now holds stale .git/worktrees/*/gitdir pointers at the vanished paths.
+	if err := os.Rename(oldRoot, newRoot); err != nil {
+		t.Fatalf("rename tree: %v", err)
+	}
+
+	cfg := Config{OldRoot: oldRoot, NewRoot: newRoot}
+	if err := Complete(context.Background(), db, cfg); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	newWt1 := filepath.Join(newRoot, "worktrees", "p", "slug-1")
+	newWt2 := filepath.Join(newRoot, "worktrees", "p", "slug-2")
+
+	// The external repo's worktree list now points at the NEW paths, none prunable.
+	list := gitTest(t, extRepo, "worktree", "list", "--porcelain")
+	if strings.Contains(list, "prunable") {
+		t.Errorf("folder-pointed worktree still prunable after repair:\n%s", list)
+	}
+	if !strings.Contains(list, newWt1) {
+		t.Errorf("repaired worktree list missing new path %q:\n%s", newWt1, list)
+	}
+	if !strings.Contains(list, newWt2) {
+		t.Errorf("repaired worktree list missing new path %q:\n%s", newWt2, list)
+	}
+
+	// DECISIVE regression: a subsequent prune must NOT deregister the migrated
+	// worktrees (pre-fix, repair was skipped, the stale gitdir survived, and prune
+	// dropped the worktrees — sibling loss).
+	gitTest(t, extRepo, "worktree", "prune")
+	listAfter := gitTest(t, extRepo, "worktree", "list", "--porcelain")
+	if !strings.Contains(listAfter, newWt1) {
+		t.Errorf("worktree %q deregistered by prune (CR-01 sibling loss):\n%s", newWt1, listAfter)
+	}
+	if !strings.Contains(listAfter, newWt2) {
+		t.Errorf("worktree %q deregistered by prune (CR-01 sibling loss):\n%s", newWt2, listAfter)
+	}
+	if out, err := exec.Command("git", "-C", newWt1, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Errorf("git status in migrated worktree failed after prune: %v\n%s", err, out)
+	}
+
+	// MIGRATE-03: Complete proceeded to deleteOldTmuxRows for the folder-pointed
+	// project too — the kangent-* row is gone regardless of the managed flag.
+	var kangentRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions WHERE name LIKE 'kangent-%'`).Scan(&kangentRows); err != nil {
+		t.Fatalf("count tmux rows: %v", err)
+	}
+	if kangentRows != 0 {
+		t.Errorf("Complete left %d kangent-* tmux rows, want 0", kangentRows)
+	}
+}
+
 // TestCompleteStalePathFiltered asserts a task whose worktree dir does not exist
 // on disk is os.Stat-filtered OUT of the repair arg list, so git never sees a
 // stale path (which would make it exit 1) — Complete still succeeds and the valid

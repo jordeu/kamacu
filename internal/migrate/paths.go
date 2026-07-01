@@ -103,6 +103,14 @@ func rewritePrefixColumn(db *sql.DB, cfg Config, selectSQL, updateSQL string) er
 			rows.Close()
 			return err
 		}
+		// WR-01 guard: the LIKE OldRoot||'/%' gate is unescaped, so a '_'/'%'
+		// metacharacter in OldRoot (legal in a Unix home, e.g. /home/john_doe/...)
+		// can over-match a row that is NOT truly prefixed by OldRoot. Skip it here —
+		// otherwise TrimPrefix is a no-op and filepath.Join nests the whole absolute
+		// path under NewRoot, silently corrupting a path outside the moved root (D-15).
+		if oldPath != cfg.OldRoot && !strings.HasPrefix(oldPath, cfg.OldRoot+"/") {
+			continue
+		}
 		newPath := filepath.Join(cfg.NewRoot, strings.TrimPrefix(oldPath, cfg.OldRoot))
 		rewrites = append(rewrites, rewrite{id: id, newPath: newPath})
 	}
@@ -138,9 +146,9 @@ func rewriteWorktreeBaseSetting(db *sql.DB, cfg Config) error {
 
 	var newValue string
 	switch {
-	case strings.HasPrefix(value, oldDataDir): // raw "~/.kangent/..." form
+	case hasRootPrefix(value, oldDataDir): // raw "~/.kangent/..." form
 		newValue = newDataDir + strings.TrimPrefix(value, oldDataDir)
-	case strings.HasPrefix(value, cfg.OldRoot): // expanded absolute form
+	case hasRootPrefix(value, cfg.OldRoot): // expanded absolute form
 		newValue = cfg.NewRoot + strings.TrimPrefix(value, cfg.OldRoot)
 	default:
 		return nil // under neither old root — leave untouched
@@ -150,6 +158,17 @@ func rewriteWorktreeBaseSetting(db *sql.DB, cfg Config) error {
 	}
 	_, err = db.Exec(`UPDATE settings SET value = ? WHERE key = ?`, newValue, settings.KeyWorktreeBase)
 	return err
+}
+
+// hasRootPrefix reports whether value is root itself or lives UNDER root (root
+// followed by a path separator). It is the separator-boundary guard the
+// worktree_base rewrite needs (WR-02): a bare strings.HasPrefix(value, root)
+// wrongly matches a SIBLING dir that only shares the root's NAME PREFIX (e.g.
+// "~/.kangent-backup" vs root "~/.kangent"), silently rewriting a setting that
+// points OUTSIDE the migrated root. Mirrors the DB path rewrite's OldRoot||'/%'
+// boundary discipline (D-15).
+func hasRootPrefix(value, root string) bool {
+	return value == root || strings.HasPrefix(value, root+"/")
 }
 
 // deleteOldTmuxRows removes every retired kangent-* tmux_sessions row (D-07/D-08)
@@ -163,12 +182,25 @@ func deleteOldTmuxRows(ctx context.Context, db *sql.DB) error {
 	return err
 }
 
-// repairWorktrees fixes git's two-way worktree link files for every managed repo
-// after the root moved (MIGRATE-02). RESEARCH Pitfall 2 is load-bearing: a bare
-// `git worktree repair` is a NO-OP when both the main repo and its linked
-// worktrees move together (our exact case), so the NEW worktree path is passed
-// explicitly; and a stale (deleted) path makes git exit 1, so each path is
-// os.Stat-filtered first (projects.go:576 idiom) — git never sees a missing path.
+// repairWorktrees fixes git's two-way worktree link files for EVERY project that
+// owns a migrated worktree after the root moved (MIGRATE-02) — managed AND
+// folder-pointed (managed=0) alike. The gate is under-new-root WORKTREE ownership,
+// NOT the managed flag (CR-01): provisionWorktree places task worktrees under the
+// global worktree_base for every project regardless of managed (tasks.go:120 —
+// managed only gates a best-effort fetch), so a folder-pointed project's main repo
+// can live OUTSIDE the data root (and not move) while its task worktrees moved with
+// the root. Repair runs from each project's OWN repo_path (the external, unmoved
+// checkout for folder projects). Scoping on managed=1 skipped these projects,
+// leaving stale .git/worktrees/*/gitdir pointers that a later `git worktree prune`
+// (worktree.go:378) deregisters — silent sibling worktree loss.
+//
+// RESEARCH Pitfall 2 is load-bearing: a bare `git worktree repair` is a NO-OP when
+// both the main repo and its linked worktrees move together, so the NEW worktree
+// path is passed explicitly; and a stale (deleted) path makes git exit 1, so each
+// path is os.Stat-filtered first (projects.go:576 idiom) — git never sees a missing
+// path. existingWorktreePaths ALSO gates worktree_path under NewRoot (LIKE + a
+// Go-side HasPrefix recheck), so a worktree genuinely outside the moved root is
+// never passed to repair; a project owning no migrated worktree is a clean no-op.
 //
 // Repair is PER PATH, never one batch invocation (Gap 1, 21-VERIFICATION.md): a
 // DB-referenced worktree dir can EXIST on disk yet be UNREGISTERED in the repo's
@@ -186,13 +218,15 @@ func deleteOldTmuxRows(ctx context.Context, db *sql.DB) error {
 // shell — task-derived paths never reach a shell interpreter. Repairing a healthy
 // tree is a clean no-op, so this is idempotent for the D-04 roll-forward path.
 //
-// Cursor discipline (SetMaxOpenConns(1)): the managed repos are collected and the
-// SELECT cursor closed BEFORE the per-repo task queries run, so at most one DB
-// cursor is ever open at a time.
+// Cursor discipline (SetMaxOpenConns(1)): the repos are collected and the SELECT
+// cursor closed BEFORE the per-repo task queries run, so at most one DB cursor is
+// ever open at a time.
 func repairWorktrees(ctx context.Context, db *sql.DB, cfg Config) error {
-	rows, err := db.Query(
-		`SELECT id, repo_path FROM projects WHERE managed=1 AND repo_path LIKE ?`,
-		cfg.NewRoot+"/%")
+	// ALL projects — not just managed=1: a folder-pointed repo's repo_path is the
+	// EXTERNAL, unmoved checkout (NOT under NewRoot), so a repo_path LIKE gate here
+	// would wrongly exclude it. The under-root filter lives on the worktree path,
+	// applied per project in existingWorktreePaths below.
+	rows, err := db.Query(`SELECT id, repo_path FROM projects`)
 	if err != nil {
 		return err
 	}
@@ -216,7 +250,7 @@ func repairWorktrees(ctx context.Context, db *sql.DB, cfg Config) error {
 	rows.Close() // close BEFORE the per-repo task queries (single-writer)
 
 	for _, r := range repos {
-		paths, err := existingWorktreePaths(db, r.id)
+		paths, err := existingWorktreePaths(db, cfg, r.id)
 		if err != nil {
 			return err
 		}
@@ -248,15 +282,25 @@ func repairWorktrees(ctx context.Context, db *sql.DB, cfg Config) error {
 }
 
 // existingWorktreePaths returns the project's non-empty tasks.worktree_path values
-// that still exist on disk (os.Stat filter). Skipping vanished trees keeps git
-// from exiting 1 on a stale path (RESEARCH Pitfall 2/G). The cursor is fully
-// drained and closed before returning so the caller may issue the git exec (and
-// the next project's query) on the single connection.
-func existingWorktreePaths(db *sql.DB, projectID int64) ([]string, error) {
+// that are UNDER the moved root (already rewritten to NewRoot by rewriteManagedPaths)
+// and still exist on disk (os.Stat filter). Two gates, both load-bearing:
+//   - the under-NewRoot filter (SQL LIKE NewRoot||'/%' + a Go-side HasPrefix recheck)
+//     is what scopes repair to MIGRATED worktrees now that repairWorktrees iterates
+//     ALL projects (CR-01): a worktree genuinely outside the moved root is never
+//     passed to `git worktree repair`. The Go-side recheck defends the LIKE gate
+//     against a '_'/'%' metacharacter in NewRoot (an over-match legal in a Unix
+//     home), matching WR-01's discipline;
+//   - the os.Stat filter drops vanished trees so git never exits 1 on a stale path
+//     (RESEARCH Pitfall 2/G).
+//
+// The cursor is fully drained and closed before returning so the caller may issue
+// the git exec (and the next project's query) on the single connection.
+func existingWorktreePaths(db *sql.DB, cfg Config, projectID int64) ([]string, error) {
 	rows, err := db.Query(
 		`SELECT worktree_path FROM tasks
-		 WHERE project_id = ? AND worktree_path IS NOT NULL AND worktree_path != ''`,
-		projectID)
+		 WHERE project_id = ? AND worktree_path IS NOT NULL AND worktree_path != ''
+		   AND worktree_path LIKE ?`,
+		projectID, cfg.NewRoot+"/%")
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +310,11 @@ func existingWorktreePaths(db *sql.DB, projectID int64) ([]string, error) {
 		var p string
 		if err := rows.Scan(&p); err != nil {
 			return nil, err
+		}
+		// Go-side boundary recheck: a '_'/'%' in NewRoot can make the LIKE gate
+		// over-match a non-prefixed path — never repair one outside the moved root.
+		if p != cfg.NewRoot && !strings.HasPrefix(p, cfg.NewRoot+"/") {
+			continue
 		}
 		if _, statErr := os.Stat(p); statErr == nil {
 			paths = append(paths, p)
