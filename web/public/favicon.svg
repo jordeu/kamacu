@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Kamacu">
+  <!-- Kamacu favicon — the KamacuMark ember spark, simplified for 16-32px.
+       A warm-ember flame (orange core -> amber tip) on a rounded dark ember
+       badge so the mark stays legible on BOTH light and dark browser-tab
+       chrome (a transparent-only mark would wash out on dark chrome). -->
+  <defs>
+    <linearGradient id="kamacu-fav-body" x1="16" y1="25" x2="16" y2="4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ea580c"/>
+      <stop offset="0.45" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#fcd34d"/>
+    </linearGradient>
+    <radialGradient id="kamacu-fav-glow" cx="50%" cy="55%" r="55%">
+      <stop offset="0" stop-color="#fb923c" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#f97316" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#1c1917"/>
+  <circle cx="16" cy="15" r="12" fill="url(#kamacu-fav-glow)"/>
+  <path d="M16 4.5C18.6 9 22 13 22 18C22 21.3 19.3 24 16 24C12.7 24 10 21.3 10 18C10 14.5 11.8 11.8 13.5 9.6C13.6 12 14.6 13.5 16 14.2C17.3 12.9 17.3 8.5 16 4.5Z" fill="url(#kamacu-fav-body)"/>
+  <circle cx="21.6" cy="8" r="1.2" fill="#fcd34d"/>
+</svg>
