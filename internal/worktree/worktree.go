@@ -81,7 +81,7 @@ func Slug(title string) string {
 
 // Service serializes worktree mutations (coarse mutex — single-user app, so
 // Retry spam can't race create/remove) and owns the central worktree root
-// (D-23, e.g. ~/.kangent/worktrees).
+// (D-23, e.g. ~/.kamacu/worktrees).
 type Service struct {
 	mu   sync.Mutex
 	Root string

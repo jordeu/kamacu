@@ -26,11 +26,11 @@ func testDB(t *testing.T) *sql.DB {
 func TestDefaultsValues(t *testing.T) {
 	want := map[string]string{
 		settings.KeyAgentExtraParams:  "--dangerously-skip-permissions",
-		settings.KeyWorktreeBase:      "~/.kangent/worktrees/",
+		settings.KeyWorktreeBase:      "~/.kamacu/worktrees/",
 		settings.KeyShell:             "bash",
 		settings.KeyBranchTemplate:    "task/{slug}-{id}",
-		settings.KeyDoneSessionTTL:    "24h", // REAP-01/D-91
-		settings.KeyGithubIntegration: "on",  // GHSET-01/D-01: absent row = on
+		settings.KeyDoneSessionTTL:    "24h",                                                                                                // REAP-01/D-91
+		settings.KeyGithubIntegration: "on",                                                                                                 // GHSET-01/D-01: absent row = on
 		settings.KeyPRReviewSeed:      `Review PR #<n> "<title>". Summarize the changes, then flag bugs, risky changes, and missing tests.`, // GHREV/12-07
 	}
 	for k, v := range want {

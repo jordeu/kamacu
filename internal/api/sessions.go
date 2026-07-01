@@ -299,7 +299,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "couldn't start a session")
 				return
 			}
-			name := fmt.Sprintf("kangent-%d-%d", req.TaskID, n)
+			name := fmt.Sprintf("kamacu-%d-%d", req.TaskID, n)
 			if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name) VALUES (?, ?, ?)`, req.TaskID, n, name); err != nil {
 				writeError(w, http.StatusInternalServerError, "couldn't start a session")
 				return

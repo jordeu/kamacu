@@ -64,7 +64,7 @@ type SpawnOpts struct {
 	// TmuxName is bash-only: when set, the session runs `tmux new-session -A`
 	// (attach-or-create) for this exact session name on the dedicated Kamacu
 	// socket instead of a plain shell. Minted and persisted by the HTTP handler
-	// (kangent-<task>-<n>); "" = plain shell. Mutually exclusive with Shell.
+	// (kamacu-<task>-<n>); "" = plain shell. Mutually exclusive with Shell.
 	TmuxName string
 }
 

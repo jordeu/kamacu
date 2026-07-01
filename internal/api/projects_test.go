@@ -24,15 +24,15 @@ import (
 )
 
 // newRepoTestServer is like newTestServer but also points the managed-clone base
-// (~/.kangent/repos/) at an isolated temp dir via the HOME env so the repo-first
-// create path (which hardcodes ExpandHome("~/.kangent/repos/")) never writes into
+// (~/.kamacu/repos/) at an isolated temp dir via the HOME env so the repo-first
+// create path (which hardcodes ExpandHome("~/.kamacu/repos/")) never writes into
 // the developer's real home. It returns the server, DB, and the repos base dir.
 func newRepoTestServer(t *testing.T) (*httptest.Server, *sql.DB, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home) // ExpandHome resolves ~ via os.UserHomeDir → HOME
 	srv, db, _ := newTestServer(t)
-	return srv, db, filepath.Join(home, ".kangent", "repos")
+	return srv, db, filepath.Join(home, ".kamacu", "repos")
 }
 
 // countProjects returns the number of rows in projects (for atomicity asserts).
