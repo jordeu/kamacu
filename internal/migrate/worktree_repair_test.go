@@ -173,3 +173,97 @@ func TestCompleteStalePathFiltered(t *testing.T) {
 		t.Errorf("valid worktree not repaired: %v\n%s", err, out)
 	}
 }
+
+// TestCompleteToleratesUnregisteredWorktree closes Gap 1 (21-VERIFICATION.md): a
+// DB-referenced worktree dir that EXISTS on disk but is NOT registered in the
+// repo's .git/worktrees/ (its .git gitfile dangles) — faithfully reproducing the
+// real sched repo's 4 stale dirs. `git worktree repair <that path>` exits 1
+// ("does not reference a repository"). Before the fix, the single batch repair
+// invocation exits 1, repairWorktrees returns a fatal error, Complete aborts,
+// deleteOldTmuxRows never runs, and the app refuses to boot on every RollForward.
+// After the fix, per-path repair slog.Warn-logs and SKIPS the straggler: Complete
+// returns nil, the VALID worktree is still repaired, and the kangent-% tmux rows
+// are still deleted.
+func TestCompleteToleratesUnregisteredWorktree(t *testing.T) {
+	root := gitIntegrationSetup(t)
+	oldRoot := filepath.Join(root, ".kangent")
+	newRoot := filepath.Join(root, ".kamacu")
+
+	repoPath, wtPath := buildRepoWithWorktree(t, oldRoot)
+
+	// A SECOND worktree, then delete its .git/worktrees/<id> registration entry so
+	// the checkout dir is left with a dangling .git gitfile — existing on disk +
+	// in the DB but absent from .git/worktrees/, exactly like the 4 real sched dirs.
+	ghostPath := filepath.Join(oldRoot, "worktrees", "p", "ghost-2")
+	gitTest(t, repoPath, "worktree", "add", "-b", "task/ghost-2", ghostPath)
+	if err := os.RemoveAll(filepath.Join(repoPath, ".git", "worktrees", "ghost-2")); err != nil {
+		t.Fatalf("unregister ghost worktree: %v", err)
+	}
+	// Fixture sanity: git can no longer repair the ghost (it exits non-zero). If
+	// this ever passes, the test would no longer reproduce the abort it guards.
+	if out, err := exec.Command("git", "-C", repoPath, "worktree", "repair", ghostPath).CombinedOutput(); err == nil {
+		t.Fatalf("ghost worktree unexpectedly repairable; fixture no longer reproduces Gap 1:\n%s", out)
+	}
+
+	db := newMigrateTestDB(t)
+	res, err := db.Exec(`INSERT INTO projects (name, repo_path, managed) VALUES ('m', ?, 1)`, repoPath)
+	if err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	projID, _ := res.LastInsertId()
+	res, err = db.Exec(`INSERT INTO tasks (project_id, title, position, worktree_path) VALUES (?, 'valid', 1, ?)`, projID, wtPath)
+	if err != nil {
+		t.Fatalf("insert valid task: %v", err)
+	}
+	validTaskID, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO tasks (project_id, title, position, worktree_path) VALUES (?, 'ghost', 2, ?)`, projID, ghostPath); err != nil {
+		t.Fatalf("insert ghost task: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO tmux_sessions (task_id, n, name) VALUES (?, 1, 'kangent-1-1')`, validTaskID); err != nil {
+		t.Fatalf("insert tmux row: %v", err)
+	}
+
+	// COMMIT POINT: move the whole tree (Part-1 os.Rename) — breaks the absolute
+	// pointers of BOTH the valid and the already-unregistered ghost worktree.
+	if err := os.Rename(oldRoot, newRoot); err != nil {
+		t.Fatalf("rename tree: %v", err)
+	}
+
+	cfg := Config{OldRoot: oldRoot, NewRoot: newRoot}
+	// The unregistered ghost straggler must NOT abort the migration.
+	if err := Complete(context.Background(), db, cfg); err != nil {
+		t.Fatalf("Complete aborted on an unregistered worktree straggler: %v", err)
+	}
+
+	newRepoPath := filepath.Join(newRoot, "repos", "o", "n")
+	newValidWt := filepath.Join(newRoot, "worktrees", "p", "slug-1")
+
+	// The VALID worktree is still repaired: usable git status, listed, not prunable.
+	list := gitTest(t, newRepoPath, "worktree", "list", "--porcelain")
+	if strings.Contains(list, "prunable") {
+		t.Errorf("valid worktree prunable after repair:\n%s", list)
+	}
+	if !strings.Contains(list, newValidWt) {
+		t.Errorf("repaired worktree list missing valid path %q:\n%s", newValidWt, list)
+	}
+	if out, err := exec.Command("git", "-C", newValidWt, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Errorf("git status in repaired valid worktree failed: %v\n%s", err, out)
+	}
+
+	// deleteOldTmuxRows ran AFTER repair — the MIGRATE-03 step the abort used to skip.
+	var kangentRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions WHERE name LIKE 'kangent-%'`).Scan(&kangentRows); err != nil {
+		t.Fatalf("count tmux rows: %v", err)
+	}
+	if kangentRows != 0 {
+		t.Errorf("Complete left %d kangent-* tmux rows, want 0 (deleteOldTmuxRows was skipped)", kangentRows)
+	}
+
+	// A second Complete on the same state is a clean no-op (returns nil, valid tree usable).
+	if err := Complete(context.Background(), db, cfg); err != nil {
+		t.Fatalf("second Complete (idempotency) errored: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", newValidWt, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Errorf("git status after second Complete failed: %v\n%s", err, out)
+	}
+}
