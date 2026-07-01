@@ -30,7 +30,7 @@ type Project struct {
 	Description string  `json:"description"`
 	GithubRepo  *string `json:"github_repo"`
 	// Managed is the v1.4 marker (migration 00008, D-06): true when Kamacu
-	// cloned and OWNS the directory under ~/.kangent/repos/ (gated-remove on
+	// cloned and OWNS the directory under ~/.kamacu/repos/ (gated-remove on
 	// delete, pre-task fetch); false for user-pointed folder projects (never
 	// touch their dir, D-09). SQLite stores it as INTEGER 0/1; scanProject maps
 	// it to bool.
@@ -139,7 +139,7 @@ func (h *projectHandlers) list(w http.ResponseWriter, r *http.Request) {
 //     the dir on delete (D-09). UNCHANGED by v1.4.
 //   - Repo-first path (v1.4, CKOUT-01): `{ "repo": "owner/name" }` gh-validates
 //     the ref (RPROJ-05/D-03), `gh repo clone`s it into
-//     ~/.kangent/repos/<owner>/<name> (D-02), and records it with managed=1 +
+//     ~/.kamacu/repos/<owner>/<name> (D-02), and records it with managed=1 +
 //     github_repo=canonical — but ONLY after the clone returns exit 0, so a
 //     failed clone leaves no row and no dir (atomic, D-01/CKOUT-04). If the dest
 //     already exists, it reattaches on origin-match (CKOUT-05/D-10).
@@ -192,7 +192,7 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 
 // reposBase is the hardcoded managed-clone root (D-02 / Claude's discretion: no
 // repos_base setting for v1.4). Clones nest under it as <owner>/<name>.
-const reposBase = "~/.kangent/repos/"
+const reposBase = "~/.kamacu/repos/"
 
 // createByRepo is the repo-first creation path (CKOUT-01). The ordering is the
 // research §"Clone-then-Create Ordering" 8-step sequence and is load-bearing for
@@ -221,7 +221,7 @@ func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 
-	// 3. Compute the managed dest: ~/.kangent/repos/<owner>/<name>. canonical is
+	// 3. Compute the managed dest: ~/.kamacu/repos/<owner>/<name>. canonical is
 	//    "owner/name", so filepath.Join nests it correctly.
 	base, err := settings.ExpandHome(reposBase)
 	if err != nil {

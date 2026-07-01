@@ -28,9 +28,9 @@ var Defaults = map[string]string{
 	// deliberate reversal of v1.0's D-51 interactive-by-default posture.
 	// The user can clear the field to restore permission prompts.
 	KeyAgentExtraParams: "--dangerously-skip-permissions",
-	KeyWorktreeBase:     "~/.kangent/worktrees/", // WT-01; stored raw, expanded at use
-	KeyShell:            "bash",                  // SHELL-01
-	KeyBranchTemplate:   "task/{slug}-{id}",      // BRANCH-01
+	KeyWorktreeBase:     "~/.kamacu/worktrees/", // WT-01; stored raw, expanded at use
+	KeyShell:            "bash",                 // SHELL-01
+	KeyBranchTemplate:   "task/{slug}-{id}",     // BRANCH-01
 	// REAP-01/D-91: Done-TTL reaper window. Go-style duration; empty/"0"/
 	// "never" disable reaping (see ParseDoneSessionTTL). Read-at-use by 09-05.
 	KeyDoneSessionTTL: "24h",

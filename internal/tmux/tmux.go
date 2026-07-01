@@ -19,14 +19,14 @@ import (
 
 // DefaultSocket is the dedicated tmux socket name (-L) for all Kamacu
 // sessions — never the user's default server (settled roadmap decision).
-const DefaultSocket = "kangent"
+const DefaultSocket = "kamacu"
 
 // Config is the Kamacu-managed tmux configuration: status bar off (D-79),
 // mouse on so wheel-scroll reaches tmux's real history (D-80), and a deep
 // history-limit because tmux history IS the durable scrollback (default 2000
 // is too shallow). Applied via -f on every invocation; tmux reads it exactly
 // once, when an invocation starts the server.
-const Config = `# kangent-managed tmux config (regenerated at startup -- do not edit)
+const Config = `# kamacu-managed tmux config (regenerated at startup -- do not edit)
 set -g status off
 set -g mouse on
 set -g history-limit 50000
@@ -75,7 +75,7 @@ func (c Client) run(ctx context.Context, args ...string) error {
 // HasSession probes liveness of the named session.
 //
 // Session targets use "="+name because WITHOUT "=", tmux 3.4 PREFIX-MATCHES
-// session names: has-session -t kangent-1 matches kangent-1-10 (exit 0!) —
+// session names: has-session -t kamacu-1 matches kamacu-1-10 (exit 0!) —
 // Empirical Finding 2. Exact match is mandatory on every session target.
 //
 // Returns:
@@ -100,7 +100,7 @@ func (c Client) HasSession(ctx context.Context, name string) (bool, error) {
 // KillSession kills the named session. Idempotent: exit 1 (already dead /
 // no server running) is treated as success, so killing an already-dead
 // session or a dead server returns nil. Uses "="+name exact match — killing
-// kangent-1-1 must never touch kangent-1-10 (Finding 2).
+// kamacu-1-1 must never touch kamacu-1-10 (Finding 2).
 func (c Client) KillSession(ctx context.Context, name string) error {
 	err := c.run(ctx, append(c.BaseArgs(), "kill-session", "-t", "="+name)...)
 	if err == nil {

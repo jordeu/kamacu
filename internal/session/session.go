@@ -81,7 +81,7 @@ type Session struct {
 	taskID          int64        // 0 = unscoped dev session; immutable after Spawn
 	kind            Kind         // KindBash or KindAgent; immutable after Spawn
 	claudeSessionID string       // agent only ("" for bash); the --session-id uuid, immutable after Spawn
-	tmuxName        string       // tmux-backed bash tab: the kangent-<task>-<n> session name ("" = not tmux)
+	tmuxName        string       // tmux-backed bash tab: the kamacu-<task>-<n> session name ("" = not tmux)
 	tmuxClient      *tmux.Client // socket/config for lifecycle probes; nil unless tmuxName != ""
 	killer          func() error // non-nil: how Stop terminates the underlying work (assigned ONCE
 	//                              in Spawn — the per-session lifecycle property; nil = default

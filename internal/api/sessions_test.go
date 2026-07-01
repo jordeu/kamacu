@@ -649,7 +649,7 @@ func awaitHasSession(t *testing.T, c tmux.Client, name string, want bool) {
 }
 
 // TestSessionTmuxSpawnHappyPath is TMUX-02 + TMUX-04 at the HTTP layer: with
-// shell=tmux stored, task spawns mint kangent-<task>-<n> from tmux_sessions,
+// shell=tmux stored, task spawns mint kamacu-<task>-<n> from tmux_sessions,
 // the wire payload stays tmux-free (D-77), stopping via the session kills the
 // tmux session end-to-end. Skips when tmux is not installed (the setting
 // itself could not have been stored without it).
@@ -694,8 +694,8 @@ func TestSessionTmuxSpawnHappyPath(t *testing.T) {
 		t.Errorf("label = %q, want %q", body["label"], "Bash 1")
 	}
 
-	// One persisted row: task_id=T, n=1, name=kangent-<T>-1, label back-filled.
-	name1 := fmt.Sprintf("kangent-%d-1", id)
+	// One persisted row: task_id=T, n=1, name=kamacu-<T>-1, label back-filled.
+	name1 := fmt.Sprintf("kamacu-%d-1", id)
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions`).Scan(&count); err != nil {
 		t.Fatalf("count tmux_sessions: %v", err)
@@ -724,7 +724,7 @@ func TestSessionTmuxSpawnHappyPath(t *testing.T) {
 	if body2["label"] != "Bash 2" {
 		t.Errorf("second label = %q, want %q", body2["label"], "Bash 2")
 	}
-	name2 := fmt.Sprintf("kangent-%d-2", id)
+	name2 := fmt.Sprintf("kamacu-%d-2", id)
 	var name2Count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions WHERE name = ?`, name2).Scan(&name2Count); err != nil {
 		t.Fatalf("count name2: %v", err)
