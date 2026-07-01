@@ -102,7 +102,7 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
 **Milestone Goal:** Rebrand kangent → Kamacu (full code/binary/module rename plus a one-time, gated on-disk migration of `~/.kangent` → `~/.kamacu` that keeps live worktrees, sessions, and DB intact) and sharpen the daily-driver UX — a GitHub-style "Files changed" diff view, a Settings worktree-cleanup panel, renameable bash/tmux tabs, a task-view actions menu that replaces the auto-inserted review prompt, and session-bar / board refinements.
 
 - [x] **Phase 20: Kamacu Rebrand & Brand** — Rename to Kamacu across code/binary/module/UI and ship the new logo, favicon, and README (no data-path change yet) (completed 2026-07-01)
-- [ ] **Phase 21: Data Directory Migration** — One-time gated `~/.kangent` → `~/.kamacu` move that repairs worktrees, rewrites DB paths, switches the tmux socket/prefix, and migrates localStorage
+- [x] **Phase 21: Data Directory Migration** — One-time gated `~/.kangent` → `~/.kamacu` move that repairs worktrees, rewrites DB paths, switches the tmux socket/prefix, and migrates localStorage (completed 2026-07-01)
 - [ ] **Phase 22: GitHub-Style Diff Review** — File-tree diff view with per-file collapse and sticky "Viewed" state that resets only when a file changes
 - [ ] **Phase 23: Worktree Cleanup Panel** — Settings panel listing every worktree (incl. orphans) with per-item force-remove and a bulk "clean eligible" action
 - [ ] **Phase 24: Session-Bar, Board & Tab Polish** — Renameable tabs, a task-view three-dots menu (no auto review-prompt), and session-bar / board cleanups
@@ -169,12 +169,12 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 21-05-PLAN.md — Live end-to-end migration verification against a copied HOME (human-verify) (MIGRATE-01..05)
+- [x] 21-05-PLAN.md — Live end-to-end migration verification against a copied HOME (human-verify) (MIGRATE-01..05)
 
 **Gap closure** *(from 21-VERIFICATION.md — 21-05 gate failed with 2 blocking gaps)*
 
 - [x] 21-06-PLAN.md — Harden `repairWorktrees`: per-path `git worktree repair` with log+skip so a stale/unregistered worktree can't abort the migration (MIGRATE-02/03)
-- [ ] 21-07-PLAN.md — Git-safe copied-HOME re-run smoke (rewrite the copy's DB + on-disk git link files) + real-install isolation proof + preserved human-verify (MIGRATE-01..05)
+- [x] 21-07-PLAN.md — Git-safe copied-HOME re-run smoke (rewrite the copy's DB + on-disk git link files) + real-install isolation proof + preserved human-verify (MIGRATE-01..05)
 
 ### Phase 22: GitHub-Style Diff Review
 
@@ -249,7 +249,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
-| 21. Data Directory Migration | v1.8 | 5/7 | In Progress|  |
+| 21. Data Directory Migration | v1.8 | 7/7 | Complete   | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
