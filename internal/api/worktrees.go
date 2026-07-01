@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"os"
 
-	"kangent/internal/session"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // WorktreeRoutes registers the per-task worktree lifecycle endpoints. The

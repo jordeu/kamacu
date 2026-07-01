@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // newAgentServer wires task routes, session routes, and the agent status

@@ -15,12 +15,12 @@ import (
 
 	"context"
 
-	"kangent/internal/github"
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/github"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // newRepoTestServer is like newTestServer but also points the managed-clone base
@@ -552,7 +552,7 @@ func TestProjectCreateValidRepo(t *testing.T) {
 // TestProjectManagedDefaultsZero proves the migration-00008 `managed` column
 // flows create→scan→JSON: a folder-created project (the existing POST path,
 // which omits `managed`) serializes "managed": false, i.e. the DEFAULT 0
-// backfill (D-06/D-09 — folder dirs are never Kangent-owned).
+// backfill (D-06/D-09 — folder dirs are never Kamacu-owned).
 func TestProjectManagedDefaultsZero(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	repo := gitRepo(t)

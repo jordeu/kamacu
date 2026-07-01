@@ -17,17 +17,17 @@ import (
 	"strings"
 	"time"
 
-	"kangent/internal/api"
-	"kangent/internal/github"
-	"kangent/internal/quota"
-	"kangent/internal/reaper"
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
-	"kangent/internal/ws"
-	"kangent/web"
+	"kamacu/internal/api"
+	"kamacu/internal/github"
+	"kamacu/internal/quota"
+	"kamacu/internal/reaper"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
+	"kamacu/internal/ws"
+	"kamacu/web"
 )
 
 func main() {
@@ -54,7 +54,7 @@ func main() {
 	} else {
 		// SAFE BY DEFAULT is the headline invariant; this is the one loud,
 		// unmistakable line announcing the user opted out of it.
-		slog.Warn("SECURITY: kangent is listening with NO authentication via --insecure-allow-remote — anyone who can reach this address gets a shell on this host", "addr", *addr)
+		slog.Warn("SECURITY: kamacu is listening with NO authentication via --insecure-allow-remote — anyone who can reach this address gets a shell on this host", "addr", *addr)
 	}
 
 	dbPath, err := settings.ExpandHome(*dbFlag)
@@ -89,9 +89,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Kangent-managed tmux config (D-79 status off, D-80 mouse on), regenerated
+	// Kamacu-managed tmux config (D-79 status off, D-80 mouse on), regenerated
 	// at every start in the data dir next to the DB — a stable path that survives
-	// reboots, so a tmux server started by a previous Kangent run still references
+	// reboots, so a tmux server started by a previous Kamacu run still references
 	// an existing file (research Open Q2).
 	tmuxConf := filepath.Join(filepath.Dir(dbPath), "kangent-tmux.conf")
 	if err := tmux.WriteConfig(tmuxConf); err != nil {
@@ -113,7 +113,7 @@ func main() {
 
 	// Origin allowlist (D-20): exact loopback origins with the serving port,
 	// plus any --dev-origin entries (dev runs need the Vite server's origin:
-	// go run ./cmd/kangent --dev-origin localhost:5173 --dev-origin 127.0.0.1:5173).
+	// go run ./cmd/kamacu --dev-origin localhost:5173 --dev-origin 127.0.0.1:5173).
 	_, port, _ := net.SplitHostPort(*addr)
 	originPatterns := append([]string{"127.0.0.1:" + port, "localhost:" + port}, devOrigins...)
 
@@ -182,9 +182,9 @@ func main() {
 	})
 
 	// Startup orphan sweep (D-93): reconcile task-deletes / worktree-removes
-	// that happened while Kangent was down. Synchronous and ONCE — block until
+	// that happened while Kamacu was down. Synchronous and ONCE — block until
 	// done so the server starts in a clean state (NOT periodic: tmux sessions
-	// only become orphaned through paths Kangent already controls, D-99).
+	// only become orphaned through paths Kamacu already controls, D-99).
 	sweepOrphanTmux(context.Background(), db, tmuxClient)
 
 	// Background reaper (REAP-01 + GHCLN-01/02): the app's background goroutine.
@@ -205,7 +205,7 @@ func main() {
 	go reaper.NewWithPR(db, mgr, wtSvc, tmuxClient, ghSvc).Run(context.Background())
 	slog.Info("session reaper started (Done-TTL + PR reconcile)")
 
-	slog.Info("kangent listening", "url", "http://"+*addr)
+	slog.Info("kamacu listening", "url", "http://"+*addr)
 	// hostCheck (DNS-rebinding defense) wraps the mux by default; the opt-in
 	// --insecure-allow-remote path serves the mux directly so non-loopback
 	// Host headers are accepted.
@@ -221,7 +221,7 @@ func main() {
 
 // sweepOrphanTmux kills any live kangent-* tmux session on the dedicated socket
 // whose name has no matching tmux_sessions row OR whose task no longer exists
-// (D-93). It reconciles deletes/removes that happened while Kangent was down —
+// (D-93). It reconciles deletes/removes that happened while Kamacu was down —
 // the kill-before-remove paths in worktrees.go/tasks.go cover the online case,
 // and this covers the offline case. Best-effort throughout: a missing/broken
 // tmux binary is a no-op (nothing to sweep), and a kill failure is warn-only.
@@ -265,7 +265,7 @@ func sweepOrphanTmux(parent context.Context, db *sql.DB, tmuxClient tmux.Client)
 	rows.Close()
 
 	for _, name := range names {
-		// Never touch a session Kangent did not create (belt-and-braces — the
+		// Never touch a session Kamacu did not create (belt-and-braces — the
 		// dedicated socket should only ever hold kangent-* sessions).
 		if !strings.HasPrefix(name, "kangent-") {
 			continue
@@ -295,7 +295,7 @@ func ensureLoopback(addr string) error {
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("--addr %q is not a loopback address; kangent serves a shell and must stay local", addr)
+		return fmt.Errorf("--addr %q is not a loopback address; kamacu serves a shell and must stay local", addr)
 	}
 	return nil
 }

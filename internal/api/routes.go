@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"net/http"
 
-	"kangent/internal/session"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // Routes registers all REST API endpoints on mux. wt provisions per-task

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"kangent/internal/session"
+	"kamacu/internal/session"
 )
 
 // AgentRoutes registers the board's agent status source (STAT-01). The

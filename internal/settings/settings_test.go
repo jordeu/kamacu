@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kangent/internal/settings"
-	"kangent/internal/store"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
 )
 
 // testDB opens a temp SQLite database with all migrations applied.

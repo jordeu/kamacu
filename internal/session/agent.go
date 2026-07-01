@@ -56,12 +56,12 @@ type overlaySettings struct {
 // The Notification matcher deliberately excludes the idle-prompt event —
 // that event is D-46's *idle*, not *waiting*; including it would make every
 // quiet session go loud.
-func buildOverlayJSON(baseURL, token, kangentSessionID string) string {
+func buildOverlayJSON(baseURL, token, kamacuSessionID string) string {
 	hook := overlayHook{
 		Type: "command",
 		Command: fmt.Sprintf(
 			"curl -s -m 3 -H 'X-Kangent-Token: %s' --data-binary @- %s/api/hooks/sessions/%s",
-			token, baseURL, kangentSessionID,
+			token, baseURL, kamacuSessionID,
 		),
 		Timeout: 5,
 		Async:   true,

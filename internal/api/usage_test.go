@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/quota"
+	"kamacu/internal/quota"
 )
 
 // usageFakeToken is generated, never pasted — real tokens must never enter

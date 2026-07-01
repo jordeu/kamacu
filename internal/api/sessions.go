@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/tmux"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/tmux"
 )
 
 // SessionRoutes registers terminal session endpoints on mux. db is consulted to
@@ -65,7 +65,7 @@ func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 }
 
 // reconcileTmux appends orphaned (restored) tmux survivor entries to infos for
-// the given task and lazily GCs rows whose tmux session died while Kangent was
+// the given task and lazily GCs rows whose tmux session died while Kamacu was
 // down (D-89). A row is a survivor iff (a) NO live in-memory session is bound to
 // its name (else it is already in infos) AND (b) tmux has-session reports it
 // alive. A row whose probe is conclusively dead (exit 1) is DELETEd; an
@@ -129,7 +129,7 @@ func (h *sessionHandlers) reconcileTmux(r *http.Request, taskID int64, infos []s
 				TmuxName:  rw.name,
 			})
 		default:
-			// Conclusively dead (exit 1): the session died while Kangent was
+			// Conclusively dead (exit 1): the session died while Kamacu was
 			// down — lazy GC the row (D-89), warn-only on failure.
 			if _, derr := h.db.Exec(`DELETE FROM tmux_sessions WHERE name = ?`, rw.name); derr != nil {
 				slog.Warn("reconcile tmux sessions: GC dead row", "name", rw.name, "error", derr)

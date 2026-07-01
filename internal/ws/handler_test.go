@@ -14,7 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"kangent/internal/session"
+	"kamacu/internal/session"
 )
 
 // newWSServer starts an httptest server routing GET /api/sessions/{id}/ws to

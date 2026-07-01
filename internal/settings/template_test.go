@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"kangent/internal/settings"
+	"kamacu/internal/settings"
 )
 
 func TestExpandTemplate(t *testing.T) {

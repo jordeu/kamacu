@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"kangent/internal/diff"
-	"kangent/internal/worktree"
+	"kamacu/internal/diff"
+	"kamacu/internal/worktree"
 )
 
 // DiffRoutes registers the read-only review endpoint (REVW-01). Computation is

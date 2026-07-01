@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"kangent/internal/github"
+	"kamacu/internal/github"
 )
 
 // TestGithubStatus pins the GET /api/github/status contract: an always-200

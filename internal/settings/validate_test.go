@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/settings"
+	"kamacu/internal/settings"
 )
 
 func TestValidateBranchTemplate(t *testing.T) {

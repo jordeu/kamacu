@@ -16,12 +16,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
-	"kangent/internal/ws"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
+	"kamacu/internal/ws"
 )
 
 // agentLifecycleToken is the per-instance hook token the lifecycle harness is
@@ -48,7 +48,7 @@ func testdataFakeClaude(t *testing.T) string {
 // registers — Routes + SessionRoutes + WorktreeRoutes + HookRoutes +
 // AgentRoutes + the WS attach handler — over one DB, one worktree.Service,
 // and one session.Manager whose AgentConfig points at the fake-claude stub.
-// If cmd/kangent/main.go wiring drifts, this harness catches it.
+// If cmd/kamacu/main.go wiring drifts, this harness catches it.
 func newAgentIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")

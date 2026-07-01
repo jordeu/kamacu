@@ -16,11 +16,11 @@ import (
 	"strings"
 	"testing"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // newDiffServer wires the diff route alongside the worktree + task routes over

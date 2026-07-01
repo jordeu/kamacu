@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/tmux"
+	"kamacu/internal/tmux"
 )
 
 // ---------------------------------------------------------------------------

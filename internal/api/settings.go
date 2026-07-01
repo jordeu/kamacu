@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"kangent/internal/settings"
+	"kamacu/internal/settings"
 )
 
 // settingEntry is the per-key payload shape (research Pattern 2). Returning

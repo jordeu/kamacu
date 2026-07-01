@@ -17,9 +17,9 @@ import (
 	"strings"
 	"testing"
 
-	"kangent/internal/session"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // spyPRState implements PRStateGetter from an injected per-(repo,n) state map.

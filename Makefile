@@ -6,13 +6,13 @@ frontend:
 	cd web && npm install && npm run build
 
 backend:
-	go build -o bin/kangent ./cmd/kangent
+	go build -o bin/kamacu ./cmd/kamacu
 
 test:
 	go test ./...
 
 dev-backend:
-	go run ./cmd/kangent
+	go run ./cmd/kamacu
 
 dev-frontend:
 	cd web && npm run dev

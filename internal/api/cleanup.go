@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // CleanupWorktreeGated runs the gated worktree-removal core shared by the HTTP

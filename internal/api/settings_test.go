@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"kangent/internal/settings"
+	"kamacu/internal/settings"
 )
 
 func TestSettingsGetAllDefaults(t *testing.T) {

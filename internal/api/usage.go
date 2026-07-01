@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"kangent/internal/quota"
+	"kamacu/internal/quota"
 )
 
 // UsageRoutes registers the quota proxy. Always 200 — the Result state

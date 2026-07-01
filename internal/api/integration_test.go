@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // newIntegrationServer wires ALL route families over one DB, one
 // worktree.Service, and one session.Manager — the exact production shape of
-// cmd/kangent/main.go (Routes, then SessionRoutes, then WorktreeRoutes). If
+// cmd/kamacu/main.go (Routes, then SessionRoutes, then WorktreeRoutes). If
 // the production wiring drifts, this harness catches it.
 func newIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	t.Helper()

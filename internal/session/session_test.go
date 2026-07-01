@@ -842,7 +842,7 @@ func TestAgentBelFallbackGating(t *testing.T) {
 
 // TestAgentStopRequestedDistinguishesExit: server-initiated Stop records
 // stopRequested so exit 143 can render gray; a natural exit stays false
-// (red stays reserved for exits Kangent didn't ask for).
+// (red stays reserved for exits Kamacu didn't ask for).
 func TestAgentStopRequestedDistinguishesExit(t *testing.T) {
 	m := NewManager()
 

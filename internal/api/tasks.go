@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // Task is the JSON shape of a task row (RESEARCH.md Pattern 4). position is
@@ -132,7 +132,7 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 			// This is the SECOND deliberate, scoped exception to worktree's
 			// never-fetch invariant (the first is PR-head/base fetch in
 			// CheckoutPR/FetchRef): a managed checkout's whole point is that
-			// Kangent owns the dir and keeps it current.
+			// Kamacu owns the dir and keeps it current.
 			//
 			// Best-effort (D-05): a failed fetch is DISCARDED — provisioning
 			// proceeds from the local base and NEVER blocks task creation. The
