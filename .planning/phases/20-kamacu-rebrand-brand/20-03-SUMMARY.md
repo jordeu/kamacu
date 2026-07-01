@@ -105,6 +105,14 @@ None - no external service configuration required.
 - The in-app rebrand is visually complete: sidebar lockup renders and no user-facing "Kangent" copy remains. Ready for the 20-04 human-verify checkpoint (expanded header shows mark + "Kamacu"; collapsed rail shows the mark at the top above the avatars) and the post-rebrand README screenshot capture (D-12).
 - Keep-out boundary intact for Phase 21 (localStorage keys + `~/.kangent` paths untouched).
 
+## Self-Check: PASSED
+
+- FOUND: `.planning/phases/20-kamacu-rebrand-brand/20-03-SUMMARY.md`
+- FOUND commit `b136add` (Task 1 sidebar lockup)
+- FOUND commit `cbc3aad` (Task 2 copy rename)
+- FOUND commit `eabca0d` (docs metadata)
+- All 6 modified source files lint clean; `npm run build` exits 0.
+
 ---
 *Phase: 20-kamacu-rebrand-brand*
 *Completed: 2026-07-01*
