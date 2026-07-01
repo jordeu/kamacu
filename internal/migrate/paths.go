@@ -22,7 +22,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,9 +166,20 @@ func deleteOldTmuxRows(ctx context.Context, db *sql.DB) error {
 // repairWorktrees fixes git's two-way worktree link files for every managed repo
 // after the root moved (MIGRATE-02). RESEARCH Pitfall 2 is load-bearing: a bare
 // `git worktree repair` is a NO-OP when both the main repo and its linked
-// worktrees move together (our exact case), so the NEW worktree paths must be
-// passed explicitly; and a stale (deleted) path makes git exit 1, so each path is
+// worktrees move together (our exact case), so the NEW worktree path is passed
+// explicitly; and a stale (deleted) path makes git exit 1, so each path is
 // os.Stat-filtered first (projects.go:576 idiom) — git never sees a missing path.
+//
+// Repair is PER PATH, never one batch invocation (Gap 1, 21-VERIFICATION.md): a
+// DB-referenced worktree dir can EXIST on disk yet be UNREGISTERED in the repo's
+// .git/worktrees/ (the os.Stat filter misses this — it only drops non-existent
+// paths). `git worktree repair <that path>` then exits 1 ("does not reference a
+// repository"); in one batch call that single straggler would fail the whole
+// invocation and abort the migration (the real sched repo's 4 stale dirs → the
+// app refused to boot on every RollForward). Per-path, a nonzero exit is logged
+// via a terminal-visible slog.Warn (D-11) and SKIPPED, so Complete still proceeds
+// to deleteOldTmuxRows (MIGRATE-03) — a stale/unopenable dir is Phase-23 cleanup's
+// job, and the skip is non-destructive.
 //
 // Runs AFTER rewriteManagedPaths, so the DB already holds new-root paths. All git
 // invocations use an arg-array exec (worktree.go invariant / ASVS V5), never a
@@ -209,19 +220,28 @@ func repairWorktrees(ctx context.Context, db *sql.DB, cfg Config) error {
 		if err != nil {
 			return err
 		}
-		if len(paths) == 0 {
-			continue // nothing on disk to repair (all trees user-deleted)
-		}
-		args := append([]string{"-C", r.repoPath, "worktree", "repair"}, paths...)
-		cmd := exec.CommandContext(ctx, "git", args...)
-		var errb bytes.Buffer
-		cmd.Stderr = &errb
-		if err := cmd.Run(); err != nil {
-			msg := strings.TrimSpace(errb.String())
-			if msg == "" {
-				msg = err.Error()
+		// Repair PER PATH, not one batch invocation: an individual worktree dir
+		// may exist on disk + in the DB yet be UNREGISTERED in .git/worktrees/
+		// (the real sched repo's 4 stale dirs — Gap 1). `git worktree repair
+		// <that path>` exits 1 ("does not reference a repository"). A stale
+		// straggler must never abort the whole migration, so on a nonzero exit we
+		// log a terminal-visible slog.Warn (D-11) and skip it, letting Complete
+		// proceed to deleteOldTmuxRows (MIGRATE-03) so the app boots. A valid
+		// moved worktree still repairs (RESEARCH D) and a healthy tree is a no-op
+		// (RESEARCH E), so per-path repair keeps D-04 roll-forward idempotent.
+		for _, p := range paths {
+			cmd := exec.CommandContext(ctx, "git", "-C", r.repoPath, "worktree", "repair", p)
+			var errb bytes.Buffer
+			cmd.Stderr = &errb
+			if err := cmd.Run(); err != nil {
+				msg := strings.TrimSpace(errb.String())
+				if msg == "" {
+					msg = err.Error()
+				}
+				slog.Warn("migrate: skipping unrepairable worktree (stale/unregistered)",
+					"repo", r.repoPath, "worktree", p, "error", msg)
+				continue
 			}
-			return fmt.Errorf("migrate: git worktree repair in %s: %s", r.repoPath, msg)
 		}
 	}
 	return nil
