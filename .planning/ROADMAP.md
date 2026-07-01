@@ -131,7 +131,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 20-03-PLAN.md — Sidebar brand lockup (mark + wordmark) + user-facing copy renames (REBRAND-01/03, BRAND-01)
+- [x] 20-03-PLAN.md — Sidebar brand lockup (mark + wordmark) + user-facing copy renames (REBRAND-01/03, BRAND-01)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -226,7 +226,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
-| 20. Kamacu Rebrand & Brand | v1.8 | 2/4 | In Progress|  |
+| 20. Kamacu Rebrand & Brand | v1.8 | 3/4 | In Progress|  |
 | 21. Data Directory Migration | v1.8 | 0/TBD | Not started | - |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
