@@ -16,6 +16,11 @@
 // is wired into cmd/kamacu/main.go in Plan 21-04.
 package migrate
 
+import (
+	"context"
+	"errors"
+)
+
 // Fixed migration endpoints — the default-path literals the gate keys on (D-13).
 // A custom --db (resolvedDBPath != ExpandHome(defaultDBFlag)) opts out entirely.
 const (
@@ -24,6 +29,11 @@ const (
 	oldDBName     = "kangent.db"          // pre-rename DB file basename
 	newDBName     = "kamacu.db"           // post-rename DB file basename
 	defaultDBFlag = "~/.kamacu/kamacu.db" // the flipped --db default (D-12); main.go (21-04) passes this
+
+	// oldTmuxSocket is the LITERAL retired tmux socket (-L) name (D-05/D-08). It
+	// is intentionally NOT tmux.DefaultSocket: Plan 21-04 flips that constant to
+	// "kamacu", but this migration must always retire the OLD "kangent" server.
+	oldTmuxSocket = "kangent"
 )
 
 // Decision is the outcome of the pure startup Gate: exactly one of five states
@@ -90,4 +100,17 @@ func Gate(customDB, srcExists, dstExists bool) Decision {
 	default: // srcExists && dstExists
 		return RefuseBoot
 	}
+}
+
+// sameFilesystemFn is indirected so tests can simulate a cross-device (EXDEV)
+// layout without needing two real filesystems.
+var sameFilesystemFn = func(src, target string) (bool, error) { return true, nil } // RED stub — real impl in GREEN
+
+// retireTmux retires the old -L kangent tmux server (D-05/D-08). It is a package
+// var so unit tests can stub it and never kill a real tmux server on the host.
+var retireTmux = func(ctx context.Context, root string) {} // RED stub — real impl in GREEN
+
+// Prepare runs Part 1 of the startup migration BEFORE store.Open (see GREEN).
+func Prepare(ctx context.Context, resolvedDBPath, defaultDBFlag string) (Decision, Config, error) {
+	return FreshInstall, Config{}, errors.New("migrate: Prepare not implemented") // RED stub
 }
