@@ -103,6 +103,14 @@ func rewritePrefixColumn(db *sql.DB, cfg Config, selectSQL, updateSQL string) er
 			rows.Close()
 			return err
 		}
+		// WR-01 guard: the LIKE OldRoot||'/%' gate is unescaped, so a '_'/'%'
+		// metacharacter in OldRoot (legal in a Unix home, e.g. /home/john_doe/...)
+		// can over-match a row that is NOT truly prefixed by OldRoot. Skip it here —
+		// otherwise TrimPrefix is a no-op and filepath.Join nests the whole absolute
+		// path under NewRoot, silently corrupting a path outside the moved root (D-15).
+		if oldPath != cfg.OldRoot && !strings.HasPrefix(oldPath, cfg.OldRoot+"/") {
+			continue
+		}
 		newPath := filepath.Join(cfg.NewRoot, strings.TrimPrefix(oldPath, cfg.OldRoot))
 		rewrites = append(rewrites, rewrite{id: id, newPath: newPath})
 	}
@@ -138,9 +146,9 @@ func rewriteWorktreeBaseSetting(db *sql.DB, cfg Config) error {
 
 	var newValue string
 	switch {
-	case strings.HasPrefix(value, oldDataDir): // raw "~/.kangent/..." form
+	case hasRootPrefix(value, oldDataDir): // raw "~/.kangent/..." form
 		newValue = newDataDir + strings.TrimPrefix(value, oldDataDir)
-	case strings.HasPrefix(value, cfg.OldRoot): // expanded absolute form
+	case hasRootPrefix(value, cfg.OldRoot): // expanded absolute form
 		newValue = cfg.NewRoot + strings.TrimPrefix(value, cfg.OldRoot)
 	default:
 		return nil // under neither old root — leave untouched
@@ -150,6 +158,17 @@ func rewriteWorktreeBaseSetting(db *sql.DB, cfg Config) error {
 	}
 	_, err = db.Exec(`UPDATE settings SET value = ? WHERE key = ?`, newValue, settings.KeyWorktreeBase)
 	return err
+}
+
+// hasRootPrefix reports whether value is root itself or lives UNDER root (root
+// followed by a path separator). It is the separator-boundary guard the
+// worktree_base rewrite needs (WR-02): a bare strings.HasPrefix(value, root)
+// wrongly matches a SIBLING dir that only shares the root's NAME PREFIX (e.g.
+// "~/.kangent-backup" vs root "~/.kangent"), silently rewriting a setting that
+// points OUTSIDE the migrated root. Mirrors the DB path rewrite's OldRoot||'/%'
+// boundary discipline (D-15).
+func hasRootPrefix(value, root string) bool {
+	return value == root || strings.HasPrefix(value, root+"/")
 }
 
 // deleteOldTmuxRows removes every retired kangent-* tmux_sessions row (D-07/D-08)
