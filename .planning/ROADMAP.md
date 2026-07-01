@@ -101,7 +101,7 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
 
 **Milestone Goal:** Rebrand kangent → Kamacu (full code/binary/module rename plus a one-time, gated on-disk migration of `~/.kangent` → `~/.kamacu` that keeps live worktrees, sessions, and DB intact) and sharpen the daily-driver UX — a GitHub-style "Files changed" diff view, a Settings worktree-cleanup panel, renameable bash/tmux tabs, a task-view actions menu that replaces the auto-inserted review prompt, and session-bar / board refinements.
 
-- [ ] **Phase 20: Kamacu Rebrand & Brand** — Rename to Kamacu across code/binary/module/UI and ship the new logo, favicon, and README (no data-path change yet)
+- [x] **Phase 20: Kamacu Rebrand & Brand** — Rename to Kamacu across code/binary/module/UI and ship the new logo, favicon, and README (no data-path change yet) (completed 2026-07-01)
 - [ ] **Phase 21: Data Directory Migration** — One-time gated `~/.kangent` → `~/.kamacu` move that repairs worktrees, rewrites DB paths, switches the tmux socket/prefix, and migrates localStorage
 - [ ] **Phase 22: GitHub-Style Diff Review** — File-tree diff view with per-file collapse and sticky "Viewed" state that resets only when a file changes
 - [ ] **Phase 23: Worktree Cleanup Panel** — Settings panel listing every worktree (incl. orphans) with per-item force-remove and a bulk "clean eligible" action
@@ -135,7 +135,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 20-04-PLAN.md — Repo-root README + end-of-phase branding human-verify & screenshot capture (BRAND-03)
+- [x] 20-04-PLAN.md — Repo-root README + end-of-phase branding human-verify & screenshot capture (BRAND-03)
 
 **UI hint**: yes
 
@@ -226,7 +226,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
-| 20. Kamacu Rebrand & Brand | v1.8 | 3/4 | In Progress|  |
+| 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete   | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 0/TBD | Not started | - |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
