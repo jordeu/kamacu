@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"kangent/internal/session"
+	"kamacu/internal/session"
 )
 
 // HookRoutes registers the Claude Code hook receiver (STAT-02). Each agent

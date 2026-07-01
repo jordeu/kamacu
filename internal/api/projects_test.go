@@ -15,12 +15,12 @@ import (
 
 	"context"
 
-	"kangent/internal/github"
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/github"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // newRepoTestServer is like newTestServer but also points the managed-clone base

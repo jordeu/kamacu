@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"kangent/internal/github"
-	"kangent/internal/settings"
-	"kangent/internal/worktree"
+	"kamacu/internal/github"
+	"kamacu/internal/settings"
+	"kamacu/internal/worktree"
 )
 
 // viewPR is the PR-metadata read seam (defaults to github.ViewPR). It is a

@@ -17,11 +17,11 @@ import (
 
 	"github.com/coder/websocket"
 
-	"kangent/internal/api"
-	"kangent/internal/session"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/ws"
+	"kamacu/internal/api"
+	"kamacu/internal/session"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/ws"
 )
 
 // newTestServer builds the mux exactly as cmd/kangent/main.go does and serves

@@ -14,7 +14,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/google/uuid"
 
-	"kangent/internal/tmux"
+	"kamacu/internal/tmux"
 )
 
 // ErrStillRunning is returned by Remove for sessions that have not exited.

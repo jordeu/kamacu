@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"strings"
 
-	"kangent/internal/github"
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/github"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // Project is the JSON shape of a project row (RESEARCH.md Pattern 4).

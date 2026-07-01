@@ -8,7 +8,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"kangent/internal/session"
+	"kamacu/internal/session"
 )
 
 // Handler upgrades GET /api/sessions/{id}/ws requests and bridges the

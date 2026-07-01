@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/session"
+	"kamacu/internal/session"
 )
 
 // testHookToken is the per-instance token the hook test server is configured

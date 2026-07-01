@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"kangent/internal/settings"
+	"kamacu/internal/settings"
 )
 
 func TestTokenize(t *testing.T) {

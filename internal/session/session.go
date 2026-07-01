@@ -21,7 +21,7 @@ import (
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
 
-	"kangent/internal/tmux"
+	"kamacu/internal/tmux"
 )
 
 // Status is a session lifecycle state.

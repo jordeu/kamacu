@@ -16,12 +16,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
-	"kangent/internal/ws"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
+	"kamacu/internal/ws"
 )
 
 // agentLifecycleToken is the per-instance hook token the lifecycle harness is

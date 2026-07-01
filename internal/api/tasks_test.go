@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
 )
 
 // createTask POSTs a task to a project and returns the decoded response body.

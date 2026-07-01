@@ -17,17 +17,17 @@ import (
 	"strings"
 	"time"
 
-	"kangent/internal/api"
-	"kangent/internal/github"
-	"kangent/internal/quota"
-	"kangent/internal/reaper"
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
-	"kangent/internal/ws"
-	"kangent/web"
+	"kamacu/internal/api"
+	"kamacu/internal/github"
+	"kamacu/internal/quota"
+	"kamacu/internal/reaper"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
+	"kamacu/internal/ws"
+	"kamacu/web"
 )
 
 func main() {

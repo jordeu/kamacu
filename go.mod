@@ -1,4 +1,4 @@
-module kangent
+module kamacu
 
 go 1.26
 

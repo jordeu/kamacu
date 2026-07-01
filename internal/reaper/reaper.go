@@ -32,11 +32,11 @@ import (
 	"log/slog"
 	"time"
 
-	"kangent/internal/api"
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/api"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // defaultTick is how often the reaper scans for expired Done tasks. The window

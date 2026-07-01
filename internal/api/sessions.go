@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/tmux"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/tmux"
 )
 
 // SessionRoutes registers terminal session endpoints on mux. db is consulted to

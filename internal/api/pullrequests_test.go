@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"kangent/internal/github"
-	"kangent/internal/settings"
-	"kangent/internal/store"
-	"kangent/internal/worktree"
+	"kamacu/internal/github"
+	"kamacu/internal/settings"
+	"kamacu/internal/store"
+	"kamacu/internal/worktree"
 )
 
 // prFake is the call-counting fake runner injected into the Service so no real

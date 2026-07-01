@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"kangent/internal/session"
-	"kangent/internal/settings"
-	"kangent/internal/tmux"
-	"kangent/internal/worktree"
+	"kamacu/internal/session"
+	"kamacu/internal/settings"
+	"kamacu/internal/tmux"
+	"kamacu/internal/worktree"
 )
 
 // Task is the JSON shape of a task row (RESEARCH.md Pattern 4). position is

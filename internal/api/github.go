@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"kangent/internal/github"
+	"kamacu/internal/github"
 )
 
 // githubStatus handles GET /api/github/status — an always-200 read of whether
