@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.7
-milestone_name: Project Icons in Collapsed Sidebar
-status: Awaiting next milestone
-stopped_at: Milestone v1.7 complete & archived (tag pending push decision)
-last_updated: "2026-06-26T10:53:14.362Z"
-last_activity: 2026-06-26 — Completed quick task 260626-hwd: opt-in --insecure-allow-remote flag (bind off-loopback; safe by default)
+milestone: v1.8
+milestone_name: Kamacu Rebrand & UX Polish
+status: planning
+last_updated: "2026-07-01T09:45:22.187Z"
+last_activity: 2026-07-01
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 ## Current Position
 
-Phase: Milestone v1.7 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-26 — Completed quick task 260626-hwd: opt-in --insecure-allow-remote flag (bind off-loopback; safe by default)
+Status: Defining requirements
+Last activity: 2026-07-01 — Milestone v1.8 started
 
 ### Phase 19 UAT decisions (visual revisions, user-approved — treat as the new contract)
 

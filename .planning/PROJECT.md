@@ -8,9 +8,18 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Between Milestones — v1.7 shipped 2026-06-19
+## Current Milestone: v1.8 Kamacu Rebrand & UX Polish
 
-**Next:** run `/gsd:new-milestone` to scope the next milestone (questioning → research → requirements → roadmap). Banked-forward candidates are in **Next Milestone** and **Deferred** below.
+**Goal:** Rebrand kangent → Kamacu (full rename incl. a one-time, gated on-disk migration of `~/.kangent` → `~/.kamacu`) and sharpen the daily-driver UX — GitHub-style diff review, forceable worktree cleanup, tab renaming, and session-bar / board refinements.
+
+**Target features:**
+- Full rename kangent → kamacu across UI/brand, binary, Go module, and packages, plus a gated startup migration of the `~/.kangent` data dir (git worktree repair, DB worktree-path rewrite, tmux socket `-L kangent` → `-L kamacu` + `kangent-*` session prefix, localStorage keys) so live worktrees/sessions/DB survive
+- New Kamacu logo + favicon; add a README.md
+- GitHub "Files changed"-style diff view: left file tree, collapsible per-file diffs, and a persistent per-file "Viewed" checkbox that resets + re-expands only when a file changes
+- Settings worktree-cleanup panel: list every worktree (referenced/orphaned, dirty/unpushed flags) with per-item force-remove + a bulk "clean eligible" action
+- Task-view three-dots menu (Stop + Insert review prompt) replacing the Stop button, with the PR review prompt no longer auto-inserted
+- Rename bash/tmux tabs (auto-names Bash 1/2… kept as defaults)
+- Session-bar / board polish: remove the total-sessions count, auto-collapse the bottom bar on outside click, remove the To Do "+ New task" shortcut
 
 _v1.7 Project Icons in Collapsed Sidebar shipped 2026-06-19 (archived to `milestones/v1.7-*`). See the Validated requirements and Current State below for what shipped._
 
@@ -163,7 +172,15 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-_Between milestones — v1.7 shipped 2026-06-19. No milestone is currently scoped; run `/gsd:new-milestone` to define the next one. Banked-forward candidates live in **Next Milestone** and **Deferred** below and in the archived milestones' Future Requirements._
+_v1.8 Kamacu Rebrand & UX Polish — full requirements in `.planning/REQUIREMENTS.md`, phase plan in `.planning/ROADMAP.md`._
+
+- [ ] Full rename kangent → kamacu (UI/brand/binary/module/packages) + gated `~/.kangent` → `~/.kamacu` data migration (git worktree repair, DB path rewrite, tmux socket/session prefix, localStorage keys)
+- [ ] Kamacu logo + favicon; README.md
+- [ ] GitHub "Files changed"-style diff view (file tree, collapsible diffs, persistent per-file "Viewed" with change-reset)
+- [ ] Settings worktree-cleanup panel (list + per-item force-remove + bulk clean eligible)
+- [ ] Task-view three-dots menu (Stop + Insert review prompt); no PR-review-prompt auto-insert
+- [ ] Rename bash/tmux tabs
+- [ ] Session-bar / board polish: remove total-sessions count, auto-collapse on outside click, remove To Do "+ New task" shortcut
 
 ### Out of Scope
 
@@ -207,7 +224,7 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**No milestone currently scoped — v1.7 shipped 2026-06-19.** Run `/gsd:new-milestone` to define the next one. Candidates carried forward are parked below.
+**v1.8 Kamacu Rebrand & UX Polish is scoped (started 2026-07-01).** Candidates NOT pulled into v1.8 are parked below for a future milestone.
 
 Banked forward investments worth a future milestone:
 - v1.7 project-icon follow-ups, scoped in `milestones/v1.7-REQUIREMENTS.md` "Future Requirements": image/logo icons (ICON-FUT-01), emoji icons (ICON-FUT-02), free-form hex color beyond the curated swatches (ICON-FUT-03), drag-to-reorder projects in the rail (ICON-FUT-04), and Add-project (+) / Settings (gear) reachable as icons in the collapsed rail so it is fully functional without expanding (ICON-FUT-05).
@@ -283,4 +300,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-19 — v1.7 Project Icons in Collapsed Sidebar shipped (Phases 18–19); milestone full evolution review complete*
+*Last updated: 2026-07-01 — v1.8 Kamacu Rebrand & UX Polish scoped (Current Milestone + Active requirements set); requirements/roadmap to follow*
