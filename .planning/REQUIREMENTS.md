@@ -15,11 +15,11 @@ Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly 
 
 ### Migrate (one-time on-disk data migration)
 
-- [ ] **MIGRATE-01**: On first launch after upgrade, the app performs a one-time, gated migration of the data directory `~/.kangent` → `~/.kamacu` (managed repos, worktrees, and the SQLite DB)
-- [ ] **MIGRATE-02**: After the move, every task/PR git worktree stays valid — worktree links are repaired (`git worktree repair`) and the DB's stored worktree/repo paths are rewritten to the new `~/.kamacu` location
-- [ ] **MIGRATE-03**: The tmux socket (`-L kangent` → `-L kamacu`) and session prefix (`kangent-<task>-<n>` → `kamacu-<task>-<n>`) are switched for new sessions, and pre-existing live `kangent-*` sessions are reconciled (reattached or cleanly retired) without orphaning a running agent
-- [ ] **MIGRATE-04**: Browser `localStorage` keys under `kangent.*` are migrated to `kamacu.*` so sidebar state, collapse preferences, and panel settings carry over
-- [ ] **MIGRATE-05**: The migration is idempotent and safe — an already-migrated or fresh install is detected and skipped; a failure leaves the original `~/.kangent` untouched and surfaces a clear error instead of a half-migrated state
+- [x] **MIGRATE-01**: On first launch after upgrade, the app performs a one-time, gated migration of the data directory `~/.kangent` → `~/.kamacu` (managed repos, worktrees, and the SQLite DB)
+- [x] **MIGRATE-02**: After the move, every task/PR git worktree stays valid — worktree links are repaired (`git worktree repair`) and the DB's stored worktree/repo paths are rewritten to the new `~/.kamacu` location
+- [x] **MIGRATE-03**: The tmux socket (`-L kangent` → `-L kamacu`) and session prefix (`kangent-<task>-<n>` → `kamacu-<task>-<n>`) are switched for new sessions, and pre-existing live `kangent-*` sessions are reconciled (reattached or cleanly retired) without orphaning a running agent
+- [x] **MIGRATE-04**: Browser `localStorage` keys under `kangent.*` are migrated to `kamacu.*` so sidebar state, collapse preferences, and panel settings carry over
+- [x] **MIGRATE-05**: The migration is idempotent and safe — an already-migrated or fresh install is detected and skipped; a failure leaves the original `~/.kangent` untouched and surfaces a clear error instead of a half-migrated state
 
 ### Brand (logo, favicon, docs)
 
@@ -104,11 +104,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 | REBRAND-01 | Phase 20 | Complete |
 | REBRAND-02 | Phase 20 | Complete |
 | REBRAND-03 | Phase 20 | Complete |
-| MIGRATE-01 | Phase 21 | Pending |
-| MIGRATE-02 | Phase 21 | Pending |
-| MIGRATE-03 | Phase 21 | Pending |
-| MIGRATE-04 | Phase 21 | Pending |
-| MIGRATE-05 | Phase 21 | Pending |
+| MIGRATE-01 | Phase 21 | Complete |
+| MIGRATE-02 | Phase 21 | Complete |
+| MIGRATE-03 | Phase 21 | Complete |
+| MIGRATE-04 | Phase 21 | Complete |
+| MIGRATE-05 | Phase 21 | Complete |
 | BRAND-01 | Phase 20 | Complete |
 | BRAND-02 | Phase 20 | Complete |
 | BRAND-03 | Phase 20 | Complete |

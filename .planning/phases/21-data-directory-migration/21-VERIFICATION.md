@@ -1,18 +1,29 @@
 ---
 phase: 21-data-directory-migration
-verified: 2026-07-01T16:20:02Z
-status: gaps_found
-score: 1/5 must-haves verified
-source_gate: 21-05 Task 1 automated migration smoke (copied-HOME UAT)
+verified: 2026-07-01T19:30:00Z
+status: passed
+score: 5/5 must-haves verified
+overrides_applied: 0
+re_verification:
+  previous_status: gaps_found
+  previous_score: 1/5
+  gaps_closed:
+    - "First boot migrates the dir to ~/.kamacu and the app serves against it (MIGRATE-01) — repairWorktrees no longer aborts on stale worktrees"
+    - "After migration a migrated worktree is a clean git status; DB paths rewritten (MIGRATE-02)"
+    - "Second boot is a clean no-op (MIGRATE-05) — Complete now survives stale stragglers"
+    - "Copied-HOME UAT recipe is now git-safe; real install proven byte-identical (Gap 2)"
+    - "Browser kamacu.* localStorage keys populated from kangent.* (MIGRATE-04) — human-confirmed via 21-07"
+    - "Board loads, task view opens, dead agent resumes, diff renders (MIGRATE-01/02/03) — human-confirmed via 21-07"
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 21: Data Directory Migration Verification Report
 
 **Phase Goal:** An existing `~/.kangent` install upgrades cleanly to `~/.kamacu` — live worktrees, sessions, the SQLite DB, and browser state all survive — while a fresh or already-migrated install skips safely and any failure is recoverable.
-**Verified:** 2026-07-01T16:20:02Z
-**Status:** gaps_found
-
-This report captures the outcome of the phase gate (Plan 21-05's Task 1 automated smoke run against a copy of the real 5.5 GB `~/.kangent` install). Plans 21-01…21-04 are complete and merged; the gate exposed a real, blocking migration defect plus an unsafe UAT recipe. The real install was briefly mutated by the test harness (Finding 2) and has been fully recovered — independently re-verified byte-intact (see "Real Install Safety").
+**Verified:** 2026-07-01T19:30:00Z
+**Status:** passed
+**Re-verification:** Yes — after gap closure (21-06 code fix + 21-07 git-safe live re-run). The first live gate (21-05) failed with 2 blocking gaps; both are now closed and independently confirmed against HEAD.
 
 ## Goal Achievement
 
@@ -20,104 +31,80 @@ This report captures the outcome of the phase gate (Plan 21-05's Task 1 automate
 
 | # | Truth (must_have) | Status | Evidence |
 |---|-------------------|--------|----------|
-| 1 | First boot migrates the dir to `~/.kamacu` and the app serves against it (MIGRATE-01) | ✗ FAILED | Dir move + WAL-safe DB rename succeed (`migrated ~/.kangent -> ~/.kamacu` logged once; `.kamacu` present, `.kangent` gone; `kamacu.db` present). BUT `migrate.Complete` returns an error at `repairWorktrees` → `os.Exit(1)`; `/api/healthz` never comes up. App does **not** serve on a real install. |
-| 2 | After migration a migrated worktree is a clean `git status`; DB paths rewritten (MIGRATE-02) | ✗ FAILED (partial) | DB rewrite ✓ — all 9 managed `repo_path` + 29 `tasks.worktree_path` under `.kamacu`, 0 under `.kangent` (hot-WAL fold preserved full row integrity). Worktree repair ✗ — aborts on stale/unregistered worktree dirs (Finding 1). |
-| 3 | Second boot is a clean no-op — dir stays `~/.kamacu`, no re-migration logged (MIGRATE-05) | ✗ FAILED (partial) | Rename gate correct (no migrate line, dir stays `.kamacu`). BUT boot 2 (RollForward) re-runs `Complete` → same `repairWorktrees` error → refuses to serve. Not a clean no-op. |
-| 4 | Browser `kamacu.*` localStorage keys populated from `kangent.*` (MIGRATE-04) | ? UNCERTAIN (needs human) | Shipped in 21-01 (idempotent copy, wired in `main.tsx`); requires the browser walkthrough (Task 2), which was not reached because the automated smoke failed first. |
-| 5 | Board loads, task view opens, a dead agent resumes, a diff renders (MIGRATE-01/02/03) | ? UNCERTAIN (needs human) | Blocked — the migrated instance cannot serve (Finding 1), so the human walkthrough could not run. |
+| 1 | First launch migrates the data dir `~/.kangent` → `~/.kamacu` and the app runs against the new location (MIGRATE-01) | ✓ VERIFIED | `migrate.Prepare` (migrate.go:142) gates + preflights + `os.Rename` commit point (line 180) + WAL-safe DB rename (`PRAGMA wal_checkpoint(TRUNCATE)`, line 252) + tmux retire, wired in `main.go:75` BEFORE `store.Open` (line 91). Gap-1 fix lets `Complete` finish so the app serves. 21-07 live run against a copy of the real 5.5 GB install: boot logged `migrated ~/.kangent -> ~/.kamacu` once, `/api/healthz` → `{"status":"ok"}`; `.kamacu` present, `.kangent` gone, `kamacu.db` present. Human confirmed board loads. |
+| 2 | Every worktree stays valid — links repaired + DB paths rewritten to `~/.kamacu` (MIGRATE-02) | ✓ VERIFIED | `rewriteManagedPaths` (paths.go:65) prefix-swaps managed `repo_path`/`worktree_path`/`worktree_base` (managed=1, under old root only; `TrimPrefix`+`Join`, never a global replace). `repairWorktrees` (paths.go:192) runs `git worktree repair` PER PATH with arg-array exec. 21-07: 9/9 managed repos + 29/29 worktree paths rewritten under `.kamacu`, 0 under `.kangent`; migrated worktree `git status` exit 0. Human confirmed diff renders. Regression `TestCompleteRepairsMovedWorktrees` + `TestCompleteToleratesUnregisteredWorktree` pass. |
+| 3 | tmux socket/prefix switched; live `kangent-*` sessions retired without orphaning an agent; new sessions use `-L kamacu` + `kamacu-<task>-<n>` (MIGRATE-03) | ✓ VERIFIED | `retireTmux` (migrate.go:125) kills the old `-L kangent` server (agents run as bare PTYs, never under tmux). `deleteOldTmuxRows` (paths.go:161) DELETEs `kangent-%` rows so reopened tasks respawn fresh. `tmux.DefaultSocket = "kamacu"` (tmux.go:22); `sessions.go:302` names `kamacu-%d-%d`; orphan sweep guards on the `kamacu-` prefix (main.go:307). 21-07: 0 `kangent-%` rows remain; human confirmed a fresh `kamacu-*` shell spawns and an agent resumes via `claude --resume`. |
+| 4 | Browser `localStorage kamacu.*` keys populated from `kangent.*` (MIGRATE-04) | ✓ VERIFIED | `web/src/lib/migrateStorage.ts` one-shot separator-agnostic prefix scan copies every `kangent`-prefixed value to the `kamacu`-prefixed key when absent, guarded idempotent; invoked in `main.tsx:20` before `createRoot`. Components consume the new keys: `kamacu.sidebar` (AppLayout.tsx:8), `kamacu:sessions-bar-collapsed` (ActiveSessionsBar.tsx:33), `kamacu:review-collapsed:${projectId}` (ReviewColumn.tsx:56). Human confirmed carryover in the 21-07 browser walkthrough (recorded sign-off). |
+| 5 | Migration is idempotent + safe: fresh/already-migrated skips; a failure leaves `~/.kangent` untouched with a clear error (MIGRATE-05) | ✓ VERIFIED | Pure 5-branch `Gate` (migrate.go:98): SkipCustom / DoMigrate / RollForward / FreshInstall / RefuseBoot. Preflight (line 212) runs before the `os.Rename` commit point; EXDEV and both-dirs anomalies refuse to boot with a clear `slog.Error` (main.go:77). Every Part-2 step self-gates on observable state (LIKE-gate, no-op repair, empty DELETE) so `Complete` is re-runnable on the RollForward path. 21-07: clean no-op second boot (no migrate line, dir stays `.kamacu`); real `~/.kangent` byte-identical before/after (120,359-file name+size manifest IDENTICAL). |
 
-**Score:** 1/5 truths verified (only the WAL-safe DB path rewrite fully passed; the dir-move mechanics work but the app cannot complete startup)
+**Score:** 5/5 truths verified
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `internal/migrate/migrate.go` (Part-1) | Gate + preflight + atomic rename + WAL-safe DB rename + tmux retire | ✓ EXISTS + SUBSTANTIVE | 9 unit tests pass incl. hot-WAL guard; dir move + DB rename verified live |
-| `internal/migrate/paths.go` (Part-2) | Path rewrite + worktree repair + tmux row delete | ✗ DEFECTIVE | `repairWorktrees` aborts on stale worktrees (Finding 1); `deleteOldTmuxRows` never reached |
-| `cmd/kamacu/main.go` wiring | Part-1 before store.Open, Part-2 after store.Migrate | ✓ EXISTS + SUBSTANTIVE | Ordering line-asserted; refuse-to-boot path works (arguably too aggressively — see Finding 1) |
-| `web/src/lib/migrateStorage.ts` | localStorage carryover | ✓ EXISTS + SUBSTANTIVE | Needs human confirmation (Task 2) |
+| `internal/migrate/migrate.go` (Part 1) | Gate + preflight + atomic rename + WAL-safe DB rename + tmux retire | ✓ VERIFIED | 301 lines; substantive; 12 unit tests incl. hot-WAL guard, cross-device refusal, both-dirs RefuseBoot, Gate table. Wired in main.go:75. |
+| `internal/migrate/paths.go` (Part 2) | Managed-path rewrite + per-path worktree repair + tmux-row delete | ✓ VERIFIED | 279 lines. Gap-1 fix present: `repairWorktrees` loops per path (line 232), on nonzero exit emits `slog.Warn` (line 241) + `continue` (line 244) — never returns the git error; `Complete` (line 42) still reaches `deleteOldTmuxRows`. Arg-array exec only (line 233), no `sh -c`. |
+| `cmd/kamacu/main.go` wiring | Part 1 before store.Open, Part 2 after store.Migrate | ✓ VERIFIED | `migrate.Prepare` at line 75 (before `os.MkdirAll`/`store.Open`); `migrate.Complete` at line 113 (after `store.Migrate`, gated to DoMigrate/RollForward); refuse-to-boot on error (lines 77, 114). |
+| `web/src/lib/migrateStorage.ts` | localStorage carryover | ✓ VERIFIED | Substantive one-shot prefix migration; wired in main.tsx:20 before render; consuming components read kamacu.* keys. Human-confirmed live (21-07). |
+| `internal/migrate/worktree_repair_test.go` | Regression test for stale/unregistered worktree | ✓ VERIFIED | `TestCompleteToleratesUnregisteredWorktree` (line 187) faithfully reproduces the 4 real `sched` stragglers (real `git worktree add` then rm `.git/worktrees/<id>`); asserts Complete returns nil, valid worktree repaired, 0 `kangent-%` rows, second Complete no-op. PASS with the expected WARN skip lines. |
 
-## Requirements Coverage
+### Key Link Verification
 
-| Requirement | Status | Blocking Issue |
-|-------------|--------|----------------|
-| MIGRATE-01: dir moves + app runs against `~/.kamacu` | ✗ BLOCKED | App refuses to boot (Finding 1) |
-| MIGRATE-02: worktrees valid + DB paths rewritten | ✗ BLOCKED | DB rewrite works; worktree repair aborts on stale worktrees (Finding 1) |
-| MIGRATE-03: tmux socket/prefix switch + `kangent-%` row cleanup | ✗ BLOCKED | Socket/prefix flip ✓ (21-04); row DELETE never runs — `Complete` aborts before it (Finding 1) |
-| MIGRATE-04: localStorage carryover | ? NEEDS HUMAN | Deferred to Task 2 (not reached) |
-| MIGRATE-05: safe gate / recoverable failure / no-op second boot | ✗ BLOCKED | Gate + preflight safety ✓, but boot 2 refuses to serve (Finding 1); anomaly refuse-to-boot untested |
+| From | To | Via | Status | Details |
+|------|-----|-----|--------|---------|
+| `main.go` | `migrate.Prepare` | before store.Open | ✓ WIRED | main.go:75, followed by store.Open at :91 |
+| `main.go` | `migrate.Complete` | after store.Migrate | ✓ WIRED | main.go:113, after store.Migrate at :98 |
+| `paths.go repairWorktrees` | `git worktree repair` (per path) | arg-array exec; nonzero → slog.Warn + continue | ✓ WIRED | paths.go:233 exec; :241 slog.Warn; :244 continue — Gap-1 fix |
+| `paths.go Complete` | `deleteOldTmuxRows` | repair no longer returns fatal error | ✓ WIRED | paths.go:49 — DELETE always reached |
+| `main.tsx` | `migrateStorage` | call before createRoot | ✓ WIRED | main.tsx:7 import, :20 invoke |
+| `rewriteManagedPaths` | projects/tasks/settings rows | UPDATE WHERE managed=1 AND path LIKE oldRoot||'/%' | ✓ WIRED | paths.go:65-153, collect-then-update (SetMaxOpenConns(1) discipline) |
 
-**Coverage:** 0/5 fully satisfied (1 partial DB-rewrite pass)
+### Behavioral Spot-Checks
 
-## Anti-Patterns Found
+| Behavior | Command | Result | Status |
+|----------|---------|--------|--------|
+| Full Go build | `go build ./...` | clean | ✓ PASS |
+| Static analysis | `go vet ./...` | clean | ✓ PASS |
+| Full test suite (13 pkgs) | `go test ./...` | all `ok` | ✓ PASS |
+| Migrate package tests | `go test ./internal/migrate/... -count=1` | 17 `--- PASS` | ✓ PASS |
+| Gap-1 regression | `go test -run TestCompleteToleratesUnregisteredWorktree -v` | PASS; WARN skip on ghost worktree; valid tree repaired; 0 kangent-% rows | ✓ PASS |
+
+### Requirements Coverage
+
+| Requirement | Source Plan(s) | Description | Status | Evidence |
+|-------------|---------------|-------------|--------|----------|
+| MIGRATE-01 | 21-02, 21-04, 21-05, 21-07 | One-time gated dir move + app runs against `~/.kamacu` | ✓ SATISFIED | Prepare wiring + Gap-1 fix; 21-07 live boot served |
+| MIGRATE-02 | 21-03, 21-05, 21-06, 21-07 | Worktree links repaired + DB paths rewritten | ✓ SATISFIED | rewriteManagedPaths + per-path repair; 9/9 + 29/29 rewritten, clean git status |
+| MIGRATE-03 | 21-03, 21-04, 21-05, 21-06, 21-07 | tmux socket/prefix switch + `kangent-*` reconciled | ✓ SATISFIED | retireTmux + deleteOldTmuxRows + DefaultSocket/sessions naming; 0 kangent-% rows |
+| MIGRATE-04 | 21-01, 21-05, 21-07 | localStorage `kangent.*` → `kamacu.*` carryover | ✓ SATISFIED | migrateStorage.ts wired in main.tsx; human-confirmed live |
+| MIGRATE-05 | 21-02, 21-04, 21-05, 21-07 | Idempotent + safe; fresh/migrated skip; failure recoverable | ✓ SATISFIED | 5-branch Gate + preflight-before-commit; clean no-op boot 2; real install byte-identical |
+
+**Coverage:** 5/5 fully satisfied. All 5 MIGRATE requirement IDs appear in both plan frontmatter and REQUIREMENTS.md; no orphaned requirements.
+
+### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| internal/migrate/paths.go | `repairWorktrees` / `existingWorktreePaths` | Passes all `os.Stat`-existing DB worktree paths to one `git worktree repair`; treats any non-zero exit as fatal | 🛑 Blocker | Real `sched` repo's 4 stale (existing-but-unregistered) worktree dirs make repair exit non-zero → migration refuses to boot and keeps failing on every RollForward |
-| 21-05-PLAN.md / 21-RESEARCH.md OQ3 | copied-HOME recipe | Rewrites copy's DB paths but not on-disk `.git`/`gitdir` link files (baked absolute `/home/jordi/.kangent`) | 🛑 Blocker (UAT) | `git worktree repair` follows absolute pointers into the REAL install; HOME override does not isolate git. Threat T-21-05-07 ("real install untouched") unmitigated for the repair step |
+| — | — | No `TBD`/`FIXME`/`XXX`/`HACK`/`PLACEHOLDER`/`TODO` in any migration or wiring file | — | None |
 
-## Real Install Safety (independently re-verified by orchestrator)
+The Blocker anti-pattern from the prior report (`repairWorktrees` treating a batch non-zero exit as fatal) is RESOLVED: repair is now per-path with `slog.Warn` + skip.
 
-- `~/.kangent` present; `~/.kamacu` absent ✓
-- Real DB byte-sizes unchanged (`kangent.db`=4096, `-wal`=2381392, `-shm`=32768; real DB never opened) ✓
-- Zero `/tmp/claude-1000` references anywhere under `~/.kangent` ✓
-- All managed repos' `git worktree list` show only `/home/jordi` paths ✓
-- Executor's before-vs-recovered manifest (153,802 files, name+size): IDENTICAL. Only residual: one benign git stat-cache index inode change (size identical).
+### Gap Closure (from prior gaps_found report)
 
-## Gaps Summary
+| Prior Gap | Status | Evidence on HEAD |
+|-----------|--------|------------------|
+| Gap 1 (code): `repairWorktrees` aborts the whole migration on a stale/unregistered worktree | ✓ CLOSED | paths.go:218-246 per-path loop; nonzero exit → `slog.Warn` + `continue`, never `return err`; commits `8875d6e` (RED) + `1bbd0e8` (GREEN) on HEAD, merged via `8295cdc`; `TestCompleteToleratesUnregisteredWorktree` passes. |
+| Gap 2 (UAT harness): copied-HOME recipe let `git worktree repair` reach the real install | ✓ CLOSED | 21-07 git-safe recipe rewrites the copy's DB **and** all on-disk git link files before boot, gated by a real-GNU-grep zero-leak isolation assertion; RESEARCH OQ3 updated. Real install byte-identical (120,359-file manifest); `~/.kamacu` absent throughout. |
 
-### Critical Gaps (Block Progress)
+### Human Verification Required
 
-1. **`repairWorktrees` aborts the whole migration on a single stale/unregistered worktree**
-   - Missing: tolerance for DB-referenced worktree dirs that exist on disk but are not registered in the repo's `.git/worktrees/`
-   - Impact: Deterministic refuse-to-boot on the real install (4 stale `sched` dirs); also prevents `deleteOldTmuxRows` (MIGRATE-03) from ever running. Blocks MIGRATE-01/02/03/05.
-   - Fix: Before calling `git worktree repair`, intersect DB worktree paths with `git worktree list --porcelain` (skip unregistered) — or run repair per-path and log+skip individual "not a valid worktree" failures. Add a regression test for an existing-but-unregistered worktree dir.
+None outstanding. The decisive end-to-end verification was a live, human-approved run (Plan 21-07) against a provably-isolated copy of the real install. The human confirmed: board loads, agent resumes via `claude --resume`, a fresh `kamacu-*` shell spawns, the diff renders, a migrated worktree's `git status` is clean, and `kamacu.*` localStorage keys carried over. These items are marked passed on the recorded 21-07 sign-off (2026-07-01); no new human run is demanded.
 
-2. **Copied-HOME UAT recipe lets `git worktree repair` reach into the real install**
-   - Missing: relocation of the copy's on-disk `.git` gitfiles and `.git/worktrees/*/gitdir` (baked `/home/jordi/.kangent` → `$TMPHOME/.kangent`) before boot
-   - Impact: The verification harness itself mutated the real install (recovered). Re-verification cannot be safely rerun until fixed.
-   - Fix: In the UAT recipe, rewrite the copy's DB **and** all on-disk git link files to `$TMPHOME/.kangent` before the first boot, so post-rename pointers dangle exactly like the real in-place case. Update the 21-05 threat register to note HOME override does not isolate `git`.
+### Gaps Summary
 
-### Non-Critical Gaps (Can Defer)
-
-None — both gaps are blocking.
-
-## Recommended Fix Plans
-
-### 21-06-PLAN.md: Harden worktree repair against stale worktrees (code)
-
-**Objective:** Make `migrate.Complete` survive DB-referenced worktree dirs that git no longer tracks, so the real install boots.
-
-**Tasks:**
-1. In `internal/migrate/paths.go`, filter the repair set to genuinely registered worktrees (intersect with `git worktree list --porcelain`) or tolerate per-path repair failures (log + skip); ensure `deleteOldTmuxRows` still runs afterward.
-2. Add a regression test: a repo with an existing-but-unregistered worktree dir migrates without error and still deletes `kangent-%` tmux rows.
-3. Verify: `go test ./internal/migrate/...` green; `go build`/`vet`/`test ./...` green.
-
-**Estimated scope:** Small
+No gaps. All five observable truths are VERIFIED and all five MIGRATE requirements are satisfied. Both blocking gaps from the prior 21-05 gate failure are closed on HEAD: the code fix (21-06) is present and covered by a passing regression test, and the harness fix (21-07) proved the migration completes live while leaving the real `~/.kangent` byte-identical. Plan 21-05 is closed as superseded-by-21-07. Build, vet, and the full 13-package test suite are green.
 
 ---
-
-### 21-07-PLAN.md: Make the copied-HOME UAT recipe git-safe (plan/harness)
-
-**Objective:** A re-runnable, provably-isolated end-to-end migration UAT that cannot touch the real install.
-
-**Tasks:**
-1. Update the 21-05 UAT recipe (and 21-RESEARCH OQ3) to rewrite the copy's on-disk `.git`/`gitdir` link files (and DB) from `/home/jordi/.kangent` → `$TMPHOME/.kangent` before any boot; update the threat register (HOME override ≠ git isolation).
-2. Re-run the automated smoke against a fresh copy; assert boot serves, boot 2 is a clean no-op, and the real install manifest is byte-identical before/after.
-3. Present the human-verify checkpoint (Task 2) once the automated smoke passes.
-
-**Estimated scope:** Small/Medium
-
----
-
-## Verification Metadata
-
-**Verification approach:** Live end-to-end gate (Plan 21-05 Task 1 automated smoke against a copy of the real install)
-**Must-haves source:** 21-05-PLAN.md frontmatter + ROADMAP.md phase goal
-**Automated checks:** 16 passed, 4 failed (dir move / WAL-safe DB rename / DB path rewrite pass; worktree repair / tmux-row delete / serve / clean-no-op fail)
-**Human checks required:** blocked by Finding 1 (migrated instance cannot serve)
-**Real install:** verified byte-intact after harness recovery
-
----
-*Verified: 2026-07-01T16:20:02Z*
-*Verifier: Claude (orchestrator, from Plan 21-05 gate failure)*
+*Verified: 2026-07-01T19:30:00Z*
+*Verifier: Claude (gsd-verifier)*
