@@ -49,7 +49,22 @@ const (
 )
 
 // String returns a stable human label for each Decision (used in slog lines).
-func (d Decision) String() string { return "" } // RED stub — implemented in GREEN
+func (d Decision) String() string {
+	switch d {
+	case SkipCustom:
+		return "SkipCustom"
+	case DoMigrate:
+		return "DoMigrate"
+	case RollForward:
+		return "RollForward"
+	case FreshInstall:
+		return "FreshInstall"
+	case RefuseBoot:
+		return "RefuseBoot"
+	default:
+		return "Decision(unknown)"
+	}
+}
 
 // Config carries the resolved (~-expanded, absolute) migration endpoints.
 type Config struct {
@@ -62,4 +77,17 @@ type Config struct {
 // NO I/O: callers stat the dirs and detect a custom --db, then Gate maps the
 // three booleans to exactly one Decision. Purity makes every branch — including
 // the RefuseBoot anomaly — trivially table-testable.
-func Gate(customDB, srcExists, dstExists bool) Decision { return FreshInstall } // RED stub — implemented in GREEN
+func Gate(customDB, srcExists, dstExists bool) Decision {
+	switch {
+	case customDB:
+		return SkipCustom
+	case srcExists && !dstExists:
+		return DoMigrate
+	case !srcExists && dstExists:
+		return RollForward
+	case !srcExists && !dstExists:
+		return FreshInstall
+	default: // srcExists && dstExists
+		return RefuseBoot
+	}
+}
