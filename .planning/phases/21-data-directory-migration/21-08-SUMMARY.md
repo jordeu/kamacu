@@ -97,6 +97,12 @@ None - no external service configuration required.
 - MIGRATE-02/MIGRATE-03 gap-closure complete: worktrees stay valid across the data-root move for ALL project types (managed and folder-pointed) with no prune-induced loss, and the path rewrite never touches a path outside the moved root.
 - Deferred (optional, per 21-REVIEW.md, intentionally NOT closed here): WR-03 (frontend `migrateStorage.ts` index-mutation), IN-01 (repair ctx timeout), IN-02 (symlinked data root).
 
+## Self-Check: PASSED
+
+- `21-08-SUMMARY.md` present on disk.
+- All task commits present in git history: `faa43ae` (RED CR-01), `069ec50` (GREEN CR-01), `2fddbac` (RED WR-01/WR-02), `4a2145c` (GREEN WR-01/WR-02), `21fb790` (summary).
+- `STATE.md`/`ROADMAP.md` intentionally untouched (orchestrator owns those writes).
+
 ---
 *Phase: 21-data-directory-migration*
 *Completed: 2026-07-01*
