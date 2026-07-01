@@ -24,7 +24,7 @@ function RedirectToFirstProject() {
         <div className="flex flex-col items-center gap-1">
           <h1 className="text-xl font-medium">No projects yet</h1>
           <p className="text-muted-foreground">
-            Point Kangent at a local git repository to get a board.
+            Point Kamacu at a local git repository to get a board.
           </p>
         </div>
         <Button onClick={() => setAddOpen(true)}>Add project</Button>

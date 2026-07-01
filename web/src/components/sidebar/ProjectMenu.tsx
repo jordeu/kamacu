@@ -92,7 +92,7 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete project?</AlertDialogTitle>
             <AlertDialogDescription>
-              {`"${project.name}" and all its tasks will be removed from Kangent. The repository on disk is untouched.`}
+              {`"${project.name}" and all its tasks will be removed from Kamacu. The repository on disk is untouched.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -40,7 +40,7 @@ const WORKTREE_HELP = `New task worktrees are created under this directory. Exis
 const SHELL_HELP = `Used when opening a new bash tab.`;
 const BRANCH_HELP = `Tokens: {slug}, {id}, {title}. Applied when a task is created — e.g. task/fix-login-42.`;
 const DONE_TTL_HELP = `Sessions of tasks left in Done are killed after this idle time. Use a duration like 24h or 90m; clear the field or enter never to disable. Worktrees are never removed.`;
-const GITHUB_INTEGRATION_HELP = `Show GitHub features across Kangent. Turn off to hide all GitHub UI.`;
+const GITHUB_INTEGRATION_HELP = `Show GitHub features across Kamacu. Turn off to hide all GitHub UI.`;
 const GITHUB_GH_MISSING_HELP = `Install the GitHub CLI (gh) before enabling GitHub integration.`;
 const PR_REVIEW_SEED_HELP = `Prefilled (not sent) into the agent when you Start a review. Use <n> for the PR number and <title> for the PR title. Leave blank to start with no prompt.`;
 

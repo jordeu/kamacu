@@ -11,9 +11,9 @@ export interface TermSession {
   taskId?: number; // omitted for unscoped dev sessions
   kind?: "bash" | "agent"; // session discriminator (04-02 server Info JSON)
   agentStatus?: "working" | "idle" | "waiting" | "exited"; // agent sessions only
-  stopRequested?: boolean; // Kangent-initiated stop (gray-dot discriminator)
+  stopRequested?: boolean; // Kamacu-initiated stop (gray-dot discriminator)
   // Restored tmux survivor (TMUX-05, D-88): a DB-derived ghost (id "") the
-  // server emits for a tmux session that outlived a Kangent restart. orphaned
+  // server emits for a tmux session that outlived a Kamacu restart. orphaned
   // is the "needs a one-shot reattach spawn" signal; tmuxName carries the name
   // to reattach against. Both absent on every real, live session — tmux stays
   // invisible (D-77).

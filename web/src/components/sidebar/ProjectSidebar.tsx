@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ProjectAvatar } from "@/components/ui/ProjectAvatar";
+import { KamacuMark } from "@/components/brand/KamacuMark";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
 import { ProjectMenu } from "@/components/sidebar/ProjectMenu";
 
@@ -45,8 +46,14 @@ export function ProjectSidebar() {
   return (
     <Sidebar collapsible="icon" className="pb-9">
       <SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:justify-center">
-        <span className="px-1 text-sm font-medium group-data-[collapsible=icon]:hidden">
-          kangent
+        {/* Brand lockup (D-07/D-08/D-09): the KamacuMark ember spark renders in
+            BOTH states — in the collapsed rail it sits at the top, above the
+            project avatars; the "Kamacu" wordmark (title case) is expanded-only. */}
+        <span className="flex items-center gap-2 px-1">
+          <KamacuMark className="size-5 shrink-0" />
+          <span className="text-sm font-medium group-data-[collapsible=icon]:hidden">
+            Kamacu
+          </span>
         </span>
         <Tooltip>
           <TooltipTrigger asChild>
