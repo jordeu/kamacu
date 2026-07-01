@@ -46,10 +46,11 @@ export function ProjectSidebar() {
   return (
     <Sidebar collapsible="icon" className="pb-9">
       <SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:justify-center">
-        {/* Brand lockup (D-07/D-08/D-09): the KamacuMark ember spark renders in
-            BOTH states — in the collapsed rail it sits at the top, above the
-            project avatars; the "Kamacu" wordmark (title case) is expanded-only. */}
-        <span className="flex items-center gap-2 px-1">
+        {/* Brand lockup (D-07/D-09; D-08 revised at 20-04 UAT): the KamacuMark
+            ember spark + "Kamacu" wordmark are EXPANDED-ONLY. When the sidebar is
+            collapsed to the icon rail the whole lockup is hidden so the mark can't
+            misalign with the toggle button — the rail then shows only the toggle. */}
+        <span className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:hidden">
           <KamacuMark className="size-5 shrink-0" />
           <span className="text-sm font-medium group-data-[collapsible=icon]:hidden">
             Kamacu
