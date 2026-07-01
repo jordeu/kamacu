@@ -104,6 +104,11 @@ None - no external service configuration required.
 - `Gate`, `Prepare`, `Config`, `Decision` (+ the five variants) are exported and stable for 21-03 (adds `Complete`/`CompletePaths`) and 21-04 (main.go wiring).
 - Full repo `go test ./...` green (13 packages), `go vet ./internal/migrate/` + `go build ./...` clean, `gofmt` clean, no `sh -c`/string-interpolated exec in the package.
 
+## Self-Check: PASSED
+
+- Files verified on disk: `internal/migrate/migrate.go`, `internal/migrate/migrate_test.go`, `.planning/phases/21-data-directory-migration/21-02-SUMMARY.md`
+- Commits verified in git: `75203a4`, `55b639e`, `1030c3e`, `7cbd4cc`, `3f72cc4`
+
 ---
 *Phase: 21-data-directory-migration*
 *Completed: 2026-07-01*
