@@ -116,6 +116,14 @@ None - no external service configuration required.
 - The favicon + tab title are live in source; the final embedded SPA (`web/dist/`) should be rebuilt via `make build` once all Phase 20 rebrand plans are merged, before capturing the Kamacu README screenshot (D-12).
 - Human-verify (mark renders, favicon in tab, visually distinct from the waiting dot) is deferred to the 20-04 checkpoint per the plan.
 
+## Self-Check: PASSED
+
+- FOUND: `web/src/components/brand/KamacuMark.tsx`
+- FOUND: `web/public/favicon.svg`
+- FOUND: `web/index.html` (`<title>Kamacu</title>` in HEAD tree)
+- FOUND: `.planning/phases/20-kamacu-rebrand-brand/20-02-SUMMARY.md`
+- FOUND commits: `603d187` (Task 1), `c399abb` (Task 2), `64c7ce9` (SUMMARY)
+
 ---
 *Phase: 20-kamacu-rebrand-brand*
 *Completed: 2026-07-01*
