@@ -57,7 +57,7 @@ type Info struct {
 
 	// Orphaned restored-tmux fields (TMUX-05, D-88). These are NOT produced by
 	// any live Session — the sessions REST handler synthesizes them from
-	// surviving tmux_sessions rows after a Kangent restart (ID is ""). Orphaned
+	// surviving tmux_sessions rows after a Kamacu restart (ID is ""). Orphaned
 	// marks "this row needs a one-shot reattach spawn"; TmuxName carries the
 	// persisted session name the frontend reattaches against. Both stay zero on
 	// every real in-memory session, so the wire shape is unchanged for live

@@ -15,7 +15,7 @@ import (
 //   - Quote handling is mid-token (`a"b c"d` → `ab cd`), matching POSIX-ish
 //     expectations.
 //   - Known sharp edge (documented, not policed): a user-supplied --settings
-//     here would override Kangent's hook overlay (commander last-value-wins)
+//     here would override Kamacu's hook overlay (commander last-value-wins)
 //     and silently kill status hooks. The Phase 4 SessionStart canary detects
 //     that (hooks-dead → bell fallback + log warning); policing the field is
 //     explicitly out of scope.

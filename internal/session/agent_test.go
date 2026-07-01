@@ -188,9 +188,9 @@ func TestSpawnAgentArgvAndIdentity(t *testing.T) {
 	if got := s.ClaudeSessionID(); got != args[1] {
 		t.Errorf("ClaudeSessionID() = %q, want the --session-id value %q", got, args[1])
 	}
-	// The overlay's hook URL embeds the KANGENT session id, not claude's.
+	// The overlay's hook URL embeds the KAMACU session id, not claude's.
 	if !strings.Contains(args[3], "/api/hooks/sessions/"+info.ID) {
-		t.Errorf("overlay does not embed the kangent session id %s:\n%s", info.ID, args[3])
+		t.Errorf("overlay does not embed the kamacu session id %s:\n%s", info.ID, args[3])
 	}
 }
 

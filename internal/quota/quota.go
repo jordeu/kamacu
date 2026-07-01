@@ -1,8 +1,8 @@
 // Package quota proxies Anthropic's undocumented OAuth usage endpoint as a
-// strictly best-effort, demand-driven quota indicator. Kangent is a read-only
+// strictly best-effort, demand-driven quota indicator. Kamacu is a read-only
 // passenger on ~/.claude/.credentials.json: the file is re-read on every poll,
 // never written, and the token never outlives a single request, never appears
-// in logs, and never crosses the Kangent API (the browser receives digested
+// in logs, and never crosses the Kamacu API (the browser receives digested
 // numbers only).
 package quota
 
@@ -44,7 +44,7 @@ type Result struct {
 	Windows   []Window   `json:"windows"`   // null when no data to show
 }
 
-// credsFile decodes ONLY the two fields Kangent needs. The file also carries
+// credsFile decodes ONLY the two fields Kamacu needs. The file also carries
 // unrelated mcpOAuth third-party secrets — never decode, hold, or log the rest.
 type credsFile struct {
 	ClaudeAiOauth struct {

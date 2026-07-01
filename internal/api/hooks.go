@@ -27,7 +27,7 @@ type hookHandlers struct {
 	token string // per-instance random token; "" means reject everything
 }
 
-// receive handles POST /api/hooks/sessions/{id} (id = Kangent session ID).
+// receive handles POST /api/hooks/sessions/{id} (id = Kamacu session ID).
 // The hook payload arrives verbatim on the body (curl --data-binary @-); the
 // receiver switches on hook_event_name ONLY and tolerates unknown fields and
 // events — claude adds both across releases. It never blocks: every dispatch

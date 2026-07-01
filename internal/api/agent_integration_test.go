@@ -48,7 +48,7 @@ func testdataFakeClaude(t *testing.T) string {
 // registers — Routes + SessionRoutes + WorktreeRoutes + HookRoutes +
 // AgentRoutes + the WS attach handler — over one DB, one worktree.Service,
 // and one session.Manager whose AgentConfig points at the fake-claude stub.
-// If cmd/kangent/main.go wiring drifts, this harness catches it.
+// If cmd/kamacu/main.go wiring drifts, this harness catches it.
 func newAgentIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")

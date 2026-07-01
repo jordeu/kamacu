@@ -1,5 +1,5 @@
 // Package ws_test exercises the full terminal engine end-to-end through the
-// REAL route table — the same wiring shape as cmd/kangent/main.go (REST via
+// REAL route table — the same wiring shape as cmd/kamacu/main.go (REST via
 // api.SessionRoutes + the WS endpoint). If the route registration drifts from
 // production, this test catches it.
 package ws_test
@@ -24,7 +24,7 @@ import (
 	"kamacu/internal/ws"
 )
 
-// newTestServer builds the mux exactly as cmd/kangent/main.go does and serves
+// newTestServer builds the mux exactly as cmd/kamacu/main.go does and serves
 // it over httptest. Cleanup stops every session so no bash outlives the run.
 // insecureAnyOrigin mirrors the --insecure-allow-remote handler flag: false is
 // the default loopback-Origin behavior, true disables Origin verification.
@@ -212,7 +212,7 @@ func TestIntegration(t *testing.T) {
 
 // TestIntegrationEvilOriginRejected asserts the CSWSH rejection end-to-end
 // through the same mux: a cross-origin browser upgrade never reaches 101.
-// (Host-header rejection lives in cmd/kangent's hostCheck middleware, which
+// (Host-header rejection lives in cmd/kamacu's hostCheck middleware, which
 // is unexported — covered by its own table tests in main_test.go.)
 func TestIntegrationEvilOriginRejected(t *testing.T) {
 	srv, mgr := newTestServer(t, false)

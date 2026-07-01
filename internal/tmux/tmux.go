@@ -1,7 +1,7 @@
 // Package tmux is a leaf package (stdlib-only imports) wrapping the three
-// production tmux verbs Kangent uses: new-session -A (attach-or-create),
+// production tmux verbs Kamacu uses: new-session -A (attach-or-create),
 // has-session (liveness probe), and kill-session (× kill). Every invocation
-// carries the dedicated socket (-L) and the Kangent-generated config (-f) so
+// carries the dedicated socket (-L) and the Kamacu-generated config (-f) so
 // the user's default tmux server and config are never touched.
 //
 // All exit-code semantics below were verified empirically against host
@@ -17,11 +17,11 @@ import (
 	"time"
 )
 
-// DefaultSocket is the dedicated tmux socket name (-L) for all Kangent
+// DefaultSocket is the dedicated tmux socket name (-L) for all Kamacu
 // sessions — never the user's default server (settled roadmap decision).
 const DefaultSocket = "kangent"
 
-// Config is the Kangent-managed tmux configuration: status bar off (D-79),
+// Config is the Kamacu-managed tmux configuration: status bar off (D-79),
 // mouse on so wheel-scroll reaches tmux's real history (D-80), and a deep
 // history-limit because tmux history IS the durable scrollback (default 2000
 // is too shallow). Applied via -f on every invocation; tmux reads it exactly
@@ -48,7 +48,7 @@ type Client struct {
 	ConfPath string // -f config path; the generated file in production, "/dev/null" in tests
 }
 
-// BaseArgs prefixes EVERY tmux invocation: dedicated socket + Kangent config.
+// BaseArgs prefixes EVERY tmux invocation: dedicated socket + Kamacu config.
 // -f is read exactly once, by whichever invocation starts the server, so
 // passing it on every call makes config application deterministic regardless
 // of which call wins the server-start race.

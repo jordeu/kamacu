@@ -62,7 +62,7 @@ type SpawnOpts struct {
 	// (back-compat for direct-Spawn tests).
 	Shell string
 	// TmuxName is bash-only: when set, the session runs `tmux new-session -A`
-	// (attach-or-create) for this exact session name on the dedicated Kangent
+	// (attach-or-create) for this exact session name on the dedicated Kamacu
 	// socket instead of a plain shell. Minted and persisted by the HTTP handler
 	// (kangent-<task>-<n>); "" = plain shell. Mutually exclusive with Shell.
 	TmuxName string
@@ -131,7 +131,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		dir = opts.Cwd
 	}
 
-	// The kangent session id is generated up front: an agent's settings
+	// The kamacu session id is generated up front: an agent's settings
 	// overlay embeds it in the hook receiver URL before the process starts.
 	id := uuid.NewString()
 

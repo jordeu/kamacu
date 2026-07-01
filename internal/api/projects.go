@@ -29,7 +29,7 @@ type Project struct {
 	RepoPath    string  `json:"repo_path"`
 	Description string  `json:"description"`
 	GithubRepo  *string `json:"github_repo"`
-	// Managed is the v1.4 marker (migration 00008, D-06): true when Kangent
+	// Managed is the v1.4 marker (migration 00008, D-06): true when Kamacu
 	// cloned and OWNS the directory under ~/.kangent/repos/ (gated-remove on
 	// delete, pre-task fetch); false for user-pointed folder projects (never
 	// touch their dir, D-09). SQLite stores it as INTEGER 0/1; scanProject maps
@@ -134,8 +134,8 @@ func (h *projectHandlers) list(w http.ResponseWriter, r *http.Request) {
 
 // create handles POST /api/projects. Two creation paths share this endpoint:
 //
-//   - Folder path (the original): `{ "repo_path": "/abs/path" }` points Kangent
-//     at a user-owned checkout. managed defaults to 0 — Kangent never touches
+//   - Folder path (the original): `{ "repo_path": "/abs/path" }` points Kamacu
+//     at a user-owned checkout. managed defaults to 0 — Kamacu never touches
 //     the dir on delete (D-09). UNCHANGED by v1.4.
 //   - Repo-first path (v1.4, CKOUT-01): `{ "repo": "owner/name" }` gh-validates
 //     the ref (RPROJ-05/D-03), `gh repo clone`s it into
@@ -509,7 +509,7 @@ func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load the marker + repo root. The marker is the SINGLE source of truth for
-	// "Kangent owns this dir" — never derive it from the path (data-loss hazard).
+	// "Kamacu owns this dir" — never derive it from the path (data-loss hazard).
 	var managed int
 	var clone string
 	err := h.db.QueryRow(`SELECT managed, repo_path FROM projects WHERE id = ?`, id).Scan(&managed, &clone)
