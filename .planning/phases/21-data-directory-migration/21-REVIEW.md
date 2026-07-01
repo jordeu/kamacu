@@ -25,6 +25,16 @@ findings:
   info: 2
   total: 6
 status: issues_found
+resolution:
+  resolved_by: 21-08
+  resolved:
+    - "CR-01 (critical) — repairWorktrees now repairs ALL repos owning an under-root worktree (folder-pointed included), gated on under-root worktree ownership not the managed flag; prune-survival regression test added"
+    - "WR-01 (warning) — Go-side HasPrefix(OldRoot+'/') boundary recheck in rewritePrefixColumn guards the unescaped LIKE gate against _/% metachar over-match"
+    - "WR-02 (warning) — hasRootPrefix separator-boundary helper in rewriteWorktreeBaseSetting; ~/.kangent-backup no longer mis-rewritten"
+  deferred:
+    - "WR-03 (warning) — migrateStorage.ts index-mutation-while-iterating; low risk (guard-flagged one-shot), tracked for Phase 23"
+    - "IN-01 (info) — no timeout on migration git repair (context.Background); tracked for Phase 23"
+    - "IN-02 (info) — sameFilesystem follows symlinks; tracked for Phase 23"
 ---
 
 # Phase 21: Code Review Report
@@ -32,7 +42,7 @@ status: issues_found
 **Reviewed:** 2026-07-01
 **Depth:** standard
 **Files Reviewed:** 15
-**Status:** issues_found
+**Status:** issues_found (critical + 2 warnings resolved by 21-08; WR-03/IN-01/IN-02 deferred to Phase 23)
 
 ## Summary
 
