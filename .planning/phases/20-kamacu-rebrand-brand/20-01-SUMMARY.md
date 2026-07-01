@@ -99,6 +99,12 @@ None - no external service configuration required.
 - The backend now builds and tests as `kamacu` with a `kamacu`-named module and binary; other Phase 20 plans (brand mark, favicon, `web/index.html` title, sidebar wordmark, UI copy, README) can rebrand on top of a `kamacu`-named build.
 - Phase 21 (data-directory migration) inherits an intact keep-out boundary: every runtime literal it must flip atomically (`~/.kangent` paths, `-L kangent` socket + `kangent-*` session prefix, `kangent-tmux.conf`, `X-Kangent-Token`) is verified still present and unchanged.
 
+## Self-Check: PASSED
+
+- Created files verified present: `20-01-SUMMARY.md`, `deferred-items.md`, `cmd/kamacu/main.go`.
+- Commits verified in git log: `a7b2796` (Task 1), `808003e` (Task 2), `406f8c1` (docs).
+- Working tree clean; no uncommitted artifacts.
+
 ---
 *Phase: 20-kamacu-rebrand-brand*
 *Completed: 2026-07-01*
