@@ -124,6 +124,11 @@ None - no external service configuration required.
 - Phase 21's runtime cutover is complete: with `~/.kangent` present, the app migrates the data root, DB file, managed paths, git worktree links, and tmux rows, then serves against `~/.kamacu` on the `-L kamacu` socket with `kamacu-*` session names.
 - Remaining Phase 21 item outside this plan: the client-side localStorage migration (MIGRATE-04), if not already covered by a sibling wave-3 plan.
 
+## Self-Check: PASSED
+
+- Files verified on disk: `.planning/phases/21-data-directory-migration/21-04-SUMMARY.md`, `cmd/kamacu/main.go`, `internal/tmux/tmux.go`, `internal/settings/settings.go`, `internal/api/projects.go`, `internal/api/sessions.go`
+- Commits verified in git: `44e0dcf` (Task 1), `e7bce56` (Task 2), `3345727` (SUMMARY)
+
 ---
 *Phase: 21-data-directory-migration*
 *Completed: 2026-07-01*
