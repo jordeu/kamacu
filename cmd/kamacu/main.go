@@ -19,6 +19,7 @@ import (
 
 	"kamacu/internal/api"
 	"kamacu/internal/github"
+	"kamacu/internal/migrate"
 	"kamacu/internal/quota"
 	"kamacu/internal/reaper"
 	"kamacu/internal/session"
@@ -32,7 +33,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7333", "listen address (localhost-only by design)")
-	dbFlag := flag.String("db", "~/.kangent/kangent.db", "path to SQLite database file")
+	dbFlag := flag.String("db", "~/.kamacu/kamacu.db", "path to SQLite database file")
 	claudeBin := flag.String("claude-bin", "", "path to the claude binary (default: resolve \"claude\" on PATH at spawn time)")
 	var devOrigins []string
 	flag.Func("dev-origin", "additional allowed Origin host:port for the Vite dev server (repeatable, e.g. localhost:5173)", func(v string) error {
@@ -62,6 +63,26 @@ func main() {
 		slog.Error("resolving db path", "path", *dbFlag, "error", err)
 		os.Exit(1)
 	}
+
+	// Part 1 of the one-time ~/.kangent -> ~/.kamacu data-directory migration
+	// (MIGRATE-01/05, D-09..D-12). Ordering is load-bearing: Prepare MUST run
+	// BEFORE os.MkdirAll/store.Open below — creating ~/.kamacu early would defeat
+	// the "destination absent" gate and make the atomic os.Rename fail (RESEARCH
+	// Pitfall 4). It gates on the default paths (a custom --db opts out), performs
+	// the preflight + atomic rename + WAL-safe DB rename + old-tmux retire, and on
+	// ANY error leaves ~/.kangent byte-for-byte untouched. A migration error or a
+	// both-dirs anomaly refuses to boot (D-11) — the data is safe.
+	decision, migCfg, err := migrate.Prepare(context.Background(), dbPath, "~/.kamacu/kamacu.db")
+	if err != nil {
+		slog.Error("migrating data directory ~/.kangent -> ~/.kamacu: refusing to boot (your data is safe — nothing moved past the failure)", "error", err)
+		os.Exit(1)
+	}
+	if decision == migrate.DoMigrate {
+		// Silent success is a single line (D-10); fresh installs and already-
+		// migrated boots stay quiet.
+		slog.Info("migrated ~/.kangent -> ~/.kamacu")
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		slog.Error("creating db directory", "dir", filepath.Dir(dbPath), "error", err)
 		os.Exit(1)
@@ -79,6 +100,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Part 2 of the data-directory migration (MIGRATE-02/03): rewrite the DB's
+	// managed stored paths under the old root (D-15), repair each managed repo's
+	// git worktree link files, and delete the retired kangent-* tmux rows so a
+	// reopened task respawns fresh on the -L kamacu socket. It needs the schema,
+	// so it MUST run after store.Migrate; only a DoMigrate/RollForward decision
+	// has anything to complete (SkipCustom/FreshInstall are no-ops; RefuseBoot
+	// already errored in Prepare). Every step self-gates, so a failure refuses to
+	// serve (D-04) and the next boot's RollForward path re-runs the idempotent
+	// steps — the data stays safe.
+	if decision == migrate.DoMigrate || decision == migrate.RollForward {
+		if err := migrate.Complete(context.Background(), db, migCfg); err != nil {
+			slog.Error("completing data-directory migration ~/.kangent -> ~/.kamacu: refusing to serve (your data is safe — a re-run finishes it)", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	// One-shot idempotent icon backfill (D-08): migration 00009 adds icon_letters
 	// + icon_color (NOT NULL DEFAULT ''); this fills every pre-existing blank row
 	// with derived letters + a palette color, reusing the SAME helpers the create
@@ -93,7 +130,7 @@ func main() {
 	// at every start in the data dir next to the DB — a stable path that survives
 	// reboots, so a tmux server started by a previous Kamacu run still references
 	// an existing file (research Open Q2).
-	tmuxConf := filepath.Join(filepath.Dir(dbPath), "kangent-tmux.conf")
+	tmuxConf := filepath.Join(filepath.Dir(dbPath), "kamacu-tmux.conf")
 	if err := tmux.WriteConfig(tmuxConf); err != nil {
 		slog.Error("writing tmux config", "path", tmuxConf, "error", err)
 		os.Exit(1)
@@ -121,7 +158,7 @@ func main() {
 	// placement is settings-driven per creation (worktree_base, WT-01) —
 	// provisionWorktree reads the setting at use, so this root is only the
 	// legacy Service field; the creation path no longer consults it.
-	wtRoot, err := settings.ExpandHome("~/.kangent/worktrees")
+	wtRoot, err := settings.ExpandHome("~/.kamacu/worktrees")
 	if err != nil {
 		slog.Error("resolving worktree root", "error", err)
 		os.Exit(1)
@@ -219,7 +256,7 @@ func main() {
 	}
 }
 
-// sweepOrphanTmux kills any live kangent-* tmux session on the dedicated socket
+// sweepOrphanTmux kills any live kamacu-* tmux session on the dedicated socket
 // whose name has no matching tmux_sessions row OR whose task no longer exists
 // (D-93). It reconciles deletes/removes that happened while Kamacu was down —
 // the kill-before-remove paths in worktrees.go/tasks.go cover the online case,
@@ -266,8 +303,8 @@ func sweepOrphanTmux(parent context.Context, db *sql.DB, tmuxClient tmux.Client)
 
 	for _, name := range names {
 		// Never touch a session Kamacu did not create (belt-and-braces — the
-		// dedicated socket should only ever hold kangent-* sessions).
-		if !strings.HasPrefix(name, "kangent-") {
+		// dedicated socket should only ever hold kamacu-* sessions).
+		if !strings.HasPrefix(name, "kamacu-") {
 			continue
 		}
 		if known[name] {
