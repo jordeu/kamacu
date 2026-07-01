@@ -161,7 +161,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 21-03-PLAN.md — internal/migrate Part 2: managed-path rewrite (D-15), git worktree repair, tmux-row cleanup (MIGRATE-02/03)
+- [x] 21-03-PLAN.md — internal/migrate Part 2: managed-path rewrite (D-15), git worktree repair, tmux-row cleanup (MIGRATE-02/03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -244,7 +244,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
-| 21. Data Directory Migration | v1.8 | 2/5 | In Progress|  |
+| 21. Data Directory Migration | v1.8 | 3/5 | In Progress|  |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
