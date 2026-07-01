@@ -226,7 +226,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
-| 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete   | 2026-07-01 |
+| 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 0/TBD | Not started | - |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |

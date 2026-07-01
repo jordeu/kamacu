@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Kamacu Rebrand & UX Polish
-status: executing
-stopped_at: Phase 20 context gathered
-last_updated: "2026-07-01T11:19:11.509Z"
+status: ready_to_plan
+stopped_at: Phase 20 complete (4/4) — ready to discuss Phase 21
+last_updated: 2026-07-01T12:46:32.834Z
 last_activity: 2026-07-01 -- Phase 20 execution started
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 4
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-01)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 20 — kamacu-rebrand-brand
+**Current focus:** Phase 21 — data directory migration
 
 ## Current Position
 
-Phase: 20 (kamacu-rebrand-brand) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 20
-Last activity: 2026-07-01 -- Phase 20 execution started
+Phase: 21
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-07-01
 
 ### v1.8 Roadmap (Phases 20–24, continues numbering from v1.7's Phase 19)
 

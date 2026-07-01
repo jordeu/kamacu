@@ -9,9 +9,9 @@ Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly 
 
 ### Rebrand (product identity in code + UI)
 
-- [ ] **REBRAND-01**: The product name is shown as "Kamacu" everywhere the brand appears (browser tab title, sidebar brand title, page/section headers, settings/about copy)
-- [ ] **REBRAND-02**: The app builds as a `kamacu` binary and the Go module path is renamed to kamacu, with all imports updated (`make build` produces `kamacu`; `go build`/`vet`/`test ./...` green)
-- [ ] **REBRAND-03**: Remaining code identifiers, log lines, and user-facing strings that say "kangent" are updated to "kamacu" wherever the change does not affect on-disk or runtime compatibility (path/socket compatibility is handled by the Migrate category)
+- [x] **REBRAND-01**: The product name is shown as "Kamacu" everywhere the brand appears (browser tab title, sidebar brand title, page/section headers, settings/about copy)
+- [x] **REBRAND-02**: The app builds as a `kamacu` binary and the Go module path is renamed to kamacu, with all imports updated (`make build` produces `kamacu`; `go build`/`vet`/`test ./...` green)
+- [x] **REBRAND-03**: Remaining code identifiers, log lines, and user-facing strings that say "kangent" are updated to "kamacu" wherever the change does not affect on-disk or runtime compatibility (path/socket compatibility is handled by the Migrate category)
 
 ### Migrate (one-time on-disk data migration)
 
@@ -23,9 +23,9 @@ Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly 
 
 ### Brand (logo, favicon, docs)
 
-- [ ] **BRAND-01**: The app ships a new Kamacu logo (SVG) rendered in the UI brand area
-- [ ] **BRAND-02**: The browser tab shows a Kamacu favicon
-- [ ] **BRAND-03**: The repo has a `README.md` describing what Kamacu is, how to build and run it, and its core project → task → agent → review workflow
+- [x] **BRAND-01**: The app ships a new Kamacu logo (SVG) rendered in the UI brand area
+- [x] **BRAND-02**: The browser tab shows a Kamacu favicon
+- [x] **BRAND-03**: The repo has a `README.md` describing what Kamacu is, how to build and run it, and its core project → task → agent → review workflow
 
 ### Diff (GitHub "Files changed"-style review)
 
@@ -101,17 +101,17 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REBRAND-01 | Phase 20 | Pending |
-| REBRAND-02 | Phase 20 | Pending |
-| REBRAND-03 | Phase 20 | Pending |
+| REBRAND-01 | Phase 20 | Complete |
+| REBRAND-02 | Phase 20 | Complete |
+| REBRAND-03 | Phase 20 | Complete |
 | MIGRATE-01 | Phase 21 | Pending |
 | MIGRATE-02 | Phase 21 | Pending |
 | MIGRATE-03 | Phase 21 | Pending |
 | MIGRATE-04 | Phase 21 | Pending |
 | MIGRATE-05 | Phase 21 | Pending |
-| BRAND-01 | Phase 20 | Pending |
-| BRAND-02 | Phase 20 | Pending |
-| BRAND-03 | Phase 20 | Pending |
+| BRAND-01 | Phase 20 | Complete |
+| BRAND-02 | Phase 20 | Complete |
+| BRAND-03 | Phase 20 | Complete |
 | DIFF-01 | Phase 22 | Pending |
 | DIFF-02 | Phase 22 | Pending |
 | DIFF-03 | Phase 22 | Pending |
