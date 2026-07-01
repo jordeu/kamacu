@@ -101,38 +101,46 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REBRAND-01 | TBD | Pending |
-| REBRAND-02 | TBD | Pending |
-| REBRAND-03 | TBD | Pending |
-| MIGRATE-01 | TBD | Pending |
-| MIGRATE-02 | TBD | Pending |
-| MIGRATE-03 | TBD | Pending |
-| MIGRATE-04 | TBD | Pending |
-| MIGRATE-05 | TBD | Pending |
-| BRAND-01 | TBD | Pending |
-| BRAND-02 | TBD | Pending |
-| BRAND-03 | TBD | Pending |
-| DIFF-01 | TBD | Pending |
-| DIFF-02 | TBD | Pending |
-| DIFF-03 | TBD | Pending |
-| DIFF-04 | TBD | Pending |
-| WTREE-01 | TBD | Pending |
-| WTREE-02 | TBD | Pending |
-| WTREE-03 | TBD | Pending |
-| WTREE-04 | TBD | Pending |
-| TABS-01 | TBD | Pending |
-| TABS-02 | TBD | Pending |
-| REVMENU-01 | TBD | Pending |
-| REVMENU-02 | TBD | Pending |
-| POLISH-01 | TBD | Pending |
-| POLISH-02 | TBD | Pending |
-| POLISH-03 | TBD | Pending |
+| REBRAND-01 | Phase 20 | Pending |
+| REBRAND-02 | Phase 20 | Pending |
+| REBRAND-03 | Phase 20 | Pending |
+| MIGRATE-01 | Phase 21 | Pending |
+| MIGRATE-02 | Phase 21 | Pending |
+| MIGRATE-03 | Phase 21 | Pending |
+| MIGRATE-04 | Phase 21 | Pending |
+| MIGRATE-05 | Phase 21 | Pending |
+| BRAND-01 | Phase 20 | Pending |
+| BRAND-02 | Phase 20 | Pending |
+| BRAND-03 | Phase 20 | Pending |
+| DIFF-01 | Phase 22 | Pending |
+| DIFF-02 | Phase 22 | Pending |
+| DIFF-03 | Phase 22 | Pending |
+| DIFF-04 | Phase 22 | Pending |
+| WTREE-01 | Phase 23 | Pending |
+| WTREE-02 | Phase 23 | Pending |
+| WTREE-03 | Phase 23 | Pending |
+| WTREE-04 | Phase 23 | Pending |
+| TABS-01 | Phase 24 | Pending |
+| TABS-02 | Phase 24 | Pending |
+| REVMENU-01 | Phase 24 | Pending |
+| REVMENU-02 | Phase 24 | Pending |
+| POLISH-01 | Phase 24 | Pending |
+| POLISH-02 | Phase 24 | Pending |
+| POLISH-03 | Phase 24 | Pending |
 
 **Coverage:**
 - v1.8 requirements: 26 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 26 ⚠️
+- Mapped to phases: 26 ✓
+- Unmapped: 0 ✓
+
+**Per-phase counts:**
+- Phase 20 (Kamacu Rebrand & Brand): 6 — REBRAND-01/02/03, BRAND-01/02/03
+- Phase 21 (Data Directory Migration): 5 — MIGRATE-01/02/03/04/05
+- Phase 22 (GitHub-Style Diff Review): 4 — DIFF-01/02/03/04
+- Phase 23 (Worktree Cleanup Panel): 4 — WTREE-01/02/03/04
+- Phase 24 (Session-Bar, Board & Tab Polish): 7 — TABS-01/02, REVMENU-01/02, POLISH-01/02/03
 
 ---
 *Requirements defined: 2026-07-01*
-*Last updated: 2026-07-01 after initial definition*
+*Last updated: 2026-07-01 — roadmap created (Phases 20–24), traceability populated, 26/26 mapped*
+</content>
