@@ -119,7 +119,13 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
   3. The UI brand area renders the new Kamacu logo (SVG) and the browser tab shows the Kamacu favicon (BRAND-01, BRAND-02)
   4. The repo root has a `README.md` describing what Kamacu is, how to build and run it, and the project → task → agent → review workflow (BRAND-03)
   5. The rebrand touches only code identity — the `~/.kangent` data dir and `-L kangent` tmux socket are still used at runtime (compatibility deferred to Phase 21) so an existing install keeps working after this phase (REBRAND-03)
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 20-01-PLAN.md — Rename Go module/binary/imports/cmd dir + Makefile to kamacu; sweep cosmetic prose (REBRAND-02/03)
+- [ ] 20-02-PLAN.md — KamacuMark ember-spark SVG component + favicon + browser-tab title/link (BRAND-01/02, REBRAND-01)
+- [ ] 20-03-PLAN.md — Sidebar brand lockup (mark + wordmark) + user-facing copy renames (REBRAND-01/03, BRAND-01)
+- [ ] 20-04-PLAN.md — Repo-root README + end-of-phase branding human-verify & screenshot capture (BRAND-03)
+
 **UI hint**: yes
 
 ### Phase 21: Data Directory Migration
@@ -197,7 +203,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
-| 20. Kamacu Rebrand & Brand | v1.8 | 0/TBD | Not started | - |
+| 20. Kamacu Rebrand & Brand | v1.8 | 0/4 | Planned | - |
 | 21. Data Directory Migration | v1.8 | 0/TBD | Not started | - |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
