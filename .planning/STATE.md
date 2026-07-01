@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Kamacu Rebrand & UX Polish
-status: ready_to_plan
-stopped_at: Phase 20 complete (4/4) — ready to discuss Phase 21
-last_updated: 2026-07-01T12:46:32.834Z
-last_activity: 2026-07-01 -- Phase 20 execution started
+status: planning
+stopped_at: Phase 21 context gathered
+last_updated: "2026-07-01T13:18:59.445Z"
+last_activity: 2026-07-01
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
   completed_plans: 4
-  percent: 0
+  percent: 20
 ---
 
 # Project State
@@ -195,9 +195,9 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-01T10:17:22.574Z
-Stopped at: Phase 20 context gathered
-Resume file: .planning/phases/20-kamacu-rebrand-brand/20-CONTEXT.md
+Last session: 2026-07-01T13:18:59.432Z
+Stopped at: Phase 21 context gathered
+Resume file: .planning/phases/21-data-directory-migration/21-CONTEXT.md
 Next: `/gsd:plan-phase 20` to plan the first v1.8 phase (Kamacu Rebrand & Brand). Execution order 20 → 21 → 22 → 23 → 24. Phase 21 (data migration) is the highest-risk phase — plan its gating/idempotency/rollback carefully.
 
 ## Operator Next Steps
