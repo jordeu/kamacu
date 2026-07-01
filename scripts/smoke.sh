@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end smoke test: proves single-binary serving (STOR-02) and
-# restart persistence (STOR-01) over real HTTP against bin/kangent.
+# restart persistence (STOR-01) over real HTTP against bin/kamacu.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,7 +24,7 @@ cleanup() {
 }
 
 start_server() {
-  ./bin/kangent --addr "$ADDR" --db "$WORK/k.db" &
+  ./bin/kamacu --addr "$ADDR" --db "$WORK/k.db" &
   SERVER_PID=$!
   for _ in $(seq 1 50); do
     if curl -fsS "$BASE/api/healthz" >/dev/null 2>&1; then
