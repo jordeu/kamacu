@@ -126,8 +126,8 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
 Plans:
 **Wave 1**
 
-- [ ] 20-01-PLAN.md — Rename Go module/binary/imports/cmd dir + Makefile to kamacu; sweep cosmetic prose (REBRAND-02/03)
-- [ ] 20-02-PLAN.md — KamacuMark ember-spark SVG component + favicon + browser-tab title/link (BRAND-01/02, REBRAND-01)
+- [x] 20-01-PLAN.md — Rename Go module/binary/imports/cmd dir + Makefile to kamacu; sweep cosmetic prose (REBRAND-02/03)
+- [x] 20-02-PLAN.md — KamacuMark ember-spark SVG component + favicon + browser-tab title/link (BRAND-01/02, REBRAND-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -226,7 +226,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 17. Global Active Sessions Bar | v1.6 | 2/2 | Complete | 2026-06-18 |
 | 18. Project Icon Data Foundation | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
-| 20. Kamacu Rebrand & Brand | v1.8 | 0/4 | Planned | - |
+| 20. Kamacu Rebrand & Brand | v1.8 | 2/4 | In Progress|  |
 | 21. Data Directory Migration | v1.8 | 0/TBD | Not started | - |
 | 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
