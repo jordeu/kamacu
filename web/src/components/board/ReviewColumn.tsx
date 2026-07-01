@@ -53,7 +53,7 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
   // (supersedes D-05 per user request 2026-06-14; D-06 / GHCOL-06). The column
   // is collapsed UNLESS the user has explicitly expanded it (stored "0"); an
   // absent key => collapsed. ---
-  const storageKey = `kangent:review-collapsed:${projectId}`;
+  const storageKey = `kamacu:review-collapsed:${projectId}`;
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(storageKey) !== "0",
   );

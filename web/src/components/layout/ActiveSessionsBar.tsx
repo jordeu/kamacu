@@ -30,7 +30,7 @@ export function ActiveSessionsBar() {
   // --- Collapse persistence — mirror ReviewColumn exactly, GLOBAL key
   // (SBAR-07 / D-04). Absent key => collapsed (the `!== "0"` idiom); explicit
   // expand persists as "0". ---
-  const storageKey = "kangent:sessions-bar-collapsed";
+  const storageKey = "kamacu:sessions-bar-collapsed";
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(storageKey) !== "0",
   );

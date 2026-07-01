@@ -5,7 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { ActiveSessionsBar } from "@/components/layout/ActiveSessionsBar";
 
-const SIDEBAR_STORAGE_KEY = "kangent.sidebar";
+const SIDEBAR_STORAGE_KEY = "kamacu.sidebar";
 
 export function AppLayout() {
   // D-04: collapsed state persists across reloads. The generated shadcn
