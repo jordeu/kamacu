@@ -25,6 +25,12 @@ export function AppLayout() {
       <SidebarProvider
         open={open}
         onOpenChange={handleOpenChange}
+        // Pin the shell to the viewport (shadcn's wrapper is only `min-h-svh`,
+        // which grows with tall content and lets the whole window scroll —
+        // dragging the sidebar + Diff file tree up). `h-svh` + `overflow-hidden`
+        // forces scrolling into the designated inner panes (e.g. the Diff tab's
+        // right pane), so the file tree stays fixed while the diff scrolls.
+        className="h-svh overflow-hidden"
         style={{ "--sidebar-width": "15rem" } as CSSProperties}
       >
         <ProjectSidebar />
