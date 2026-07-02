@@ -23,7 +23,9 @@ findings:
   warning: 6
   info: 5
   total: 12
-status: issues_found
+status: partially_resolved
+fixed: [CR-01, WR-01, WR-02]
+open_deferred: [WR-03, WR-04, WR-05, WR-06, IN-01, IN-02, IN-03, IN-04, IN-05]
 ---
 
 # Phase 23: Code Review Report
@@ -38,6 +40,16 @@ status: issues_found
 Reviewed the worktree-cleanup panel: a localhost force-remove endpoint for real git worktrees, plus the bulk clean-eligible / clear-pointer flows and the React UI. The core removal path (`CleanupWorktreeGated`) is a clean, well-tested extraction, the D-01 blocked-outcome path is correctly implemented and covered by tests (200 blocked banner, no `--force` retry, DB row intact), the never-force invariant of the bulk path holds, and the `sudo rm -rf` hint is copy-only. Test coverage is genuinely strong.
 
 The primary concern is that the panel's `POST /api/worktrees/remove` handler takes `repo` and `path` **verbatim from the request body** and hands them straight to `git worktree remove` with no verification that the pair is a registered, enumerated worktree — a deliberate departure from every other removal caller in the codebase, which derive the path from the DB. On this no-auth localhost app that is not a privilege escalation, but it removes the last correctness guardrail and invites deregistering/removing the wrong tree from a stale client snapshot. A secondary cluster of robustness issues: a transient `git worktree list` failure misclassifies live worktrees as "stale" (offering a metadata-destroying Clear-pointer), and the `github_pr` eligibility path calls `gh pr view` twice per row, contradicting an explicit in-code invariant and risking inconsistent eligible/displayed state.
+
+## Resolution (2026-07-02)
+
+The three correctness findings on the destructive remove path were fixed TDD-first (6 commits, 6 new tests, all green):
+
+- **CR-01 (fixed)** — `POST /api/worktrees/remove` now validates `(repo, path)` against `enumerate()` via a new `findEnumerated` helper (404 on no match) and derives the null-columns `task_id` from the **matched** worktree's task, never `req.TaskID`. Commits `9134db5` (RED) / `1729cbe` (fix). Tests: `TestWorktreeCleanupRemoveRejectsUnenumeratedPath`, `TestWorktreeCleanupRemoveNullsMatchedTaskNotBodyTaskID`, `TestWorktreeCleanupRemoveOrphanTaskIDZero`.
+- **WR-01 (fixed)** — `enumerate` tracks `listOK` and no longer fabricates "stale" rows when `git worktree list` fails. Commits `f8c0a83` / `ecb3d73`. Test: `TestWorktreeCleanupListNoStaleOnFailedList`.
+- **WR-02 (fixed, closes IN-02)** — PR state is resolved once per row (`enumWorktree.prState`/`prStateOK` via `resolvePRState`); `eligibilityReason`/`buildRow`/`computeEligible` read the stored value → exactly one `gh` call per PR row, no eligible-vs-displayed disagreement. Commits `a6de21d` / `63ec46c`. Tests: `TestWorktreeCleanupListSinglePRStateCall`, `TestWorktreeCleanupCleanEligibleSinglePRStateCall`.
+
+**Deferred (open):** WR-03 (unpushed-base under-count for non-PR referenced tasks), WR-04 (client-honored force override), WR-05 (dead-end confirm state in CleanEligibleDialog), WR-06 (`sudo` hint truncation on quote-containing paths), and IN-01/03/04/05 — tracked for a future `/gsd:code-review 23 --fix` pass; none block phase completion.
 
 ## Critical Issues
 
