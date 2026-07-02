@@ -344,6 +344,12 @@ func (h *cleanupPanelHandlers) list(w http.ResponseWriter, r *http.Request) {
 			Worktrees:   make([]worktreeRow, 0, len(g.worktrees)),
 		}
 		for _, ew := range g.worktrees {
+			// The panel is a cleanup QUEUE, not a full inventory (WTREE-01
+			// refinement): skip active-work rows BEFORE buildRow so hidden rows
+			// do no needless git/gh work (and never double-call gh's PRState).
+			if !h.isCleanupCandidate(ctx, g.meta.repoPath, ew) {
+				continue
+			}
 			row := h.buildRow(ctx, g.meta, ew)
 			pg.Worktrees = append(pg.Worktrees, row)
 			resp.Counts.Total++
@@ -351,9 +357,28 @@ func (h *cleanupPanelHandlers) list(w http.ResponseWriter, r *http.Request) {
 				resp.Counts.Orphaned++
 			}
 		}
+		// Omit a project group that has no shown worktrees (no empty groups).
+		if len(pg.Worktrees) == 0 {
+			continue
+		}
 		resp.Projects = append(resp.Projects, pg)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// isCleanupCandidate reports whether a worktree should appear in the cleanup
+// panel (user decision: the panel is a cleanup queue, not a full inventory).
+// Orphans and stale pointers are always housekeeping candidates. A REFERENCED
+// worktree only appears once its work is finished — task Done, or PR merged/
+// closed (gh-unconfirmed ⇒ treated as still-active ⇒ hidden, degrade-don't-break).
+func (h *cleanupPanelHandlers) isCleanupCandidate(ctx context.Context, repo string, ew enumWorktree) bool {
+	switch ew.classification {
+	case "orphan", "stale":
+		return true
+	default: // "referenced"
+		_, ok := h.eligibilityReason(ctx, repo, ew)
+		return ok
+	}
 }
 
 // buildRow annotates one classified worktree with the display + flag fields the
