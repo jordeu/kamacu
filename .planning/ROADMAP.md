@@ -209,7 +209,25 @@ Plans:
   3. The user can force-remove an individual worktree from the list, overriding the dirty/unpushed/stash gates, behind a confirmation (WTREE-02)
   4. A bulk "clean eligible" action removes all safely-removable worktrees (done/merged-and-pristine, or orphaned) in one action (WTREE-03)
 
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+**Wave 1**
+
+- [ ] 23-01-PLAN.md — worktree List --porcelain -z parser + CleanupWorktreeGated orphan-mode & D-01 blocked outcome (WTREE-01/04/02)
+- [ ] 23-04-PLAN.md — shadcn badge primitive + worktreeCleanup.ts query/mutation hooks & types (WTREE-01/02/03/04)
+
+**Wave 2** *(blocked on 23-01)*
+
+- [ ] 23-02-PLAN.md — cleanuppanel.go: annotated GET list + force-remove + bulk clean-eligible + clear-pointer, wired with ghSvc (WTREE-01/02/03/04)
+
+**Wave 3** *(blocked on 23-02 + 23-04)*
+
+- [ ] 23-03-PLAN.md — Settings section, per-project rows, force-remove & clean-eligible dialogs, D-01 blocked banner (WTREE-01/02/03/04)
+
+**Wave 4** *(blocked on 23-03)*
+
+- [ ] 23-05-PLAN.md — full-phase build/test gate + human-verify of WTREE-01..04 & the D-01 blocked case
+
 **UI hint**: yes
 
 ### Phase 24: Session-Bar, Board & Tab Polish
@@ -257,7 +275,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete    | 2026-07-02 |
-| 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
+| 23. Worktree Cleanup Panel | v1.8 | 0/5 | Not started | - |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
 
 ---
