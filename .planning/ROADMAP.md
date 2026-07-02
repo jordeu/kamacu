@@ -189,7 +189,12 @@ Plans:
   3. Marking a file "Viewed" collapses that file, and the viewed state persists across reopening the diff view and across a server restart (DIFF-03)
   4. When a previously-viewed file changes again it is automatically reset to un-viewed and re-expanded on the next open, while unchanged viewed files stay collapsed and viewed (DIFF-04)
 
-**Plans**: TBD
+**Plans**: 5 plans
+- [ ] 22-01-PLAN.md — Rendered-per-file diff hash in internal/diff (Wave 1)
+- [ ] 22-02-PLAN.md — Viewed persistence table + GET read-merge + PUT /diff/viewed (Wave 2)
+- [ ] 22-03-PLAN.md — Diff types + useToggleViewed + checkbox + DiffFileSection restructure (Wave 3)
+- [ ] 22-04-PLAN.md — Two-pane layout: FileTree, scroll-spy, DiffTab (Wave 4)
+- [ ] 22-05-PLAN.md — Full-phase gate + human-verify of DIFF-01..04 (Wave 5)
 **UI hint**: yes
 
 ### Phase 23: Worktree Cleanup Panel
