@@ -213,8 +213,8 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 23-01-PLAN.md — worktree List --porcelain -z parser + CleanupWorktreeGated orphan-mode & D-01 blocked outcome (WTREE-01/04/02)
-- [ ] 23-04-PLAN.md — shadcn badge primitive + worktreeCleanup.ts query/mutation hooks & types (WTREE-01/02/03/04)
+- [x] 23-01-PLAN.md — worktree List --porcelain -z parser + CleanupWorktreeGated orphan-mode & D-01 blocked outcome (WTREE-01/04/02)
+- [x] 23-04-PLAN.md — shadcn badge primitive + worktreeCleanup.ts query/mutation hooks & types (WTREE-01/02/03/04)
 
 **Wave 2** *(blocked on 23-01)*
 
@@ -275,7 +275,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete    | 2026-07-02 |
-| 23. Worktree Cleanup Panel | v1.8 | 0/5 | Not started | - |
+| 23. Worktree Cleanup Panel | v1.8 | 2/5 | In Progress|  |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
 
 ---
