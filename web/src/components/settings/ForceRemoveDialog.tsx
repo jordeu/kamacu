@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { useRemoveWorktree, type WorktreeRow } from "@/api/worktreeCleanup";
 import {
@@ -33,6 +33,10 @@ interface ForceRemoveDialogProps {
  * re-checks every gate at remove time regardless of this snapshot. A `blocked`
  * outcome (D-01) is NOT an error — it closes the dialog and surfaces the row's
  * blocked banner; a real ApiError renders inline (mirrors CleanupWorktreeDialog).
+ *
+ * The body is keyed on `open` (mounted only while open), so the typed-confirm
+ * state and the mutation reset on every open/close flip WITHOUT a setState-in-
+ * effect (fresh state = a fresh mount).
  */
 export function ForceRemoveDialog({
   open,
@@ -40,16 +44,32 @@ export function ForceRemoveDialog({
   row,
   onBlocked,
 }: ForceRemoveDialogProps) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        {open && (
+          <ForceRemoveBody
+            row={row}
+            onClose={() => onOpenChange(false)}
+            onBlocked={onBlocked}
+          />
+        )}
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function ForceRemoveBody({
+  row,
+  onClose,
+  onBlocked,
+}: {
+  row: WorktreeRow;
+  onClose: () => void;
+  onBlocked: (path: string) => void;
+}) {
   const remove = useRemoveWorktree();
   const [confirmText, setConfirmText] = useState("");
-
-  // Fresh dialog on every open/close flip: clear the typed confirmation and
-  // any prior mutation error.
-  const resetRemove = remove.reset;
-  useEffect(() => {
-    setConfirmText("");
-    resetRemove();
-  }, [open, resetRemove]);
 
   const { sessions, dirty, unpushed, stash, branch } = row;
   // Type-to-confirm target = the worktree DIRECTORY NAME (basename of path).
@@ -74,11 +94,11 @@ export function ForceRemoveDialog({
         onSuccess: (result) => {
           if (result.outcome === "blocked") {
             // D-01: not a red error — close and let the row show the banner.
-            onOpenChange(false);
+            onClose();
             onBlocked(result.path ?? row.path);
             return;
           }
-          onOpenChange(false);
+          onClose();
         },
         // A real error renders inline (remove.isError below) — dialog stays open.
       },
@@ -92,100 +112,98 @@ export function ForceRemoveDialog({
       : "Force-remove";
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{`Force-remove this worktree?`}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-2 text-left">
-              <p className="font-mono text-xs break-all">{row.path}</p>
-              {sessions > 0 && (
-                <p>
-                  {sessions === 1
-                    ? `1 session running in this worktree will be stopped.`
-                    : `${sessions} sessions running in this worktree will be stopped.`}
-                </p>
-              )}
-              {dirty > 0 && (
-                <div className="flex items-start gap-1 px-3">
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-400" />
-                  <span className="text-zinc-50">
-                    {`This worktree has ${dirty === 1 ? "1 changed file" : `${dirty} changed files`} with uncommitted work. Removing it permanently deletes those changes.`}
-                  </span>
-                </div>
-              )}
-              {unpushed !== null && unpushed > 0 && (
-                <p>
-                  {unpushed === 1
-                    ? `1 unpushed commit will be lost.`
-                    : `${unpushed} unpushed commits will be lost.`}
-                </p>
-              )}
-              {stash > 0 && (
-                <p>
-                  {stash === 1
-                    ? `1 stash entry will be lost.`
-                    : `${stash} stash entries will be lost.`}
-                </p>
-              )}
-              {/* Branch-kept reassurance — last line of EVERY variant (D-02/D-34). */}
+    <>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{`Force-remove this worktree?`}</AlertDialogTitle>
+        <AlertDialogDescription asChild>
+          <div className="space-y-2 text-left">
+            <p className="font-mono text-xs break-all">{row.path}</p>
+            {sessions > 0 && (
               <p>
-                {`The branch `}
-                <span className="font-mono">{branch}</span>
-                {` is kept.`}
+                {sessions === 1
+                  ? `1 session running in this worktree will be stopped.`
+                  : `${sessions} sessions running in this worktree will be stopped.`}
               </p>
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-
-        {dirty > 0 && (
-          <div className="space-y-2">
-            <label
-              htmlFor="force-remove-confirm-input"
-              className="block text-xs font-medium text-muted-foreground"
-            >
-              {`Type `}
-              <span className="font-mono">{target}</span>
-              {` to confirm`}
-            </label>
-            <Input
-              id="force-remove-confirm-input"
-              autoFocus
-              value={confirmText}
-              className="font-mono"
-              onChange={(e) => setConfirmText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && gateOpen && !remove.isPending) {
-                  e.preventDefault();
-                  handleConfirm();
-                }
-              }}
-            />
+            )}
+            {dirty > 0 && (
+              <div className="flex items-start gap-1 px-3">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-400" />
+                <span className="text-zinc-50">
+                  {`This worktree has ${dirty === 1 ? "1 changed file" : `${dirty} changed files`} with uncommitted work. Removing it permanently deletes those changes.`}
+                </span>
+              </div>
+            )}
+            {unpushed !== null && unpushed > 0 && (
+              <p>
+                {unpushed === 1
+                  ? `1 unpushed commit will be lost.`
+                  : `${unpushed} unpushed commits will be lost.`}
+              </p>
+            )}
+            {stash > 0 && (
+              <p>
+                {stash === 1
+                  ? `1 stash entry will be lost.`
+                  : `${stash} stash entries will be lost.`}
+              </p>
+            )}
+            {/* Branch-kept reassurance — last line of EVERY variant (D-02/D-34). */}
+            <p>
+              {`The branch `}
+              <span className="font-mono">{branch}</span>
+              {` is kept.`}
+            </p>
           </div>
-        )}
+        </AlertDialogDescription>
+      </AlertDialogHeader>
 
-        {remove.isError && (
-          <p className="text-xs text-destructive">
-            {`Couldn't remove the worktree: ${remove.error.message}`}
-          </p>
-        )}
-
-        <AlertDialogFooter>
-          <AlertDialogCancel>{`Cancel`}</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            disabled={confirmDisabled}
-            onClick={(e) => {
-              // Keep the dialog open until the mutation lands (pending state,
-              // inline failure) — mirror CleanupWorktreeDialog.
-              e.preventDefault();
-              handleConfirm();
-            }}
+      {dirty > 0 && (
+        <div className="space-y-2">
+          <label
+            htmlFor="force-remove-confirm-input"
+            className="block text-xs font-medium text-muted-foreground"
           >
-            {ctaLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+            {`Type `}
+            <span className="font-mono">{target}</span>
+            {` to confirm`}
+          </label>
+          <Input
+            id="force-remove-confirm-input"
+            autoFocus
+            value={confirmText}
+            className="font-mono"
+            onChange={(e) => setConfirmText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && gateOpen && !remove.isPending) {
+                e.preventDefault();
+                handleConfirm();
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {remove.isError && (
+        <p className="text-xs text-destructive">
+          {`Couldn't remove the worktree: ${remove.error.message}`}
+        </p>
+      )}
+
+      <AlertDialogFooter>
+        <AlertDialogCancel>{`Cancel`}</AlertDialogCancel>
+        <AlertDialogAction
+          variant="destructive"
+          disabled={confirmDisabled}
+          onClick={(e) => {
+            // Keep the dialog open until the mutation lands (pending state,
+            // inline failure) — mirror CleanupWorktreeDialog.
+            e.preventDefault();
+            handleConfirm();
+          }}
+        >
+          {ctaLabel}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </>
   );
 }

@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { useSaveSetting, useSettings, type Settings } from "@/api/settings";
 import { useGithubStatus } from "@/api/queries";
 import { SettingsField } from "@/components/settings/SettingsField";
+import { WorktreeCleanupSection } from "@/components/settings/WorktreeCleanupSection";
 
 /**
  * Wraps the given substrings of a contract literal in the mono stack at
@@ -222,6 +223,9 @@ export default function SettingsPage() {
               enabled={settings.github_integration?.value === "on"}
               settings={settings}
             />
+            {/* WTREE-01..04: the worktree cleanup panel — one more section in
+                the same 640px column, never a full-width breakout. */}
+            <WorktreeCleanupSection />
           </div>
         )}
       </div>

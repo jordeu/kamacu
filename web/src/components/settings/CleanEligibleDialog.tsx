@@ -32,8 +32,8 @@ const REASON_LABEL: Record<EligibleItem["reason"], string> = {
 
 const REASSURANCE = `Only worktrees with no running session, no uncommitted changes, no unpushed commits, and no stash are removed. Nothing is forced; anything blocked or with unsaved work is skipped.`;
 
-/** True when the settled mutation carried the applied {removed, skipped} shape
- *  (the confirm path) rather than the {items} preview. */
+/** True when a settled value carried the applied {removed, skipped} shape (the
+ *  confirm run) rather than the {items} preview (the dry run). */
 function isResult(
   v: CleanEligiblePreview | CleanEligibleResult | undefined,
 ): v is CleanEligibleResult {
@@ -46,27 +46,36 @@ function isResult(
  * list cache); on confirm it removes that set. By construction it only ever
  * touches provably-safe worktrees (no session / no dirty / no unpushed / no
  * stash), so the CTA is the DEFAULT variant — nothing destructive is at stake.
- * The server recomputes the eligible set on the real run, so a raced item that
- * tripped a gate is simply skipped and stays in the refreshed list.
+ *
+ * The body is mounted only while open, so the preview fetch fires once per open
+ * and its local state resets on close (fresh state = a fresh mount) without a
+ * setState-in-effect.
  */
 export function CleanEligibleDialog({
   open,
   onOpenChange,
 }: CleanEligibleDialogProps) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        {open && <CleanEligibleBody />}
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function CleanEligibleBody() {
   const clean = useCleanEligible();
-  // The preview set, held locally so the confirm-run's {removed,skipped} result
-  // doesn't blank the list while the summary shows.
+  // Snapshot of the preview set, captured once from the dry-run response so the
+  // later confirm-run's {removed,skipped} result doesn't blank the list.
   const [items, setItems] = useState<EligibleItem[]>([]);
   const [summary, setSummary] = useState<CleanEligibleResult | null>(null);
 
-  const previewReset = clean.reset;
+  // Fire the dry-run preview once on mount. The effect only CALLS the mutation
+  // (its result is captured in onSuccess) — no synchronous setState here.
+  const previewMutate = clean.mutate;
   useEffect(() => {
-    if (!open) return;
-    // Fresh preview on every open (Pitfall 8: fresh server state, not the cache).
-    setItems([]);
-    setSummary(null);
-    previewReset();
-    clean.mutate(
+    previewMutate(
       { dryRun: true },
       {
         onSuccess: (res) => {
@@ -74,11 +83,9 @@ export function CleanEligibleDialog({
         },
       },
     );
-    // clean.mutate identity is stable per mount; re-run only on open flip.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [previewMutate]);
 
-  const loadingPreview = clean.isPending && summary === null;
+  const loadingPreview = clean.isPending && summary === null && items.length === 0;
   const count = items.length;
 
   function handleConfirm() {
@@ -99,62 +106,60 @@ export function CleanEligibleDialog({
       : `Remove ${count} worktrees`;
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{`Clean eligible worktrees?`}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3 text-left">
-              <p>{REASSURANCE}</p>
-              {loadingPreview ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-3/4" />
-                </div>
-              ) : count === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {`Nothing is eligible right now.`}
-                </p>
-              ) : (
-                <ul className="max-h-56 space-y-1 overflow-y-auto">
-                  {items.map((item) => (
-                    <li
-                      key={`${item.repo}:${item.path}`}
-                      className="text-xs text-muted-foreground"
-                    >
-                      <span>{item.project_name}</span>
-                      {` · `}
-                      <span className="font-mono">{item.path}</span>
-                      {` · `}
-                      <span>{REASON_LABEL[item.reason]}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {summary && (
-                <p className="text-xs text-muted-foreground">
-                  {`Removed ${summary.removed}; ${summary.skipped} skipped.`}
-                </p>
-              )}
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+    <>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{`Clean eligible worktrees?`}</AlertDialogTitle>
+        <AlertDialogDescription asChild>
+          <div className="space-y-3 text-left">
+            <p>{REASSURANCE}</p>
+            {loadingPreview ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ) : count === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {`Nothing is eligible right now.`}
+              </p>
+            ) : (
+              <ul className="max-h-56 space-y-1 overflow-y-auto">
+                {items.map((item) => (
+                  <li
+                    key={`${item.repo}:${item.path}`}
+                    className="text-xs text-muted-foreground"
+                  >
+                    <span>{item.project_name}</span>
+                    {` · `}
+                    <span className="font-mono">{item.path}</span>
+                    {` · `}
+                    <span>{REASON_LABEL[item.reason]}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {summary && (
+              <p className="text-xs text-muted-foreground">
+                {`Removed ${summary.removed}; ${summary.skipped} skipped.`}
+              </p>
+            )}
+          </div>
+        </AlertDialogDescription>
+      </AlertDialogHeader>
 
-        <AlertDialogFooter>
-          <AlertDialogCancel>{`Cancel`}</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={clean.isPending || count === 0 || summary !== null}
-            onClick={(e) => {
-              // Keep the dialog open until the bulk run lands (pending, summary).
-              e.preventDefault();
-              handleConfirm();
-            }}
-          >
-            {ctaLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      <AlertDialogFooter>
+        <AlertDialogCancel>{`Cancel`}</AlertDialogCancel>
+        <AlertDialogAction
+          disabled={clean.isPending || count === 0 || summary !== null}
+          onClick={(e) => {
+            // Keep the dialog open until the bulk run lands (pending, summary).
+            e.preventDefault();
+            handleConfirm();
+          }}
+        >
+          {ctaLabel}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </>
   );
 }
