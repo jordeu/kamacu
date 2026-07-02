@@ -57,20 +57,29 @@ export function DiffTab({ taskId }: { taskId: number }) {
     return () => window.clearTimeout(timer);
   }, [isPending, data]);
 
-  // Scroll-only jump to a file's diff (UI-SPEC Decision 1). The scroll-mt-[41px]
-  // on each section wrapper (Plan 03) lands the header under the sticky totals
-  // bar; CSS.escape guards paths with special characters (T-22-08). Never
-  // mutates collapse or Viewed.
+  // Scroll-only jump to a file's diff (UI-SPEC Decision 1). CSS.escape guards
+  // paths with special characters (T-22-08). Never mutates collapse or Viewed.
+  //
+  // We scroll to the header's layout `offsetTop` rather than calling
+  // `scrollIntoView`: the file headers are position:sticky, and scrollIntoView
+  // aligns their *pinned* rect — so upward jumps (to a file whose header is
+  // pinned/pushed above) under-scroll or no-op. `offsetTop` is the header's
+  // natural position within the (position:relative) scroll pane, unaffected by
+  // sticky, so jumps are correct in both directions.
   const scrollToPath = useCallback((path: string) => {
     const container = scrollRef.current;
     if (!container) return;
     const el = container.querySelector(
       `[data-diff-path="${CSS.escape(path)}"]`,
     );
+    if (!(el instanceof HTMLElement)) return;
     const reduce = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
-    el?.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+    container.scrollTo({
+      top: el.offsetTop,
+      behavior: reduce ? "auto" : "smooth",
+    });
   }, []);
 
   if (isError && !data) {
@@ -186,7 +195,10 @@ export function DiffTab({ taskId }: { taskId: number }) {
           </Tooltip>
         </div>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={scrollRef}
+          className="relative min-h-0 flex-1 overflow-y-auto"
+        >
           <div className="flex flex-col">
             {files.map((file) => (
               // key=path:hash so a changed file (new hash) remounts un-viewed +
