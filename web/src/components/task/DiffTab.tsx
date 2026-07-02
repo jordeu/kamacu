@@ -60,24 +60,24 @@ export function DiffTab({ taskId }: { taskId: number }) {
   // Scroll-only jump to a file's diff (UI-SPEC Decision 1). CSS.escape guards
   // paths with special characters (T-22-08). Never mutates collapse or Viewed.
   //
-  // We scroll to the header's layout `offsetTop` rather than calling
-  // `scrollIntoView`: the file headers are position:sticky, and scrollIntoView
-  // aligns their *pinned* rect — so upward jumps (to a file whose header is
-  // pinned/pushed above) under-scroll or no-op. `offsetTop` is the header's
-  // natural position within the (position:relative) scroll pane, unaffected by
-  // sticky, so jumps are correct in both directions.
+  // We jump to each file's non-sticky `[data-diff-anchor]` marker (a zero-height
+  // element at the file's flow top), NOT the sticky header: a position:sticky
+  // element's offsetTop/rect reflects its *pinned* position, so measuring the
+  // header made upward jumps (to a file pinned/pushed above) resolve to the
+  // wrong offset and not scroll. The static anchor's offsetTop is the true flow
+  // position within the (position:relative) scroll pane — correct both ways.
   const scrollToPath = useCallback((path: string) => {
     const container = scrollRef.current;
     if (!container) return;
-    const el = container.querySelector(
-      `[data-diff-path="${CSS.escape(path)}"]`,
+    const anchor = container.querySelector(
+      `[data-diff-anchor="${CSS.escape(path)}"]`,
     );
-    if (!(el instanceof HTMLElement)) return;
+    if (!(anchor instanceof HTMLElement)) return;
     const reduce = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
     container.scrollTo({
-      top: el.offsetTop,
+      top: anchor.offsetTop,
       behavior: reduce ? "auto" : "smooth",
     });
   }, []);

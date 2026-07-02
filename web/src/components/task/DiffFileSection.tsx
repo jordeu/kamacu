@@ -85,34 +85,46 @@ export function DiffFileSection({
     </label>
   );
 
+  // Non-sticky zero-height jump anchor at the file's flow top. Tree-click jumps
+  // target THIS (via offsetTop), never the sticky header — a sticky element's
+  // offsetTop/rect reflects its pinned position, which breaks upward jumps.
+  const anchor = (
+    <div data-diff-anchor={file.path} aria-hidden className="h-0" />
+  );
+
   if (file.binary) {
     // Non-collapsible sticky header row — chevron slot empty, stats replaced by
     // the muted "Binary file changed" copy. Still carries the Viewed checkbox.
     return (
-      <div
-        data-diff-path={file.path}
-        className={cn(
-          "sticky z-[5] flex items-center gap-2 border-b border-border bg-card px-3 py-2",
-          STICKY_TOP,
-        )}
-      >
-        <span className="inline-block size-4 shrink-0" />
-        <span
+      <>
+        {anchor}
+        <div
+          data-diff-path={file.path}
           className={cn(
-            "min-w-0 flex-1 truncate text-left font-mono text-sm",
-            file.viewed && "text-muted-foreground",
+            "sticky z-[5] flex items-center gap-2 border-b border-border bg-card px-3 py-2",
+            STICKY_TOP,
           )}
         >
-          {pathLabel}
-        </span>
-        {statusSuffix && (
-          <span className="text-xs text-muted-foreground">{statusSuffix}</span>
-        )}
-        <span className="text-xs text-muted-foreground">
-          Binary file changed
-        </span>
-        {viewedLabel}
-      </div>
+          <span className="inline-block size-4 shrink-0" />
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-left font-mono text-sm",
+              file.viewed && "text-muted-foreground",
+            )}
+          >
+            {pathLabel}
+          </span>
+          {statusSuffix && (
+            <span className="text-xs text-muted-foreground">
+              {statusSuffix}
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">
+            Binary file changed
+          </span>
+          {viewedLabel}
+        </div>
+      </>
     );
   }
 
@@ -122,6 +134,7 @@ export function DiffFileSection({
       onOpenChange={setOpen}
       className="group/diff-file contents"
     >
+      {anchor}
       <div
         data-diff-path={file.path}
         className={cn(
