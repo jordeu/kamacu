@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { get } from "./client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { get, put } from "./client";
 import type { ApiError } from "./client";
 
 /**
@@ -21,6 +21,13 @@ export interface DiffFile {
   additions: number | null; // null for binary
   deletions: number | null;
   hunks: DiffHunk[];
+  // Content hash of the file's current diff (plan 22-02 backend contract). The
+  // Viewed toggle is keyed by task + path + hash; a new hash means the file
+  // changed since it was last viewed (DIFF-04 auto-reset).
+  hash: string;
+  // Server-persisted per-file review state (DIFF-03). Reflected on every open,
+  // including after a server restart.
+  viewed: boolean;
 }
 
 export interface DiffHunk {
@@ -46,5 +53,49 @@ export function useTaskDiff(taskId: number) {
   return useQuery<DiffResponse, ApiError>({
     queryKey: ["diff", taskId],
     queryFn: () => get<DiffResponse>(`/api/tasks/${taskId}/diff`),
+  });
+}
+
+/**
+ * Toggle a file's "Viewed" state (DIFF-03) against the plan 22-02 endpoint
+ * PUT /api/tasks/{id}/diff/viewed (body { path, hash, viewed } → 204). Mirrors
+ * the useMoveTask optimistic pattern: onMutate cancels + snapshots + flips
+ * `viewed` on the matching path in the ["diff", taskId] cache; onError rolls
+ * back; onSettled invalidates so the authoritative server state reconciles.
+ */
+export function useToggleViewed(taskId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      path,
+      hash,
+      viewed,
+    }: {
+      path: string;
+      hash: string;
+      viewed: boolean;
+    }) =>
+      put<void>(`/api/tasks/${taskId}/diff/viewed`, { path, hash, viewed }),
+    onMutate: async ({ path, viewed }) => {
+      await queryClient.cancelQueries({ queryKey: ["diff", taskId] });
+      const prev = queryClient.getQueryData<DiffResponse>(["diff", taskId]);
+      queryClient.setQueryData<DiffResponse>(["diff", taskId], (old) =>
+        old
+          ? {
+              ...old,
+              files: old.files.map((f) =>
+                f.path === path ? { ...f, viewed } : f,
+              ),
+            }
+          : old,
+      );
+      return { prev };
+    },
+    onError: (_error, _args, context) => {
+      queryClient.setQueryData(["diff", taskId], context?.prev);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["diff", taskId] });
+    },
   });
 }
