@@ -36,7 +36,7 @@ Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly 
 
 ### Worktree Cleanup (Settings panel)
 
-- [ ] **WTREE-01**: Settings has a worktree-management section listing every worktree with its task/PR association, referenced-vs-orphaned status, and dirty / unpushed / stash flags
+- [ ] **WTREE-01**: Settings has a worktree-management section listing every cleanup-candidate worktree — orphaned, stale-pointer, or referenced-but-finished (task Done / PR merged or closed) — with its task/PR association, classification, and dirty / unpushed / stash flags. Active-work worktrees (in-progress tasks, open/pending-review PRs) are intentionally hidden so the panel reads as a cleanup queue, not a full inventory (refined post-approval, 2026-07-02; reverses the original "every worktree" wording).
 - [ ] **WTREE-02**: The user can force-remove an individual worktree from the list, overriding the dirty/unpushed/stash gates, behind a confirmation
 - [ ] **WTREE-03**: A bulk "clean eligible" action removes all safely-removable worktrees (done/merged-and-pristine, or orphaned) in one action
 - [ ] **WTREE-04**: Orphaned worktrees (present on disk / in `git worktree list` but with no matching DB task) are detected, listed, and removable — reconciling the accumulation the reaper currently skips

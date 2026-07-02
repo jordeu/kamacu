@@ -58,6 +58,21 @@ The user exercised the live panel in Settings against the real install and confi
 
 WTREE-01 (listing), WTREE-02 (force-remove keeps branch), WTREE-03 (bulk clean, never forces), WTREE-04 (orphans), and the load-bearing D-01 blocked-outcome degrade-don't-500 safety promise.
 
+## Post-approval refinement (WTREE-01 scope reversal)
+
+After approving the panel, the user observed it listed worktrees for still-active work (tasks not yet in Done, PRs still pending review) and decided the panel should read as a **cleanup queue, not a full inventory**. This reverses WTREE-01's original "list every worktree" wording (REQUIREMENTS.md WTREE-01 updated accordingly).
+
+Implemented TDD as a backend-only change to `GET /api/worktrees` (`internal/api/cleanuppanel.go` `list()` + new `isCleanupCandidate`), commits:
+- `459ec22` test(23): RED cleanup-candidates-only list filter
+- `aed78d0` feat(23): GET /api/worktrees returns only cleanup candidates (hide active work)
+
+New contract — a worktree appears iff it is a cleanup candidate:
+- **Shown:** orphan (always), stale pointer (always — Clear-pointer housekeeping), referenced with task **Done** or PR **MERGED/CLOSED**. A done-but-dirty worktree still shows (manual force-remove candidate).
+- **Hidden:** referenced in-progress task, referenced open/pending PR, and gh-unconfirmed PR state (degrade-don't-break → treated as still-active → hidden).
+- Empty project groups are omitted; `counts.total`/`counts.orphaned` reflect only shown rows. `enumerate`/`computeEligible`/`remove`/`clearPointer`/JSON shape untouched. UI needs no change (renders whatever the endpoint returns).
+
+Verification: `go build`/`go vet` exit 0; `go test ./internal/api/` green (new `TestWorktreeCleanupListShowsOnlyCandidates` + 3 updated list tests). A live re-check (rebuild + Refresh → only candidates appear) is recommended but non-blocking.
+
 ## Follow-up gaps
 
 None. Panel is shippable.
