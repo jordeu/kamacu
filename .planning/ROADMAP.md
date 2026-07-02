@@ -222,7 +222,7 @@ Plans:
 
 **Wave 3** *(blocked on 23-02 + 23-04)*
 
-- [ ] 23-03-PLAN.md — Settings section, per-project rows, force-remove & clean-eligible dialogs, D-01 blocked banner (WTREE-01/02/03/04)
+- [x] 23-03-PLAN.md — Settings section, per-project rows, force-remove & clean-eligible dialogs, D-01 blocked banner (WTREE-01/02/03/04)
 
 **Wave 4** *(blocked on 23-03)*
 
@@ -275,7 +275,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete    | 2026-07-02 |
-| 23. Worktree Cleanup Panel | v1.8 | 3/5 | In Progress|  |
+| 23. Worktree Cleanup Panel | v1.8 | 4/5 | In Progress|  |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
 
 ---
