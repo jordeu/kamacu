@@ -803,14 +803,12 @@ func TestListParsesRealGit(t *testing.T) {
 		t.Fatalf("List after dir removal: %v", err)
 	}
 	gone := entryByPath(t, entries, branchPath)
+	// The load-bearing reverse-orphan signal is Prunable + its reason (git's own
+	// "gitdir file points to non-existent location"). Whether git also emits
+	// `detached`/drops `branch` for a merely-deleted dir varies by git version,
+	// so we assert only the stable signal the panel keys on.
 	if !gone.Prunable {
 		t.Errorf("deleted-dir worktree Prunable = false, want true: %+v", gone)
-	}
-	if !gone.Detached {
-		t.Errorf("deleted-dir worktree Detached = false, want true: %+v", gone)
-	}
-	if gone.Branch != "" {
-		t.Errorf("deleted-dir worktree Branch = %q, want \"\" (git drops branch on prunable)", gone.Branch)
 	}
 	if !strings.Contains(gone.PrunableReason, "non-existent location") {
 		t.Errorf("PrunableReason = %q, want it to mention the non-existent location", gone.PrunableReason)
