@@ -170,9 +170,11 @@ func TestWorktreeCleanupListClassifies(t *testing.T) {
 	repo := gitRepoWithCommit(t)
 	pid := seedProjectFull(t, env.db, "Alpha", repo)
 
-	// Referenced worktree: a linked worktree with a matching task row.
+	// Referenced worktree: a linked worktree with a matching task row. status
+	// "done" makes it a cleanup candidate so it is shown (WTREE-01 refinement:
+	// the panel lists only candidates; an in-progress referenced row is hidden).
 	refPath := addLinkedWorktree(t, repo, "feature")
-	seedTaskFull(t, env.db, pid, "Do the thing", "in_progress", "feature", refPath, "manual", 0, "")
+	seedTaskFull(t, env.db, pid, "Do the thing", "done", "feature", refPath, "manual", 0, "")
 
 	// Orphan worktree: a linked worktree with NO task row.
 	_ = addLinkedWorktree(t, repo, "orphan-branch")
@@ -260,14 +262,17 @@ func TestWorktreeCleanupListStalePointer(t *testing.T) {
 	}
 }
 
-// TestWorktreeCleanupListDirtyFlag: a referenced manual task with 2 uncommitted
+// TestWorktreeCleanupListDirtyFlag: a referenced DONE task with 2 uncommitted
 // files reports dirty=2; the base resolves so unpushed is a number (0), not null.
+// status "done" keeps the row a cleanup candidate (shown) even though it is
+// dirty — a done-but-dirty referenced row stays shown as a manual force-remove
+// candidate (WTREE-01 refinement).
 func TestWorktreeCleanupListDirtyFlag(t *testing.T) {
 	srv, env := newCleanupPanelServer(t, &stubPRState{})
 	repo := gitRepoWithCommit(t)
 	pid := seedProjectFull(t, env.db, "Gamma", repo)
 	wtPath := addLinkedWorktree(t, repo, "dirty-branch")
-	seedTaskFull(t, env.db, pid, "Messy", "in_progress", "dirty-branch", wtPath, "manual", 0, "")
+	seedTaskFull(t, env.db, pid, "Messy", "done", "dirty-branch", wtPath, "manual", 0, "")
 
 	for _, name := range []string{"a.txt", "b.txt"} {
 		if err := os.WriteFile(filepath.Join(wtPath, name), []byte("x\n"), 0o644); err != nil {
@@ -348,7 +353,10 @@ func TestWorktreeCleanupListPRStateLowercased(t *testing.T) {
 }
 
 // TestWorktreeCleanupListPRStateAbsentDegrades: with a gh-absent spy, a github_pr
-// row lists with pr_state null and the GET is 200 (never a broken chip / 500).
+// row's PRState errors, so under the WTREE-01 refinement the row is HIDDEN
+// (gh-unconfirmed ⇒ treated as still-active ⇒ hidden, degrade-don't-break). Its
+// project has no other rows, so the group is omitted, counts.total is 0, and the
+// GET stays 200 (a gh failure hides one row, never a broken chip / 500).
 func TestWorktreeCleanupListPRStateAbsentDegrades(t *testing.T) {
 	pr := &stubPRState{err: fmt.Errorf("gh not installed")}
 	srv, env := newCleanupPanelServer(t, pr)
@@ -358,12 +366,127 @@ func TestWorktreeCleanupListPRStateAbsentDegrades(t *testing.T) {
 	seedTaskFull(t, env.db, pid, "Review", "in_review", "pr-branch", wtPath, "github_pr", 99, "main")
 
 	resp := getList(t, srv)
-	rows := resp.Projects[0].Worktrees
-	if len(rows) != 1 {
-		t.Fatalf("rows = %d, want 1", len(rows))
+	if len(resp.Projects) != 0 {
+		t.Fatalf("projects = %d, want 0 (gh-unconfirmed PR row hidden, empty group omitted); %+v", len(resp.Projects), resp.Projects)
 	}
-	if rows[0].PRState != nil {
-		t.Errorf("pr_state = %v, want null (gh absent degrade)", *rows[0].PRState)
+	if resp.Counts.Total != 0 {
+		t.Errorf("counts.total = %d, want 0 (row hidden)", resp.Counts.Total)
+	}
+	// The GET returned 200 (getList asserts status 200) — degrade did not 500.
+}
+
+// TestWorktreeCleanupListShowsOnlyCandidates asserts the WTREE-01 refinement
+// (user decision reversing "list every worktree" → "list only cleanup
+// candidates"): GET /api/worktrees returns ONLY cleanup-candidate worktrees and
+// hides active-work rows.
+//
+// SHOWN (candidates): orphan, stale pointer, referenced-done task, referenced
+// github_pr whose PRState is MERGED or CLOSED.
+// HIDDEN (active work): referenced manual task not done (in_progress),
+// referenced github_pr whose PRState is OPEN, and a github_pr whose PRState
+// lookup errors (gh-unconfirmed ⇒ treated as still-active ⇒ hidden).
+// Also: a project whose worktrees are all hidden is omitted from projects, and
+// counts.total equals the number of shown rows.
+func TestWorktreeCleanupListShowsOnlyCandidates(t *testing.T) {
+	pr := &stubPRState{states: map[int]string{
+		10: "MERGED", // shown
+		11: "CLOSED", // shown
+		20: "OPEN",   // hidden (active)
+		// 21 has no mapping → PRState errors → hidden (gh-unconfirmed)
+	}}
+	srv, env := newCleanupPanelServer(t, pr)
+
+	// Alpha: a mix of shown + hidden rows.
+	repoA := gitRepoWithCommit(t)
+	pidA := seedProjectFull(t, env.db, "Alpha", repoA)
+
+	// SHOWN: orphan (git-listed, no task).
+	orphanPath := addLinkedWorktree(t, repoA, "orphan-wt")
+
+	// SHOWN: stale pointer (task path not in git's list).
+	stalePath := filepath.Join(t.TempDir(), "gone")
+	seedTaskFull(t, env.db, pidA, "Vanished", "in_progress", "stale-branch", stalePath, "manual", 0, "")
+
+	// SHOWN: referenced manual task, status done.
+	donePath := addLinkedWorktree(t, repoA, "done-wt")
+	seedTaskFull(t, env.db, pidA, "Finished", "done", "done-wt", donePath, "manual", 0, "")
+
+	// SHOWN: referenced github_pr, PRState MERGED.
+	mergedPath := addLinkedWorktree(t, repoA, "merged-wt")
+	seedTaskFull(t, env.db, pidA, "Merged PR", "in_review", "merged-wt", mergedPath, "github_pr", 10, "main")
+
+	// SHOWN: referenced github_pr, PRState CLOSED.
+	closedPath := addLinkedWorktree(t, repoA, "closed-wt")
+	seedTaskFull(t, env.db, pidA, "Closed PR", "in_review", "closed-wt", closedPath, "github_pr", 11, "main")
+
+	// HIDDEN: referenced manual task, status in_progress (active work).
+	wipPath := addLinkedWorktree(t, repoA, "wip-wt")
+	seedTaskFull(t, env.db, pidA, "In progress", "in_progress", "wip-wt", wipPath, "manual", 0, "")
+
+	// HIDDEN: referenced github_pr, PRState OPEN (active work).
+	openPath := addLinkedWorktree(t, repoA, "open-wt")
+	seedTaskFull(t, env.db, pidA, "Open PR", "in_review", "open-wt", openPath, "github_pr", 20, "main")
+
+	// HIDDEN: referenced github_pr whose PRState lookup errors (gh-unconfirmed).
+	errPath := addLinkedWorktree(t, repoA, "err-wt")
+	seedTaskFull(t, env.db, pidA, "Unknown PR", "in_review", "err-wt", errPath, "github_pr", 21, "main")
+
+	// Beta: only active-work rows → project group must be omitted entirely.
+	repoB := gitRepoWithCommit(t)
+	pidB := seedProjectFull(t, env.db, "Beta", repoB)
+	betaWIP := addLinkedWorktree(t, repoB, "beta-wip")
+	seedTaskFull(t, env.db, pidB, "Beta WIP", "in_progress", "beta-wip", betaWIP, "manual", 0, "")
+
+	resp := getList(t, srv)
+
+	// Beta has zero shown rows → omitted; only Alpha remains.
+	if len(resp.Projects) != 1 {
+		t.Fatalf("projects = %d, want 1 (Beta omitted — all rows hidden); %+v", len(resp.Projects), resp.Projects)
+	}
+	g := resp.Projects[0]
+	if g.ProjectName != "Alpha" {
+		t.Fatalf("shown project = %q, want Alpha (Beta must be omitted)", g.ProjectName)
+	}
+
+	shown := map[string]string{} // clean path -> classification
+	for _, wt := range g.Worktrees {
+		shown[filepath.Clean(wt.Path)] = wt.Classification
+	}
+
+	wantShown := map[string]string{
+		filepath.Clean(orphanPath): "orphan",
+		filepath.Clean(stalePath):  "stale",
+		filepath.Clean(donePath):   "referenced",
+		filepath.Clean(mergedPath): "referenced",
+		filepath.Clean(closedPath): "referenced",
+	}
+	for p, cls := range wantShown {
+		got, ok := shown[p]
+		if !ok {
+			t.Errorf("candidate row missing from list: %s (want classification %q)", p, cls)
+			continue
+		}
+		if got != cls {
+			t.Errorf("row %s classification = %q, want %q", p, got, cls)
+		}
+	}
+
+	for _, p := range []string{wipPath, openPath, errPath, betaWIP} {
+		if _, in := shown[filepath.Clean(p)]; in {
+			t.Errorf("active-work row wrongly shown: %s", p)
+		}
+	}
+
+	if len(g.Worktrees) != len(wantShown) {
+		t.Errorf("shown rows = %d, want %d (only candidates); rows=%v", len(g.Worktrees), len(wantShown), shown)
+	}
+
+	// counts.total counts only shown rows; counts.orphaned only shown orphans.
+	if resp.Counts.Total != len(wantShown) {
+		t.Errorf("counts.total = %d, want %d (shown rows only)", resp.Counts.Total, len(wantShown))
+	}
+	if resp.Counts.Orphaned != 1 {
+		t.Errorf("counts.orphaned = %d, want 1 (only the shown orphan)", resp.Counts.Orphaned)
 	}
 }
 
