@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
 	"sort"
 	"strings"
@@ -157,7 +158,11 @@ func Compute(ctx context.Context, wt, base string) (*Diff, error) {
 		// git as an option (CR-01); rel stays the authoritative display path.
 		patch, err := runNoIndex(ctx, wt, "./"+rel)
 		if err != nil {
-			return nil, err
+			// A single vanished/unreadable untracked file (agent churn, broken
+			// symlink, FIFO) must not abort the whole diff (WR-01): skip it and
+			// continue so every other file still renders.
+			slog.Warn("skipping untracked file in diff", "path", rel, "err", err)
+			continue
 		}
 		if patch == "" {
 			continue // empty file: identical to /dev/null, skip
