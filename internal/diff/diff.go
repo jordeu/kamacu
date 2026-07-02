@@ -153,7 +153,9 @@ func Compute(ctx context.Context, wt, base string) (*Diff, error) {
 		if rel == "" {
 			continue
 		}
-		patch, err := runNoIndex(ctx, wt, rel)
+		// Prefix "./" so a filename beginning with "-" can never be parsed by
+		// git as an option (CR-01); rel stays the authoritative display path.
+		patch, err := runNoIndex(ctx, wt, "./"+rel)
 		if err != nil {
 			return nil, err
 		}
