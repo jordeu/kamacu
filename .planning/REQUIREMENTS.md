@@ -29,10 +29,10 @@ Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly 
 
 ### Diff (GitHub "Files changed"-style review)
 
-- [ ] **DIFF-01**: The diff view shows a left-hand tree of all changed files; selecting a file focuses/scrolls to its diff
-- [ ] **DIFF-02**: Each file's diff can be individually collapsed and expanded
-- [ ] **DIFF-03**: Each file has a "Viewed" checkbox; marking it viewed collapses that file, and the viewed state persists across reopening the diff view (and server restarts)
-- [ ] **DIFF-04**: When a previously-viewed file changes again, it is automatically reset to un-viewed and re-expanded on the next open; unchanged viewed files stay collapsed and viewed
+- [x] **DIFF-01**: The diff view shows a left-hand tree of all changed files; selecting a file focuses/scrolls to its diff
+- [x] **DIFF-02**: Each file's diff can be individually collapsed and expanded
+- [x] **DIFF-03**: Each file has a "Viewed" checkbox; marking it viewed collapses that file, and the viewed state persists across reopening the diff view (and server restarts)
+- [x] **DIFF-04**: When a previously-viewed file changes again, it is automatically reset to un-viewed and re-expanded on the next open; unchanged viewed files stay collapsed and viewed
 
 ### Worktree Cleanup (Settings panel)
 
@@ -112,10 +112,10 @@ Which phases cover which requirements. Populated during roadmap creation.
 | BRAND-01 | Phase 20 | Complete |
 | BRAND-02 | Phase 20 | Complete |
 | BRAND-03 | Phase 20 | Complete |
-| DIFF-01 | Phase 22 | Pending |
-| DIFF-02 | Phase 22 | Pending |
-| DIFF-03 | Phase 22 | Pending |
-| DIFF-04 | Phase 22 | Pending |
+| DIFF-01 | Phase 22 | Complete |
+| DIFF-02 | Phase 22 | Complete |
+| DIFF-03 | Phase 22 | Complete |
+| DIFF-04 | Phase 22 | Complete |
 | WTREE-01 | Phase 23 | Pending |
 | WTREE-02 | Phase 23 | Pending |
 | WTREE-03 | Phase 23 | Pending |
