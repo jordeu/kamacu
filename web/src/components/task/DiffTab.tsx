@@ -124,7 +124,13 @@ export function DiffTab({ taskId }: { taskId: number }) {
 
       <div className="flex flex-col gap-2 pt-2">
         {files.map((file) => (
-          <DiffFileSection key={file.path} file={file} />
+          // key=path:hash so a changed file (new hash) remounts un-viewed +
+          // expanded (DIFF-04 auto-reset).
+          <DiffFileSection
+            key={`${file.path}:${file.hash}`}
+            file={file}
+            taskId={taskId}
+          />
         ))}
       </div>
     </div>
