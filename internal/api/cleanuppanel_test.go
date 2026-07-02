@@ -711,3 +711,55 @@ func TestWorktreeCleanupListNoStaleOnFailedList(t *testing.T) {
 		t.Errorf("counts.total = %d, want 0 (failed list must not surface stale rows)", resp.Counts.Total)
 	}
 }
+
+// TestWorktreeCleanupListSinglePRStateCall (WR-02) asserts that a shown
+// github_pr row resolves its PR state EXACTLY ONCE across the whole list
+// request. The pre-fix code called PRState twice per shown github_pr row
+// (isCleanupCandidate→eligibilityReason AND buildRow) — non-atomic, so
+// eligibility and displayed pr_state could disagree. One row, MERGED ⇒ one
+// gh call; the displayed pr_state must be "merged".
+func TestWorktreeCleanupListSinglePRStateCall(t *testing.T) {
+	pr := &stubPRState{states: map[int]string{42: "MERGED"}}
+	srv, env := newCleanupPanelServer(t, pr)
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Theta", repo)
+	wtPath := addLinkedWorktree(t, repo, "pr-branch")
+	seedTaskFull(t, env.db, pid, "Review", "in_review", "pr-branch", wtPath, "github_pr", 42, "main")
+
+	resp := getList(t, srv)
+	rows := resp.Projects[0].Worktrees
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].PRState == nil || *rows[0].PRState != "merged" {
+		t.Errorf("pr_state = %v, want %q", rows[0].PRState, "merged")
+	}
+	if pr.calls != 1 {
+		t.Errorf("PRState calls = %d, want exactly 1 (WR-02: resolve PR state once per row)", pr.calls)
+	}
+}
+
+// TestWorktreeCleanupCleanEligibleSinglePRStateCall (WR-02) asserts the
+// clean-eligible path (which shares enumerate()+eligibilityReason) also makes
+// exactly ONE gh call per PR row — computeEligible reads the stored resolution,
+// never re-invoking PRState.
+func TestWorktreeCleanupCleanEligibleSinglePRStateCall(t *testing.T) {
+	pr := &stubPRState{states: map[int]string{7: "MERGED"}}
+	srv, env := newCleanupPanelServer(t, pr)
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Iota", repo)
+	wtPath := addLinkedWorktree(t, repo, "pr-clean")
+	seedTaskFull(t, env.db, pid, "Merged clean", "in_review", "pr-clean", wtPath, "github_pr", 7, "main")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible?dry_run=1", nil)
+	if status != http.StatusOK {
+		t.Fatalf("dry-run status = %d, want 200; body=%v", status, body)
+	}
+	items, _ := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("eligible items = %d, want 1 (merged PR, clean); body=%v", len(items), body)
+	}
+	if pr.calls != 1 {
+		t.Errorf("PRState calls = %d, want exactly 1 (WR-02: one gh call per PR row)", pr.calls)
+	}
+}
