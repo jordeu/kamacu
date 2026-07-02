@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 func DiffRoutes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service) {
 	h := &diffHandlers{db: db, wt: wt}
 	mux.HandleFunc("GET /api/tasks/{id}/diff", h.get)
+	mux.HandleFunc("PUT /api/tasks/{id}/diff/viewed", h.setViewed)
 }
 
 type diffHandlers struct {
@@ -106,6 +108,41 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Base = base // totals bar + empty state share the resolved base
+
+	// Merge per-file "Viewed" state (DIFF-03/04). A file reads viewed iff a
+	// diff_viewed row exists at its CURRENT rendered hash (keep-history, D-02):
+	// a changed file mints a new hash with no matching row -> un-viewed; a revert
+	// to a byte-identical diff restores the old hash -> its lingering row matches
+	// again. One drained SELECT, cursor CLOSED before we touch d.Files -- safe
+	// under SetMaxOpenConns(1) (icons.go discipline). Parameterized (?) only.
+	type viewedKey struct{ path, hash string }
+	viewed := map[viewedKey]bool{}
+	rows, qErr := h.db.Query(`SELECT file_path, diff_hash FROM diff_viewed WHERE task_id = ?`, id)
+	if qErr != nil {
+		writeError(w, http.StatusInternalServerError, qErr.Error())
+		return
+	}
+	for rows.Next() {
+		var fp, hash string
+		if scanErr := rows.Scan(&fp, &hash); scanErr != nil {
+			rows.Close()
+			writeError(w, http.StatusInternalServerError, scanErr.Error())
+			return
+		}
+		viewed[viewedKey{fp, hash}] = true
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		rows.Close()
+		writeError(w, http.StatusInternalServerError, rowsErr.Error())
+		return
+	}
+	rows.Close()
+	for i := range d.Files {
+		if viewed[viewedKey{d.Files[i].Path, d.Files[i].Hash}] {
+			d.Files[i].Viewed = true
+		}
+	}
+
 	writeJSON(w, http.StatusOK, d)
 }
 
@@ -124,4 +161,74 @@ func resolvePRBase(ctx context.Context, wt, baseName string) string {
 		return baseName // local branch tip
 	}
 	return "origin/" + baseName // remote-tracking ref (fetched above)
+}
+
+// setViewed handles the per-file Viewed write endpoint (DIFF-03). It toggles the
+// exact keep-history row for (task, path, hash): viewed=true INSERTs it
+// (idempotent via ON CONFLICT DO NOTHING), viewed=false DELETEs precisely that
+// row. The client sends the hash it JUST rendered; we TRUST it and do NOT
+// re-Compute (RESEARCH §Area 2) -- a stale/garbage-but-well-formed row never
+// matches the current rendered hash on the next open (so it shows un-viewed,
+// correct) and is cascade-pruned when the task is deleted. All SQL uses '?'
+// placeholders only (T-22-01, never string-concatenated). Input is bounded +
+// validated (T-22-03) so oversized/garbage path/hash is rejected 400, never
+// persisted.
+func (h *diffHandlers) setViewed(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Path   string `json:"path"`
+		Hash   string `json:"hash"`
+		Viewed bool   `json:"viewed"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	if len(req.Path) > 4096 {
+		writeError(w, http.StatusBadRequest, "path is too long")
+		return
+	}
+	if !isDiffHash(req.Hash) {
+		writeError(w, http.StatusBadRequest, "hash must be 64 lowercase hex characters")
+		return
+	}
+	if req.Viewed {
+		if _, err := h.db.Exec(
+			`INSERT INTO diff_viewed(task_id, file_path, diff_hash) VALUES(?,?,?) ON CONFLICT(task_id, file_path, diff_hash) DO NOTHING`,
+			id, req.Path, req.Hash); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		if _, err := h.db.Exec(
+			`DELETE FROM diff_viewed WHERE task_id=? AND file_path=? AND diff_hash=?`,
+			id, req.Path, req.Hash); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// isDiffHash reports whether s is exactly 64 lowercase hex characters -- the
+// shape of the sha256 hex fingerprint from internal/diff.hashFile. Bounds the
+// stored hash and rejects garbage cheaply (T-22-03).
+func isDiffHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }

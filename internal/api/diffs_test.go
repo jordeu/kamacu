@@ -398,3 +398,204 @@ func TestDiffMissingWorktreeDir(t *testing.T) {
 		t.Errorf("error message empty, want a relayed message for the UI error card")
 	}
 }
+
+// getDiffFile fetches GET /api/tasks/{id}/diff and returns the rendered hash and
+// Viewed flag for the named path, plus whether that file appeared at all.
+func getDiffFile(t *testing.T, srv *httptest.Server, id int64, path string) (hash string, viewed, found bool) {
+	t.Helper()
+	status, body := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d/diff", srv.URL, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET diff status = %d, want 200; body=%v", status, body)
+	}
+	files, _ := body["files"].([]any)
+	for _, f := range files {
+		fm, _ := f.(map[string]any)
+		if p, _ := fm["path"].(string); p == path {
+			h, _ := fm["hash"].(string)
+			v, _ := fm["viewed"].(bool)
+			return h, v, true
+		}
+	}
+	return "", false, false
+}
+
+// putViewed issues the PUT .../diff/viewed toggle and returns the HTTP status.
+func putViewed(t *testing.T, srv *httptest.Server, id int64, path, hash string, viewed bool) int {
+	t.Helper()
+	status, _ := doJSON(t, "PUT", fmt.Sprintf("%s/api/tasks/%d/diff/viewed", srv.URL, id),
+		map[string]any{"path": path, "hash": hash, "viewed": viewed})
+	return status
+}
+
+// TestViewedPersistToggleAndKeepHistory drives the read-merge + write endpoint
+// end to end (DIFF-03/04): (a) PUT true then GET marks viewed; (b) PUT false
+// clears it; (c) a changed rendered diff mints a new hash that reads un-viewed
+// while the old-hash row is KEPT (D-02); (d) reverting to the byte-identical old
+// diff restores the checkmark with NO new write.
+func TestViewedPersistToggleAndKeepHistory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, db, _ := newDiffServerDB(t)
+	repo := gitRepoWithCommit(t) // main with file.txt="hello\n" committed
+	id, wtPath := provisionTaskWithWorktree(t, srv, repo)
+
+	writeFile := func(content string) {
+		if err := os.WriteFile(filepath.Join(wtPath, "file.txt"), []byte(content), 0o644); err != nil {
+			t.Fatalf("write file.txt: %v", err)
+		}
+	}
+
+	// Content C1 -> rendered-diff hash H1.
+	writeFile("hello\nAAA\n")
+	h1, viewed, found := getDiffFile(t, srv, id, "file.txt")
+	if !found {
+		t.Fatalf("file.txt missing from diff response")
+	}
+	if !isDiffHash(h1) {
+		t.Fatalf("hash %q is not 64 lowercase hex", h1)
+	}
+	if viewed {
+		t.Fatalf("file.txt viewed=true before any PUT; want false")
+	}
+
+	// (a) PUT true, GET marks viewed.
+	if st := putViewed(t, srv, id, "file.txt", h1, true); st != http.StatusNoContent {
+		t.Fatalf("(a) PUT viewed=true status = %d, want 204", st)
+	}
+	if _, viewed, _ = getDiffFile(t, srv, id, "file.txt"); !viewed {
+		t.Fatalf("(a) file.txt viewed=false after PUT true; want true")
+	}
+
+	// (b) PUT false, GET clears it.
+	if st := putViewed(t, srv, id, "file.txt", h1, false); st != http.StatusNoContent {
+		t.Fatalf("(b) PUT viewed=false status = %d, want 204", st)
+	}
+	if _, viewed, _ = getDiffFile(t, srv, id, "file.txt"); viewed {
+		t.Fatalf("(b) file.txt viewed=true after PUT false; want false")
+	}
+
+	// Re-mark viewed at H1 for the keep-history walk.
+	if st := putViewed(t, srv, id, "file.txt", h1, true); st != http.StatusNoContent {
+		t.Fatalf("re-mark PUT viewed=true status = %d, want 204", st)
+	}
+
+	// (c) Change the rendered diff -> new hash H2 reads un-viewed; the (path,H1)
+	// row is deliberately KEPT (D-02, keep-history).
+	writeFile("hello\nBBB\n")
+	h2, viewed, found := getDiffFile(t, srv, id, "file.txt")
+	if !found {
+		t.Fatalf("file.txt missing from diff after change")
+	}
+	if h2 == h1 {
+		t.Fatalf("(c) hash unchanged after content change: %q", h2)
+	}
+	if viewed {
+		t.Fatalf("(c) file.txt viewed=true at new hash H2; want false (auto-reset)")
+	}
+	var keepCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM diff_viewed WHERE task_id=? AND file_path=? AND diff_hash=?`,
+		id, "file.txt", h1).Scan(&keepCount); err != nil {
+		t.Fatalf("query keep-history row: %v", err)
+	}
+	if keepCount != 1 {
+		t.Fatalf("(c) old-hash (H1) row count = %d, want 1 (keep-history preserved)", keepCount)
+	}
+
+	// (d) Revert to the byte-identical C1 -> hash returns to H1 -> viewed again,
+	// and no row was ever written at H2 (proving no implicit write on revert).
+	writeFile("hello\nAAA\n")
+	hBack, viewed, _ := getDiffFile(t, srv, id, "file.txt")
+	if hBack != h1 {
+		t.Fatalf("(d) reverted hash = %q, want H1 %q (byte-identical diff)", hBack, h1)
+	}
+	if !viewed {
+		t.Fatalf("(d) file.txt viewed=false after revert to H1; want true (checkmark restored)")
+	}
+	var h2Count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM diff_viewed WHERE task_id=? AND file_path=? AND diff_hash=?`,
+		id, "file.txt", h2).Scan(&h2Count); err != nil {
+		t.Fatalf("query H2 row: %v", err)
+	}
+	if h2Count != 0 {
+		t.Fatalf("(d) H2 row count = %d, want 0 (no write happened at H2)", h2Count)
+	}
+}
+
+// TestViewedFKCascadeOnTaskDelete (e): deleting the owning task prunes every
+// diff_viewed row via ON DELETE CASCADE. The DB is opened through store.Open
+// (foreign_keys pragma ON), so the constraint actually fires; the assertion
+// queries diff_viewed directly.
+func TestViewedFKCascadeOnTaskDelete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, db, _ := newDiffServerDB(t)
+	repo := gitRepoWithCommit(t)
+	id, wtPath := provisionTaskWithWorktree(t, srv, repo)
+
+	if err := os.WriteFile(filepath.Join(wtPath, "file.txt"), []byte("hello\nZ\n"), 0o644); err != nil {
+		t.Fatalf("modify file.txt: %v", err)
+	}
+	h, _, found := getDiffFile(t, srv, id, "file.txt")
+	if !found {
+		t.Fatalf("file.txt missing from diff response")
+	}
+	if st := putViewed(t, srv, id, "file.txt", h, true); st != http.StatusNoContent {
+		t.Fatalf("PUT viewed=true status = %d, want 204", st)
+	}
+
+	var before int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM diff_viewed WHERE task_id = ?`, id).Scan(&before); err != nil {
+		t.Fatalf("count rows before delete: %v", err)
+	}
+	if before == 0 {
+		t.Fatalf("no diff_viewed rows persisted before delete")
+	}
+
+	// Delete the task row directly -> ON DELETE CASCADE prunes the rows.
+	if _, err := db.Exec(`DELETE FROM tasks WHERE id = ?`, id); err != nil {
+		t.Fatalf("delete task row: %v", err)
+	}
+	var after int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM diff_viewed WHERE task_id = ?`, id).Scan(&after); err != nil {
+		t.Fatalf("count rows after delete: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("(e) diff_viewed rows after task delete = %d, want 0 (FK cascade)", after)
+	}
+}
+
+// TestViewedRejectsBadInput (f): the write endpoint returns 400 for an empty
+// path, a hash that is not exactly 64 lowercase hex chars, and an over-length
+// path (T-22-03), never persisting garbage.
+func TestViewedRejectsBadInput(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, _, _ := newDiffServerDB(t)
+	repo := gitRepoWithCommit(t)
+	id, _ := provisionTaskWithWorktree(t, srv, repo)
+
+	url := fmt.Sprintf("%s/api/tasks/%d/diff/viewed", srv.URL, id)
+	goodHash := strings.Repeat("a", 64) // 64 lowercase hex
+
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"empty path", map[string]any{"path": "", "hash": goodHash, "viewed": true}},
+		{"short hash", map[string]any{"path": "file.txt", "hash": "abc", "viewed": true}},
+		{"uppercase hash", map[string]any{"path": "file.txt", "hash": strings.Repeat("A", 64), "viewed": true}},
+		{"non-hex hash", map[string]any{"path": "file.txt", "hash": strings.Repeat("z", 64), "viewed": true}},
+		{"over-length path", map[string]any{"path": strings.Repeat("a", 4097), "hash": goodHash, "viewed": true}},
+	}
+	for _, tc := range cases {
+		status, body := doJSON(t, "PUT", url, tc.body)
+		if status != http.StatusBadRequest {
+			t.Errorf("%s: PUT status = %d, want 400; body=%v", tc.name, status, body)
+		}
+	}
+}
