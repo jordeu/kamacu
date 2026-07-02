@@ -190,7 +190,7 @@ Plans:
   4. When a previously-viewed file changes again it is automatically reset to un-viewed and re-expanded on the next open, while unchanged viewed files stay collapsed and viewed (DIFF-04)
 
 **Plans**: 5 plans
-- [ ] 22-01-PLAN.md — Rendered-per-file diff hash in internal/diff (Wave 1)
+- [x] 22-01-PLAN.md — Rendered-per-file diff hash in internal/diff (Wave 1)
 - [ ] 22-02-PLAN.md — Viewed persistence table + GET read-merge + PUT /diff/viewed (Wave 2)
 - [ ] 22-03-PLAN.md — Diff types + useToggleViewed + checkbox + DiffFileSection restructure (Wave 3)
 - [ ] 22-04-PLAN.md — Two-pane layout: FileTree, scroll-spy, DiffTab (Wave 4)
@@ -256,7 +256,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
-| 22. GitHub-Style Diff Review | v1.8 | 0/TBD | Not started | - |
+| 22. GitHub-Style Diff Review | v1.8 | 1/5 | In Progress|  |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
 
