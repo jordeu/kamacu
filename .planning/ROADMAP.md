@@ -104,7 +104,7 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
 - [x] **Phase 20: Kamacu Rebrand & Brand** — Rename to Kamacu across code/binary/module/UI and ship the new logo, favicon, and README (no data-path change yet) (completed 2026-07-01)
 - [x] **Phase 21: Data Directory Migration** — One-time gated `~/.kangent` → `~/.kamacu` move that repairs worktrees, rewrites DB paths, switches the tmux socket/prefix, and migrates localStorage (completed 2026-07-01)
 - [x] **Phase 22: GitHub-Style Diff Review** — File-tree diff view with per-file collapse and sticky "Viewed" state that resets only when a file changes (completed 2026-07-02)
-- [x] **Phase 23: Worktree Cleanup Panel** — Settings panel listing every worktree (incl. orphans) with per-item force-remove and a bulk "clean eligible" action (completed 2026-07-02)
+- [x] **Phase 23: Worktree Cleanup Panel** — Settings panel listing cleanup-candidate worktrees (orphaned/stale/finished; active work hidden) with per-item force-remove and a bulk "clean eligible" action (completed 2026-07-02)
 - [ ] **Phase 24: Session-Bar, Board & Tab Polish** — Renameable tabs, a task-view three-dots menu (no auto review-prompt), and session-bar / board cleanups
 
 ## Phase Details
@@ -199,12 +199,12 @@ Plans:
 
 ### Phase 23: Worktree Cleanup Panel
 
-**Goal**: Settings gives the user a full accounting of every worktree and the controls to reclaim them — including the orphaned worktrees the reaper currently leaves behind.
+**Goal**: Settings gives the user a full accounting of every cleanup-candidate worktree and the controls to reclaim them — including the orphaned worktrees the reaper currently leaves behind. (Refined post-approval 2026-07-02: the panel is a cleanup queue — orphaned/stale/finished worktrees only; active in-progress tasks and open PRs are hidden.)
 **Depends on**: Phase 21
 **Requirements**: WTREE-01, WTREE-02, WTREE-03, WTREE-04
 **Success Criteria** (what must be TRUE):
 
-  1. Settings has a worktree-management section listing every worktree with its task/PR association, referenced-vs-orphaned status, and dirty / unpushed / stash flags (WTREE-01)
+  1. Settings has a worktree-management section listing every cleanup-candidate worktree (orphaned/stale/finished; active work hidden) with its task/PR association, classification, and dirty / unpushed / stash flags (WTREE-01)
   2. Orphaned worktrees — present on disk / in `git worktree list` but with no matching DB task — are detected and shown in the list (WTREE-04)
   3. The user can force-remove an individual worktree from the list, overriding the dirty/unpushed/stash gates, behind a confirmation (WTREE-02)
   4. A bulk "clean eligible" action removes all safely-removable worktrees (done/merged-and-pristine, or orphaned) in one action (WTREE-03)
@@ -275,7 +275,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete    | 2026-07-02 |
-| 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete   | 2026-07-02 |
+| 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete    | 2026-07-02 |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
 
 ---

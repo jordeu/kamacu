@@ -36,10 +36,10 @@ Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly 
 
 ### Worktree Cleanup (Settings panel)
 
-- [ ] **WTREE-01**: Settings has a worktree-management section listing every cleanup-candidate worktree — orphaned, stale-pointer, or referenced-but-finished (task Done / PR merged or closed) — with its task/PR association, classification, and dirty / unpushed / stash flags. Active-work worktrees (in-progress tasks, open/pending-review PRs) are intentionally hidden so the panel reads as a cleanup queue, not a full inventory (refined post-approval, 2026-07-02; reverses the original "every worktree" wording).
-- [ ] **WTREE-02**: The user can force-remove an individual worktree from the list, overriding the dirty/unpushed/stash gates, behind a confirmation
-- [ ] **WTREE-03**: A bulk "clean eligible" action removes all safely-removable worktrees (done/merged-and-pristine, or orphaned) in one action
-- [ ] **WTREE-04**: Orphaned worktrees (present on disk / in `git worktree list` but with no matching DB task) are detected, listed, and removable — reconciling the accumulation the reaper currently skips
+- [x] **WTREE-01**: Settings has a worktree-management section listing every cleanup-candidate worktree — orphaned, stale-pointer, or referenced-but-finished (task Done / PR merged or closed) — with its task/PR association, classification, and dirty / unpushed / stash flags. Active-work worktrees (in-progress tasks, open/pending-review PRs) are intentionally hidden so the panel reads as a cleanup queue, not a full inventory (refined post-approval, 2026-07-02; reverses the original "every worktree" wording).
+- [x] **WTREE-02**: The user can force-remove an individual worktree from the list, overriding the dirty/unpushed/stash gates, behind a confirmation
+- [x] **WTREE-03**: A bulk "clean eligible" action removes all safely-removable worktrees (done/merged-and-pristine, or orphaned) in one action
+- [x] **WTREE-04**: Orphaned worktrees (present on disk / in `git worktree list` but with no matching DB task) are detected, listed, and removable — reconciling the accumulation the reaper currently skips
 
 ### Tabs (rename bash/tmux tabs)
 
@@ -116,10 +116,10 @@ Which phases cover which requirements. Populated during roadmap creation.
 | DIFF-02 | Phase 22 | Complete |
 | DIFF-03 | Phase 22 | Complete |
 | DIFF-04 | Phase 22 | Complete |
-| WTREE-01 | Phase 23 | Pending |
-| WTREE-02 | Phase 23 | Pending |
-| WTREE-03 | Phase 23 | Pending |
-| WTREE-04 | Phase 23 | Pending |
+| WTREE-01 | Phase 23 | Complete |
+| WTREE-02 | Phase 23 | Complete |
+| WTREE-03 | Phase 23 | Complete |
+| WTREE-04 | Phase 23 | Complete |
 | TABS-01 | Phase 24 | Pending |
 | TABS-02 | Phase 24 | Pending |
 | REVMENU-01 | Phase 24 | Pending |
