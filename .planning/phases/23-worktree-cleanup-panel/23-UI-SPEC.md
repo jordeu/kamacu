@@ -1,10 +1,11 @@
 ---
 phase: 23
 slug: worktree-cleanup-panel
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova (neutral base, cssVariables)
 created: 2026-07-02
+reviewed_at: 2026-07-02
 ---
 
 # Phase 23 — UI Design Contract
