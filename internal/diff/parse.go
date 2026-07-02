@@ -43,7 +43,23 @@ type Totals struct {
 // File is one changed path. Additions/Deletions are nil for binary files
 // (rendered stat-only per D-62); OldPath is set only for renames.
 type File struct {
-	Path      string  `json:"path"`
+	Path string `json:"path"`
+	// Hash is a deterministic sha256 hex of the RENDERED per-file content:
+	// Status/Binary/OldPath/Hunks are IN; Base/Path/counts are OUT (see hashFile
+	// in diff.go). It keys the per-file "Viewed" persistence and drives the
+	// DIFF-04 auto-reset — a file whose rendered diff changes gets a new hash and
+	// therefore no matching Viewed row. Base movement that leaves a file's hunks
+	// untouched leaves its hash unchanged (D-01). Binary files hash a
+	// content-invariant "Binary file changed" header (no hunks); the underlying
+	// blob OIDs are intentionally NOT captured (strict D-01, rendered-only), so a
+	// binary whose bytes change without a status/path/header change keeps its
+	// hash — an accepted, documented limitation, not a bug.
+	Hash string `json:"hash"`
+	// Viewed reflects whether this exact rendered diff (task+path+Hash) is marked
+	// reviewed. Populated by the API handler from the diff_viewed store; it is the
+	// zero value (false) here because Compute is DB-free.
+	Viewed bool `json:"viewed"`
+
 	OldPath   *string `json:"oldPath"`
 	Status    string  `json:"status"` // modified | new | deleted | renamed
 	Binary    bool    `json:"binary"`

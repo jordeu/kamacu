@@ -3,8 +3,11 @@ package diff
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sort"
 	"strings"
@@ -178,6 +181,15 @@ func Compute(ctx context.Context, wt, base string) (*Diff, error) {
 	// Stable ordering: sort everything by path ascending (planner's pick).
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
+	// Single post-sort pass: derive the rendered-per-file hash for every file so
+	// the tracked and untracked branches above share ONE hashing code path. Hash
+	// keys the per-file Viewed persistence (Plan 02) and drives DIFF-04 auto-reset
+	// (a changed rendered diff gets a new hash → no matching Viewed row). Viewed is
+	// left at its zero value here — Compute is DB-free; the API handler fills it.
+	for i := range files {
+		files[i].Hash = hashFile(files[i])
+	}
+
 	d := &Diff{Files: files}
 	if d.Files == nil {
 		d.Files = []File{} // D-63 empty state: never null
@@ -208,4 +220,59 @@ func countHunkLines(hunks []Hunk) (add, del int) {
 		}
 	}
 	return add, del
+}
+
+// hashFile derives a deterministic sha256 hex fingerprint of a file's RENDERED
+// diff — the exact per-file content the client displays (structured-diff-on-
+// server, dumb-map-on-client). It is a pure function (no I/O, ordered slices
+// only, no map iteration), so the same File value hashes identically across runs
+// and machines. It mirrors the shape of countHunkLines: a package-level helper
+// over File/[]Hunk.
+//
+// INCLUDES (a change to any of these is a visible change worth re-reviewing):
+//   - Status (modified/new/deleted/renamed) — a status flip is visible.
+//   - the Binary flag.
+//   - OldPath (the rendered "old → new" for renames).
+//   - every Hunk.Header and every Line.Kind + Line.Text, in order.
+//
+// EXCLUDES:
+//   - Base — D-01: the hash is NOT base-inclusive, so base movement that leaves a
+//     file's hunks untouched (three-dot semantics) does not reset its Viewed.
+//   - Path — it is the separate persistence key column (file_path); two files
+//     with byte-identical rendered content share a hash but differ by path.
+//   - Additions/Deletions — derived from the hunks (redundant).
+//
+// Serialization is LENGTH-PREFIXED (each string written as "<len>:<bytes>") so no
+// field value can be confused with a delimiter — collision-safe against a value
+// that happens to contain the separator (T-22-06).
+//
+// Binary files carry a content-invariant header and NO hunks, so their hash is
+// stable regardless of the underlying bytes. A binary whose bytes change without
+// a status/path/header change keeps its hash and thus its Viewed state — this is
+// the accepted, documented strict-D-01 limitation (blob OIDs are intentionally
+// NOT captured in parse.go); do NOT "fix" it by folding in index <oid>..<oid>.
+func hashFile(f File) string {
+	h := sha256.New()
+	ws := func(s string) { fmt.Fprintf(h, "%d:", len(s)); io.WriteString(h, s) }
+	ws(f.Status)
+	if f.Binary {
+		ws("bin")
+	} else {
+		ws("txt")
+	}
+	if f.OldPath != nil {
+		ws(*f.OldPath)
+	} else {
+		ws("")
+	}
+	fmt.Fprintf(h, "H%d:", len(f.Hunks))
+	for _, hk := range f.Hunks {
+		ws(hk.Header)
+		fmt.Fprintf(h, "L%d:", len(hk.Lines))
+		for _, ln := range hk.Lines {
+			ws(ln.Kind)
+			ws(ln.Text)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
