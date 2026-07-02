@@ -534,14 +534,14 @@ web/src/components/task/FileTree.tsx               # NEW: buildTree + recursive 
 
 **No `[ASSUMED]` package names** — the only package is `radix-ui`, already installed and CLAUDE.md-blessed.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Binary-file Viewed reset semantics (needs user/planner confirmation).**
+1. **Binary-file Viewed reset semantics — RESOLVED: strict D-01 (user-confirmed 2026-07-02).**
    - What we know: D-01 hashes the *rendered* diff. A binary file renders a constant "Binary file changed" header (DiffFileSection.tsx:33-52) with no hunks. `parse.go` does **not** capture the `index <oldOID>..<newOID>` line (verified) — so a rendered-only hash is identical regardless of the binary's actual bytes.
    - What's unclear: should marking a binary Viewed and then changing its bytes reset Viewed (DIFF-04 "when a file changes again")? A strict rendered-only reading says **no**; user intent may say **yes**.
-   - Recommendation: default to the strict D-01 reading (rendered-only) so nothing contradicts the locked decision, and **flag it**. If "yes" is wanted, add capture of the binary `index abc..def` blob OIDs in `parse.go` and fold the new OID into `hashFile` **for binary files only**. Cheap, localized, but it is a (minor) deviation from "not the worktree blob" — hence confirm before locking.
+   - **RESOLVED:** strict D-01 (rendered-only) — locked by D-01 ("not the worktree blob") and D-04 (binary Viewed is a header-only no-op). Do **NOT** add `index <oid>..<oid>` blob-OID capture to `parse.go`. A binary whose bytes change without a status/path/header change stays Viewed; this is an **accepted, documented limitation** (see 22-01 `<notes>` and 22-05 human-verify — do not report as a bug).
 
-2. **`TOTALS_BAR_PX` source.** Measure at runtime (ref + `getBoundingClientRect`) vs. hardcode a constant. Recommend measuring to survive font/zoom changes; a constant is acceptable if the bar height is provably fixed. (Cosmetic; not a correctness gate.)
+2. **`TOTALS_BAR_PX` source — RESOLVED: constant `41`.** The plans use the constant `41` (across 22-03 and 22-04) for the `rootMargin` top offset, sticky `top`, and `scroll-mt`. Cosmetic only, not a correctness gate; measure-at-runtime (ref + `getBoundingClientRect`) is deferred as a future refinement if font/zoom drift is ever observed.
 
 ## Environment Availability
 
