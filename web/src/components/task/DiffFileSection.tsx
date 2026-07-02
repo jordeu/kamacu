@@ -89,13 +89,13 @@ export function DiffFileSection({
       <div
         data-diff-path={file.path}
         className={cn(
-          "overflow-hidden rounded-lg border border-border",
+          "rounded-lg border border-border",
           SCROLL_MARGIN,
         )}
       >
         <div
           className={cn(
-            "sticky z-[5] flex items-center gap-2 bg-card px-3 py-2",
+            "sticky z-[5] flex items-center gap-2 rounded-lg bg-card px-3 py-2",
             STICKY_TOP,
           )}
         >
@@ -126,13 +126,13 @@ export function DiffFileSection({
       onOpenChange={setOpen}
       data-diff-path={file.path}
       className={cn(
-        "group/diff-file overflow-hidden rounded-lg border border-border",
+        "group/diff-file rounded-lg border border-border",
         SCROLL_MARGIN,
       )}
     >
       <div
         className={cn(
-          "sticky z-[5] flex items-center gap-2 bg-card px-3 py-2",
+          "sticky z-[5] flex items-center gap-2 rounded-t-lg bg-card px-3 py-2",
           STICKY_TOP,
         )}
       >
@@ -166,7 +166,7 @@ export function DiffFileSection({
         {viewedLabel}
       </div>
       <CollapsibleContent>
-        <div className="overflow-x-auto bg-zinc-950">
+        <div className="overflow-x-auto rounded-b-lg bg-zinc-950">
           {file.hunks.map((hunk, hi) => (
             <div key={hi}>
               <div className="w-fit min-w-full bg-card px-3 py-2 font-mono text-xs whitespace-pre text-zinc-400">
