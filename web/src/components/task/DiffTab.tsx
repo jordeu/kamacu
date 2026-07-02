@@ -45,8 +45,13 @@ export function DiffTab({ taskId }: { taskId: number }) {
 
   // Safe file list for the hooks below (data is undefined during first load).
   const files = data?.files ?? [];
-  // Joined path key re-observes the scroll-spy when the file list changes.
-  const activePath = useScrollSpy(scrollRef, files.map((f) => f.path).join("\n"));
+  // Keyed on the same `path:hash` identity the sections remount on (WR-02), so
+  // the scroll-spy re-observes whenever a node is replaced — including a
+  // content-only refresh where a file's hash changes but the path set does not.
+  const activePath = useScrollSpy(
+    scrollRef,
+    files.map((f) => `${f.path}:${f.hash}`).join("\n"),
+  );
 
   useEffect(() => {
     if (!(isPending && !data)) {
