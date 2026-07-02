@@ -98,3 +98,8 @@ None - no external service configuration required. Migration 00011 auto-applies 
 ---
 *Phase: 22-github-style-diff-review*
 *Completed: 2026-07-02*
+
+## Self-Check: PASSED
+
+- Files verified present: `internal/store/migrations/00011_diff_viewed.sql`, `internal/api/diffs.go`, `internal/api/diffs_test.go`, `.planning/phases/22-github-style-diff-review/22-02-SUMMARY.md`.
+- Commits verified present: `239fade` (Task 1), `8146d0c` (Task 2), `c1f5d68` (Task 3).
