@@ -280,6 +280,82 @@ func (s *Service) FetchRef(ctx context.Context, repo, ref string) error {
 	return err
 }
 
+// Entry is one record from `git worktree list --porcelain -z`. It is a faithful
+// mirror of git's porcelain attributes (verified against git 2.43.0, RESEARCH
+// Pattern 1): the format is documented stable regardless of config
+// (https://git-scm.com/docs/git-worktree). The FIRST entry of every repo's list
+// is the MAIN worktree (the repo checkout itself); List does NOT filter it —
+// the API layer excludes the main worktree by comparing
+// filepath.Clean(Path) == filepath.Clean(project.repo_path), keeping List an
+// independently-testable parser (RESEARCH Pitfall 2).
+type Entry struct {
+	Path           string
+	HEAD           string
+	Branch         string // "" when detached or bare
+	Bare           bool
+	Detached       bool
+	Locked         bool
+	LockedReason   string
+	Prunable       bool
+	PrunableReason string
+}
+
+// List enumerates every worktree registered in repo, robustly, via
+// `git worktree list --porcelain -z`. The -z variant NUL-separates attributes
+// (\x00) and double-NUL-separates records (\x00\x00), which makes paths
+// containing spaces/newlines safe to parse (RESEARCH Pattern 1). A worktree
+// whose directory was manually deleted appears with a `prunable gitdir file
+// points to non-existent location` attribute (losing its `branch`, showing
+// `detached`) — git's own reverse-orphan signal the cleanup panel surfaces.
+//
+// The main worktree is returned like any other entry (see Entry doc). Follows
+// the gitRun arg-array invariant — never a shell (Security Domain V5).
+func (s *Service) List(ctx context.Context, repo string) ([]Entry, error) {
+	out, err := gitRun(ctx, repo, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return nil, err
+	}
+	return parseWorktreeList(out), nil
+}
+
+// parseWorktreeList parses the raw `worktree list --porcelain -z` buffer into
+// Entry records. Records are "\x00\x00"-separated; attributes within a record
+// are "\x00"-separated. A trailing "\x00" (or "\x00\x00") is trimmed before the
+// record split so it never yields a spurious empty Entry. Split out from List
+// so the crafted-buffer edge cases (locked reasons, bare, trailing-NUL) are
+// unit-testable without live git. Mirrors the switch in RESEARCH Pattern 1.
+func parseWorktreeList(out string) []Entry {
+	var entries []Entry
+	for _, rec := range strings.Split(strings.TrimRight(out, "\x00"), "\x00\x00") {
+		if rec == "" {
+			continue
+		}
+		var e Entry
+		for _, line := range strings.Split(rec, "\x00") {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				e.Path = strings.TrimPrefix(line, "worktree ")
+			case strings.HasPrefix(line, "HEAD "):
+				e.HEAD = strings.TrimPrefix(line, "HEAD ")
+			case strings.HasPrefix(line, "branch "):
+				e.Branch = strings.TrimPrefix(line, "branch ")
+			case line == "bare":
+				e.Bare = true
+			case line == "detached":
+				e.Detached = true
+			case line == "locked" || strings.HasPrefix(line, "locked "):
+				e.Locked = true
+				e.LockedReason = strings.TrimSpace(strings.TrimPrefix(line, "locked"))
+			case line == "prunable" || strings.HasPrefix(line, "prunable "):
+				e.Prunable = true
+				e.PrunableReason = strings.TrimSpace(strings.TrimPrefix(line, "prunable"))
+			}
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
 // DirtyCount returns the number of porcelain=v2 records for the worktree at
 // wt, counting untracked files individually (--untracked-files=all). The
 // per-file untracked count is load-bearing: plain `worktree remove` refuses

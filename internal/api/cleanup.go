@@ -3,13 +3,80 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"io/fs"
 	"os"
+	"strings"
 	"time"
 
 	"kamacu/internal/session"
 	"kamacu/internal/tmux"
 	"kamacu/internal/worktree"
 )
+
+// BlockedError is the D-01 permission-blocked signal: a worktree containing a
+// foreign-uid, mode-700 subtree (the container `./.db` case) cannot be deleted
+// by the unprivileged app. It carries the offending Path so the panel can render
+// a copyable "sudo rm -rf <Path>" hint — the app NEVER runs sudo/pkexec itself
+// (D-01, Security Domain V5). CleanupWorktreeGated returns it with
+// reason=="blocked" instead of a raw error, and the handler maps it to a 200
+// `{outcome:"blocked", path}` (NOT a 500) so the row renders inline (RESEARCH A4).
+type BlockedError struct{ Path string }
+
+func (e *BlockedError) Error() string { return "blocked: " + e.Path }
+
+// classifyRemoveBlocked reports whether a wt.Remove failure is a permission
+// block (D-01), and if so returns a *BlockedError carrying the offending path.
+//
+// wt.Remove shells out to git, so a real permission failure surfaces as git's
+// stderr STRING (not a wrapped *fs.PathError); the string branch is the one that
+// fires in practice. The *fs.PathError / fs.ErrPermission branch is the precise
+// Go-native path (RESEARCH Option B, verified: os.RemoveAll on a mode-000 subtree
+// yields fs.ErrPermission AND exposes the exact blocked dir via *fs.PathError.Path)
+// — kept defensively for any caller that surfaces a native error.
+//
+// Path resolution: prefer *fs.PathError.Path (exact, no parsing); else parse
+// git's `could not open directory '<dir>'` message; else fall back to the passed
+// worktree path. NEVER retry --force on a blocked case (Pitfall 1) — that
+// produces the misleading "is not a working tree" and leaves an undeletable shell.
+func classifyRemoveBlocked(err error, fallbackPath string) (*BlockedError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var pe *fs.PathError
+	if errors.As(err, &pe) && errors.Is(err, fs.ErrPermission) {
+		return &BlockedError{Path: pe.Path}, true
+	}
+	// Stderr-string fallback for the git-shell-out path (verified messages:
+	// "warning: could not open directory '<dir>': Permission denied" +
+	// "error: failed to delete '<path>': Directory not empty").
+	msg := err.Error()
+	permBlocked := strings.Contains(msg, "Permission denied") ||
+		(strings.Contains(msg, "Directory not empty") && strings.Contains(msg, "failed to delete"))
+	if !permBlocked {
+		return nil, false
+	}
+	path := fallbackPath
+	if dir := parseCouldNotOpenDir(msg); dir != "" {
+		path = dir
+	}
+	return &BlockedError{Path: path}, true
+}
+
+// parseCouldNotOpenDir extracts <dir> from git's `could not open directory
+// '<dir>'` line, or "" if absent.
+func parseCouldNotOpenDir(msg string) string {
+	const marker = "could not open directory '"
+	i := strings.Index(msg, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := msg[i+len(marker):]
+	if j := strings.IndexByte(rest, '\''); j >= 0 {
+		return rest[:j]
+	}
+	return ""
+}
 
 // CleanupWorktreeGated runs the gated worktree-removal core shared by the HTTP
 // handler (worktreeHandlers.remove) and the reaper (reconcilePRsOnce, 13-02).
@@ -78,14 +145,25 @@ func CleanupWorktreeGated(
 	// Plain remove when clean; --force only when the user passed the dirty
 	// gate. The clean-but-submodules --force fallback lives inside Remove.
 	if rerr := wt.Remove(cctx, repo, path, dirty > 0); rerr != nil {
+		// Extension A (D-01): a permission block is a DISTINCT outcome, not a
+		// generic error. Detect it BEFORE surfacing the raw error and NEVER retry
+		// --force (Pitfall 1). Returns reason=="blocked" + a *BlockedError the
+		// handler maps to a 200 {outcome:"blocked", path}.
+		if be, blocked := classifyRemoveBlocked(rerr, path); blocked {
+			return false, "blocked", be
+		}
 		return false, "", rerr
 	}
-	// Manual semantics: the ROW survives, columns nulled (D-26 absent state; the
-	// branch ALWAYS survives, D-34). The reaper's extra DELETE (13-02) is on
-	// top of this for the auto-cleanup case (D-07).
-	if _, uerr := db.Exec(
-		`UPDATE tasks SET branch = NULL, worktree_path = NULL, worktree_error = NULL WHERE id = ?`, taskID); uerr != nil {
-		return false, "", uerr
+	// Extension B (orphan mode): an orphan worktree (taskID==0) has NO DB task
+	// row, so skip the null-columns UPDATE entirely. For a referenced task
+	// (taskID>0) the manual semantics are unchanged — the ROW survives, columns
+	// nulled (D-26 absent state; the branch ALWAYS survives, D-34). The reaper's
+	// extra DELETE (13-02) is on top of this for the auto-cleanup case (D-07).
+	if taskID > 0 {
+		if _, uerr := db.Exec(
+			`UPDATE tasks SET branch = NULL, worktree_path = NULL, worktree_error = NULL WHERE id = ?`, taskID); uerr != nil {
+			return false, "", uerr
+		}
 	}
 	return true, "", nil
 }

@@ -741,3 +741,140 @@ func TestFetchRefError(t *testing.T) {
 		t.Error("FetchRef of a nonexistent ref returned nil, want an error")
 	}
 }
+
+// entryByPath returns the parsed Entry whose Path (filepath.Clean-matched)
+// equals want, or fails the test.
+func entryByPath(t *testing.T, entries []Entry, want string) Entry {
+	t.Helper()
+	for _, e := range entries {
+		if filepath.Clean(e.Path) == filepath.Clean(want) {
+			return e
+		}
+	}
+	t.Fatalf("no Entry with Path %q in %+v", want, entries)
+	return Entry{}
+}
+
+// TestListParsesRealGit exercises the porcelain parser against REAL git output
+// (the Pattern-1 source of truth, verified on git 2.43.0): a main worktree plus
+// a linked worktree, then a linked worktree whose dir was manually deleted
+// (git's own reverse-orphan `prunable` + `detached` signal).
+func TestListParsesRealGit(t *testing.T) {
+	ctx := context.Background()
+	repo := makeRepo(t) // main worktree on "main"
+	svc := NewService(t.TempDir())
+
+	// A branch worktree, still on disk.
+	branchPath, branchName := makeWorktree(t, svc, repo, "feature", 1)
+
+	entries, err := svc.List(ctx, repo)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	// The main worktree is NOT filtered by List (faithful parser) — the API
+	// layer excludes it. Both records must be present.
+	if len(entries) != 2 {
+		t.Fatalf("List returned %d entries, want 2 (main + 1 linked): %+v", len(entries), entries)
+	}
+
+	main := entryByPath(t, entries, repo)
+	if main.Branch != "refs/heads/main" {
+		t.Errorf("main worktree Branch = %q, want %q", main.Branch, "refs/heads/main")
+	}
+	if main.HEAD == "" {
+		t.Errorf("main worktree HEAD is empty, want a sha")
+	}
+	if main.Detached || main.Bare || main.Prunable {
+		t.Errorf("main worktree flags wrong: %+v", main)
+	}
+
+	linked := entryByPath(t, entries, branchPath)
+	if linked.Branch != "refs/heads/"+branchName {
+		t.Errorf("linked worktree Branch = %q, want %q", linked.Branch, "refs/heads/"+branchName)
+	}
+
+	// Now manually delete the linked worktree's dir on disk — git reports it as
+	// detached + prunable with a non-existent-location reason (RESEARCH Pattern 1).
+	if err := os.RemoveAll(branchPath); err != nil {
+		t.Fatalf("rm linked worktree dir: %v", err)
+	}
+	entries, err = svc.List(ctx, repo)
+	if err != nil {
+		t.Fatalf("List after dir removal: %v", err)
+	}
+	gone := entryByPath(t, entries, branchPath)
+	// The load-bearing reverse-orphan signal is Prunable + its reason (git's own
+	// "gitdir file points to non-existent location"). Whether git also emits
+	// `detached`/drops `branch` for a merely-deleted dir varies by git version,
+	// so we assert only the stable signal the panel keys on.
+	if !gone.Prunable {
+		t.Errorf("deleted-dir worktree Prunable = false, want true: %+v", gone)
+	}
+	if !strings.Contains(gone.PrunableReason, "non-existent location") {
+		t.Errorf("PrunableReason = %q, want it to mention the non-existent location", gone.PrunableReason)
+	}
+}
+
+// TestListParseBuffer asserts the pure parse logic against crafted -z buffers,
+// covering records that are awkward to reproduce deterministically with live
+// git: a locked worktree with a reason, a bare main, and trailing-NUL hygiene
+// (a trailing \x00 or \x00\x00 must NOT produce a spurious empty Entry).
+func TestListParseBuffer(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []Entry
+	}{
+		{
+			name: "two records: main branch + detached prunable linked",
+			in:   "worktree /repo\x00HEAD abc123\x00branch refs/heads/main\x00\x00worktree /wt\x00HEAD def456\x00detached\x00prunable gitdir file points to non-existent location\x00\x00",
+			want: []Entry{
+				{Path: "/repo", HEAD: "abc123", Branch: "refs/heads/main"},
+				{Path: "/wt", HEAD: "def456", Detached: true, Prunable: true, PrunableReason: "gitdir file points to non-existent location"},
+			},
+		},
+		{
+			name: "feature branch ref preserved verbatim",
+			in:   "worktree /wt\x00HEAD ff\x00branch refs/heads/feature/x\x00\x00",
+			want: []Entry{{Path: "/wt", HEAD: "ff", Branch: "refs/heads/feature/x"}},
+		},
+		{
+			name: "locked with reason",
+			in:   "worktree /wt\x00HEAD ff\x00branch refs/heads/b\x00locked under maintenance\x00\x00",
+			want: []Entry{{Path: "/wt", HEAD: "ff", Branch: "refs/heads/b", Locked: true, LockedReason: "under maintenance"}},
+		},
+		{
+			name: "locked with no reason",
+			in:   "worktree /wt\x00HEAD ff\x00branch refs/heads/b\x00locked\x00\x00",
+			want: []Entry{{Path: "/wt", HEAD: "ff", Branch: "refs/heads/b", Locked: true, LockedReason: ""}},
+		},
+		{
+			name: "bare main record has no branch",
+			in:   "worktree /repo.git\x00bare\x00\x00",
+			want: []Entry{{Path: "/repo.git", Bare: true}},
+		},
+		{
+			name: "trailing double-NUL yields no spurious empty entry",
+			in:   "worktree /repo\x00HEAD abc\x00branch refs/heads/main\x00\x00",
+			want: []Entry{{Path: "/repo", HEAD: "abc", Branch: "refs/heads/main"}},
+		},
+		{
+			name: "single trailing NUL is trimmed, no empty entry",
+			in:   "worktree /repo\x00HEAD abc\x00branch refs/heads/main\x00",
+			want: []Entry{{Path: "/repo", HEAD: "abc", Branch: "refs/heads/main"}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseWorktreeList(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("parseWorktreeList(%q) returned %d entries, want %d: %+v", tc.in, len(got), len(tc.want), got)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("entry[%d] = %+v, want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
