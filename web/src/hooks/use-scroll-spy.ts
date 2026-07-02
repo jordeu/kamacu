@@ -16,10 +16,11 @@ const BAND_TOP_PX = 0;
  * fixed header outside this scroll pane; `-70%` bottom keeps it near the top);
  * `threshold: 0`.
  *
- * It observes the non-sticky `[data-diff-path]` wrappers — NOT the sticky file
- * headers, whose pinned rects would confuse the topmost calc (Pitfall 3). The
- * observer disconnects on cleanup and the effect re-observes when the file list
- * changes (keyed on `pathListKey`), which is StrictMode-safe (Pitfall 4).
+ * It observes the `[data-diff-path]` sticky file headers directly. With the band
+ * starting at 0, a header pushed above the pin (top < 0) leaves the band, so the
+ * smallest-top in-band header is always the one currently pinned at the top — the
+ * active file. The observer disconnects on cleanup and re-observes when the file
+ * list changes (keyed on `pathListKey`), which is StrictMode-safe (Pitfall 4).
  */
 export function useScrollSpy<T extends HTMLElement>(
   scrollRef: RefObject<T | null>,

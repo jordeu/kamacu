@@ -9,10 +9,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useToggleViewed, type DiffFile } from "@/api/diffs";
 
-// The totals bar is a fixed header OUTSIDE the diff scroll pane (DiffTab), so
-// file headers pin to the very top of the pane and scroll-jumps land flush.
+// GitHub-style STACKING headers: each file header is a `sticky top-0` sibling in
+// the shared flat list. The Collapsible root is `display:contents` (no box), so
+// it doesn't box-in the header — the header's containing block is the whole list,
+// letting the current file's header stay pinned just under the fixed totals bar
+// until the next file's header pushes it up. Result: always exactly one header
+// pinned, and never raw content directly under the bar.
 const STICKY_TOP = "top-0";
-const SCROLL_MARGIN = "scroll-mt-0";
 
 // blue-500 checked override (UI-SPEC Decision 2): the default checkbox fill is
 // the near-white `primary` in dark; this surface's interactive accent is blue.
@@ -83,39 +86,32 @@ export function DiffFileSection({
   );
 
   if (file.binary) {
-    // Non-collapsible header row — chevron slot empty, stats replaced by the
-    // muted "Binary file changed" copy. Still carries the Viewed checkbox.
+    // Non-collapsible sticky header row — chevron slot empty, stats replaced by
+    // the muted "Binary file changed" copy. Still carries the Viewed checkbox.
     return (
       <div
         data-diff-path={file.path}
         className={cn(
-          "rounded-lg border border-border",
-          SCROLL_MARGIN,
+          "sticky z-[5] flex items-center gap-2 border-b border-border bg-card px-3 py-2",
+          STICKY_TOP,
         )}
       >
-        <div
+        <span className="inline-block size-4 shrink-0" />
+        <span
           className={cn(
-            "sticky z-[5] flex items-center gap-2 rounded-lg bg-card px-3 py-2",
-            STICKY_TOP,
+            "min-w-0 flex-1 truncate text-left font-mono text-sm",
+            file.viewed && "text-muted-foreground",
           )}
         >
-          <span className="inline-block size-4 shrink-0" />
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate text-left font-mono text-sm",
-              file.viewed && "text-muted-foreground",
-            )}
-          >
-            {pathLabel}
-          </span>
-          {statusSuffix && (
-            <span className="text-xs text-muted-foreground">{statusSuffix}</span>
-          )}
-          <span className="text-xs text-muted-foreground">
-            Binary file changed
-          </span>
-          {viewedLabel}
-        </div>
+          {pathLabel}
+        </span>
+        {statusSuffix && (
+          <span className="text-xs text-muted-foreground">{statusSuffix}</span>
+        )}
+        <span className="text-xs text-muted-foreground">
+          Binary file changed
+        </span>
+        {viewedLabel}
       </div>
     );
   }
@@ -124,15 +120,12 @@ export function DiffFileSection({
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      data-diff-path={file.path}
-      className={cn(
-        "group/diff-file rounded-lg border border-border",
-        SCROLL_MARGIN,
-      )}
+      className="group/diff-file contents"
     >
       <div
+        data-diff-path={file.path}
         className={cn(
-          "sticky z-[5] flex items-center gap-2 rounded-t-lg bg-card px-3 py-2",
+          "sticky z-[5] flex items-center gap-2 border-b border-border bg-card px-3 py-2",
           STICKY_TOP,
         )}
       >
@@ -166,7 +159,7 @@ export function DiffFileSection({
         {viewedLabel}
       </div>
       <CollapsibleContent>
-        <div className="overflow-x-auto rounded-b-lg bg-zinc-950">
+        <div className="overflow-x-auto border-b border-border bg-zinc-950">
           {file.hunks.map((hunk, hi) => (
             <div key={hi}>
               <div className="w-fit min-w-full bg-card px-3 py-2 font-mono text-xs whitespace-pre text-zinc-400">
