@@ -9,10 +9,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useToggleViewed, type DiffFile } from "@/api/diffs";
 
-// Sticky offset ≈ the totals-bar height so file headers park just below it
-// (a shared TOTALS_BAR_PX constant is finalized in Plan 04 — use 41 here).
-const STICKY_TOP = "top-[41px]";
-const SCROLL_MARGIN = "scroll-mt-[41px]";
+// The totals bar is a fixed header OUTSIDE the diff scroll pane (DiffTab), so
+// file headers pin to the very top of the pane and scroll-jumps land flush.
+const STICKY_TOP = "top-0";
+const SCROLL_MARGIN = "scroll-mt-0";
 
 // blue-500 checked override (UI-SPEC Decision 2): the default checkbox fill is
 // the near-white `primary` in dark; this surface's interactive accent is blue.

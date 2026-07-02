@@ -1,9 +1,9 @@
 import { useEffect, useState, type RefObject } from "react";
 
-// Sticky totals-bar height (≈ py-2 + text-sm + border). Kept consistent with
-// the TOTALS_BAR_PX value used by DiffFileSection (scroll-mt / sticky top) and
-// DiffTab so the active-detection band sits just under the totals bar.
-const TOTALS_BAR_PX = 41;
+// The totals bar is a fixed header OUTSIDE this scroll container (DiffTab), so
+// the active-detection band starts at the very top of the scroll pane — where
+// per-file headers pin (sticky top-0). No totals-bar offset is needed here.
+const BAND_TOP_PX = 0;
 
 /**
  * Scroll-spy for the two-pane diff view (D-05): one IntersectionObserver rooted
@@ -12,8 +12,9 @@ const TOTALS_BAR_PX = 41;
  *
  * Verified config (RESEARCH §Area 3): `root` MUST be the scroll container
  * (omitting it observes the viewport and the spy never fires per-file); a thin
- * active band is defined by `rootMargin` (`-41px` top offset pushes it below the
- * sticky totals bar, `-70%` bottom keeps it near the top); `threshold: 0`.
+ * active band is defined by `rootMargin` (top offset 0 — the totals bar is a
+ * fixed header outside this scroll pane; `-70%` bottom keeps it near the top);
+ * `threshold: 0`.
  *
  * It observes the non-sticky `[data-diff-path]` wrappers — NOT the sticky file
  * headers, whose pinned rects would confuse the topmost calc (Pitfall 3). The
@@ -57,7 +58,7 @@ export function useScrollSpy<T extends HTMLElement>(
       },
       {
         root: scrollEl,
-        rootMargin: `-${TOTALS_BAR_PX}px 0px -70% 0px`,
+        rootMargin: `-${BAND_TOP_PX}px 0px -70% 0px`,
         threshold: 0,
       },
     );
