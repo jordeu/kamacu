@@ -116,6 +116,16 @@ None - no external service configuration required.
 - The full worktree-cleanup feature (backend 23-02, hooks/primitive 23-04, UI 23-03) is now assembled; the plan's phase-level human-verify checkpoint (browser walkthrough of the panel) is the remaining gate.
 - `npm run build` (tsc -b + vite) is green; `npm run lint` introduces no new advisories.
 
+## Self-Check: PASSED
+
+All created files exist and all task/metadata commits are present:
+- `web/src/components/settings/WorktreeRow.tsx` FOUND
+- `web/src/components/settings/ForceRemoveDialog.tsx` FOUND
+- `web/src/components/settings/CleanEligibleDialog.tsx` FOUND
+- `web/src/components/settings/WorktreeCleanupSection.tsx` FOUND
+- `.planning/phases/23-worktree-cleanup-panel/23-03-SUMMARY.md` FOUND
+- Commits `84c9df0`, `04dcd9c`, `0db6656` FOUND
+
 ---
 *Phase: 23-worktree-cleanup-panel*
 *Completed: 2026-07-02*
