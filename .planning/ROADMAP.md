@@ -103,7 +103,7 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
 
 - [x] **Phase 20: Kamacu Rebrand & Brand** — Rename to Kamacu across code/binary/module/UI and ship the new logo, favicon, and README (no data-path change yet) (completed 2026-07-01)
 - [x] **Phase 21: Data Directory Migration** — One-time gated `~/.kangent` → `~/.kamacu` move that repairs worktrees, rewrites DB paths, switches the tmux socket/prefix, and migrates localStorage (completed 2026-07-01)
-- [ ] **Phase 22: GitHub-Style Diff Review** — File-tree diff view with per-file collapse and sticky "Viewed" state that resets only when a file changes
+- [x] **Phase 22: GitHub-Style Diff Review** — File-tree diff view with per-file collapse and sticky "Viewed" state that resets only when a file changes (completed 2026-07-02)
 - [ ] **Phase 23: Worktree Cleanup Panel** — Settings panel listing every worktree (incl. orphans) with per-item force-remove and a bulk "clean eligible" action
 - [ ] **Phase 24: Session-Bar, Board & Tab Polish** — Renameable tabs, a task-view three-dots menu (no auto review-prompt), and session-bar / board cleanups
 
@@ -194,7 +194,7 @@ Plans:
 - [x] 22-02-PLAN.md — Viewed persistence table + GET read-merge + PUT /diff/viewed (Wave 2)
 - [x] 22-03-PLAN.md — Diff types + useToggleViewed + checkbox + DiffFileSection restructure (Wave 3)
 - [x] 22-04-PLAN.md — Two-pane layout: FileTree, scroll-spy, DiffTab (Wave 4)
-- [ ] 22-05-PLAN.md — Full-phase gate + human-verify of DIFF-01..04 (Wave 5)
+- [x] 22-05-PLAN.md — Full-phase gate + human-verify of DIFF-01..04 (Wave 5)
 **UI hint**: yes
 
 ### Phase 23: Worktree Cleanup Panel
@@ -256,7 +256,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 19. Sidebar Avatars & Settings Editors | v1.7 | 3/3 | Complete | 2026-06-19 |
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
-| 22. GitHub-Style Diff Review | v1.8 | 4/5 | In Progress|  |
+| 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete   | 2026-07-02 |
 | 23. Worktree Cleanup Panel | v1.8 | 0/TBD | Not started | - |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
 
