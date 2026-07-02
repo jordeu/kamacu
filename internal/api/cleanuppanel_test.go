@@ -674,3 +674,40 @@ func TestWorktreeCleanupClearPointer(t *testing.T) {
 		t.Errorf("branch = %q, want NULL after clear-pointer (columns nulled, row kept)", br)
 	}
 }
+
+// TestWorktreeCleanupListNoStaleOnFailedList (WR-01) asserts that a transient
+// `git worktree list` FAILURE does NOT fabricate "stale" rows. When List errors
+// for a project, gitByPath is empty; the pre-fix code then classified EVERY DB
+// task in that project as "stale" (surfacing a metadata-destroying Clear-pointer
+// on a false signal). A stale classification must require a SUCCESSFUL list that
+// genuinely lacks the path. Here repo_path points at a non-git directory so
+// List() errors; the project's task must therefore NOT appear as a stale row.
+func TestWorktreeCleanupListNoStaleOnFailedList(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+
+	// A directory that is NOT a git repo → List(ctx, notARepo) shells out to
+	// `git worktree list` there and returns lerr != nil.
+	notARepo := t.TempDir()
+	pid := seedProjectFull(t, env.db, "Eta", notARepo)
+
+	// A task with a worktree_path. Its dir exists on disk (so this is not a
+	// genuinely-vanished pointer) — the only reason it would be "stale" is the
+	// failed list wrongly reporting it absent-in-git.
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	if err := os.Mkdir(wtDir, 0o755); err != nil {
+		t.Fatalf("mkdir wt: %v", err)
+	}
+	seedTaskFull(t, env.db, pid, "Present", "done", "some-branch", wtDir, "manual", 0, "")
+
+	resp := getList(t, srv)
+	for _, g := range resp.Projects {
+		for _, wt := range g.Worktrees {
+			if wt.Classification == "stale" {
+				t.Errorf("stale row fabricated from a failed git list: %+v", wt)
+			}
+		}
+	}
+	if resp.Counts.Total != 0 {
+		t.Errorf("counts.total = %d, want 0 (failed list must not surface stale rows)", resp.Counts.Total)
+	}
+}
