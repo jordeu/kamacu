@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -40,6 +43,9 @@ type PRStateGetter interface {
 func WorktreeCleanupRoutes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client, pr PRStateGetter) {
 	h := &cleanupPanelHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient, pr: pr}
 	mux.HandleFunc("GET /api/worktrees", h.list)
+	mux.HandleFunc("POST /api/worktrees/remove", h.remove)
+	mux.HandleFunc("POST /api/worktrees/clean-eligible", h.cleanEligible)
+	mux.HandleFunc("POST /api/worktrees/clear-pointer", h.clearPointer)
 }
 
 type cleanupPanelHandlers struct {
@@ -471,4 +477,288 @@ func (h *cleanupPanelHandlers) unpushedBase(ctx context.Context, repo string, ew
 // network-free rev-parse --verify (mirrors resolvePRBase's local-read posture).
 func (h *cleanupPanelHandlers) refResolves(ctx context.Context, wt, ref string) bool {
 	return h.wt.RefResolves(ctx, wt, ref)
+}
+
+// --- HTTP: POST /api/worktrees/remove (per-item force-remove, WTREE-02/D-03) ---
+
+// remove force-removes a single worktree through the ONE shared gated path
+// (the panel is the 3rd caller). D-03: the client always sends force=true AND
+// stop_sessions=true for the per-item override, but both are read from the body
+// and honored. The gates are re-checked server-side inside CleanupWorktreeGated
+// (Pitfall 4/8 — the client snapshot is advisory). Outcome mapping:
+//   - removed          → 204
+//   - *BlockedError    → 200 {outcome:"blocked", path} (D-01, NOT a 500)
+//   - !removed+reason  → 409 reason (a raced gate; force normally clears it)
+//   - other err        → 500
+func (h *cleanupPanelHandlers) remove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Repo         string `json:"repo"`
+		Path         string `json:"path"`
+		TaskID       int64  `json:"task_id"`
+		Force        bool   `json:"force"`
+		StopSessions bool   `json:"stop_sessions"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Repo) == "" || strings.TrimSpace(req.Path) == "" {
+		writeError(w, http.StatusBadRequest, "repo and path are required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), enumTimeout)
+	defer cancel()
+
+	// task_id==0 (orphan) → cleanupSessionCount/liveTmuxNames are no-ops (tmux
+	// rows are keyed by task_id; an orphan has none).
+	count := h.cleanupSessionCount(ctx, req.TaskID)
+	live := h.liveTmuxNames(ctx, req.TaskID)
+
+	removed, reason, err := CleanupWorktreeGated(
+		ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
+		req.TaskID, req.Repo, req.Path, count, req.StopSessions, req.Force)
+
+	// D-01: a permission block is a distinct 200 outcome, not a 500. The git
+	// registration + DB row stay intact (CleanupWorktreeGated did not proceed).
+	var be *BlockedError
+	if errors.As(err, &be) {
+		writeJSON(w, http.StatusOK, map[string]any{"outcome": "blocked", "path": be.Path})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !removed {
+		// A raced gate (force should normally clear it, but honor a real reason).
+		writeError(w, http.StatusConflict, reason)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- HTTP: POST /api/worktrees/clean-eligible (bulk, WTREE-03/D-04/D-05) ---
+
+// eligibleItem is one entry in the bulk preview/execution set (23-04 contract).
+type eligibleItem struct {
+	Repo        string `json:"repo"`
+	Path        string `json:"path"`
+	TaskID      int64  `json:"task_id"`
+	ProjectName string `json:"project_name"`
+	Reason      string `json:"reason"` // "orphaned" | "done" | "pr_merged" | "pr_closed"
+}
+
+// cleanEligible recomputes the provably-safe set SERVER-SIDE (never trusts a
+// client list) and either previews it (dry_run) or removes it best-effort per
+// item. It NEVER forces (D-04/D-05): eligibility requires all four gates to
+// already pass, and each removal calls CleanupWorktreeGated with
+// stopSessions=false, force=false. A raced-tripped gate skips that item and
+// continues (unlike removeManaged's all-or-nothing).
+func (h *cleanupPanelHandlers) cleanEligible(w http.ResponseWriter, r *http.Request) {
+	dryRun := r.URL.Query().Get("dry_run") == "1"
+
+	ctx, cancel := context.WithTimeout(r.Context(), enumTimeout)
+	defer cancel()
+
+	items := h.computeEligible(ctx)
+
+	if dryRun {
+		if items == nil {
+			items = []eligibleItem{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		return
+	}
+
+	// Execute: best-effort per item. NEVER force (stopSessions=false, force=false).
+	removed, skipped := 0, 0
+	for _, it := range items {
+		count := h.cleanupSessionCount(ctx, it.TaskID)
+		live := h.liveTmuxNames(ctx, it.TaskID)
+		ok, _, err := CleanupWorktreeGated(
+			ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
+			it.TaskID, it.Repo, it.Path, count, false /*stopSessions*/, false /*force*/)
+		if err != nil || !ok {
+			// A race re-tripped a gate, or a blocked shell — skip it, keep going.
+			skipped++
+			continue
+		}
+		removed++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"removed": removed, "skipped": skipped})
+}
+
+// computeEligible enumerates the same union as list() and returns the provably-
+// safe removal set (D-04): orphans OR referenced-done/pr-merged-or-closed, that
+// pass ALL four gates (no session, no dirty, no unpushed, no stash) and are not
+// a stale pointer. It reuses the shared enumerate() spine so the set never
+// drifts from what list() shows. A row whose unpushed base can't resolve is
+// conservatively INELIGIBLE (null unpushed fails the unpushed==0 test). NEVER
+// includes anything that would need force.
+func (h *cleanupPanelHandlers) computeEligible(ctx context.Context) []eligibleItem {
+	groups, err := h.enumerate(ctx)
+	if err != nil {
+		slog.Warn("clean-eligible enumeration failed", "error", err)
+		return nil
+	}
+	var out []eligibleItem
+	for _, g := range groups {
+		for _, ew := range g.worktrees {
+			// Stale pointers are never bulk-removed (no dir to remove — the D-07
+			// "clear pointer" action handles them).
+			if ew.classification == "stale" {
+				continue
+			}
+			// The dir must exist on disk to be removable.
+			if _, statErr := os.Stat(ew.path); statErr != nil {
+				continue
+			}
+
+			reason, ok := h.eligibilityReason(ctx, g.meta.repoPath, ew)
+			if !ok {
+				continue
+			}
+
+			// All four gates must already pass (never force).
+			if !h.passesAllGates(ctx, g.meta.repoPath, ew) {
+				continue
+			}
+
+			var taskID int64
+			if ew.task != nil {
+				taskID = ew.task.id
+			}
+			out = append(out, eligibleItem{
+				Repo:        g.meta.repoPath,
+				Path:        ew.path,
+				TaskID:      taskID,
+				ProjectName: g.meta.name,
+				Reason:      reason,
+			})
+		}
+	}
+	return out
+}
+
+// eligibilityReason reports whether a REFERENCED/ORPHAN worktree qualifies for
+// bulk removal on the task-status/PR axis (D-04), and the reason string
+// (23-04 contract: "orphaned"|"done"|"pr_merged"|"pr_closed"). Orphans always
+// qualify on this axis (no task to protect). A referenced task qualifies when
+// its task is Done OR its PR is MERGED/CLOSED. PR state uses the RAW UPPERCASE
+// value (NOT the display-lowercased one); a gh error ⇒ not eligible
+// (degrade-don't-break — that row is simply skipped, never forced).
+func (h *cleanupPanelHandlers) eligibilityReason(ctx context.Context, repo string, ew enumWorktree) (string, bool) {
+	if ew.classification == "orphan" || ew.task == nil {
+		return "orphaned", true
+	}
+	t := ew.task
+	if t.source == "github_pr" && t.prNumber > 0 {
+		if h.pr == nil {
+			return "", false
+		}
+		state, err := h.pr.PRState(ctx, repo, t.prNumber)
+		if err != nil {
+			return "", false // degrade-don't-break: not eligible, never forced
+		}
+		switch state {
+		case "MERGED":
+			return "pr_merged", true
+		case "CLOSED":
+			return "pr_closed", true
+		default:
+			return "", false
+		}
+	}
+	if t.status == "done" {
+		return "done", true
+	}
+	return "", false
+}
+
+// passesAllGates reports whether a worktree passes ALL four conservative gates
+// (D-04): no live session, no dirty file, no unpushed commit, no stash. A row
+// whose unpushed base can't resolve is conservatively ineligible (null unpushed
+// fails unpushed==0). Any git error on a gate ⇒ ineligible (never remove on a
+// gate we couldn't compute).
+func (h *cleanupPanelHandlers) passesAllGates(ctx context.Context, repo string, ew enumWorktree) bool {
+	// Sessions.
+	if ew.task != nil && h.cleanupSessionCount(ctx, ew.task.id) > 0 {
+		return false
+	}
+	// Dirty.
+	dirty, derr := h.wt.DirtyCount(ctx, ew.path)
+	if derr != nil || dirty > 0 {
+		return false
+	}
+	// Stash.
+	stash, serr := h.wt.StashCount(ctx, ew.path)
+	if serr != nil || stash > 0 {
+		return false
+	}
+	// Unpushed: base must resolve AND count must be 0 (unresolvable ⇒ ineligible).
+	base, ok := h.unpushedBase(ctx, repo, ew)
+	if !ok {
+		return false
+	}
+	unpushed, uerr := h.wt.UnpushedCount(ctx, ew.path, base)
+	if uerr != nil || unpushed > 0 {
+		return false
+	}
+	return true
+}
+
+// --- HTTP: POST /api/worktrees/clear-pointer (stale-pointer reconcile, D-07) ---
+
+// clearPointer nulls a stale task's worktree columns (keeping the row + branch
+// history) and prunes the stale git registration at the task's project repo
+// (D-07). Deletes NO files — the dir is already gone (that is what "stale"
+// means). Returns 204.
+func (h *cleanupPanelHandlers) clearPointer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TaskID int64 `json:"task_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.TaskID <= 0 {
+		writeError(w, http.StatusBadRequest, "task_id is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), enumTimeout)
+	defer cancel()
+
+	// Look up the task's project repo BEFORE nulling the columns so we can prune
+	// the stale git registration there.
+	var repo string
+	err := h.db.QueryRowContext(ctx,
+		`SELECT (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id)
+		 FROM tasks WHERE tasks.id = ?`, req.TaskID).Scan(&repo)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Null the pointer, KEEP the row + branch history (D-07 / D-34).
+	if _, uerr := h.db.ExecContext(ctx,
+		`UPDATE tasks SET branch = NULL, worktree_path = NULL, worktree_error = NULL WHERE id = ?`,
+		req.TaskID); uerr != nil {
+		writeError(w, http.StatusInternalServerError, uerr.Error())
+		return
+	}
+
+	// Prune the stale git registration so a subsequent scan is clean. Best-effort
+	// — a prune failure must not fail the DB-side clear (the pointer is already
+	// nulled, which is the load-bearing reconciliation).
+	if perr := h.wt.Prune(ctx, repo); perr != nil {
+		slog.Warn("worktree prune after clear-pointer failed", "task", req.TaskID, "repo", repo, "error", perr)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
