@@ -114,6 +114,11 @@ None — the checkbox is wired end-to-end to the real `useToggleViewed` mutation
 - Binary strict-D-01 limitation carries through: a binary file marked Viewed will not auto-reset on a byte change (accepted, Plan 01 notes).
 - No blockers.
 
+## Self-Check: PASSED
+
+- All created/modified files present: `web/src/api/diffs.ts`, `web/src/components/ui/checkbox.tsx`, `web/src/components/task/DiffFileSection.tsx`, `web/src/components/task/DiffTab.tsx`, `.planning/phases/22-github-style-diff-review/22-03-SUMMARY.md`.
+- All task commits present in history: `872bc5f`, `ade87b2`, `4aa8169`.
+
 ---
 *Phase: 22-github-style-diff-review*
 *Completed: 2026-07-02*
