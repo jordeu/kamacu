@@ -366,3 +366,188 @@ func TestWorktreeCleanupListPRStateAbsentDegrades(t *testing.T) {
 		t.Errorf("pr_state = %v, want null (gh absent degrade)", *rows[0].PRState)
 	}
 }
+
+// --- Task 2: remove / clean-eligible / clear-pointer ---
+
+// postJSON POSTs a JSON body and returns (status, decoded map). A non-JSON body
+// (204/empty) yields an empty map.
+func postJSON(t *testing.T, url string, body any) (int, map[string]any) {
+	t.Helper()
+	return doJSON(t, "POST", url, body)
+}
+
+// TestWorktreeCleanupRemove: a clean referenced worktree removed via the shared
+// gated path returns 204 and the task's worktree columns are nulled.
+func TestWorktreeCleanupRemove(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Alpha", repo)
+	wtPath := addLinkedWorktree(t, repo, "feature")
+	id := seedTaskFull(t, env.db, pid, "Do it", "done", "feature", wtPath, "manual", 0, "")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": wtPath, "task_id": id, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusNoContent {
+		t.Fatalf("remove status = %d, want 204; body=%v", status, body)
+	}
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Errorf("worktree dir still present after remove: %v", err)
+	}
+	br, wp := taskColsFor(t, env.db, id)
+	if br != "" || wp != "" {
+		t.Errorf("task columns not nulled after remove: branch=%q worktree_path=%q", br, wp)
+	}
+}
+
+// TestWorktreeCleanupBlocked: a permission-blocked shell (a mode-000 subdir git
+// can't delete) returns HTTP 200 with {outcome:"blocked", path:...}, NOT a 500,
+// and does NOT --force (the tree survives).
+func TestWorktreeCleanupBlocked(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: mode-000 does not block removal")
+	}
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Beta", repo)
+	wtPath := addLinkedWorktree(t, repo, "blocked-branch")
+	id := seedTaskFull(t, env.db, pid, "Blocked", "done", "blocked-branch", wtPath, "manual", 0, "")
+
+	blocked := filepath.Join(wtPath, ".db")
+	if err := os.Mkdir(blocked, 0o755); err != nil {
+		t.Fatalf("mkdir blocked: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "x"), []byte("secret\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatalf("chmod 000: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": wtPath, "task_id": id, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("blocked remove status = %d, want 200 (not 500); body=%v", status, body)
+	}
+	if body["outcome"] != "blocked" {
+		t.Errorf("outcome = %v, want %q", body["outcome"], "blocked")
+	}
+	if body["path"] == nil || body["path"] == "" {
+		t.Errorf("blocked response missing offending path: %v", body)
+	}
+	// Pitfall 1: no --force retry — the tree survives as a blocked shell.
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Errorf("worktree dir vanished — a --force retry was attempted on the blocked case")
+	}
+}
+
+// TestWorktreeCleanupCleanEligibleDryRun: preview with 1 orphan (clean) + 1
+// done-clean-referenced + 1 dirty-done-referenced returns exactly the orphan
+// (reason "orphaned") and the clean done row (reason "done"); the dirty one is
+// excluded (a tripped gate makes it ineligible; bulk never forces).
+func TestWorktreeCleanupCleanEligibleDryRun(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Gamma", repo)
+
+	orphanPath := addLinkedWorktree(t, repo, "orphan-wt")
+
+	doneCleanPath := addLinkedWorktree(t, repo, "done-clean")
+	seedTaskFull(t, env.db, pid, "Done clean", "done", "done-clean", doneCleanPath, "manual", 0, "")
+
+	dirtyDonePath := addLinkedWorktree(t, repo, "done-dirty")
+	seedTaskFull(t, env.db, pid, "Done dirty", "done", "done-dirty", dirtyDonePath, "manual", 0, "")
+	if err := os.WriteFile(filepath.Join(dirtyDonePath, "wip.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible?dry_run=1", nil)
+	if status != http.StatusOK {
+		t.Fatalf("dry-run status = %d, want 200; body=%v", status, body)
+	}
+	itemsRaw, _ := body["items"].([]any)
+	byPath := map[string]string{}
+	for _, it := range itemsRaw {
+		m, _ := it.(map[string]any)
+		byPath[filepath.Clean(m["path"].(string))] = m["reason"].(string)
+	}
+	if len(byPath) != 2 {
+		t.Fatalf("preview items = %d, want 2 (orphan + done-clean); got %v", len(byPath), byPath)
+	}
+	if r := byPath[filepath.Clean(orphanPath)]; r != "orphaned" {
+		t.Errorf("orphan reason = %q, want %q", r, "orphaned")
+	}
+	if r := byPath[filepath.Clean(doneCleanPath)]; r != "done" {
+		t.Errorf("done-clean reason = %q, want %q", r, "done")
+	}
+	if _, in := byPath[filepath.Clean(dirtyDonePath)]; in {
+		t.Errorf("dirty-done worktree wrongly eligible: %v", byPath)
+	}
+}
+
+// TestWorktreeCleanupCleanEligibleExecute: the applied bulk removes the eligible
+// set best-effort and reports {removed, skipped}; it removes the orphan + clean
+// done rows and leaves the dirty one on disk (never forced).
+func TestWorktreeCleanupCleanEligibleExecute(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Delta", repo)
+
+	orphanPath := addLinkedWorktree(t, repo, "orphan-wt")
+	doneCleanPath := addLinkedWorktree(t, repo, "done-clean")
+	seedTaskFull(t, env.db, pid, "Done clean", "done", "done-clean", doneCleanPath, "manual", 0, "")
+	dirtyDonePath := addLinkedWorktree(t, repo, "done-dirty")
+	seedTaskFull(t, env.db, pid, "Done dirty", "done", "done-dirty", dirtyDonePath, "manual", 0, "")
+	if err := os.WriteFile(filepath.Join(dirtyDonePath, "wip.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible", nil)
+	if status != http.StatusOK {
+		t.Fatalf("execute status = %d, want 200; body=%v", status, body)
+	}
+	if body["removed"] != float64(2) {
+		t.Errorf("removed = %v, want 2", body["removed"])
+	}
+	for _, p := range []string{orphanPath, doneCleanPath} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("eligible worktree not removed: %s", p)
+		}
+	}
+	// The dirty-done worktree was never forced → still on disk.
+	if _, err := os.Stat(dirtyDonePath); err != nil {
+		t.Errorf("dirty-done worktree removed (forced!) — bulk must never force: %v", err)
+	}
+}
+
+// TestWorktreeCleanupClearPointer: clearing a stale pointer nulls the task's
+// worktree columns, keeps the row, and returns 204.
+func TestWorktreeCleanupClearPointer(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Epsilon", repo)
+	gonePath := filepath.Join(t.TempDir(), "gone")
+	id := seedTaskFull(t, env.db, pid, "Vanished", "done", "kept-branch", gonePath, "manual", 0, "")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clear-pointer", map[string]any{"task_id": id})
+	if status != http.StatusNoContent {
+		t.Fatalf("clear-pointer status = %d, want 204; body=%v", status, body)
+	}
+	// The row still exists with worktree_path NULL (D-07 keeps the row + branch).
+	var count int
+	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id = ?`, id).Scan(&count); err != nil {
+		t.Fatalf("count task: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("task row deleted by clear-pointer, want kept")
+	}
+	br, wp := taskColsFor(t, env.db, id)
+	if wp != "" {
+		t.Errorf("worktree_path = %q, want NULL after clear-pointer", wp)
+	}
+	if br != "" {
+		t.Errorf("branch = %q, want NULL after clear-pointer (columns nulled, row kept)", br)
+	}
+}
