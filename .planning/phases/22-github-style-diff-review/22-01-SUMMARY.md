@@ -107,6 +107,11 @@ None - no external service configuration required.
 - The `hash` + `viewed` JSON contract on `diff.File` is now the authoritative shape Plans 02/03 consume: Plan 02 wires the `diff_viewed` store + `PUT .../diff/viewed` endpoint and populates `File.Viewed`; the client echoes `file.hash` back on toggle.
 - No blockers. `Viewed` is intentionally the zero value here (Compute is DB-free) — the API handler layers it on top, exactly as the research/patterns prescribe.
 
+## Self-Check: PASSED
+
+- Files verified present: `internal/diff/parse.go`, `internal/diff/diff.go`, `internal/diff/diff_test.go`, `.planning/phases/22-github-style-diff-review/22-01-SUMMARY.md`.
+- Commits verified in git log: `491d16e` (feat), `3477f64` (test), `c499ed7` (docs).
+
 ---
 *Phase: 22-github-style-diff-review*
 *Completed: 2026-07-02*
