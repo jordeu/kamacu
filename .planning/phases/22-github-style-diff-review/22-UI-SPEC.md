@@ -1,10 +1,11 @@
 ---
 phase: 22
 slug: github-style-diff-review
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova (neutral base, cssVariables)
 created: 2026-07-02
+reviewed_at: 2026-07-02
 ---
 
 # Phase 22 — UI Design Contract
@@ -24,7 +25,7 @@ created: 2026-07-02
 | Component library | radix-ui `1.5.0` (primitives copied into `@/components/ui`) |
 | Icon library | lucide-react `1.17.0` |
 | Font (UI) | `ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif` (`--font-sans`) |
-| Font (code/diff/paths) | `ui-mono, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace` (`--font-mono`) |
+| Font (code/diff/paths) | `ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace` (`--font-mono`) |
 | Theme | Dark-only — `class="dark"` hardcoded on `<html>`; zinc ramp via oklch CSS vars |
 
 **Existing primitives reused (no new import):** `collapsible`, `button`, `tooltip`, `label`, `separator`.
