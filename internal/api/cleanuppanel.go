@@ -161,8 +161,8 @@ type enumProject struct {
 // result with the task rows whose worktree_path is non-NULL, classifying each as
 // referenced / orphan / stale (D-07). It is the shared spine both list() and
 // cleanEligible() call so the two never drift. A single project's git-list
-// failure is logged and skipped (its stale task rows still surface), never a
-// whole-GET 500.
+// failure is logged and that project contributes NO rows (its stale task rows
+// are NOT fabricated from the degraded read, WR-01), never a whole-GET 500.
 func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, error) {
 	projects, err := h.loadProjects(ctx)
 	if err != nil {
@@ -180,9 +180,15 @@ func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, er
 		// git side: every NON-main, non-bare linked worktree, keyed by clean path.
 		gitByPath := map[string]*worktree.Entry{}
 		entries, lerr := h.wt.List(ctx, p.repoPath)
+		listOK := lerr == nil
 		if lerr != nil {
-			// A repo we can't list (e.g. moved/broken) — log and continue with
-			// only its DB side (stale pointers still surface). Never fail the GET.
+			// A repo we can't list (e.g. moved/broken, a transient git error, a
+			// lock/permissions blip, a ctx deadline mid-scan) — log and continue
+			// with only its git side (empty). Never fail the GET. Crucially we do
+			// NOT fabricate "stale" rows from this degraded read (WR-01): a stale
+			// classification is emitted ONLY when the list SUCCEEDED and genuinely
+			// lacks the path, so a transient failure can never surface a
+			// metadata-destroying Clear-pointer on a live worktree.
 			slog.Warn("worktree list failed for project", "project", p.id, "repo", p.repoPath, "error", lerr)
 		}
 		mainClean := filepath.Clean(p.repoPath)
@@ -217,13 +223,18 @@ func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, er
 			}
 		}
 
-		// Stale pointers: DB task rows whose path is NOT in git's list.
-		for i := range dbTasks {
-			t := &dbTasks[i]
-			if _, inGit := gitByPath[t.cleanPath]; !inGit {
-				grp.worktrees = append(grp.worktrees, enumWorktree{
-					classification: "stale", path: t.rawPath, task: t,
-				})
+		// Stale pointers: DB task rows whose path is NOT in git's list. Only
+		// classify "stale" when the list SUCCEEDED and the path is genuinely absent
+		// (WR-01) — a failed list (listOK==false) leaves gitByPath empty, which
+		// would otherwise mark EVERY task in the project stale on a false signal.
+		if listOK {
+			for i := range dbTasks {
+				t := &dbTasks[i]
+				if _, inGit := gitByPath[t.cleanPath]; !inGit {
+					grp.worktrees = append(grp.worktrees, enumWorktree{
+						classification: "stale", path: t.rawPath, task: t,
+					})
+				}
 			}
 		}
 
