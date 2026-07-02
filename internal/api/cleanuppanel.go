@@ -552,15 +552,47 @@ func (h *cleanupPanelHandlers) refResolves(ctx context.Context, wt, ref string) 
 
 // --- HTTP: POST /api/worktrees/remove (per-item force-remove, WTREE-02/D-03) ---
 
+// findEnumerated locates the enumerated worktree matching (repo, path) — a
+// clean-path comparison scoped to the project whose repoPath equals repo, using
+// the SAME filepath.Clean normalization the enumerator keys on. It is the CR-01
+// guardrail: the remove handler passes only a body pair that resolves to a real,
+// currently-enumerated worktree, so an arbitrary/stale client path can never be
+// force-removed. Returns the matched enumWorktree, the matched project's
+// server-truth repoPath, and true; or (zero, "", false).
+func findEnumerated(groups []enumProject, repo, path string) (enumWorktree, string, bool) {
+	wantRepo := filepath.Clean(repo)
+	wantPath := filepath.Clean(path)
+	for _, g := range groups {
+		if filepath.Clean(g.meta.repoPath) != wantRepo {
+			continue
+		}
+		for _, ew := range g.worktrees {
+			if filepath.Clean(ew.path) == wantPath {
+				return ew, g.meta.repoPath, true
+			}
+		}
+	}
+	return enumWorktree{}, "", false
+}
+
 // remove force-removes a single worktree through the ONE shared gated path
 // (the panel is the 3rd caller). D-03: the client always sends force=true AND
 // stop_sessions=true for the per-item override, but both are read from the body
 // and honored. The gates are re-checked server-side inside CleanupWorktreeGated
-// (Pitfall 4/8 — the client snapshot is advisory). Outcome mapping:
-//   - removed          → 204
-//   - *BlockedError    → 200 {outcome:"blocked", path} (D-01, NOT a 500)
-//   - !removed+reason  → 409 reason (a raced gate; force normally clears it)
-//   - other err        → 500
+// (Pitfall 4/8 — the client snapshot is advisory).
+//
+// CR-01: the (repo, path) pair is VALIDATED against enumerate() before any
+// removal — a pair that is not a real, enumerated worktree returns 404, so this
+// destructive path can never force-remove an arbitrary body path. The task_id
+// for the null-columns UPDATE is DERIVED from the MATCHED worktree's task (not
+// the client's task_id), so a mismatched body can never null an unrelated task's
+// branch/worktree_path/worktree_error. An enumerated orphan (no task) removes
+// with taskID=0 as before. Outcome mapping:
+//   - no such worktree  → 404 (CR-01 validation)
+//   - removed           → 204
+//   - *BlockedError     → 200 {outcome:"blocked", path} (D-01, NOT a 500)
+//   - !removed+reason   → 409 reason (a raced gate; force normally clears it)
+//   - other err         → 500
 func (h *cleanupPanelHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Repo         string `json:"repo"`
@@ -581,14 +613,36 @@ func (h *cleanupPanelHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), enumTimeout)
 	defer cancel()
 
-	// task_id==0 (orphan) → cleanupSessionCount/liveTmuxNames are no-ops (tmux
+	// CR-01: validate the (repo, path) pair against server truth before removing
+	// anything. enumerate() is the same union scan list() shows; a pair absent
+	// from it is not a removable worktree.
+	groups, err := h.enumerate(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ew, repo, ok := findEnumerated(groups, req.Repo, req.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "no such worktree")
+		return
+	}
+	// Derive the target repo/path/task_id from the MATCHED worktree — NOT the
+	// client body — so the null-columns UPDATE can only ever touch the task that
+	// actually owns this worktree (orphan ⇒ taskID 0 ⇒ no UPDATE).
+	path := ew.path
+	var taskID int64
+	if ew.task != nil {
+		taskID = ew.task.id
+	}
+
+	// taskID==0 (orphan) → cleanupSessionCount/liveTmuxNames are no-ops (tmux
 	// rows are keyed by task_id; an orphan has none).
-	count := h.cleanupSessionCount(ctx, req.TaskID)
-	live := h.liveTmuxNames(ctx, req.TaskID)
+	count := h.cleanupSessionCount(ctx, taskID)
+	live := h.liveTmuxNames(ctx, taskID)
 
 	removed, reason, err := CleanupWorktreeGated(
 		ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
-		req.TaskID, req.Repo, req.Path, count, req.StopSessions, req.Force)
+		taskID, repo, path, count, req.StopSessions, req.Force)
 
 	// D-01: a permission block is a distinct 200 outcome, not a 500. The git
 	// registration + DB row stay intact (CleanupWorktreeGated did not proceed).
