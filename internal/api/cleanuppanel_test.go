@@ -523,6 +523,107 @@ func TestWorktreeCleanupRemove(t *testing.T) {
 	}
 }
 
+// TestWorktreeCleanupRemoveRejectsUnenumeratedPath (CR-01) asserts the remove
+// handler validates (repo, path) against the enumerated set: a request whose
+// path is NOT a real, enumerated worktree returns 404 "no such worktree" and
+// nulls NO DB columns. The pre-fix handler force-removed an arbitrary body path
+// and nulled the client's task_id independently.
+func TestWorktreeCleanupRemoveRejectsUnenumeratedPath(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Alpha", repo)
+
+	// A real, healthy worktree + task that must remain untouched.
+	realPath := addLinkedWorktree(t, repo, "real")
+	victim := seedTaskFull(t, env.db, pid, "Victim", "done", "real", realPath, "manual", 0, "")
+
+	// A path that is NOT an enumerated worktree of this (or any) project.
+	bogusPath := filepath.Join(t.TempDir(), "not-a-worktree")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": bogusPath, "task_id": victim, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusNotFound {
+		t.Fatalf("remove of unenumerated path status = %d, want 404; body=%v", status, body)
+	}
+	// The victim task's columns must be intact — the mismatched request must not
+	// null an unrelated (or any) task.
+	br, wp := taskColsFor(t, env.db, victim)
+	if br == "" || wp == "" {
+		t.Errorf("victim task columns nulled by an unenumerated-path remove: branch=%q worktree_path=%q", br, wp)
+	}
+	// The real worktree must still be on disk (nothing removed).
+	if _, err := os.Stat(realPath); err != nil {
+		t.Errorf("real worktree removed by an unenumerated-path request: %v", err)
+	}
+}
+
+// TestWorktreeCleanupRemoveNullsMatchedTaskNotBodyTaskID (CR-01) asserts the
+// null-columns UPDATE targets the task of the MATCHED enumerated worktree, NOT
+// the client-supplied task_id. A body whose path matches worktree A but whose
+// task_id names an unrelated task B must remove A and null A's columns, leaving
+// B's columns fully intact.
+func TestWorktreeCleanupRemoveNullsMatchedTaskNotBodyTaskID(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Beta", repo)
+
+	// Worktree A (the real remove target) with task A.
+	pathA := addLinkedWorktree(t, repo, "wt-a")
+	taskA := seedTaskFull(t, env.db, pid, "Task A", "done", "wt-a", pathA, "manual", 0, "")
+
+	// Worktree B with task B — an UNRELATED live worktree the client wrongly names.
+	pathB := addLinkedWorktree(t, repo, "wt-b")
+	taskB := seedTaskFull(t, env.db, pid, "Task B", "done", "wt-b", pathB, "manual", 0, "")
+
+	// Request removes A's path but (maliciously/erroneously) names task B.
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": pathA, "task_id": taskB, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusNoContent {
+		t.Fatalf("remove status = %d, want 204; body=%v", status, body)
+	}
+	// A was removed and A's columns nulled (derived from the matched worktree).
+	if _, err := os.Stat(pathA); !os.IsNotExist(err) {
+		t.Errorf("worktree A not removed: %v", err)
+	}
+	brA, wpA := taskColsFor(t, env.db, taskA)
+	if brA != "" || wpA != "" {
+		t.Errorf("matched task A columns not nulled: branch=%q worktree_path=%q", brA, wpA)
+	}
+	// B — the client's mismatched task_id — must be FULLY intact (its worktree
+	// still exists on disk and its DB columns untouched).
+	brB, wpB := taskColsFor(t, env.db, taskB)
+	if brB == "" || wpB == "" {
+		t.Errorf("unrelated task B columns nulled from client task_id: branch=%q worktree_path=%q", brB, wpB)
+	}
+	if _, err := os.Stat(pathB); err != nil {
+		t.Errorf("worktree B removed — the wrong tree was destroyed: %v", err)
+	}
+}
+
+// TestWorktreeCleanupRemoveOrphanTaskIDZero (CR-01) asserts an ENUMERATED orphan
+// worktree (no task row) still removes with taskID=0 after path validation — the
+// validation admits real orphans, only the null-columns UPDATE is skipped.
+func TestWorktreeCleanupRemoveOrphanTaskIDZero(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	seedProjectFull(t, env.db, "Gamma", repo)
+
+	// An orphan: a git-listed worktree with NO task row.
+	orphanPath := addLinkedWorktree(t, repo, "orphan")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": orphanPath, "task_id": 0, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusNoContent {
+		t.Fatalf("orphan remove status = %d, want 204; body=%v", status, body)
+	}
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Errorf("orphan worktree not removed: %v", err)
+	}
+}
+
 // TestWorktreeCleanupBlocked: a permission-blocked shell (a mode-000 subdir git
 // can't delete) returns HTTP 200 with {outcome:"blocked", path:...}, NOT a 500,
 // and does NOT --force (the tree survives).
@@ -672,5 +773,94 @@ func TestWorktreeCleanupClearPointer(t *testing.T) {
 	}
 	if br != "" {
 		t.Errorf("branch = %q, want NULL after clear-pointer (columns nulled, row kept)", br)
+	}
+}
+
+// TestWorktreeCleanupListNoStaleOnFailedList (WR-01) asserts that a transient
+// `git worktree list` FAILURE does NOT fabricate "stale" rows. When List errors
+// for a project, gitByPath is empty; the pre-fix code then classified EVERY DB
+// task in that project as "stale" (surfacing a metadata-destroying Clear-pointer
+// on a false signal). A stale classification must require a SUCCESSFUL list that
+// genuinely lacks the path. Here repo_path points at a non-git directory so
+// List() errors; the project's task must therefore NOT appear as a stale row.
+func TestWorktreeCleanupListNoStaleOnFailedList(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+
+	// A directory that is NOT a git repo → List(ctx, notARepo) shells out to
+	// `git worktree list` there and returns lerr != nil.
+	notARepo := t.TempDir()
+	pid := seedProjectFull(t, env.db, "Eta", notARepo)
+
+	// A task with a worktree_path. Its dir exists on disk (so this is not a
+	// genuinely-vanished pointer) — the only reason it would be "stale" is the
+	// failed list wrongly reporting it absent-in-git.
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	if err := os.Mkdir(wtDir, 0o755); err != nil {
+		t.Fatalf("mkdir wt: %v", err)
+	}
+	seedTaskFull(t, env.db, pid, "Present", "done", "some-branch", wtDir, "manual", 0, "")
+
+	resp := getList(t, srv)
+	for _, g := range resp.Projects {
+		for _, wt := range g.Worktrees {
+			if wt.Classification == "stale" {
+				t.Errorf("stale row fabricated from a failed git list: %+v", wt)
+			}
+		}
+	}
+	if resp.Counts.Total != 0 {
+		t.Errorf("counts.total = %d, want 0 (failed list must not surface stale rows)", resp.Counts.Total)
+	}
+}
+
+// TestWorktreeCleanupListSinglePRStateCall (WR-02) asserts that a shown
+// github_pr row resolves its PR state EXACTLY ONCE across the whole list
+// request. The pre-fix code called PRState twice per shown github_pr row
+// (isCleanupCandidate→eligibilityReason AND buildRow) — non-atomic, so
+// eligibility and displayed pr_state could disagree. One row, MERGED ⇒ one
+// gh call; the displayed pr_state must be "merged".
+func TestWorktreeCleanupListSinglePRStateCall(t *testing.T) {
+	pr := &stubPRState{states: map[int]string{42: "MERGED"}}
+	srv, env := newCleanupPanelServer(t, pr)
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Theta", repo)
+	wtPath := addLinkedWorktree(t, repo, "pr-branch")
+	seedTaskFull(t, env.db, pid, "Review", "in_review", "pr-branch", wtPath, "github_pr", 42, "main")
+
+	resp := getList(t, srv)
+	rows := resp.Projects[0].Worktrees
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].PRState == nil || *rows[0].PRState != "merged" {
+		t.Errorf("pr_state = %v, want %q", rows[0].PRState, "merged")
+	}
+	if pr.calls != 1 {
+		t.Errorf("PRState calls = %d, want exactly 1 (WR-02: resolve PR state once per row)", pr.calls)
+	}
+}
+
+// TestWorktreeCleanupCleanEligibleSinglePRStateCall (WR-02) asserts the
+// clean-eligible path (which shares enumerate()+eligibilityReason) also makes
+// exactly ONE gh call per PR row — computeEligible reads the stored resolution,
+// never re-invoking PRState.
+func TestWorktreeCleanupCleanEligibleSinglePRStateCall(t *testing.T) {
+	pr := &stubPRState{states: map[int]string{7: "MERGED"}}
+	srv, env := newCleanupPanelServer(t, pr)
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Iota", repo)
+	wtPath := addLinkedWorktree(t, repo, "pr-clean")
+	seedTaskFull(t, env.db, pid, "Merged clean", "in_review", "pr-clean", wtPath, "github_pr", 7, "main")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible?dry_run=1", nil)
+	if status != http.StatusOK {
+		t.Fatalf("dry-run status = %d, want 200; body=%v", status, body)
+	}
+	items, _ := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("eligible items = %d, want 1 (merged PR, clean); body=%v", len(items), body)
+	}
+	if pr.calls != 1 {
+		t.Errorf("PRState calls = %d, want exactly 1 (WR-02: one gh call per PR row)", pr.calls)
 	}
 }

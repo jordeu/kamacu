@@ -143,11 +143,21 @@ type dbTask struct {
 // enumWorktree is one classified worktree in a project's group, BEFORE flag
 // computation. It pairs the on-disk git entry (nil for a stale pointer whose
 // dir is gone) with its owning task (nil for an orphan).
+//
+// prState/prStateOK hold the PR state resolved ONCE per referenced github_pr row
+// during enumerate (WR-02). eligibilityReason and buildRow both read these
+// instead of each calling h.pr.PRState, so the whole request makes exactly one
+// gh call per PR row and eligibility can never disagree with the displayed
+// pr_state. prState is the RAW UPPERCASE value ("OPEN"|"CLOSED"|"MERGED");
+// prStateOK is false when there is no PR to resolve or the gh lookup failed
+// (unresolved ⇒ ineligible AND pr_state renders nil, degrade-don't-break).
 type enumWorktree struct {
 	classification string // "referenced" | "orphan" | "stale"
 	path           string // the worktree path (git Path, or the stale task path)
 	entry          *worktree.Entry
 	task           *dbTask
+	prState        string // RAW UPPERCASE resolved PR state (github_pr rows only)
+	prStateOK      bool   // true only when prState was resolved successfully
 }
 
 // enumProject is a project plus its classified worktrees (main excluded).
@@ -161,8 +171,8 @@ type enumProject struct {
 // result with the task rows whose worktree_path is non-NULL, classifying each as
 // referenced / orphan / stale (D-07). It is the shared spine both list() and
 // cleanEligible() call so the two never drift. A single project's git-list
-// failure is logged and skipped (its stale task rows still surface), never a
-// whole-GET 500.
+// failure is logged and that project contributes NO rows (its stale task rows
+// are NOT fabricated from the degraded read, WR-01), never a whole-GET 500.
 func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, error) {
 	projects, err := h.loadProjects(ctx)
 	if err != nil {
@@ -180,9 +190,15 @@ func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, er
 		// git side: every NON-main, non-bare linked worktree, keyed by clean path.
 		gitByPath := map[string]*worktree.Entry{}
 		entries, lerr := h.wt.List(ctx, p.repoPath)
+		listOK := lerr == nil
 		if lerr != nil {
-			// A repo we can't list (e.g. moved/broken) — log and continue with
-			// only its DB side (stale pointers still surface). Never fail the GET.
+			// A repo we can't list (e.g. moved/broken, a transient git error, a
+			// lock/permissions blip, a ctx deadline mid-scan) — log and continue
+			// with only its git side (empty). Never fail the GET. Crucially we do
+			// NOT fabricate "stale" rows from this degraded read (WR-01): a stale
+			// classification is emitted ONLY when the list SUCCEEDED and genuinely
+			// lacks the path, so a transient failure can never surface a
+			// metadata-destroying Clear-pointer on a live worktree.
 			slog.Warn("worktree list failed for project", "project", p.id, "repo", p.repoPath, "error", lerr)
 		}
 		mainClean := filepath.Clean(p.repoPath)
@@ -207,9 +223,14 @@ func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, er
 		// Referenced + orphan: iterate the git list.
 		for clean, entry := range gitByPath {
 			if task := dbByPath[clean]; task != nil {
-				grp.worktrees = append(grp.worktrees, enumWorktree{
+				ew := enumWorktree{
 					classification: "referenced", path: entry.Path, entry: entry, task: task,
-				})
+				}
+				// Resolve the PR state ONCE here (WR-02) so both the eligibility
+				// decision and the display field read the same value — exactly one
+				// gh call per referenced github_pr row across the whole request.
+				ew.prState, ew.prStateOK = h.resolvePRState(ctx, p.repoPath, task)
+				grp.worktrees = append(grp.worktrees, ew)
 			} else {
 				grp.worktrees = append(grp.worktrees, enumWorktree{
 					classification: "orphan", path: entry.Path, entry: entry,
@@ -217,19 +238,42 @@ func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, er
 			}
 		}
 
-		// Stale pointers: DB task rows whose path is NOT in git's list.
-		for i := range dbTasks {
-			t := &dbTasks[i]
-			if _, inGit := gitByPath[t.cleanPath]; !inGit {
-				grp.worktrees = append(grp.worktrees, enumWorktree{
-					classification: "stale", path: t.rawPath, task: t,
-				})
+		// Stale pointers: DB task rows whose path is NOT in git's list. Only
+		// classify "stale" when the list SUCCEEDED and the path is genuinely absent
+		// (WR-01) — a failed list (listOK==false) leaves gitByPath empty, which
+		// would otherwise mark EVERY task in the project stale on a false signal.
+		if listOK {
+			for i := range dbTasks {
+				t := &dbTasks[i]
+				if _, inGit := gitByPath[t.cleanPath]; !inGit {
+					grp.worktrees = append(grp.worktrees, enumWorktree{
+						classification: "stale", path: t.rawPath, task: t,
+					})
+				}
 			}
 		}
 
 		out = append(out, grp)
 	}
 	return out, nil
+}
+
+// resolvePRState resolves a referenced task's PR state ONCE (WR-02), returning
+// the RAW UPPERCASE state ("OPEN"|"CLOSED"|"MERGED") and ok=true only on a clean
+// gh lookup. A non-github_pr task, an absent pr service, a non-positive PR
+// number, an empty state, or a gh error all yield ("", false) — the
+// degrade-don't-break contract (unresolved ⇒ ineligible AND pr_state renders
+// nil). Called exactly once per referenced row in enumerate so neither
+// eligibilityReason nor buildRow re-invokes h.pr.PRState.
+func (h *cleanupPanelHandlers) resolvePRState(ctx context.Context, repo string, t *dbTask) (string, bool) {
+	if t == nil || t.source != "github_pr" || t.prNumber <= 0 || h.pr == nil {
+		return "", false
+	}
+	state, err := h.pr.PRState(ctx, repo, t.prNumber)
+	if err != nil || state == "" {
+		return "", false
+	}
+	return state, true
 }
 
 // loadProjects reads every project's grouping metadata (D-06 scan roots).
@@ -345,9 +389,10 @@ func (h *cleanupPanelHandlers) list(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, ew := range g.worktrees {
 			// The panel is a cleanup QUEUE, not a full inventory (WTREE-01
-			// refinement): skip active-work rows BEFORE buildRow so hidden rows
-			// do no needless git/gh work (and never double-call gh's PRState).
-			if !h.isCleanupCandidate(ctx, g.meta.repoPath, ew) {
+			// refinement): skip active-work rows BEFORE buildRow so hidden rows do
+			// no needless git work. PR state is resolved once per row in enumerate
+			// (WR-02), so no code path double-calls gh's PRState.
+			if !h.isCleanupCandidate(ew) {
 				continue
 			}
 			row := h.buildRow(ctx, g.meta, ew)
@@ -371,12 +416,12 @@ func (h *cleanupPanelHandlers) list(w http.ResponseWriter, r *http.Request) {
 // Orphans and stale pointers are always housekeeping candidates. A REFERENCED
 // worktree only appears once its work is finished — task Done, or PR merged/
 // closed (gh-unconfirmed ⇒ treated as still-active ⇒ hidden, degrade-don't-break).
-func (h *cleanupPanelHandlers) isCleanupCandidate(ctx context.Context, repo string, ew enumWorktree) bool {
+func (h *cleanupPanelHandlers) isCleanupCandidate(ew enumWorktree) bool {
 	switch ew.classification {
 	case "orphan", "stale":
 		return true
 	default: // "referenced"
-		_, ok := h.eligibilityReason(ctx, repo, ew)
+		_, ok := h.eligibilityReason(ew)
 		return ok
 	}
 }
@@ -442,13 +487,14 @@ func (h *cleanupPanelHandlers) buildRow(ctx context.Context, p projectMeta, ew e
 	}
 
 	// PR-state display suffix (github_pr referenced rows only), degrade-don't-break.
-	if ew.task != nil && ew.task.source == "github_pr" && ew.task.prNumber > 0 && h.pr != nil {
-		if state, perr := h.pr.PRState(ctx, p.repoPath, ew.task.prNumber); perr == nil && state != "" {
-			// DISPLAY-ONLY lowercasing (contract with 23-04: "open"|"closed"|
-			// "merged"). The D-04 eligibility comparison keeps the RAW uppercase.
-			lower := strings.ToLower(state)
-			row.PRState = &lower
-		}
+	// Reads the state resolved ONCE in enumerate (ew.prState) — no gh call here
+	// (WR-02), so the displayed pr_state and the eligibility decision are drawn
+	// from the same value and can never disagree. Unresolved ⇒ pr_state nil.
+	if ew.prStateOK {
+		// DISPLAY-ONLY lowercasing (contract with 23-04: "open"|"closed"|
+		// "merged"). The D-04 eligibility comparison keeps the RAW uppercase.
+		lower := strings.ToLower(ew.prState)
+		row.PRState = &lower
 	}
 
 	return row
@@ -506,15 +552,47 @@ func (h *cleanupPanelHandlers) refResolves(ctx context.Context, wt, ref string) 
 
 // --- HTTP: POST /api/worktrees/remove (per-item force-remove, WTREE-02/D-03) ---
 
+// findEnumerated locates the enumerated worktree matching (repo, path) — a
+// clean-path comparison scoped to the project whose repoPath equals repo, using
+// the SAME filepath.Clean normalization the enumerator keys on. It is the CR-01
+// guardrail: the remove handler passes only a body pair that resolves to a real,
+// currently-enumerated worktree, so an arbitrary/stale client path can never be
+// force-removed. Returns the matched enumWorktree, the matched project's
+// server-truth repoPath, and true; or (zero, "", false).
+func findEnumerated(groups []enumProject, repo, path string) (enumWorktree, string, bool) {
+	wantRepo := filepath.Clean(repo)
+	wantPath := filepath.Clean(path)
+	for _, g := range groups {
+		if filepath.Clean(g.meta.repoPath) != wantRepo {
+			continue
+		}
+		for _, ew := range g.worktrees {
+			if filepath.Clean(ew.path) == wantPath {
+				return ew, g.meta.repoPath, true
+			}
+		}
+	}
+	return enumWorktree{}, "", false
+}
+
 // remove force-removes a single worktree through the ONE shared gated path
 // (the panel is the 3rd caller). D-03: the client always sends force=true AND
 // stop_sessions=true for the per-item override, but both are read from the body
 // and honored. The gates are re-checked server-side inside CleanupWorktreeGated
-// (Pitfall 4/8 — the client snapshot is advisory). Outcome mapping:
-//   - removed          → 204
-//   - *BlockedError    → 200 {outcome:"blocked", path} (D-01, NOT a 500)
-//   - !removed+reason  → 409 reason (a raced gate; force normally clears it)
-//   - other err        → 500
+// (Pitfall 4/8 — the client snapshot is advisory).
+//
+// CR-01: the (repo, path) pair is VALIDATED against enumerate() before any
+// removal — a pair that is not a real, enumerated worktree returns 404, so this
+// destructive path can never force-remove an arbitrary body path. The task_id
+// for the null-columns UPDATE is DERIVED from the MATCHED worktree's task (not
+// the client's task_id), so a mismatched body can never null an unrelated task's
+// branch/worktree_path/worktree_error. An enumerated orphan (no task) removes
+// with taskID=0 as before. Outcome mapping:
+//   - no such worktree  → 404 (CR-01 validation)
+//   - removed           → 204
+//   - *BlockedError     → 200 {outcome:"blocked", path} (D-01, NOT a 500)
+//   - !removed+reason   → 409 reason (a raced gate; force normally clears it)
+//   - other err         → 500
 func (h *cleanupPanelHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Repo         string `json:"repo"`
@@ -535,14 +613,36 @@ func (h *cleanupPanelHandlers) remove(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), enumTimeout)
 	defer cancel()
 
-	// task_id==0 (orphan) → cleanupSessionCount/liveTmuxNames are no-ops (tmux
+	// CR-01: validate the (repo, path) pair against server truth before removing
+	// anything. enumerate() is the same union scan list() shows; a pair absent
+	// from it is not a removable worktree.
+	groups, err := h.enumerate(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ew, repo, ok := findEnumerated(groups, req.Repo, req.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "no such worktree")
+		return
+	}
+	// Derive the target repo/path/task_id from the MATCHED worktree — NOT the
+	// client body — so the null-columns UPDATE can only ever touch the task that
+	// actually owns this worktree (orphan ⇒ taskID 0 ⇒ no UPDATE).
+	path := ew.path
+	var taskID int64
+	if ew.task != nil {
+		taskID = ew.task.id
+	}
+
+	// taskID==0 (orphan) → cleanupSessionCount/liveTmuxNames are no-ops (tmux
 	// rows are keyed by task_id; an orphan has none).
-	count := h.cleanupSessionCount(ctx, req.TaskID)
-	live := h.liveTmuxNames(ctx, req.TaskID)
+	count := h.cleanupSessionCount(ctx, taskID)
+	live := h.liveTmuxNames(ctx, taskID)
 
 	removed, reason, err := CleanupWorktreeGated(
 		ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
-		req.TaskID, req.Repo, req.Path, count, req.StopSessions, req.Force)
+		taskID, repo, path, count, req.StopSessions, req.Force)
 
 	// D-01: a permission block is a distinct 200 outcome, not a 500. The git
 	// registration + DB row stay intact (CleanupWorktreeGated did not proceed).
@@ -640,7 +740,7 @@ func (h *cleanupPanelHandlers) computeEligible(ctx context.Context) []eligibleIt
 				continue
 			}
 
-			reason, ok := h.eligibilityReason(ctx, g.meta.repoPath, ew)
+			reason, ok := h.eligibilityReason(ew)
 			if !ok {
 				continue
 			}
@@ -670,23 +770,20 @@ func (h *cleanupPanelHandlers) computeEligible(ctx context.Context) []eligibleIt
 // bulk removal on the task-status/PR axis (D-04), and the reason string
 // (23-04 contract: "orphaned"|"done"|"pr_merged"|"pr_closed"). Orphans always
 // qualify on this axis (no task to protect). A referenced task qualifies when
-// its task is Done OR its PR is MERGED/CLOSED. PR state uses the RAW UPPERCASE
-// value (NOT the display-lowercased one); a gh error ⇒ not eligible
-// (degrade-don't-break — that row is simply skipped, never forced).
-func (h *cleanupPanelHandlers) eligibilityReason(ctx context.Context, repo string, ew enumWorktree) (string, bool) {
+// its task is Done OR its PR is MERGED/CLOSED. PR state is read from the value
+// resolved ONCE in enumerate (ew.prState, RAW UPPERCASE); an unresolved state
+// (prStateOK==false) ⇒ not eligible (degrade-don't-break — that row is simply
+// skipped, never forced). This reader makes NO gh call (WR-02).
+func (h *cleanupPanelHandlers) eligibilityReason(ew enumWorktree) (string, bool) {
 	if ew.classification == "orphan" || ew.task == nil {
 		return "orphaned", true
 	}
 	t := ew.task
 	if t.source == "github_pr" && t.prNumber > 0 {
-		if h.pr == nil {
-			return "", false
+		if !ew.prStateOK {
+			return "", false // unresolved ⇒ not eligible, never forced
 		}
-		state, err := h.pr.PRState(ctx, repo, t.prNumber)
-		if err != nil {
-			return "", false // degrade-don't-break: not eligible, never forced
-		}
-		switch state {
+		switch ew.prState {
 		case "MERGED":
 			return "pr_merged", true
 		case "CLOSED":
