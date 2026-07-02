@@ -119,6 +119,10 @@ Each task was committed atomically:
 - Ready for Plan 05 phase verification / human-verify against the UI-SPEC (tree lists all changed files path-compressed, click scrolls, scroll highlights the top file, PanelLeft hides/shows, collapse + Viewed still behave per Plan 03).
 - No frontend test framework exists (house rule); verification is `cd web && npm run build && npm run lint` (both green) + human UAT.
 
+## Self-Check: PASSED
+
+All created files present on disk (`FileTree.tsx`, `use-scroll-spy.ts`, `DiffTab.tsx`, `22-04-SUMMARY.md`); all task commits present in git (`a8e04b6`, `e1723e9`, `34ae612`, `25d9fac`).
+
 ---
 *Phase: 22-github-style-diff-review*
 *Completed: 2026-07-02*
