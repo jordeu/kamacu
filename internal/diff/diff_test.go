@@ -292,3 +292,204 @@ func fileNames(d *Diff) []string {
 	}
 	return names
 }
+
+// TestFileHash pins the rendered-per-file hash contract that keys the "Viewed"
+// persistence (DIFF-03) and drives auto-reset (DIFF-04). Every assertion is on a
+// RELATIONSHIP between hashes (equal / not-equal), never a hard-coded hex literal,
+// so the test survives any future reshaping of the serialization that preserves
+// its invariants. The real-git cases run through Compute (the production path);
+// the rename-vs-modify case calls hashFile directly (in-package) to prove that
+// Status/OldPath participate without fighting git's rename-detection heuristics.
+func TestFileHash(t *testing.T) {
+	requireGit(t)
+
+	// oneCommitRepo returns a repo on main carrying the given text file, plus a
+	// task-branch worktree off main (mirrors the other fixtures' shape).
+	oneCommitRepo := func(t *testing.T, name, content string) (repo, wt string) {
+		t.Helper()
+		repo = t.TempDir()
+		git(t, repo, "init", "-b", "main")
+		write(t, repo, name, content)
+		git(t, repo, "add", "-A")
+		git(t, repo, "commit", "-m", "base")
+		wt = filepath.Join(t.TempDir(), "wt")
+		git(t, repo, "worktree", "add", "-b", "task", wt, "main")
+		return repo, wt
+	}
+
+	t.Run("deterministic: same content hashes identically across two Computes", func(t *testing.T) {
+		_, wt := oneCommitRepo(t, "a.txt", "one\ntwo\nthree\n")
+		write(t, wt, "a.txt", "one\nCHANGED\nthree\n")
+
+		d1, err := Compute(context.Background(), wt, "main")
+		if err != nil {
+			t.Fatalf("Compute #1: %v", err)
+		}
+		d2, err := Compute(context.Background(), wt, "main")
+		if err != nil {
+			t.Fatalf("Compute #2: %v", err)
+		}
+
+		// Every file carries a non-empty 64-char lowercase-hex hash.
+		for _, f := range d1.Files {
+			if len(f.Hash) != 64 {
+				t.Errorf("%s: hash %q is not 64 chars (sha256 hex)", f.Path, f.Hash)
+			}
+			for _, r := range f.Hash {
+				if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+					t.Errorf("%s: hash %q is not lowercase hex", f.Path, f.Hash)
+					break
+				}
+			}
+		}
+
+		f1, f2 := findFile(d1, "a.txt"), findFile(d2, "a.txt")
+		if f1 == nil || f2 == nil {
+			t.Fatalf("a.txt missing (files=%v / %v)", fileNames(d1), fileNames(d2))
+		}
+		if f1.Hash != f2.Hash {
+			t.Errorf("non-deterministic hash for unchanged content: %q != %q", f1.Hash, f2.Hash)
+		}
+	})
+
+	t.Run("content-sensitive: editing a file changes its hash", func(t *testing.T) {
+		_, wt := oneCommitRepo(t, "a.txt", "one\ntwo\nthree\n")
+
+		write(t, wt, "a.txt", "one\nCHANGED\nthree\n")
+		d1, err := Compute(context.Background(), wt, "main")
+		if err != nil {
+			t.Fatalf("Compute #1: %v", err)
+		}
+		h1 := findFile(d1, "a.txt").Hash
+
+		write(t, wt, "a.txt", "one\nCHANGED-AGAIN\nthree\n")
+		d2, err := Compute(context.Background(), wt, "main")
+		if err != nil {
+			t.Fatalf("Compute #2: %v", err)
+		}
+		h2 := findFile(d2, "a.txt").Hash
+
+		if h1 == h2 {
+			t.Errorf("editing a.txt did not change its hash (%q) — DIFF-04 auto-reset would never fire", h1)
+		}
+	})
+
+	t.Run("base movement that does not touch F leaves F's hash unchanged (D-01)", func(t *testing.T) {
+		repo, wt := oneCommitRepo(t, "a.txt", "one\ntwo\nthree\n")
+		write(t, wt, "a.txt", "one\nCHANGED\nthree\n")
+
+		d1, err := Compute(context.Background(), wt, "main")
+		if err != nil {
+			t.Fatalf("Compute #1: %v", err)
+		}
+		h1 := findFile(d1, "a.txt").Hash
+
+		// Advance main with a commit that never touches a.txt. Three-dot
+		// semantics keep the merge-base at the fork point, so a.txt's rendered
+		// diff — and therefore its hash — must not move (D-01: base movement
+		// does not reset Viewed).
+		write(t, repo, "unrelated.txt", "MAIN-ADVANCED-LINE\n")
+		git(t, repo, "add", "unrelated.txt")
+		git(t, repo, "commit", "-m", "main advances, a.txt untouched")
+
+		d2, err := Compute(context.Background(), wt, "main")
+		if err != nil {
+			t.Fatalf("Compute #2: %v", err)
+		}
+		if findFile(d2, "unrelated.txt") != nil {
+			t.Errorf("unrelated.txt leaked into the diff — base movement is not three-dot")
+		}
+		h2 := findFile(d2, "a.txt").Hash
+		if h1 != h2 {
+			t.Errorf("unrelated base movement reset a.txt's hash: %q != %q (violates D-01)", h1, h2)
+		}
+	})
+
+	t.Run("rename and modify with identical hunks hash differently (Status/OldPath participate)", func(t *testing.T) {
+		// Identical rendered hunks; only Status and OldPath differ. hashFile MUST
+		// distinguish them, else renaming a file to a path that once held
+		// byte-identical hunks would wrongly restore its Viewed checkmark.
+		hunks := []Hunk{{
+			Header: "@@ -1,2 +1,2 @@",
+			Lines: []Line{
+				{Kind: "context", Text: " keep"},
+				{Kind: "del", Text: "-old line"},
+				{Kind: "add", Text: "+new line"},
+			},
+		}}
+		oldPath := "src/old-name.txt"
+		renamed := File{Path: "src/new-name.txt", Status: "renamed", OldPath: &oldPath, Hunks: hunks}
+		modified := File{Path: "src/new-name.txt", Status: "modified", Hunks: hunks}
+
+		if hashFile(renamed) == hashFile(modified) {
+			t.Errorf("rename and modify with identical hunks hashed identically — Status/OldPath are not participating in the hash")
+		}
+		// Sanity anchor: two structurally identical Files hash identically.
+		if hashFile(modified) != hashFile(File{Path: "src/new-name.txt", Status: "modified", Hunks: hunks}) {
+			t.Errorf("two identical File values hashed differently — hashFile is not deterministic")
+		}
+	})
+
+	t.Run("binary hash is stable across Computes and byte-invariant (strict D-01)", func(t *testing.T) {
+		// A binary change renders a content-invariant "Binary files ... differ"
+		// header with no hunks, so its hash depends only on Status/Binary/path —
+		// never the bytes. This is the ACCEPTED, DOCUMENTED strict-D-01 limitation
+		// (parse.go deliberately does NOT capture index <oid>..<oid> blob OIDs):
+		// a binary whose bytes change without a status/path/header change keeps its
+		// Viewed state. Do NOT "fix" this — the assertions below pin it as intended.
+		binRepo := func(t *testing.T, bytesAfter []byte) (wt string) {
+			t.Helper()
+			repo := t.TempDir()
+			git(t, repo, "init", "-b", "main")
+			if err := os.WriteFile(filepath.Join(repo, "logo.bin"), []byte{0, 0, 0, 0}, 0o644); err != nil {
+				t.Fatalf("write base logo.bin: %v", err)
+			}
+			git(t, repo, "add", "-A")
+			git(t, repo, "commit", "-m", "base binary")
+			wt = filepath.Join(t.TempDir(), "wt")
+			git(t, repo, "worktree", "add", "-b", "task", wt, "main")
+			if err := os.WriteFile(filepath.Join(wt, "logo.bin"), bytesAfter, 0o644); err != nil {
+				t.Fatalf("rewrite logo.bin: %v", err)
+			}
+			git(t, wt, "commit", "-am", "change binary")
+			return wt
+		}
+
+		wtA := binRepo(t, []byte{1, 2, 3, 4, 5, 6})
+		dA1, err := Compute(context.Background(), wtA, "main")
+		if err != nil {
+			t.Fatalf("Compute A#1: %v", err)
+		}
+		dA2, err := Compute(context.Background(), wtA, "main")
+		if err != nil {
+			t.Fatalf("Compute A#2: %v", err)
+		}
+		bA1, bA2 := findFile(dA1, "logo.bin"), findFile(dA2, "logo.bin")
+		if bA1 == nil || bA2 == nil {
+			t.Fatalf("logo.bin missing (files=%v / %v)", fileNames(dA1), fileNames(dA2))
+		}
+		if !bA1.Binary {
+			t.Errorf("logo.bin Binary = false, want true")
+		}
+		if bA1.Hash == "" {
+			t.Errorf("binary file has an empty hash")
+		}
+		if bA1.Hash != bA2.Hash {
+			t.Errorf("binary hash not stable across two Computes: %q != %q", bA1.Hash, bA2.Hash)
+		}
+
+		// Different bytes, same rendered header → same hash (strict D-01).
+		wtB := binRepo(t, []byte{9, 8, 7, 6, 5, 4, 3, 2})
+		dB, err := Compute(context.Background(), wtB, "main")
+		if err != nil {
+			t.Fatalf("Compute B: %v", err)
+		}
+		bB := findFile(dB, "logo.bin")
+		if bB == nil {
+			t.Fatalf("logo.bin missing from B (files=%v)", fileNames(dB))
+		}
+		if bA1.Hash != bB.Hash {
+			t.Errorf("binary hash changed with an only-bytes change: %q != %q — strict D-01 requires the rendered-only hash to stay stable", bA1.Hash, bB.Hash)
+		}
+	})
+}
