@@ -523,6 +523,107 @@ func TestWorktreeCleanupRemove(t *testing.T) {
 	}
 }
 
+// TestWorktreeCleanupRemoveRejectsUnenumeratedPath (CR-01) asserts the remove
+// handler validates (repo, path) against the enumerated set: a request whose
+// path is NOT a real, enumerated worktree returns 404 "no such worktree" and
+// nulls NO DB columns. The pre-fix handler force-removed an arbitrary body path
+// and nulled the client's task_id independently.
+func TestWorktreeCleanupRemoveRejectsUnenumeratedPath(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Alpha", repo)
+
+	// A real, healthy worktree + task that must remain untouched.
+	realPath := addLinkedWorktree(t, repo, "real")
+	victim := seedTaskFull(t, env.db, pid, "Victim", "done", "real", realPath, "manual", 0, "")
+
+	// A path that is NOT an enumerated worktree of this (or any) project.
+	bogusPath := filepath.Join(t.TempDir(), "not-a-worktree")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": bogusPath, "task_id": victim, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusNotFound {
+		t.Fatalf("remove of unenumerated path status = %d, want 404; body=%v", status, body)
+	}
+	// The victim task's columns must be intact — the mismatched request must not
+	// null an unrelated (or any) task.
+	br, wp := taskColsFor(t, env.db, victim)
+	if br == "" || wp == "" {
+		t.Errorf("victim task columns nulled by an unenumerated-path remove: branch=%q worktree_path=%q", br, wp)
+	}
+	// The real worktree must still be on disk (nothing removed).
+	if _, err := os.Stat(realPath); err != nil {
+		t.Errorf("real worktree removed by an unenumerated-path request: %v", err)
+	}
+}
+
+// TestWorktreeCleanupRemoveNullsMatchedTaskNotBodyTaskID (CR-01) asserts the
+// null-columns UPDATE targets the task of the MATCHED enumerated worktree, NOT
+// the client-supplied task_id. A body whose path matches worktree A but whose
+// task_id names an unrelated task B must remove A and null A's columns, leaving
+// B's columns fully intact.
+func TestWorktreeCleanupRemoveNullsMatchedTaskNotBodyTaskID(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Beta", repo)
+
+	// Worktree A (the real remove target) with task A.
+	pathA := addLinkedWorktree(t, repo, "wt-a")
+	taskA := seedTaskFull(t, env.db, pid, "Task A", "done", "wt-a", pathA, "manual", 0, "")
+
+	// Worktree B with task B — an UNRELATED live worktree the client wrongly names.
+	pathB := addLinkedWorktree(t, repo, "wt-b")
+	taskB := seedTaskFull(t, env.db, pid, "Task B", "done", "wt-b", pathB, "manual", 0, "")
+
+	// Request removes A's path but (maliciously/erroneously) names task B.
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": pathA, "task_id": taskB, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusNoContent {
+		t.Fatalf("remove status = %d, want 204; body=%v", status, body)
+	}
+	// A was removed and A's columns nulled (derived from the matched worktree).
+	if _, err := os.Stat(pathA); !os.IsNotExist(err) {
+		t.Errorf("worktree A not removed: %v", err)
+	}
+	brA, wpA := taskColsFor(t, env.db, taskA)
+	if brA != "" || wpA != "" {
+		t.Errorf("matched task A columns not nulled: branch=%q worktree_path=%q", brA, wpA)
+	}
+	// B — the client's mismatched task_id — must be FULLY intact (its worktree
+	// still exists on disk and its DB columns untouched).
+	brB, wpB := taskColsFor(t, env.db, taskB)
+	if brB == "" || wpB == "" {
+		t.Errorf("unrelated task B columns nulled from client task_id: branch=%q worktree_path=%q", brB, wpB)
+	}
+	if _, err := os.Stat(pathB); err != nil {
+		t.Errorf("worktree B removed — the wrong tree was destroyed: %v", err)
+	}
+}
+
+// TestWorktreeCleanupRemoveOrphanTaskIDZero (CR-01) asserts an ENUMERATED orphan
+// worktree (no task row) still removes with taskID=0 after path validation — the
+// validation admits real orphans, only the null-columns UPDATE is skipped.
+func TestWorktreeCleanupRemoveOrphanTaskIDZero(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	seedProjectFull(t, env.db, "Gamma", repo)
+
+	// An orphan: a git-listed worktree with NO task row.
+	orphanPath := addLinkedWorktree(t, repo, "orphan")
+
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{
+		"repo": repo, "path": orphanPath, "task_id": 0, "force": true, "stop_sessions": true,
+	})
+	if status != http.StatusNoContent {
+		t.Fatalf("orphan remove status = %d, want 204; body=%v", status, body)
+	}
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Errorf("orphan worktree not removed: %v", err)
+	}
+}
+
 // TestWorktreeCleanupBlocked: a permission-blocked shell (a mode-000 subdir git
 // can't delete) returns HTTP 200 with {outcome:"blocked", path:...}, NOT a 500,
 // and does NOT --force (the tree survives).
