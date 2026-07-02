@@ -411,6 +411,18 @@ func (s *Service) StashCount(ctx context.Context, wt string) (int, error) {
 	return len(strings.Split(out, "\n")), nil
 }
 
+// RefResolves reports whether ref resolves to a commit in the worktree at wt,
+// using a NETWORK-FREE `rev-parse --verify --quiet <ref>^{commit}` (no fetch).
+// The panel uses it to decide whether a github_pr row's origin/<pr_base_ref>
+// exists locally before measuring unpushed commits against it (Pattern 3): if
+// the remote-tracking ref was never fetched, the base is unresolvable and the
+// row degrades to unpushed:null rather than surfacing a git error. The ^{commit}
+// peel keeps a tag or annotated ref from passing as a non-commit.
+func (s *Service) RefResolves(ctx context.Context, wt, ref string) bool {
+	_, err := gitRun(ctx, wt, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
 // Remove removes the worktree at wt from repo, then prunes bookkeeping
 // (D-34). It NEVER deletes branches.
 //

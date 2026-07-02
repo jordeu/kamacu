@@ -123,19 +123,19 @@ type listResp struct {
 		IconLetters string `json:"icon_letters"`
 		IconColor   string `json:"icon_color"`
 		Worktrees   []struct {
-			Repo           string `json:"repo"`
-			Path           string `json:"path"`
-			TaskID         int64  `json:"task_id"`
-			Classification string `json:"classification"`
+			Repo           string  `json:"repo"`
+			Path           string  `json:"path"`
+			TaskID         int64   `json:"task_id"`
+			Classification string  `json:"classification"`
 			Association    *string `json:"association"`
 			PRState        *string `json:"pr_state"`
-			Branch         string `json:"branch"`
-			Dirty          int    `json:"dirty"`
-			Unpushed       *int   `json:"unpushed"`
-			Stash          int    `json:"stash"`
-			Blocked        bool   `json:"blocked"`
+			Branch         string  `json:"branch"`
+			Dirty          int     `json:"dirty"`
+			Unpushed       *int    `json:"unpushed"`
+			Stash          int     `json:"stash"`
+			Blocked        bool    `json:"blocked"`
 			BlockedPath    *string `json:"blocked_path"`
-			Sessions       int    `json:"sessions"`
+			Sessions       int     `json:"sessions"`
 		} `json:"worktrees"`
 	} `json:"projects"`
 	Counts struct {
@@ -288,30 +288,37 @@ func TestWorktreeCleanupListDirtyFlag(t *testing.T) {
 	}
 }
 
-// TestWorktreeCleanupListUnpushedNullDegrade: when the unpushed base can't be
-// resolved (an unborn/empty repo), the row still lists with unpushed:null and
-// the GET is 200, never a 500.
+// TestWorktreeCleanupListUnpushedNullDegrade: an orphan worktree checked out on
+// a DETACHED HEAD has no branch base to diff against, so its row lists with
+// unpushed:null while the GET stays 200 (a resolution failure degrades one row's
+// flag, never the whole GET). This exercises the null branch of unpushedBase.
 func TestWorktreeCleanupListUnpushedNullDegrade(t *testing.T) {
 	srv, env := newCleanupPanelServer(t, &stubPRState{})
 	repo := gitRepoWithCommit(t)
-	pid := seedProjectFull(t, env.db, "Delta", repo)
-	wtPath := addLinkedWorktree(t, repo, "detached-wt")
+	seedProjectFull(t, env.db, "Delta", repo)
 
-	// Detach the worktree HEAD and point the task at it: a referenced worktree
-	// whose base (origin/HEAD absent, local main present) still resolves — so to
-	// force the null path we instead seed a task with an empty branch name so the
-	// base-vs-HEAD rev-list has no valid range. Simpler: make the row a github_pr
-	// with a pr_base_ref that resolves to nothing (origin absent) so unpushed is
-	// null but the row still renders.
-	seedTaskFull(t, env.db, pid, "PR row", "in_review", "detached-wt", wtPath, "github_pr", 7, "nonexistent-base")
+	// A detached orphan worktree: `git worktree add --detach <path>` checks out
+	// HEAD with no branch. It has no task row (orphan) and no branch (detached),
+	// so unpushedBase returns ("", false) → unpushed:null.
+	wtPath := filepath.Join(t.TempDir(), "detached-orphan")
+	full := append([]string{"-C", repo, "-c", "user.name=test", "-c", "user.email=test@test"},
+		"worktree", "add", "--detach", wtPath)
+	cmd := exec.Command("git", full...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add --detach: %v\n%s", err, out)
+	}
 
 	resp := getList(t, srv)
 	rows := resp.Projects[0].Worktrees
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1; %+v", len(rows), rows)
 	}
+	if rows[0].Classification != "orphan" {
+		t.Errorf("classification = %q, want orphan", rows[0].Classification)
+	}
 	if rows[0].Unpushed != nil {
-		t.Errorf("unpushed = %d, want null (base origin/nonexistent-base unresolvable)", *rows[0].Unpushed)
+		t.Errorf("unpushed = %d, want null (detached orphan has no base)", *rows[0].Unpushed)
 	}
 	// The GET returned 200 with the row intact — the degrade path did not 500.
 }
