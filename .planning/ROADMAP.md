@@ -104,7 +104,7 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
 - [x] **Phase 20: Kamacu Rebrand & Brand** — Rename to Kamacu across code/binary/module/UI and ship the new logo, favicon, and README (no data-path change yet) (completed 2026-07-01)
 - [x] **Phase 21: Data Directory Migration** — One-time gated `~/.kangent` → `~/.kamacu` move that repairs worktrees, rewrites DB paths, switches the tmux socket/prefix, and migrates localStorage (completed 2026-07-01)
 - [x] **Phase 22: GitHub-Style Diff Review** — File-tree diff view with per-file collapse and sticky "Viewed" state that resets only when a file changes (completed 2026-07-02)
-- [ ] **Phase 23: Worktree Cleanup Panel** — Settings panel listing every worktree (incl. orphans) with per-item force-remove and a bulk "clean eligible" action
+- [x] **Phase 23: Worktree Cleanup Panel** — Settings panel listing every worktree (incl. orphans) with per-item force-remove and a bulk "clean eligible" action (completed 2026-07-02)
 - [ ] **Phase 24: Session-Bar, Board & Tab Polish** — Renameable tabs, a task-view three-dots menu (no auto review-prompt), and session-bar / board cleanups
 
 ## Phase Details
@@ -226,7 +226,7 @@ Plans:
 
 **Wave 4** *(blocked on 23-03)*
 
-- [ ] 23-05-PLAN.md — full-phase build/test gate + human-verify of WTREE-01..04 & the D-01 blocked case
+- [x] 23-05-PLAN.md — full-phase build/test gate + human-verify of WTREE-01..04 & the D-01 blocked case
 
 **UI hint**: yes
 
@@ -275,7 +275,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 20. Kamacu Rebrand & Brand | v1.8 | 4/4 | Complete    | 2026-07-01 |
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete    | 2026-07-02 |
-| 23. Worktree Cleanup Panel | v1.8 | 4/5 | In Progress|  |
+| 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete   | 2026-07-02 |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
 
 ---
