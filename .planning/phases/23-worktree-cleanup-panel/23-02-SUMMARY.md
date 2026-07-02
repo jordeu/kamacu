@@ -138,6 +138,13 @@ None - no external service configuration required.
 ## Threat Flags
 None — no new security surface beyond the threat register's already-mitigated items. All four endpoints operate on git-enumerated worktree paths at DB-known repo roots via the shared gated-removal core; no new auth path, no schema change, no `os.RemoveAll` on a client path.
 
+## Self-Check: PASSED
+
+- FOUND: internal/api/cleanuppanel.go
+- FOUND: internal/api/cleanuppanel_test.go
+- FOUND: .planning/phases/23-worktree-cleanup-panel/23-02-SUMMARY.md
+- FOUND commit: 0f7c52b (Task 1 RED) / d55b854 (Task 1 GREEN) / 893b767 (Task 2 RED) / f472248 (Task 2 GREEN)
+
 ---
 *Phase: 23-worktree-cleanup-panel*
 *Completed: 2026-07-02*
