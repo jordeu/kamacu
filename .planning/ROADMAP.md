@@ -105,7 +105,7 @@ Full details: [milestones/v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
 - [x] **Phase 21: Data Directory Migration** — One-time gated `~/.kangent` → `~/.kamacu` move that repairs worktrees, rewrites DB paths, switches the tmux socket/prefix, and migrates localStorage (completed 2026-07-01)
 - [x] **Phase 22: GitHub-Style Diff Review** — File-tree diff view with per-file collapse and sticky "Viewed" state that resets only when a file changes (completed 2026-07-02)
 - [x] **Phase 23: Worktree Cleanup Panel** — Settings panel listing cleanup-candidate worktrees (orphaned/stale/finished; active work hidden) with per-item force-remove and a bulk "clean eligible" action (completed 2026-07-02)
-- [ ] **Phase 24: Session-Bar, Board & Tab Polish** — Renameable tabs, a task-view three-dots menu (no auto review-prompt), and session-bar / board cleanups
+- [x] **Phase 24: Session-Bar, Board & Tab Polish** — Renameable tabs, a task-view three-dots menu (no auto review-prompt), and session-bar / board cleanups (completed 2026-07-03)
 
 ## Phase Details
 
@@ -253,7 +253,7 @@ Plans:
 
 **Wave 2** *(blocked on 24-01)*
 
-- [ ] 24-04-PLAN.md — Tab rename frontend: useRenameSession + double-click inline editor + empty→Bash N reset, bash/tmux-only (TABS-01/02)
+- [x] 24-04-PLAN.md — Tab rename frontend: useRenameSession + double-click inline editor + empty→Bash N reset, bash/tmux-only (TABS-01/02)
 
 **UI hint**: yes
 
@@ -287,7 +287,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete    | 2026-07-02 |
 | 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete    | 2026-07-02 |
-| 24. Session-Bar, Board & Tab Polish | v1.8 | 3/4 | In Progress|  |
+| 24. Session-Bar, Board & Tab Polish | v1.8 | 4/4 | Complete   | 2026-07-03 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
