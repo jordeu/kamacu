@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"kamacu/internal/session"
@@ -27,6 +28,7 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxCli
 	mux.HandleFunc("POST /api/sessions", s.create)
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.delete)
+	mux.HandleFunc("PATCH /api/sessions/{id}", s.rename)
 }
 
 type sessionHandlers struct {
@@ -113,7 +115,12 @@ func (h *sessionHandlers) reconcileTmux(r *http.Request, taskID int64, infos []s
 		case alive:
 			label := rw.label
 			if label == "" {
-				label = "Bash ?"
+				// D-04: never surface the old Bash-question-mark sentinel for an
+				// empty label (a pre-write survivor or a failed spawn back-fill).
+				// Re-derive the deterministic Bash <n> default from the machine-minted
+				// tmux name kamacu-<task>-<n>, exactly the label the spawn UPDATE would
+				// have written, so a restarted survivor always shows a real name.
+				label = defaultTmuxLabel(rw.name)
 			}
 			created, perr := time.Parse(time.RFC3339, rw.createdAt)
 			if perr != nil {
@@ -300,7 +307,12 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			name := fmt.Sprintf("kamacu-%d-%d", req.TaskID, n)
-			if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name) VALUES (?, ?, ?)`, req.TaskID, n, name); err != nil {
+			// D-04 belt-and-braces: persist the default "Bash N" label at INSERT so
+			// the column is never transiently '' even if the later sess.Info().Label
+			// back-fill UPDATE (below) fails. The two writes agree (both "Bash N"),
+			// so the back-fill is idempotent reconciliation, not a conflict.
+			label := fmt.Sprintf("Bash %d", n)
+			if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, ?, ?, ?)`, req.TaskID, n, name, label); err != nil {
 				writeError(w, http.StatusInternalServerError, "couldn't start a session")
 				return
 			}
@@ -360,6 +372,82 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 	}
 	go sess.Stop()
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// maxLabelRunes bounds a stored+rendered session label (T-24-01): an unbounded
+// user-supplied label could bloat the tmux_sessions row and the rendered tab
+// strip. 200 runes is generous for a human tab name.
+const maxLabelRunes = 200
+
+// defaultTmuxLabel re-derives the deterministic "Bash <n>" default from a
+// machine-minted tmux session name (kamacu-<task>-<n>). The name is
+// server-controlled, not user input. On a malformed name it returns a safe
+// non-empty "Bash" — never the old question-mark sentinel — so a restarted
+// survivor and an empty-reset both always show a real, non-sentinel name.
+func defaultTmuxLabel(tmuxName string) string {
+	if i := strings.LastIndexByte(tmuxName, '-'); i >= 0 {
+		if n, err := strconv.Atoi(tmuxName[i+1:]); err == nil {
+			return fmt.Sprintf("Bash %d", n)
+		}
+	}
+	return "Bash"
+}
+
+// rename handles PATCH /api/sessions/{id} — renames a session's display label
+// (TABS-01/02). The label is set in memory via the mutex-guarded SetLabel (so it
+// survives navigating away and reopening the task for ALL bash tabs), and for
+// tmux-backed tabs is ALSO persisted to tmux_sessions.label so it survives a
+// server restart. An unknown session id is 404 (T-24-02: h.mgr.Get gates against
+// arbitrary/foreign ids). A trimmed-empty label RESETS a tmux tab to its
+// re-derived "Bash N" default (D-05). The label is trimmed and capped at
+// maxLabelRunes (T-24-01). Persistence is warn-only, mirroring the spawn
+// back-fill.
+func (h *sessionHandlers) rename(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.mgr.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	var req struct {
+		Label *string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// Absent label: nothing to rename — return the current snapshot unchanged.
+	if req.Label == nil {
+		writeJSON(w, http.StatusOK, sess.Info())
+		return
+	}
+	newLabel := strings.TrimSpace(*req.Label)
+	// D-05: an empty/whitespace commit resets to the auto default. For a tmux tab
+	// the default is re-derivable from the kamacu-<task>-<n> name. A non-tmux
+	// (plain-bash) tab has no derivable ordinal here (the per-task counter lives
+	// in the manager and is not exposed on Session), so an empty reset leaves the
+	// current in-memory label unchanged — a plain-bash tab does not survive a
+	// restart anyway, so there is nothing to re-derive for it (Claude's discretion).
+	if newLabel == "" {
+		if sess.TmuxName() != "" {
+			newLabel = defaultTmuxLabel(sess.TmuxName())
+		} else {
+			newLabel = sess.Info().Label
+		}
+	}
+	// Cap the trimmed label (T-24-01) to bound the stored+rendered string.
+	if runes := []rune(newLabel); len(runes) > maxLabelRunes {
+		newLabel = string(runes[:maxLabelRunes])
+	}
+	sess.SetLabel(newLabel)
+	// tmux tabs additionally persist so the rename survives a restart — the SAME
+	// statement the spawn back-fill uses, warn-only on error (same degradation
+	// posture: a failed write costs only the restart label, never the session).
+	if sess.TmuxName() != "" {
+		if _, err := h.db.Exec(`UPDATE tmux_sessions SET label = ? WHERE name = ?`, newLabel, sess.TmuxName()); err != nil {
+			slog.Warn("persisting tmux session label", "name", sess.TmuxName(), "error", err)
+		}
+	}
+	writeJSON(w, http.StatusOK, sess.Info())
 }
 
 // delete handles DELETE /api/sessions/{id} — removes an EXITED session,
