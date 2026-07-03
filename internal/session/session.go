@@ -262,6 +262,18 @@ func (s *Session) SetWaiting() {
 	s.waiting = true
 }
 
+// SetLabel renames the session's display label under the session mutex. The
+// label was set-once at Spawn (D-01); this is the rename write path making it
+// mutable. Info() already reads s.label under the same s.mu, so the next
+// Info()/List/ListByTask snapshot returns the new label with no other change.
+// No kind/tmux gating here — the handler decides which sessions are renamable;
+// this is a plain guarded field write.
+func (s *Session) SetLabel(label string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.label = label
+}
+
 // SetIdle marks turn end (Stop hook): waiting clears, the status computes
 // idle IMMEDIATELY (activity zeroed), and the settle window opens so the
 // final response paint cannot flip idle back to working (Pitfall 1).
