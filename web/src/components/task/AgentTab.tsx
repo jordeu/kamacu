@@ -1,10 +1,12 @@
 import { useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Ellipsis } from "lucide-react";
 import type { Task } from "@/api/types";
 import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
 import {
   useResumeAgent,
   useSpawnAgent,
+  useStopSession,
   type TermSession,
 } from "@/api/sessions";
 import { Button } from "@/components/ui/button";
@@ -13,12 +15,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
-
-// Agent session ids whose PR-review seed has already been injected. Module
-// scope (not a ref) so reopening/remounting the review never re-injects —
-// the guard is the SESSION, which is stable across mounts (12-07 fix #4).
-const seededSessionIds = new Set<string>();
 
 /**
  * The permanent Agent tab's content (D-38..D-41, revised at checkpoint
@@ -43,6 +47,7 @@ export function AgentTab({
 }) {
   const spawn = useSpawnAgent(task.id);
   const resume = useResumeAgent(task.id);
+  const stopSession = useStopSession();
   const queryClient = useQueryClient();
   const pasteApiRef = useRef<{ paste: (t: string) => void } | null>(null);
 
@@ -128,31 +133,61 @@ export function AgentTab({
     );
   }
 
-  // Insert description (D-35/36/37): ONLY while running with a non-empty
-  // description — otherwise hidden (not disabled). Pure frontend: xterm
-  // wraps the paste in \x1b[200~..\x1b[201~ (claude enables mode 2004);
-  // never submits, repeatable.
-  const insertAction =
-    task.description !== "" && agentSession.status === "running" ? (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => pasteApiRef.current?.paste(task.description)}
+  // Agent ⋯ menu (D-06/D-07): folds the old standalone Insert-description
+  // header button, the manual PR-review-prompt insert (D-09, no longer
+  // auto-pasted on connect), and Stop into a single dropdown that supersedes
+  // the pane's inline Stop button (headerMenu, D-07). Built ONLY while running;
+  // when not running, agentMenu is undefined so TerminalPane's default
+  // exited/not-found handling applies.
+  //
+  // Both insert items reuse the SAME bracketed-paste mechanism (pasteApiRef →
+  // term.paste, wrapped by xterm in \x1b[200~..\x1b[201~ because claude enables
+  // mode 2004): the text is prefilled, NEVER auto-submitted — the user reviews
+  // and presses Enter. Repeatable.
+  const running = agentSession.status === "running";
+  // Insert description (D-35/36/37): only with a non-empty description.
+  const showInsertDescription = task.description !== "" && running;
+  // Insert review prompt (D-08): `seed` is already undefined for non-PR tasks
+  // and blank templates (derived upstream in TaskPage), so gate on it directly.
+  const showInsertSeed = Boolean(seed) && running;
+  const agentMenu = running ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label="Agent actions">
+          <Ellipsis className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {showInsertDescription && (
+          <DropdownMenuItem
+            onSelect={() => pasteApiRef.current?.paste(task.description)}
           >
             {`Insert description`}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          {`Types the description into the prompt without sending`}
-        </TooltipContent>
-      </Tooltip>
-    ) : undefined;
+          </DropdownMenuItem>
+        )}
+        {showInsertSeed && (
+          <DropdownMenuItem
+            onSelect={() => pasteApiRef.current?.paste(seed as string)}
+          >
+            {`Insert review prompt`}
+          </DropdownMenuItem>
+        )}
+        {(showInsertDescription || showInsertSeed) && <DropdownMenuSeparator />}
+        <DropdownMenuItem
+          variant="destructive"
+          onSelect={() => stopSession.mutate(agentSession.id)}
+        >
+          {`Stop`}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : undefined;
 
   // D-45 optimistic clear: the open client reflects the waiting→idle
   // transition immediately on attach; the server clears authoritatively in
-  // the WS attach path, other surfaces converge next poll.
+  // the WS attach path, other surfaces converge next poll. (D-09 removed the
+  // connect-time PR-review-seed auto-paste — the seed now enters only via the
+  // Insert review prompt menu item above.)
   const handleConnect = () => {
     queryClient.setQueryData<AgentStatusEntry[]>(["agent-statuses"], (old) =>
       old?.map((e) =>
@@ -161,19 +196,6 @@ export function AgentTab({
           : e,
       ),
     );
-
-    // PR-review seed (D-06/D-07): prefill once per agent session after connect.
-    // Reuses the exact Insert-description mechanism (pasteApiRef → term.paste,
-    // wrapped by xterm in bracketed-paste \x1b[200~..\x1b[201~ so claude
-    // receives it as a single un-submitted prompt). NEVER auto-sent — the user
-    // edits and presses Enter. Guarded by the SESSION id at module scope
-    // (12-07 fix #4): a freshly started session seeds once on first connect;
-    // reopening the review re-mounts onto the same session id → already in the
-    // set → never re-pastes; reconnects (same id) also never re-paste.
-    if (seed && agentSession && !seededSessionIds.has(agentSession.id)) {
-      seededSessionIds.add(agentSession.id);
-      pasteApiRef.current?.paste(seed);
-    }
   };
 
   // State B — session exists (running or exited). Exited output stays
@@ -224,7 +246,7 @@ export function AgentTab({
         pasteApiRef.current = api;
       }}
       onConnect={handleConnect}
-      headerActions={insertAction}
+      headerMenu={agentMenu}
     />
   );
 }
