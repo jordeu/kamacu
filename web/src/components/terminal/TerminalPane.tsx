@@ -22,6 +22,7 @@ export interface TerminalPaneProps {
   onSessionExit?: () => void; // 'x' frame received — parent invalidates ["sessions"]
   onNewTerminal?: () => void; // banner "New terminal" — parent spawns; the pane NEVER spawns
   headerActions?: ReactNode; // header right group, BEFORE Stop (D-36 slot)
+  headerMenu?: ReactNode; // agent-only ⋯ menu (D-07): when set, SUPERSEDES the Stop button (its own Stop item lives in AgentTab). Bash panes pass nothing → inline Stop unchanged.
   exitedPrimaryLabel?: string; // exited-banner primary action label; default "New terminal"
   showExitedClose?: boolean; // default true; false hides the banner's ghost Close (D-38)
   exitedMessage?: string; // exited-banner copy override; default "Session exited (code {N})" (bash)
@@ -44,6 +45,7 @@ export function TerminalPane({
   onSessionExit,
   onNewTerminal,
   headerActions,
+  headerMenu,
   exitedPrimaryLabel,
   showExitedClose,
   exitedMessage,
@@ -310,16 +312,23 @@ export function TerminalPane({
             </span>
           )}
           {headerActions}
-          {showStop && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={stopping}
-              onClick={handleStop}
-              className="text-red-500 hover:text-red-500"
-            >
-              {stopping ? "Stopping…" : "Stop"}
-            </Button>
+          {/* D-07: an agent-only headerMenu (⋯) SUPERSEDES the inline Stop
+              button — its own Stop item lives in AgentTab. Bash panes pass no
+              headerMenu, so their inline Stop stays exactly as-is. */}
+          {headerMenu ? (
+            headerMenu
+          ) : (
+            showStop && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={stopping}
+                onClick={handleStop}
+                className="text-red-500 hover:text-red-500"
+              >
+                {stopping ? "Stopping…" : "Stop"}
+              </Button>
+            )
           )}
         </div>
       </div>
