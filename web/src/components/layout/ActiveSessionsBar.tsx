@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { ChevronUp, ChevronDown } from "lucide-react";
 import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
@@ -48,6 +48,26 @@ export function ActiveSessionsBar() {
     localStorage.setItem(storageKey, "1");
   };
 
+  // --- Outside-click auto-collapse (D-11): when expanded, a pointer press
+  // anywhere outside the bar dismisses it via collapse() (persists "1"). Mirrors
+  // the TaskPage document-listener idiom (add-on-mount / remove-on-cleanup). Uses
+  // the `mousedown` bubble phase so nested surfaces inside the bar count as
+  // "inside" via the ref-contains check — the collapsed bar's own onClick={toggle}
+  // therefore keeps toggling without this listener double-firing a re-expand. The
+  // effect is a no-op while already collapsed (guarded on `collapsed`), and it
+  // deliberately does NOT collapse on Escape — the gesture is click-only this pass. ---
+  const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (collapsed) return;
+    function onMouseDown(e: MouseEvent) {
+      if (barRef.current && !barRef.current.contains(e.target as Node)) {
+        collapse();
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [collapsed]);
+
   // --- Data — the single existing 5s poll (D-12); no new hook. ---
   const { data } = useAgentStatuses();
   const navigate = useNavigate();
@@ -83,7 +103,7 @@ export function ActiveSessionsBar() {
   }`;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex flex-col">
+    <div ref={barRef} className="fixed inset-x-0 bottom-0 z-30 flex flex-col">
       {/* Expanded panel — rendered ABOVE the collapsed bar so it floats UP over
           content (overlay; never reflows the xterm terminals, D-03). */}
       {!collapsed && (
@@ -139,10 +159,6 @@ export function ActiveSessionsBar() {
             <CountGroup status="waiting" count={waiting} />
             {/* Idle count */}
             <CountGroup status="idle" count={idle} />
-            {/* Total */}
-            <span className="text-xs font-medium text-muted-foreground tabular-nums">
-              {total}
-            </span>
           </>
         )}
 

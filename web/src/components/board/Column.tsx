@@ -6,18 +6,16 @@ import {
 } from "@dnd-kit/sortable";
 import { cn } from "@/lib/utils";
 import { STATUS_LABELS, type Status, type Task } from "@/api/types";
-import { QuickAdd } from "./QuickAdd";
 import { TaskCard } from "./TaskCard";
 
 interface ColumnProps {
   status: Status;
   tasks: Task[];
-  projectId: number;
-  /** Optional content rendered above the cards (in addition to To Do's quick-add). */
+  /** Optional content rendered above the cards. */
   topSlot?: ReactNode;
 }
 
-export function Column({ status, tasks, projectId, topSlot }: ColumnProps) {
+export function Column({ status, tasks, topSlot }: ColumnProps) {
   // Namespaced droppable id: empty columns accept drops and column ids never
   // collide with task ids.
   const { setNodeRef, isOver } = useDroppable({ id: `column:${status}` });
@@ -43,7 +41,6 @@ export function Column({ status, tasks, projectId, topSlot }: ColumnProps) {
             isOver && "ring-1 ring-blue-500",
           )}
         >
-          {status === "todo" && <QuickAdd projectId={projectId} />}
           {topSlot}
           {tasks.map((task) => (
             <TaskCard key={task.id} task={task} />
