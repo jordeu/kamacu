@@ -12,6 +12,7 @@ import { useSettings } from "@/api/settings";
 import {
   useDeleteSession,
   useReattachTmux,
+  useRenameSession,
   useSessions,
   useSpawnSession,
   useStopSession,
@@ -67,6 +68,10 @@ export default function TaskPage() {
   const spawn = useSpawnSession(taskId);
   const stopSession = useStopSession();
   const deleteSession = useDeleteSession();
+  // Tab rename (TABS-01/02, D-03): PATCHes the session label; wired per-bash-tab
+  // below (offered on every bash tab regardless of shell mode — the backend
+  // handles the plain-bash/tmux persistence distinction).
+  const renameSession = useRenameSession(taskId);
   // Restored tmux survivors auto-reattach invisibly (TMUX-05, D-88).
   const reattach = useReattachTmux(taskId);
 
@@ -390,6 +395,13 @@ export default function TaskPage() {
         onClose:
           s.status === "running" && !closing
             ? () => handleCloseTab(s.id)
+            : undefined,
+        // Rename affordance on EVERY bash tab (D-03), but only while running:
+        // an exited/closing session is gone, so a rename can't persist
+        // meaningfully — mirror the onClose gate (Claude's discretion, D-02).
+        onRename:
+          s.status === "running" && !closing
+            ? (label: string) => renameSession.mutate({ id: s.id, label })
             : undefined,
         keepMounted: true,
         // Bash content is exempt from the 860px constraint — terminal real
