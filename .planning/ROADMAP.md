@@ -243,7 +243,18 @@ Plans:
   4. The bottom active-sessions bar drops the total-sessions count (per-state colored counts remain) and auto-collapses when the user clicks outside it (POLISH-01, POLISH-02)
   5. The To Do column no longer shows the inline "+ New task" shortcut (POLISH-03)
 
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+**Wave 1**
+
+- [ ] 24-01-PLAN.md — Backend: Session.SetLabel + PATCH /api/sessions/{id} rename handler + D-04 label-persistence hardening (never "Bash ?") (TABS-01/02)
+- [ ] 24-02-PLAN.md — Bar + board polish: drop total count, outside-click auto-collapse, remove To Do quick-add + retire QuickAdd.tsx (POLISH-01/02/03)
+- [ ] 24-03-PLAN.md — Agent header ⋯ menu (Stop + Insert review prompt + Insert description) replacing Stop; remove connect-time auto-paste (REVMENU-01/02)
+
+**Wave 2** *(blocked on 24-01)*
+
+- [ ] 24-04-PLAN.md — Tab rename frontend: useRenameSession + double-click inline editor + empty→Bash N reset, bash/tmux-only (TABS-01/02)
+
 **UI hint**: yes
 
 ## Progress
@@ -276,7 +287,7 @@ Phases execute in numeric order: 20 → 21 → 22 → 23 → 24
 | 21. Data Directory Migration | v1.8 | 8/8 | Complete    | 2026-07-01 |
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete    | 2026-07-02 |
 | 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete    | 2026-07-02 |
-| 24. Session-Bar, Board & Tab Polish | v1.8 | 0/TBD | Not started | - |
+| 24. Session-Bar, Board & Tab Polish | v1.8 | 0/4 | Planned | - |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
