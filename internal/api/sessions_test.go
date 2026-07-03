@@ -1198,3 +1198,176 @@ func TestSessionDelete(t *testing.T) {
 		t.Errorf("error = %q, want %q", body["error"], "session not found")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Tab rename (Phase 24, plan 01): PATCH /api/sessions/{id} renames the
+// in-memory label and persists tmux tabs to tmux_sessions.label (TABS-01/02),
+// an empty commit re-derives Bash N (D-05), and reconcile never surfaces the
+// old "Bash ?" sentinel for an empty label (D-04).
+// ---------------------------------------------------------------------------
+
+// spawnTmuxTab stores shell=tmux and spawns one tmux tab for the task, returning
+// its in-memory session id and tmux name. Waits for the tmux session to be live.
+func spawnTmuxTab(t *testing.T, srv *httptest.Server, db *sql.DB, c tmux.Client, taskID int64) (string, string) {
+	t.Helper()
+	if err := settings.Set(db, settings.KeyShell, "tmux"); err != nil {
+		t.Fatalf("set shell=tmux: %v", err)
+	}
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": taskID})
+	if status != http.StatusCreated {
+		t.Fatalf("spawn tmux tab: status = %d, want 201; body=%v", status, body)
+	}
+	sid, _ := body["id"].(string)
+	if sid == "" {
+		t.Fatalf("spawn tmux tab returned empty id; body=%v", body)
+	}
+	name := fmt.Sprintf("kamacu-%d-1", taskID)
+	awaitHasSession(t, c, name, true)
+	return sid, name
+}
+
+// TestRenameTmuxSession is TABS-01/02 at the HTTP layer: renaming a live tmux
+// tab returns 200 with the new label AND persists it to tmux_sessions.label so
+// it survives a restart. Skip-guarded on tmux availability.
+func TestRenameTmuxSession(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-rename-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, mgr, db := newTmuxSessionServer(t, c)
+	id, _ := worktreeTask(t, srv, "Renamable Tab")
+	sid, name := spawnTmuxTab(t, srv, db, c, id)
+
+	status, body := doJSON(t, "PATCH", srv.URL+"/api/sessions/"+sid, map[string]any{"label": "my-server"})
+	if status != http.StatusOK {
+		t.Fatalf("rename: status = %d, want 200; body=%v", status, body)
+	}
+	if body["label"] != "my-server" {
+		t.Errorf("response label = %q, want %q", body["label"], "my-server")
+	}
+	// Persisted to the row so it survives a restart.
+	var gotLabel string
+	if err := db.QueryRow(`SELECT label FROM tmux_sessions WHERE name = ?`, name).Scan(&gotLabel); err != nil {
+		t.Fatalf("read tmux_sessions label: %v", err)
+	}
+	if gotLabel != "my-server" {
+		t.Errorf("persisted label = %q, want %q", gotLabel, "my-server")
+	}
+
+	// Clean up the in-memory session before teardown.
+	if s, ok := mgr.Get(sid); ok {
+		s.Stop()
+	}
+	awaitHasSession(t, c, name, false)
+}
+
+// TestRenameUnknownSession is T-24-02: a PATCH against an id with no live
+// session is 404 — a client can never rename an arbitrary/foreign session. The
+// guard fires before any tmux work, so this is tmux-independent.
+func TestRenameUnknownSession(t *testing.T) {
+	srv, _, _ := newTmuxSessionServer(t, tmux.Client{Socket: "ktest-unused", ConfPath: "/dev/null"})
+
+	status, body := doJSON(t, "PATCH", srv.URL+"/api/sessions/does-not-exist",
+		map[string]any{"label": "whatever"})
+	if status != http.StatusNotFound {
+		t.Fatalf("rename unknown: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+// TestRenameEmptyResetsDefault is D-05: renaming a tmux tab to a custom name,
+// then committing a whitespace-only label, resets it to the re-derived Bash <n>
+// default — never the old "Bash ?" sentinel. Skip-guarded on tmux availability.
+func TestRenameEmptyResetsDefault(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-reset-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, mgr, db := newTmuxSessionServer(t, c)
+	id, _ := worktreeTask(t, srv, "Reset Tab")
+	sid, name := spawnTmuxTab(t, srv, db, c, id)
+
+	// First give it a custom name.
+	if status, body := doJSON(t, "PATCH", srv.URL+"/api/sessions/"+sid,
+		map[string]any{"label": "custom"}); status != http.StatusOK || body["label"] != "custom" {
+		t.Fatalf("custom rename: status = %d, label=%v; want 200/custom", status, body["label"])
+	}
+
+	// Whitespace-only commit resets to the derived Bash 1 (the row's ordinal).
+	status, body := doJSON(t, "PATCH", srv.URL+"/api/sessions/"+sid, map[string]any{"label": "   "})
+	if status != http.StatusOK {
+		t.Fatalf("empty reset: status = %d, want 200; body=%v", status, body)
+	}
+	if body["label"] != "Bash 1" {
+		t.Errorf("reset label = %q, want %q", body["label"], "Bash 1")
+	}
+	if body["label"] == "Bash ?" {
+		t.Errorf("reset label surfaced the forbidden sentinel: %q", body["label"])
+	}
+	// The reset is persisted too.
+	var gotLabel string
+	if err := db.QueryRow(`SELECT label FROM tmux_sessions WHERE name = ?`, name).Scan(&gotLabel); err != nil {
+		t.Fatalf("read tmux_sessions label: %v", err)
+	}
+	if gotLabel != "Bash 1" {
+		t.Errorf("persisted reset label = %q, want %q", gotLabel, "Bash 1")
+	}
+
+	if s, ok := mgr.Get(sid); ok {
+		s.Stop()
+	}
+	awaitHasSession(t, c, name, false)
+}
+
+// TestReconcileNeverShowsBashQuestion is D-04 at the reconcile path: a persisted
+// row with an EMPTY label (a pre-write / failed-back-fill survivor) whose name
+// is kamacu-<task>-3 reconciles to "Bash 3", NEVER the old "Bash ?" sentinel,
+// when the tmux session is alive. Skip-guarded on tmux availability.
+func TestReconcileNeverShowsBashQuestion(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-reconcile-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, _, db := newTmuxSessionServer(t, c)
+	id, wtPath := worktreeTask(t, srv, "Empty Label Survivor")
+
+	// Simulate a survivor whose label was never written (column left ''), with a
+	// name carrying ordinal 3, plus a live detached tmux session under it and NO
+	// in-memory session — exactly what reconcile surfaces as orphaned.
+	name := fmt.Sprintf("kamacu-%d-3", id)
+	if _, err := db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, 3, ?, '')`, id, name); err != nil {
+		t.Fatalf("seed empty-label row: %v", err)
+	}
+	detach := append(c.BaseArgs(), "new-session", "-d", "-s", name, "-c", wtPath)
+	if err := exec.Command("tmux", detach...).Run(); err != nil {
+		t.Fatalf("seed surviving tmux session: %v", err)
+	}
+	awaitHasSession(t, c, name, true)
+	t.Cleanup(func() { _ = c.KillSession(context.Background(), name) })
+
+	status, list := doJSONList(t, fmt.Sprintf("%s/api/sessions?task_id=%d", srv.URL, id))
+	if status != http.StatusOK {
+		t.Fatalf("list: status = %d, want 200", status)
+	}
+	var found *map[string]any
+	for i := range list {
+		if list[i]["tmuxName"] == name {
+			found = &list[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("reconciled survivor %q not in list: %v", name, list)
+	}
+	if (*found)["label"] != "Bash 3" {
+		t.Errorf("reconciled label = %q, want %q (re-derived from name ordinal)", (*found)["label"], "Bash 3")
+	}
+	if (*found)["label"] == "Bash ?" {
+		t.Errorf("reconciled label surfaced the forbidden sentinel: %q", (*found)["label"])
+	}
+}
