@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
@@ -32,6 +33,14 @@ export interface TabDef {
   /** Renders the trigger disabled (zinc-600 label) with an explanation tooltip. */
   disabled?: boolean;
   disabledTooltip?: string;
+  /**
+   * Enables double-click inline rename on this tab's label (TABS-01, D-02).
+   * Set ONLY for bash/tmux tabs — Agent, Description, and Diff pass no
+   * `onRename`, so they keep fixed labels. Called on commit with the trimmed
+   * label; a trimmed-empty commit passes `""` as an explicit reset intent (the
+   * server re-derives the `Bash N` default — D-05).
+   */
+  onRename?: (label: string) => void;
 }
 
 export function TaskTabs({
@@ -45,6 +54,31 @@ export function TaskTabs({
   onValueChange: (v: string) => void;
   trailing?: ReactNode;
 }) {
+  // Inline tab-rename state (TABS-01, D-01) — mirrors TaskPage's title-edit
+  // contract: a per-tab `renamingId`, the working `draft`, and a `cancelRef`
+  // set on Escape and read-and-cleared in the commit path so the blur that
+  // Escape triggers does NOT save.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const cancelRenameRef = useRef(false);
+
+  function commitRename(tab: TabDef, value: string) {
+    const cancelled = cancelRenameRef.current;
+    cancelRenameRef.current = false;
+    setRenamingId(null);
+    if (cancelled) return;
+    const trimmed = value.trim();
+    // D-05 divergence from the title editor: a trimmed-empty commit is an
+    // explicit reset (server re-derives `Bash N`) — so DO NOT early-return on
+    // empty. Send "" for a reset; otherwise send the trimmed value only when
+    // it actually changed.
+    if (trimmed === "") {
+      tab.onRename?.("");
+    } else if (trimmed !== tab.label) {
+      tab.onRename?.(trimmed);
+    }
+  }
+
   if (tabs.length === 0) return null;
 
   return (
@@ -92,11 +126,50 @@ export function TaskTabs({
               {/* dot + 4px gap + label (UI-SPEC) — trigger height unchanged */}
               <span className="flex items-center gap-1">
                 {tab.leading}
-                <span
-                  className={tab.muted ? "text-muted-foreground" : undefined}
-                >
-                  {tab.label}
-                </span>
+                {renamingId === tab.id ? (
+                  // Inline rename editor (TABS-01, D-01) — copies the TaskPage
+                  // title contract: Enter→blur (commit), Esc→cancelRef+blur
+                  // (no save), blur→commit. Lives INSIDE TabsTrigger next to
+                  // the × span, so — like the × (span[role=button], not a real
+                  // <button>) — pointer/click events stopPropagation to keep
+                  // the Radix trigger's select from firing while typing.
+                  <Input
+                    autoFocus
+                    value={draft}
+                    className="h-6 w-32 px-1 py-0 text-sm"
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={(e) => commitRename(tab, e.currentTarget.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      } else if (e.key === "Escape") {
+                        cancelRenameRef.current = true;
+                        e.currentTarget.blur();
+                      }
+                    }}
+                  />
+                ) : (
+                  <span
+                    className={tab.muted ? "text-muted-foreground" : undefined}
+                    // Double-click enters rename mode (D-01) only when the tab
+                    // offers `onRename` (bash/tmux — D-02). stopPropagation so
+                    // the double-click does not also toggle selection; a
+                    // single-click still selects via the Radix trigger.
+                    onDoubleClick={
+                      tab.onRename
+                        ? (e) => {
+                            e.stopPropagation();
+                            setDraft(tab.label);
+                            setRenamingId(tab.id);
+                          }
+                        : undefined
+                    }
+                  >
+                    {tab.label}
+                  </span>
+                )}
               </span>
               {tab.onClose && (
               <Tooltip>

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { del, get, post } from "./client";
+import { del, get, patch, post } from "./client";
 import type { ApiError } from "./client";
 
 export interface TermSession {
@@ -127,6 +127,27 @@ export function useStopSession() {
   return useMutation<void, ApiError, string>({
     mutationFn: (id: string) => post<void>(`/api/sessions/${id}/stop`),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+// useRenameSession renames a session's display label via PATCH /api/sessions/{id}
+// (TABS-01/02, D-03). The server (Plan 01) trims + caps at 200 runes, persists a
+// tmux tab's label to tmux_sessions.label (survives restart), and re-derives the
+// Bash N default on an empty/whitespace commit (D-05) — the returned TermSession
+// already carries the resolved label, so onSuccess just mirrors it into the
+// scoped cache (copying the useSpawnSession optimistic write) for an immediate
+// render, then invalidates so the 5s poll stays authoritative.
+export function useRenameSession(taskId: number) {
+  const queryClient = useQueryClient();
+  return useMutation<TermSession, ApiError, { id: string; label: string }>({
+    mutationFn: ({ id, label }) =>
+      patch<TermSession>(`/api/sessions/${id}`, { label }),
+    onSuccess: (session) => {
+      queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
+        old ? old.map((s) => (s.id === session.id ? session : s)) : old,
+      );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
