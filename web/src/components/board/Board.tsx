@@ -5,8 +5,10 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCorners,
+  pointerWithin,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -18,6 +20,31 @@ import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 import { Column } from "./Column";
 import { ReviewColumn } from "./ReviewColumn";
 import { TaskCardOverlay } from "./TaskCard";
+
+/**
+ * Pointer-first collision detection — fixes cross-column drag overshoot where a
+ * card dropped on the adjacent column jumped to the next-next column.
+ *
+ * `closestCorners` compares the dragged card's RECTANGLE corners to every
+ * droppable. A card is a full column-width box, so dragged sideways its leading
+ * corners reach into the FAR column and corner-distance minimization selects
+ * that column instead of the one under the cursor — compounded by
+ * handleDragOver's live reflow (moving the card into the hovered column grows it
+ * and shifts every rect, oscillating the corner-closest target). `pointerWithin`
+ * instead picks the droppable the cursor is literally inside; a column's
+ * horizontal position is stable across the vertical reflow, so the target no
+ * longer jumps. Among the pointer hits we prefer a card (numeric id) over its
+ * enclosing column (`column:<status>` id) so the within-column insert index
+ * stays precise. When the pointer is over the gaps between columns — or absent
+ * entirely, as in keyboard dragging — fall back to closestCorners so gap-hover
+ * and keyboard moves keep working.
+ */
+const boardCollisionDetection: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  if (pointerHits.length === 0) return closestCorners(args);
+  const cardHit = pointerHits.find((c) => typeof c.id === "number");
+  return cardHit ? [cardHit] : pointerHits;
+};
 
 function groupTasks(tasks: Task[]): Record<Status, Task[]> {
   const columns: Record<Status, Task[]> = {
@@ -191,7 +218,7 @@ export function Board({ tasks, projectId }: BoardProps) {
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCorners}
+      collisionDetection={boardCollisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
