@@ -1,8 +1,10 @@
 ---
 phase: 24-session-bar-board-tab-polish
 verified: 2026-07-03T20:05:00Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
+human_verification_completed: 2026-07-04
+human_verification_note: "All 6 human-verify items confirmed in a running app (24-HUMAN-UAT.md). Item 2 (tmux label survives restart) initially failed, root-caused to a reattach label-drop + back-fill clobber, fixed in 1b12b52 with regression test TestSessionTmuxReattachPreservesCustomLabel, and re-verified."
 overrides_applied: 0
 human_verification:
   - test: "Rename a bash/tmux tab and confirm the custom label survives reopening the task"

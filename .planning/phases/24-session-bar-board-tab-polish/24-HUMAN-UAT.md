@@ -1,14 +1,14 @@
 ---
-status: partial
+status: complete
 phase: 24-session-bar-board-tab-polish
 source: [24-VERIFICATION.md]
 started: 2026-07-03T17:59:26Z
-updated: 2026-07-03T17:59:26Z
+updated: 2026-07-04T07:10:00Z
 ---
 
 ## Current Test
 
-[5 passed; item 2 fixed in 1b12b52 — awaiting human re-verify in a running app]
+[complete — all 6 passed; item 2 fixed in 1b12b52 and re-verified by human in a running app]
 
 ## Tests
 
@@ -18,7 +18,7 @@ result: pass
 
 ### 2. Rename a TMUX tab, then restart the server, and confirm the label persists (never "Bash ?")
 expected: For a tmux-backed tab, a custom label survives a full server restart via tmux_sessions.label; a never-renamed survivor shows its real "Bash N" default, never the old "Bash ?" sentinel
-result: fixed (pending human re-verify) — root cause was the reattach path dropping the persisted label + a back-fill clobber. Fixed in 1b12b52; HTTP-layer regression test TestSessionTmuxReattachPreservesCustomLabel now covers rename → restart → reattach. Re-test in a running app to confirm end-to-end. See GAP-01 below.
+result: pass — fixed in 1b12b52 (reattach dropped the persisted label + back-fill clobber) and re-verified by human in a running app. Regression test TestSessionTmuxReattachPreservesCustomLabel covers rename → restart → reattach. See GAP-01 below.
 
 ### 3. Empty-commit a tab rename and confirm it resets to the auto default
 expected: Clear the rename Input (or type only whitespace) and commit → a tmux tab resets to its "Bash N" default; a new tab still defaults to "Bash 1", "Bash 2", … until renamed
@@ -39,17 +39,17 @@ result: pass
 ## Summary
 
 total: 6
-passed: 5
+passed: 6
 issues: 0
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
-note: item 2 fixed in 1b12b52 (regression-tested); counted pending until human re-verify in a running app
+note: item 2 fixed in 1b12b52 (regression-tested) and re-verified by human
 
 ## Gaps
 
 ### GAP-01 (TABS-01): tmux custom label lost on restart via reattach clobber
-status: fixed
+status: resolved
 fixed_in: 1b12b52
 fix_applied: |
   reattach branch now captures tmux_sessions.label into reattachLabel and
