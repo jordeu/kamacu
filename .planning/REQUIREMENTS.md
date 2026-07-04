@@ -43,19 +43,19 @@ Requirements for the Kamacu Rebrand & UX Polish milestone. Each maps to exactly 
 
 ### Tabs (rename bash/tmux tabs)
 
-- [ ] **TABS-01**: The user can rename a bash/tmux tab to a custom label; the custom name persists across reopening the task and server restarts
-- [ ] **TABS-02**: New tabs keep their auto-generated default names (Bash 1, Bash 2, …) until the user renames them
+- [x] **TABS-01**: The user can rename a bash/tmux tab to a custom label; the custom name persists across reopening the task and server restarts
+- [x] **TABS-02**: New tabs keep their auto-generated default names (Bash 1, Bash 2, …) until the user renames them
 
 ### Review Menu (task-view actions + review prompt)
 
-- [ ] **REVMENU-01**: The agent view's top-right Stop button is replaced by a three-dots menu with "Stop" and "Insert review prompt" actions
-- [ ] **REVMENU-02**: The PR review prompt is no longer auto-inserted into a PR-review session — it is placed into the prompt only when the user chooses "Insert review prompt"
+- [x] **REVMENU-01**: The agent view's top-right Stop button is replaced by a three-dots menu with "Stop" and "Insert review prompt" actions
+- [x] **REVMENU-02**: The PR review prompt is no longer auto-inserted into a PR-review session — it is placed into the prompt only when the user chooses "Insert review prompt"
 
 ### Polish (session bar + board)
 
-- [ ] **POLISH-01**: The bottom active-sessions bar no longer shows the total-sessions count (per-state colored counts remain)
-- [ ] **POLISH-02**: The bottom active-sessions bar auto-collapses when the user clicks outside it (e.g., clicking back into the task view)
-- [ ] **POLISH-03**: The To Do column no longer shows the inline "+ New task" shortcut
+- [x] **POLISH-01**: The bottom active-sessions bar no longer shows the total-sessions count (per-state colored counts remain)
+- [x] **POLISH-02**: The bottom active-sessions bar auto-collapses when the user clicks outside it (e.g., clicking back into the task view)
+- [x] **POLISH-03**: The To Do column no longer shows the inline "+ New task" shortcut
 
 ## Future Requirements
 
@@ -120,13 +120,13 @@ Which phases cover which requirements. Populated during roadmap creation.
 | WTREE-02 | Phase 23 | Complete |
 | WTREE-03 | Phase 23 | Complete |
 | WTREE-04 | Phase 23 | Complete |
-| TABS-01 | Phase 24 | Pending |
-| TABS-02 | Phase 24 | Pending |
-| REVMENU-01 | Phase 24 | Pending |
-| REVMENU-02 | Phase 24 | Pending |
-| POLISH-01 | Phase 24 | Pending |
-| POLISH-02 | Phase 24 | Pending |
-| POLISH-03 | Phase 24 | Pending |
+| TABS-01 | Phase 24 | Complete |
+| TABS-02 | Phase 24 | Complete |
+| REVMENU-01 | Phase 24 | Complete |
+| REVMENU-02 | Phase 24 | Complete |
+| POLISH-01 | Phase 24 | Complete |
+| POLISH-02 | Phase 24 | Complete |
+| POLISH-03 | Phase 24 | Complete |
 
 **Coverage:**
 - v1.8 requirements: 26 total
