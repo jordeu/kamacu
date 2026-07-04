@@ -1,5 +1,37 @@
 # Milestones
 
+## v1.8 Kamacu Rebrand & UX Polish (Shipped: 2026-07-04)
+
+**Phases completed:** 5 phases, 26 plans, 53 tasks
+
+**Key accomplishments:**
+
+- Go module, imports, entrypoint dir, and Makefile target renamed kangent -> kamacu; cosmetic prose + the kangentSessionID identifier say Kamacu — while every runtime path/socket/session/config/auth literal stays kangent for Phase 21's gated flip.
+- An abstract multi-tone ember-spark `KamacuMark` inline-SVG component, a spark-derived rounded-badge `favicon.svg`, and a `web/index.html` that titles the tab "Kamacu" and links the favicon.
+- Shareable open-source Kamacu README with a post-rebrand board screenshot, plus a human-confirmed end-to-end verification that the ember-spark branding renders correctly and is distinct from the amber waiting dot.
+- One-shot idempotent localStorage prefix-scan migration copies every kangent-prefixed value to the kamacu key on boot, and the sidebar / sessions-bar / review-collapse components now read the new keys — completing the rebrand's client-side carry-over (MIGRATE-04).
+- `internal/migrate` package: a pure 5-branch Gate decision table plus `Prepare` — gate → preflight → atomic `os.Rename` of `~/.kangent`→`~/.kamacu` → checkpoint-first `kangent.db`→`kamacu.db` rename → idempotent `-L kangent` tmux retirement, failure-safe by construction.
+- Wires the two-part `internal/migrate` one-shot into `cmd/kamacu/main.go` (Prepare before `store.Open`, Complete after `store.Migrate`, refuse-to-boot on either error) and flips every remaining runtime `kangent` literal — `--db` default, `-L kamacu` socket, `kamacu-<task>-<n>` session prefix, tmux config header/filename, and the `~/.kamacu` worktree + repos roots — so the running app switches atomically to `~/.kamacu`.
+- Status:
+- `migrate.repairWorktrees` now repairs each managed worktree PER PATH and tolerates a DB-referenced dir that exists on disk but is unregistered in `.git/worktrees/` — logging a terminal-visible `slog.Warn` and skipping it instead of aborting the whole migration — so the real `sched` repo's 4 stale dirs no longer make `Complete` return an error, `deleteOldTmuxRows` (MIGRATE-03) always runs, and the app boots (Gap 1 closed).
+- Re-ran the MIGRATE-01..05 phase gate against a provably-isolated copy of the real 5.5 GB ~/.kangent install: the migration now completes and serves (21-06 stale-worktree fix proven live), the real install stayed byte-identical (Gap 2 closed), and the preserved human-verify checkpoint was approved.
+- Broadened `~/.kangent` → `~/.kamacu` worktree repair to folder-pointed (managed=0) repos so their moved worktrees survive a later `git worktree prune`, and boundary-checked the LIKE-gated path rewrites so a `_`/`%` home-path metacharacter or a sibling `~/.kangent-backup` dir can never be corrupted.
+- Server-authoritative sha256 `Hash` (and a `Viewed` field) on `diff.File`, computed via a pure length-prefixed `hashFile` helper over the rendered diff (Status/Binary/OldPath/Hunks), keying the per-file Viewed persistence and driving DIFF-04 auto-reset.
+- Server-side keep-history per-file diff "Viewed" state: a SQLite table keyed by (task, path, rendered-diff hash) that survives restart (DIFF-03) and auto-resets when a file's rendered diff changes while restoring on revert (DIFF-04), merged onto GET diff and toggled via a validated PUT endpoint.
+- Blue-500 "Viewed" checkbox wired to an optimistic useToggleViewed mutation, sitting as a sibling of the collapse trigger in a sticky DiffFileSection header — checking collapses+dims, unchecking re-expands, collapse stays independent, and a new content hash remounts the section un-viewed+expanded.
+- GitHub "Files changed" two-pane diff view: a fixed 288px path-compressed file tree whose scroll-only clicks jump the right pane, with an IntersectionObserver scroll-spy that highlights the top file and a PanelLeft toggle to hide/show the tree.
+- A `git worktree list --porcelain -z` parser (typed Entry records) plus two additive extensions to the shared removal core — orphan mode (taskID==0 skips the null-columns UPDATE) and a D-01 permission-blocked outcome (BlockedError carrying the offending path, never retrying --force).
+- The panel's HTTP contract: one annotated cross-project GET (`/api/worktrees`) enumerating + classifying every non-main worktree with per-row dirty/unpushed/stash/session flags and PR-state display, plus force-remove / bulk clean-eligible / clear-pointer actions — the 3rd caller of the shared `CleanupWorktreeGated`, wired in main.go with the shared `ghSvc`.
+- Settings worktree-cleanup panel: per-project grouped worktree list with classification/flag chips, type-gated force-remove, a copyable-but-never-run sudo hint for permission-blocked shells, and a non-destructive bulk clean-eligible preview — fetch-on-open with a spinning manual Refresh, no polling.
+- shadcn `badge` primitive + the TanStack Query data layer (fetch-on-mount no-poll `useWorktreeList` + three settle-invalidating mutation hooks) and the full TypeScript type set encoding the Wave 2 worktree-cleanup endpoint contract
+- Outcome:
+- PATCH /api/sessions/{id} renames a session label in memory and (for tmux tabs) persists it to tmux_sessions.label so it survives a restart, plus a belt-and-braces D-04 fix that guarantees a restarted survivor never shows the "Bash ?" sentinel.
+- Collapsed active-sessions bar drops the total count and now auto-collapses on an outside click via the shared collapse() helper; the To Do column's inline "+ New task" quick-add is removed and QuickAdd.tsx is deleted.
+- The agent view's standalone Stop button is replaced by a single ⋯ dropdown (Insert description / Insert review prompt / Stop), and the PR-review seed's connect-time auto-paste is deleted so the seed enters only when the user picks "Insert review prompt".
+- Double-clicking a bash/tmux tab label swaps it to an inline Input (Enter commits, Esc cancels, blur commits); committing PATCHes /api/sessions/{id} so the custom name persists (and, for tmux, survives a restart), while an empty commit resets the tab to its Bash N default — Agent/Description/Diff keep fixed labels.
+
+---
+
 ## v1.7 Project Icons in Collapsed Sidebar (Shipped: 2026-06-19)
 
 **Phases completed:** 2 phases (18–19), 6 plans, 12 tasks

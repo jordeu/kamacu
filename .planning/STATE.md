@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Kamacu Rebrand & UX Polish
-status: milestone_complete
-stopped_at: Milestone complete (Phase 24 was final phase)
-last_updated: 2026-07-04T05:03:58.487Z
-last_activity: 2026-07-03 -- Phase 24 execution started
+status: Awaiting next milestone
+stopped_at: Phase 24 planned (4 plans, 2 waves)
+last_updated: "2026-07-04T06:00:52.742Z"
+last_activity: 2026-07-04 — Milestone v1.8 completed and archived
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 26
   completed_plans: 26
-  percent: 80
+  percent: 100
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-07-01)
 
 ## Current Position
 
-Phase: 24
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-07-04 - Completed quick task 260704-a6q: fix board drag-and-drop overshooting to the next-next column
+Phase: Milestone v1.8 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-04 — Milestone v1.8 completed and archived
 
 ### v1.8 Roadmap (Phases 20–24, continues numbering from v1.7's Phase 19)
 
@@ -204,6 +204,4 @@ Next: `/gsd:execute-phase 24` to execute the final v1.8 phase. Wave 1 = plans 01
 
 ## Operator Next Steps
 
-- Execute the final v1.8 phase with `/gsd:execute-phase 24` (Session-Bar, Board & Tab Polish).
-
-</content>
+- Start the next milestone with /gsd-new-milestone
