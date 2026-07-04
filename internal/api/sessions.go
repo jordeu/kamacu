@@ -247,6 +247,11 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 		opts.ResumeSessionID = csid.String
 	}
+	// reattachLabel carries the persisted tmux_sessions.label from the reattach
+	// branch below through to after Spawn, so a restored survivor keeps its custom
+	// name (GAP-01): Manager.Spawn has no label param and would otherwise re-derive
+	// "Bash N", which the post-spawn back-fill would then persist over the stored label.
+	var reattachLabel string
 	// SET-03 read-at-use: settings come from the DB at EVERY spawn — never
 	// cached — so edits apply at the next Start with no restart. A real DB
 	// error (absent rows read as defaults) is exceptional on local SQLite:
@@ -267,9 +272,10 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// worktree"). Verify the row belongs to THIS task so a client can never
 		// reattach to an arbitrary name, then reuse the persisted name — no
 		// mint, no INSERT (the row already exists; MAX(n)+1 stays correct because
-		// it persists). Spawn runs new-session -A against the live session.
-		var label string
-		err := h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&label)
+		// it persists). Spawn runs new-session -A against the live session. The
+		// persisted label is captured into reattachLabel and reapplied after Spawn
+		// (GAP-01) so a renamed survivor keeps its custom name.
+		err := h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&reattachLabel)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "no session to reattach")
 			return
@@ -348,6 +354,14 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
 			slog.Warn("persisting claude_session_id", "task", req.TaskID, "error", err)
 		}
+	}
+	// GAP-01: restore the survivor's persisted custom label onto the reattached
+	// session. Spawn re-derived a fresh "Bash N" (it has no label param); without
+	// this the wire reply shows the wrong name AND the back-fill below would
+	// overwrite the stored custom label with that default. An empty stored label
+	// is left as the derived default (matches reconcile's empty-label handling).
+	if reattach && reattachLabel != "" {
+		sess.SetLabel(reattachLabel)
 	}
 	// tmux label back-fill, warn-only (same degradation posture as the agent
 	// claude_session_id persist above): a failed write costs only the Phase 9

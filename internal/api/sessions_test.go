@@ -819,6 +819,65 @@ func TestSessionTmuxReattach(t *testing.T) {
 	awaitHasSession(t, c, name, false)
 }
 
+// TestSessionTmuxReattachPreservesCustomLabel is the GAP-01 regression (TABS-01):
+// a tmux tab renamed to a CUSTOM label must keep that label when it reattaches
+// after a restart. The reattach path reads the persisted tmux_sessions.label but
+// used to drop it — Manager.Spawn re-derived "Bash N" (no label param) and the
+// post-spawn back-fill then overwrote the stored custom label with that default.
+// Both the returned session label AND the persisted row must stay the custom name.
+// Skip-guarded on tmux availability per the package convention.
+func TestSessionTmuxReattachPreservesCustomLabel(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-reattach-lbl-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, mgr, db := newTmuxSessionServer(t, c)
+	id, wtPath := worktreeTask(t, srv, "Renamed Survivor")
+
+	// Post-restart survivor with a CUSTOM label (not the "Bash N" default), a live
+	// tmux session under the same name, and no in-memory session.
+	const custom = "deploy box"
+	name := fmt.Sprintf("kamacu-%d-1", id)
+	if _, err := db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, 1, ?, ?)`, id, name, custom); err != nil {
+		t.Fatalf("seed tmux_sessions row: %v", err)
+	}
+	detach := append(c.BaseArgs(), "new-session", "-d", "-s", name, "-c", wtPath)
+	if err := exec.Command("tmux", detach...).Run(); err != nil {
+		t.Fatalf("seed surviving tmux session: %v", err)
+	}
+	awaitHasSession(t, c, name, true)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions",
+		map[string]any{"task_id": id, "reattach_tmux_name": name})
+	if status != http.StatusCreated {
+		t.Fatalf("reattach: status = %d, want 201; body=%v", status, body)
+	}
+
+	// The reattached session must surface the CUSTOM label, not a re-derived "Bash N".
+	if body["label"] != custom {
+		t.Errorf("reattach label = %q, want %q (custom label dropped on reattach)", body["label"], custom)
+	}
+
+	// The persisted row must still hold the custom label — the back-fill must not
+	// clobber it back to the derived default.
+	var gotLabel string
+	if err := db.QueryRow(`SELECT label FROM tmux_sessions WHERE name = ?`, name).Scan(&gotLabel); err != nil {
+		t.Fatalf("read tmux_sessions label: %v", err)
+	}
+	if gotLabel != custom {
+		t.Errorf("persisted label = %q, want %q (back-fill clobbered the stored custom label)", gotLabel, custom)
+	}
+
+	// Clean up the in-memory session before the harness tears down.
+	if sid, _ := body["id"].(string); sid != "" {
+		if s, ok := mgr.Get(sid); ok {
+			s.Stop()
+		}
+	}
+	awaitHasSession(t, c, name, false)
+}
+
 // TestTaskDeleteKillsDetachedTmux is TMUX-08 / D-93 at the HTTP layer: deleting
 // a task kills its live DETACHED tmux session (a survivor with no in-memory
 // session — StopAllForTask cannot see it) and removes its tmux_sessions rows
