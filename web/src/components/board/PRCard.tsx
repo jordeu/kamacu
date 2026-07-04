@@ -109,7 +109,13 @@ export function PRCard({
         }
       }}
       className={cn(
-        "relative overflow-hidden rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+        // shrink-0: PRCards live in a `flex flex-col overflow-y-auto` list
+        // (ReviewColumn). Flex children default to flex-shrink:1, so once enough
+        // cards overflow the column the algorithm COMPRESSES each card below its
+        // natural height; combined with overflow-hidden that clips the 2nd title
+        // line and the meta row bleeds into the next card. shrink-0 makes each
+        // card keep its content height and the container scroll instead.
+        "relative shrink-0 overflow-hidden rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
         openReview.isPending && "opacity-60",
       )}
     >
