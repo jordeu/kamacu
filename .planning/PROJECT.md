@@ -8,9 +8,23 @@ A local-only web app for organizing Claude Code agent sessions around projects a
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
 
-## Current Milestone: none — v1.8 shipped 2026-07-04
+## Current Milestone: v1.9 Workspaces
 
-_v1.8 Kamacu Rebrand & UX Polish shipped 2026-07-04 (audited, archived to `milestones/v1.8-*`). No milestone is currently active — run `/gsd:new-milestone` to scope the next one. See the Validated requirements and Current State below for what shipped._
+**Goal:** Group projects into named workspaces (e.g. "Personal", "Professional"), switchable from the top of the expanded projects sidebar, while the global Active Sessions bar keeps showing agent work across every workspace.
+
+**Target features:**
+- `workspaces` table + `projects.workspace_id` FK (migration 00012) with a one-time backfill assigning all existing projects to a protected default **Personal** workspace.
+- Workspace **switcher** at the top of the projects sidebar (expanded state only) — a dropdown to select the active workspace; the sidebar project list (expanded rows AND collapsed icon rail) filters to the active workspace.
+- Workspace management — **add**, **rename**, **delete** (delete blocked while the workspace still holds projects; the default Personal workspace is renamable but never deletable, so orphaned projects always have a home).
+- **Transfer a project** to another workspace from the project's existing `⋯` menu.
+- Active workspace persisted in **localStorage** (like sidebar state); switching navigates to that workspace's first project, and new projects are created in the active workspace.
+- The global **Active Sessions bar stays cross-workspace** — it already shows sessions across all projects with no project filter, and must remain global regardless of the selected workspace.
+
+**Key context:** Purely internal feature (new table + FK + migration + sidebar switcher + client state) — no new libraries and no external domain to research. Builds directly on existing patterns: goose migrations under `internal/store/migrations/` (latest 00011), `projectHandlers` CRUD in `internal/api/projects.go`, the URL-based current-project selection (`/projects/:projectId`), the per-project `ProjectMenu` `⋯` dropdown, and the `kamacu.*` localStorage convention.
+
+---
+
+_v1.8 Kamacu Rebrand & UX Polish shipped 2026-07-04 (audited, archived to `milestones/v1.8-*`). Prior shipped milestones are in the collapsible blocks below._
 
 <details>
 <summary>Shipped milestone targets — v1.8 Kamacu Rebrand & UX Polish (2026-07-04)</summary>
@@ -189,7 +203,13 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-_No milestone is currently active — v1.8 shipped 2026-07-04. Run `/gsd:new-milestone` to scope the next milestone and generate a fresh `.planning/REQUIREMENTS.md` (deleted at milestone close). Parked candidates for the next milestone are under **Next Milestone** below._
+**v1.9 Workspaces** — building toward these (`.planning/REQUIREMENTS.md` holds the REQ-ID breakdown):
+
+- [ ] Group projects into named workspaces; migrate existing projects into a protected default **Personal** workspace
+- [ ] Workspace switcher at the top of the expanded projects sidebar; the sidebar project list (rows + collapsed icon rail) filters to the active workspace
+- [ ] Add / rename / delete workspaces (delete blocked while non-empty; Personal renamable but not deletable)
+- [ ] Transfer a project between workspaces from its `⋯` menu
+- [ ] Active workspace remembered in localStorage; new projects land in it; the global Active Sessions bar stays cross-workspace
 
 ### Out of Scope
 
@@ -243,7 +263,7 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**v1.8 Kamacu Rebrand & UX Polish shipped 2026-07-04.** No next milestone is scoped yet — run `/gsd:new-milestone` to scope it. Candidates NOT pulled into v1.8 are parked below.
+**v1.9 Workspaces scoped 2026-07-05** (see Current Milestone above). Candidates NOT pulled into v1.9 remain parked below for a future milestone.
 
 Banked forward investments worth a future milestone:
 - v1.7 project-icon follow-ups, scoped in `milestones/v1.7-REQUIREMENTS.md` "Future Requirements": image/logo icons (ICON-FUT-01), emoji icons (ICON-FUT-02), free-form hex color beyond the curated swatches (ICON-FUT-03), drag-to-reorder projects in the rail (ICON-FUT-04), and Add-project (+) / Settings (gear) reachable as icons in the collapsed rail so it is fully functional without expanding (ICON-FUT-05).
@@ -321,4 +341,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-04 — v1.8 Kamacu Rebrand & UX Polish shipped and archived (`/gsd:complete-milestone`): 5 phases (20–24), 26 plans, 53 tasks, 26 requirements; ROADMAP/REQUIREMENTS archived to `milestones/v1.8-*`, `.planning/REQUIREMENTS.md` cleared for the next milestone. Current-milestone block collapsed, Active requirements moved to Validated (incl. the previously-missing Phase 21 data-migration entry), Current State backfilled for Phase 21*
+*Last updated: 2026-07-05 — v1.9 Workspaces milestone scoped (`/gsd:new-milestone`): Current Milestone block set and Active requirements populated with the workspace feature set. Scoping-time decisions locked: delete-blocked-until-empty, protected-but-renamable Personal default, localStorage-remembered active workspace, name-only workspaces (no icons/colors). REQUIREMENTS.md + ROADMAP.md to follow.*
