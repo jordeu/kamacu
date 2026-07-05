@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { del, patch, post } from "./client";
-import type { Project, Status, Task } from "./types";
+import type { Project, Status, Task, Workspace } from "./types";
 
 export type MoveArgs = { id: number; status: Status; afterId: number | null };
 
@@ -11,7 +11,68 @@ export function useCreateProject() {
       name?: string;
       repo_path?: string;
       repo?: string;
+      // v1.9: create into the active workspace (WSPROJ-02). Omitted/undefined
+      // falls back to the Personal default server-side, so passing undefined is
+      // always safe.
+      workspace_id?: number;
     }) => post<Project>("/api/projects", body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+export function useCreateWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name }: { name: string }) =>
+      post<Workspace>("/api/workspaces", { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+  });
+}
+
+export function useRenameWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      patch<Workspace>(`/api/workspaces/${id}`, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+  });
+}
+
+export function useDeleteWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`/api/workspaces/${id}`),
+    onSuccess: () => {
+      // Invalidate both: deleting a workspace changes the workspace list AND
+      // (defensively) what the sidebar project filter should show.
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+/**
+ * Transfer a project to another workspace (WSPROJ-01, D-17). This is a PATCH to
+ * the *project* endpoint (an optional `workspace_id` on the partial-PATCH — no
+ * dedicated transfer route), so it invalidates ["projects"] (the sidebar list),
+ * not ["workspaces"].
+ */
+export function useMoveProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      workspace_id,
+    }: {
+      id: number;
+      workspace_id: number;
+    }) => patch<Project>(`/api/projects/${id}`, { workspace_id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },

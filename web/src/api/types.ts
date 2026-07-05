@@ -24,6 +24,23 @@ export interface Project {
   // serializes these as json:"icon_letters" / json:"icon_color".
   icon_letters: string;
   icon_color: string;
+  // v1.9 workspace FK (Phase 25, migration 00012): the workspace this project
+  // belongs to. NOT NULL on the backend (DEFAULT 1 → Personal), so it is always
+  // present on the wire, never null. The backend serializes it as
+  // json:"workspace_id" between icon_color and the timestamps.
+  workspace_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// v1.9 workspaces (Phase 25, migration 00012): a named grouping of projects.
+// Mirrors the backend Workspace struct. `is_default` marks the protected
+// "Personal" workspace (renamable but never deletable, and the fallback target
+// for a stale saved active-workspace id) — key off this flag, never the name.
+export interface Workspace {
+  id: number;
+  name: string;
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }

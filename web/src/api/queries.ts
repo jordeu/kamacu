@@ -1,11 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./client";
-import type { Project, Task } from "./types";
+import type { Project, Task, Workspace } from "./types";
 
 export function useProjects() {
   return useQuery({
     queryKey: ["projects"],
     queryFn: () => get<Project[]>("/api/projects"),
+  });
+}
+
+export function useWorkspaces() {
+  return useQuery({
+    queryKey: ["workspaces"],
+    queryFn: () => get<Workspace[]>("/api/workspaces"),
   });
 }
 
