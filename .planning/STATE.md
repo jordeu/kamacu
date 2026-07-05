@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
 status: executing
-stopped_at: Completed 26-03-PLAN.md
-last_updated: "2026-07-05T19:28:50.690Z"
+stopped_at: Completed 26-04-PLAN.md
+last_updated: "2026-07-05T19:41:21.170Z"
 last_activity: 2026-07-05
 progress:
   total_phases: 2
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 ## Current Position
 
 Phase: 26 (workspace-switcher-management-assignment) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-07-05
 
@@ -129,6 +129,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 26 P01 | 6min | 3 tasks | 3 files |
 | Phase 26-workspace-switcher-management-assignment P02 | 6 min | 3 tasks | 2 files |
 | Phase 26-workspace-switcher-management-assignment P03 | 5min | 2 tasks | 5 files |
+| Phase 26-workspace-switcher-management-assignment P04 | 7 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,8 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 - [Phase ?]: Phase 26-03: active workspace is a single shared React context (ActiveWorkspaceProvider in AppLayout), not a per-component localStorage hook, so the switcher and sidebar filter never desync
 - [Phase ?]: Phase 26-03: the active-workspace resolver validates the saved kamacu.workspace id against live useWorkspaces() rows and falls back to the is_default workspace (never the name 'Personal') for a stale/forged id — rename-proof (D-14, T-26-07)
 - [Phase ?]: Phase 26-03: useDeleteWorkspace invalidates both ['workspaces'] and ['projects']; useMoveProject (transfer via PATCH /api/projects/{id}) invalidates ['projects'] (the sidebar list key)
+- [Phase 26]: Phase 26-04: WorkspaceNameDialog is one mode-switched dialog (create/rename) cloning RenameProjectDialog; it calls both useCreateWorkspace and useRenameWorkspace unconditionally and picks by mode (hooks-rules-safe)
+- [Phase 26]: Phase 26-04: disabled-delete guards use aria-disabled + a click no-op (never raw disabled) so the guard Tooltip stays discoverable; guard tooltips are muted (text-muted-foreground), never destructive-red
 
 ### Pending Todos
 
@@ -207,8 +210,8 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-05T19:28:50.677Z
-Stopped at: Completed 26-03-PLAN.md
+Last session: 2026-07-05T19:41:21.155Z
+Stopped at: Completed 26-04-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 25` to plan the Workspace Data Foundation (migration 00012 `workspaces` table + `projects.workspace_id` FK + idempotent Personal backfill). `/clear` first for a fresh context window.
 
