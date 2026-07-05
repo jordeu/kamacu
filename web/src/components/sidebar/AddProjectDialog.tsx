@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { ApiError } from "@/api/client";
 import { useCreateProject } from "@/api/mutations";
 import { useSettings } from "@/api/settings";
+import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,6 +57,10 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
 
   const createProject = useCreateProject();
   const navigate = useNavigate();
+  // Create the project into the currently active workspace (WSPROJ-02, D-10).
+  // Null (unresolved) → omit workspace_id so the backend falls back to the
+  // Personal default (plan 02).
+  const { activeWorkspaceId } = useActiveWorkspace();
 
   // The effective mode: when integration is off the dialog is folder-only, so
   // the repo-first branch never mounts regardless of `mode`.
@@ -105,8 +110,16 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
     try {
       const project = await createProject.mutateAsync(
         activeMode === "repo"
-          ? { repo: ownerName.trim(), name: name.trim() || undefined }
-          : { repo_path: repoPath.trim(), name: name.trim() || undefined },
+          ? {
+              repo: ownerName.trim(),
+              name: name.trim() || undefined,
+              workspace_id: activeWorkspaceId ?? undefined,
+            }
+          : {
+              repo_path: repoPath.trim(),
+              name: name.trim() || undefined,
+              workspace_id: activeWorkspaceId ?? undefined,
+            },
       );
       onOpenChange(false);
       setMode("repo");
