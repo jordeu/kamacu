@@ -3,8 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
 status: planning
-last_updated: "2026-07-05T05:34:32.000Z"
-last_activity: 2026-07-05
+stopped_at: Phase 25 context gathered
+last_updated: "2026-07-05T06:24:07.016Z"
+last_activity: 2026-07-05 — v1.9 roadmap created (2 phases, 12/12 requirements mapped)
 progress:
   total_phases: 2
   completed_phases: 0
@@ -194,9 +195,9 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-05T05:34:32.000Z
-Stopped at: v1.9 roadmap created (Phases 25–26; ROADMAP.md, REQUIREMENTS.md traceability, and STATE.md written)
-Resume file: .planning/ROADMAP.md
+Last session: 2026-07-05T06:24:07.004Z
+Stopped at: Phase 25 context gathered
+Resume file: .planning/phases/25-workspace-data-foundation/25-CONTEXT.md
 Next: `/gsd:plan-phase 25` to plan the Workspace Data Foundation (migration 00012 `workspaces` table + `projects.workspace_id` FK + idempotent Personal backfill). `/clear` first for a fresh context window.
 
 ## Operator Next Steps
