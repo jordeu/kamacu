@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
-import { useDeleteProject } from "@/api/mutations";
+import { useDeleteProject, useMoveProject } from "@/api/mutations";
+import { useWorkspaces } from "@/api/queries";
+import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 import type { Project } from "@/api/types";
 import {
   AlertDialog,
@@ -18,6 +20,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenuAction } from "@/components/ui/sidebar";
@@ -33,6 +40,9 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const deleteProject = useDeleteProject();
+  const moveProject = useMoveProject();
+  const { data: workspaces } = useWorkspaces();
+  const { setActiveWorkspaceId } = useActiveWorkspace();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { projectId } = useParams();
@@ -47,6 +57,25 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
       navigate("/");
     }
   }
+
+  // Transfer + follow-the-project (WSPROJ-01, D-08/D-09). Move the project to the
+  // target workspace; if it is the currently-open project, flip the active
+  // workspace to the target so the view follows it (the project stays selected
+  // and visible; the localStorage active-workspace key is updated by the setter).
+  // A non-open project just drops out of the filtered sidebar list.
+  function handleMove(targetWorkspaceId: number) {
+    if (targetWorkspaceId === project.workspace_id) return;
+    moveProject.mutate({ id: project.id, workspace_id: targetWorkspaceId });
+    if (projectId === String(project.id)) {
+      setActiveWorkspaceId(targetWorkspaceId);
+    }
+  }
+
+  // Name-sorted so the submenu order is stable regardless of fetch order
+  // (mirrors WorkspaceSwitcher).
+  const sortedWorkspaces = [...(workspaces ?? [])].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
 
   return (
     <>
@@ -66,6 +95,27 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
           <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
             Project settings
           </DropdownMenuItem>
+          {/* WSPROJ-01 / D-08: transfer submenu — radio items for every
+              workspace, the project's current workspace checked + disabled.
+              Selecting another workspace moves the project (and, if it is the
+              open one, the view follows it — D-09). */}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Move to workspace</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup value={String(project.workspace_id)}>
+                {sortedWorkspaces.map((ws) => (
+                  <DropdownMenuRadioItem
+                    key={ws.id}
+                    value={String(ws.id)}
+                    disabled={ws.id === project.workspace_id}
+                    onSelect={() => handleMove(ws.id)}
+                  >
+                    {ws.name}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuItem
             variant="destructive"
             onSelect={() => setDeleteOpen(true)}
