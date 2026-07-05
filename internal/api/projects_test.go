@@ -957,3 +957,69 @@ func TestProjectsWorkspaceWire(t *testing.T) {
 		t.Errorf("workspace_id = %v, want 1 (Personal default)", ws)
 	}
 }
+
+// TestProjectsCreateAssignsDefaultWorkspace proves BOTH create paths (folder +
+// repo-first) assign the default Personal workspace (D-09): the created project
+// carries workspace_id == 1 on the wire AND in the DB row, so the NOT NULL FK
+// invariant holds for newly-created projects.
+func TestProjectsCreateAssignsDefaultWorkspace(t *testing.T) {
+	t.Run("folder", func(t *testing.T) {
+		srv, db, _ := newTestServer(t)
+		repo := gitRepo(t)
+		status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo_path": repo})
+		if status != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body=%v", status, body)
+		}
+		if body["workspace_id"] != float64(1) {
+			t.Errorf("workspace_id = %v, want 1 (Personal default)", body["workspace_id"])
+		}
+		var ws int64
+		if err := db.QueryRow(`SELECT workspace_id FROM projects WHERE repo_path = ?`, repo).Scan(&ws); err != nil {
+			t.Fatalf("read back workspace_id: %v", err)
+		}
+		if ws != 1 {
+			t.Errorf("DB workspace_id = %d, want 1", ws)
+		}
+	})
+
+	t.Run("repo", func(t *testing.T) {
+		srv, db, base := newRepoTestServer(t)
+		defer repoSuccessSeams(t)()
+		status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo": "octocat/hello-world"})
+		if status != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body=%v", status, body)
+		}
+		if body["workspace_id"] != float64(1) {
+			t.Errorf("workspace_id = %v, want 1 (Personal default)", body["workspace_id"])
+		}
+		wantPath := filepath.Join(base, "Octocat", "Hello-World")
+		var ws int64
+		if err := db.QueryRow(`SELECT workspace_id FROM projects WHERE repo_path = ?`, wantPath).Scan(&ws); err != nil {
+			t.Fatalf("read back workspace_id: %v", err)
+		}
+		if ws != 1 {
+			t.Errorf("DB workspace_id = %d, want 1", ws)
+		}
+	})
+}
+
+// TestProjectsCreateRejectsWhenNoDefaultWorkspace proves the create path
+// resolves the default workspace EXPLICITLY (D-09) rather than silently leaning
+// on the column DEFAULT: with no is_default=1 row, the resolve fails and create
+// returns 500 and persists NO project (never a silently-defaulted project). The
+// Personal row still exists (FK target intact), so only the explicit resolve —
+// not the FK — can reject here.
+func TestProjectsCreateRejectsWhenNoDefaultWorkspace(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	if _, err := db.Exec(`UPDATE workspaces SET is_default = 0`); err != nil {
+		t.Fatalf("clear default flag: %v", err)
+	}
+	repo := gitRepo(t)
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo_path": repo})
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (no default workspace); body=%v", status, body)
+	}
+	if n := countProjects(t, db); n != 0 {
+		t.Errorf("projects rows = %d, want 0 (create must not persist without a default)", n)
+	}
+}
