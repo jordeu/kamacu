@@ -1003,6 +1003,109 @@ func TestProjectsCreateAssignsDefaultWorkspace(t *testing.T) {
 	})
 }
 
+// seedWorkspace inserts a workspace with the given name directly via the DB
+// handle and returns its id. It deliberately does NOT go through the
+// /api/workspaces handlers so the transfer + create-in-workspace tests stay
+// independent of plan 01 (this plan is wave-1 parallel with it).
+func seedWorkspace(t *testing.T, db *sql.DB, name string) int64 {
+	t.Helper()
+	res, err := db.Exec(`INSERT INTO workspaces (name) VALUES (?)`, name)
+	if err != nil {
+		t.Fatalf("seed workspace %q: %v", name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("workspace id: %v", err)
+	}
+	return id
+}
+
+// TestProjectTransferWorkspace proves WSPROJ-01 / D-17: PATCH /api/projects/{id}
+// with a workspace_id transfers the project (no dedicated route). A valid target
+// moves the project (reflected in the response AND a follow-up list); a
+// non-existent target is rejected 400 without mutating the row (T-26-05).
+func TestProjectTransferWorkspace(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	workID := seedWorkspace(t, db, "Work")
+
+	id := createProject(t, srv, gitRepo(t))
+	url := fmt.Sprintf("%s/api/projects/%d", srv.URL, id)
+
+	// Transfer PATCH → 200 and the returned body's workspace_id == workID.
+	status, body := doJSON(t, "PATCH", url, map[string]any{"workspace_id": workID})
+	if status != http.StatusOK {
+		t.Fatalf("transfer status = %d, want 200; body=%v", status, body)
+	}
+	if body["workspace_id"] != float64(workID) {
+		t.Errorf("response workspace_id = %v, want %d", body["workspace_id"], workID)
+	}
+
+	// A follow-up GET shows the project under the target workspace.
+	_, list := doJSONList(t, srv.URL+"/api/projects")
+	if len(list) != 1 {
+		t.Fatalf("list len = %d, want 1: %v", len(list), list)
+	}
+	if list[0]["workspace_id"] != float64(workID) {
+		t.Errorf("listed workspace_id = %v, want %d", list[0]["workspace_id"], workID)
+	}
+
+	// A non-existent target → 400 and the row is unchanged (T-26-05).
+	status, body = doJSON(t, "PATCH", url, map[string]any{"workspace_id": 999999})
+	if status != http.StatusBadRequest {
+		t.Fatalf("non-existent transfer status = %d, want 400; body=%v", status, body)
+	}
+	var ws int64
+	if err := db.QueryRow(`SELECT workspace_id FROM projects WHERE id = ?`, id).Scan(&ws); err != nil {
+		t.Fatalf("read back workspace_id: %v", err)
+	}
+	if ws != workID {
+		t.Errorf("DB workspace_id = %d, want unchanged %d (rejected transfer must not mutate)", ws, workID)
+	}
+}
+
+// TestProjectCreateInWorkspace proves WSPROJ-02 / D-10: POST /api/projects with a
+// workspace_id lands the project there; without one it falls back to the default
+// Personal workspace (id 1); a non-existent workspace_id is rejected 400 with no
+// row created (T-26-06).
+func TestProjectCreateInWorkspace(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	workID := seedWorkspace(t, db, "Work")
+
+	// Explicit workspace_id → the project lands there.
+	status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{
+		"repo_path": gitRepo(t), "workspace_id": workID,
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("create-in-workspace status = %d, want 201; body=%v", status, body)
+	}
+	if body["workspace_id"] != float64(workID) {
+		t.Errorf("workspace_id = %v, want %d", body["workspace_id"], workID)
+	}
+
+	// No workspace_id → default Personal (id 1, seeded by migration 00012).
+	status, body = doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{
+		"repo_path": gitRepo(t),
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("default-workspace create status = %d, want 201; body=%v", status, body)
+	}
+	if body["workspace_id"] != float64(1) {
+		t.Errorf("workspace_id = %v, want 1 (Personal default)", body["workspace_id"])
+	}
+
+	// Non-existent workspace_id → 400, no row created (T-26-06 mitigation).
+	before := countProjects(t, db)
+	status, body = doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{
+		"repo_path": gitRepo(t), "workspace_id": 999999,
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("non-existent-workspace create status = %d, want 400; body=%v", status, body)
+	}
+	if after := countProjects(t, db); after != before {
+		t.Errorf("rows after non-existent-workspace create = %d, want unchanged %d", after, before)
+	}
+}
+
 // TestProjectsCreateRejectsWhenNoDefaultWorkspace proves the create path
 // resolves the default workspace EXPLICITLY (D-09) rather than silently leaning
 // on the column DEFAULT: with no is_default=1 row, the resolve fails and create
