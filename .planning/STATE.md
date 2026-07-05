@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
 status: planning
-last_updated: "2026-07-05T05:22:58.320Z"
+last_updated: "2026-07-05T05:34:32.000Z"
 last_activity: 2026-07-05
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,39 +17,37 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-01)
+See: .planning/PROJECT.md (updated 2026-07-05)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Milestone complete
+**Current focus:** v1.9 Workspaces — Phase 25 (Workspace Data Foundation) ready to plan
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 25 — Workspace Data Foundation (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-05 — Milestone v1.9 started
+Status: Roadmap created — ready to plan Phase 25
+Last activity: 2026-07-05 — v1.9 roadmap created (2 phases, 12/12 requirements mapped)
 
-### v1.8 Roadmap (Phases 20–24, continues numbering from v1.7's Phase 19)
+### v1.9 Roadmap (Phases 25–26, continues numbering from v1.8's Phase 24)
 
-Coarse granularity, yolo mode. 26 requirements → 5 phases, 100% mapped.
+Coarse granularity, yolo mode, parallelization on, ui_phase on. 12 requirements → 2 phases, 100% mapped (Phase 25: 2 · Phase 26: 10).
 
-- **Phase 20 — Kamacu Rebrand & Brand** (REBRAND-01/02/03, BRAND-01/02/03): code/binary/module/UI rename to Kamacu + new logo, favicon, README. Deliberately does NOT flip runtime data paths or the tmux socket — that is Phase 21's gated migration. First phase; depends on nothing.
-- **Phase 21 — Data Directory Migration** (MIGRATE-01..05): the highest-risk phase. One-time gated `~/.kangent` → `~/.kamacu` move (repos + worktrees + DB), `git worktree repair`, DB worktree/repo path rewrite, tmux `-L kangent` → `-L kamacu` socket + `kangent-*` → `kamacu-*` prefix switch with live-session reconciliation (no orphaned agent), localStorage `kangent.*` → `kamacu.*`; idempotent + failure-safe (leaves `~/.kangent` untouched on error). Depends on Phase 20.
-- **Phase 22 — GitHub-Style Diff Review** (DIFF-01..04): file-tree diff view, per-file collapse/expand, sticky per-file "Viewed" state (persists across reopen + restart) that resets + re-expands only when a file changes. Depends on Phase 21.
-- **Phase 23 — Worktree Cleanup Panel** (WTREE-01..04): Settings section listing every worktree (referenced/orphaned, dirty/unpushed/stash flags), per-item force-remove (confirmed), bulk "clean eligible", orphan detection (reconciles the reaper's skipped accumulation). Depends on Phase 21.
-- **Phase 24 — Session-Bar, Board & Tab Polish** (TABS-01/02, REVMENU-01/02, POLISH-01/02/03): renameable bash/tmux tabs (persist across restart; Bash N defaults kept), task-view three-dots menu (Stop + Insert review prompt) replacing the Stop button with NO auto-inserted PR review prompt, session-bar drops total count + auto-collapses on outside click, To Do "+ New task" shortcut removed. Depends on Phase 21.
+- **Phase 25 — Workspace Data Foundation** (WSDATA-01, WSDATA-02): the backend/data layer the switcher UI builds on. Migration `00012` adds a `workspaces` table + `projects.workspace_id` FK (NOT NULL, so a project can never be workspace-less); a one-time idempotent startup backfill creates the protected default **Personal** workspace and assigns every pre-existing project to it (model on the existing `BackfillProjectIcons` startup hook). `workspace_id` is surfaced on the projects wire for Phase 26. First phase; depends on nothing new (extends the existing schema).
+- **Phase 26 — Workspace Switcher, Management & Assignment** (WSMGMT-01/02/03/04, WSNAV-01/02/03, WSPROJ-01/02, WSBAR-01): the full user-facing feature. A workspaces CRUD API (create / rename / delete-block-when-empty / Personal-protected) + the sidebar workspace switcher (expanded-state only, hidden in the collapsed rail) with add/rename/delete; the sidebar project list (expanded rows AND collapsed icon rail) filters to the active workspace; the active workspace persists in `localStorage` and switching navigates to that workspace's first project (empty state when none); project transfer via the existing per-project `⋯` menu; new projects land in the active workspace; and a WSBAR-01 non-regression guardrail keeping the global Active Sessions bar cross-workspace. Depends on Phase 25.
 
-Execution order: 20 → 21 → 22 → 23 → 24. Phases 22/23/24 are independent feature work that only need the rebrand+migration foundation (Phase 21) landed first so they build against the final `~/.kamacu` paths.
+Execution order: 25 → 26. Phase 26 is one cohesive full-stack feature phase (CRUD API + all UI) that needs only the Phase 25 data foundation landed first; plan-phase will decompose it into waves.
 
-### Planning grounding for v1.8 (from PROJECT.md / prior STATE — treat as fact)
+### Planning grounding for v1.9 (from a fresh code map — treat as fact)
 
-- **Rebrand seams (Phase 20):** Go module rename touches every import + `go.mod`; `Makefile` build target → `kamacu`; UI brand title lives in the sidebar (`web/src/components/sidebar/ProjectSidebar.tsx`, currently hides the `kangent` brand title in icon mode); browser tab title in `web/index.html`; log lines via `log/slog`. REBRAND-03 must NOT touch the `~/.kangent` path constant or the `-L kangent` tmux socket constant — those are Phase 21's to flip atomically with the data move.
-- **Migration seams (Phase 21):** data dir is `~/.kangent/` (managed repos under `repos/`, worktrees under `worktrees/`, plus the SQLite DB); worktree paths + repo roots are stored in the DB (need rewrite after move); tmux uses a dedicated `-L kangent` socket with `kangent-<task>-<n>` session names (`internal/tmux`); the reaper reconciles tmux rows via `has-session`. localStorage keys are `kangent.*` (e.g. `kangent.sidebar` in `AppLayout.tsx`). Migration must be gated (detect fresh/already-migrated), idempotent, and failure-safe. Consider modeling the startup one-shot on the existing startup orphan-sweep / `BackfillProjectIcons` idempotent-startup-hook pattern.
-- **Diff seams (Phase 22):** the current diff is a read-only unified-diff tab (`GET /api/tasks/{id}/diff` returns per-file-hunk JSON; frontend renders collapsible unified diffs). DIFF-03/04 need persistent per-file "Viewed" state keyed by file + content hash — new persistence (likely a DB table or a per-worktree store) so it survives restart and resets on content change.
-- **Worktree cleanup seams (Phase 23):** reuse `git worktree list --porcelain` + the existing gated `CleanupWorktreeGated` (`force` param already exists — HTTP handler passes force per gate, reaper passes force=false). Orphan = on disk / in `git worktree list` with no matching DB `tasks` row. The reaper currently SKIPS dirty/unpushed worktrees (the accumulation WTREE-04 addresses). New Settings section is a full-page `/settings` route addition.
-- **Tabs seams (Phase 24):** bash/tmux tabs get auto labels "Bash 1", "Bash 2", …; TABS-01 needs a persisted custom label (likely a `label`/`name` column on the sessions/tmux_sessions row or a sidecar) surviving restart, defaulting to the auto name (TABS-02).
-- **Review-menu / polish seams (Phase 24):** the agent view has a Stop button + a PR-review seed prompt currently prefilled-once-per-session (`pr_review_seed` KV, seeded in TaskPage/agent view) — REVMENU-02 removes the auto-insert, REVMENU-01 moves Stop + a manual "Insert review prompt" into a three-dots menu. The bottom bar is `web/src/components/.../ActiveSessionsBar.tsx` (POLISH-01 total-count removal, POLISH-02 outside-click auto-collapse — a `collapse()` helper already exists from quick task 260618-mlu). POLISH-03 removes the To Do "+ New task" quick-add row.
-- **Verification model:** backend via `go test ./...` / `go build` / `go vet`; frontend via `cd web && npm run build` (tsc -b + vite build) + `npm run lint` + a human-verify checkpoint (NO frontend test framework). Phase 21 (migration) warrants especially careful gating + a live end-to-end restart/reattach verification against a real `~/.kangent` install.
+- **Scoping decisions locked (do not re-open):** delete is block-until-empty (never cascade); Personal is renamable but NEVER deletable and at least one workspace always exists; the switcher is expanded-sidebar only (hidden in the collapsed rail) while the project list filters in BOTH sidebar states; active workspace lives in `localStorage`, restored on reload, and switching navigates to that workspace's first project (empty state when none); new projects land in the active workspace; project transfer is via the existing per-project `⋯` menu (NOT drag-and-drop); the global Active Sessions bar stays cross-workspace (WSBAR-01 is a non-regression guardrail, likely folded into the UI phase, not its own phase); workspaces are name-only (no icons/colors) for v1.9.
+- **Migrations (Phase 25):** `internal/store/migrations/NNNNN_snake.sql`, goose Up/Down, embedded + run at startup (`internal/store/migrate.go`). Latest is `00011_diff_viewed.sql`; the workspaces migration is `00012`. The idempotent startup backfill models on the existing `BackfillProjectIcons` hook (`internal/api/icons.go`) run after `Migrate`.
+- **Projects CRUD (Phases 25–26):** `internal/api/projects.go` (`projectHandlers`: `list()`, `create()`, `createByRepo()`, `update()` partial-PATCH, `delete()`); `projectColumns` const; routes in `internal/api/routes.go` (GET/POST `/api/projects`, PATCH/DELETE `/api/projects/{id}`). `workspace_id` joins these — carried on the projects wire (Phase 25), set at create to the active workspace (WSPROJ-02), and transferable via partial-PATCH (WSPROJ-01). Workspaces get their own CRUD surface (e.g. `/api/workspaces`) in Phase 26.
+- **Sidebar (Phase 26):** `web/src/components/sidebar/ProjectSidebar.tsx` renders both expanded rows and the collapsed `collapsible="icon"` rail from `useProjects()` (`web/src/api/queries.ts` → `GET /api/projects`, queryKey `["projects"]`). Sidebar header is brand lockup + `SidebarTrigger` only — the switcher is NEW, expanded-only. Per-project `⋯` menu is `web/src/components/sidebar/ProjectMenu.tsx` (Rename / Project settings / Delete via shadcn `DropdownMenu`) — WSPROJ-01 adds a "Move to workspace…" item here. Add-project button + `AddProjectDialog` in the `SidebarFooter`.
+- **Current-project selection is URL-only (Phase 26):** routes `/projects/:projectId` and `/projects/:projectId/tasks/:taskId` (`web/src/App.tsx`); index `/` redirects to the first project (`RedirectToFirstProject`). No zustand — TanStack Query + URL + localStorage only. WSNAV-03 navigation reuses this; workspace stays OUT of the URL (localStorage-only, per Out of Scope).
+- **Active sessions bar (Phase 26, WSBAR-01 guardrail):** `web/src/components/layout/ActiveSessionsBar.tsx`, mounted globally in `AppLayout.tsx` outside `<Outlet/>`; data from `GET /api/agents/status` (already cross-project, JOINs projects, no filter). WSBAR-01 = keep it global; do NOT add a workspace filter.
+- **localStorage keys (Phase 26, WSNAV-03):** `kamacu.sidebar`, `kamacu:sessions-bar-collapsed`, `kamacu:review-collapsed:${projectId}`; boot migration shim `web/src/lib/migrateStorage.ts`. The active-workspace key follows this `kamacu.*` convention (e.g. `kamacu.workspace`).
+- **Verification model:** backend via `go test ./...` / `go build` / `go vet`; frontend via `cd web && npm run build` (tsc -b + vite build) + `npm run lint` + a human-verify checkpoint (NO frontend test framework). Phase 25's migration + backfill warrant an upgrade-path check (existing install → every project lands under Personal, idempotent on re-run; no project left workspace-less).
 
 ### Phase 19 UAT decisions (visual revisions, user-approved — treat as the new contract)
 
@@ -196,11 +194,11 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-03T04:22:34.898Z
-Stopped at: Phase 24 planned (4 plans, 2 waves)
-Resume file: .planning/phases/24-session-bar-board-tab-polish/24-01-PLAN.md
-Next: `/gsd:execute-phase 24` to execute the final v1.8 phase. Wave 1 = plans 01 (backend rename+label), 02 (bar/board polish), 03 (agent ⋯ menu); Wave 2 = plan 04 (tab rename frontend, depends on 01). `/clear` first for a fresh context window.
+Last session: 2026-07-05T05:34:32.000Z
+Stopped at: v1.9 roadmap created (Phases 25–26; ROADMAP.md, REQUIREMENTS.md traceability, and STATE.md written)
+Resume file: .planning/ROADMAP.md
+Next: `/gsd:plan-phase 25` to plan the Workspace Data Foundation (migration 00012 `workspaces` table + `projects.workspace_id` FK + idempotent Personal backfill). `/clear` first for a fresh context window.
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 25 (Workspace Data Foundation) with `/gsd:plan-phase 25`.

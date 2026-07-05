@@ -69,24 +69,24 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WSDATA-01 | TBD | Pending |
-| WSDATA-02 | TBD | Pending |
-| WSMGMT-01 | TBD | Pending |
-| WSMGMT-02 | TBD | Pending |
-| WSMGMT-03 | TBD | Pending |
-| WSMGMT-04 | TBD | Pending |
-| WSNAV-01 | TBD | Pending |
-| WSNAV-02 | TBD | Pending |
-| WSNAV-03 | TBD | Pending |
-| WSPROJ-01 | TBD | Pending |
-| WSPROJ-02 | TBD | Pending |
-| WSBAR-01 | TBD | Pending |
+| WSDATA-01 | Phase 25 | Pending |
+| WSDATA-02 | Phase 25 | Pending |
+| WSMGMT-01 | Phase 26 | Pending |
+| WSMGMT-02 | Phase 26 | Pending |
+| WSMGMT-03 | Phase 26 | Pending |
+| WSMGMT-04 | Phase 26 | Pending |
+| WSNAV-01 | Phase 26 | Pending |
+| WSNAV-02 | Phase 26 | Pending |
+| WSNAV-03 | Phase 26 | Pending |
+| WSPROJ-01 | Phase 26 | Pending |
+| WSPROJ-02 | Phase 26 | Pending |
+| WSBAR-01 | Phase 26 | Pending |
 
 **Coverage:**
 - v1.9 requirements: 12 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 12 ⚠️ (filled by roadmapper)
+- Mapped to phases: 12 ✓ (Phase 25: 2 · Phase 26: 10)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-05*
-*Last updated: 2026-07-05 after initial definition*
+*Last updated: 2026-07-05 — traceability populated by roadmapper (Phases 25–26, 12/12 mapped)*
