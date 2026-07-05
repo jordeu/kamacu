@@ -386,14 +386,16 @@ From `internal/api/icons.go` (`BackfillProjectIcons` doc comment) — the rule D
 | A2 | Under Approach A the Go hook's "collect-then-update project reassignment" (D-07) is vestigial and can be omitted; the hook only ensures the default workspace exists. | §3 / Open Q1 | If a reviewer insists on literally honoring D-07's collect-then-update, add a provably-empty defensive loop. Behaviorally identical; no data risk. **Flag for discuss-phase.** |
 | A3 | Personal is deterministically `id = 1` (first INSERT into an empty `INTEGER PRIMARY KEY` table) and stays 1 (WSMGMT-04: never deletable), so `DEFAULT 1` is correct forever. | Pattern 2 | If a future migration deletes+recreates Personal with a different id, the literal default would drift. Guarded by WSMGMT-04. Very low risk. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **D-07 says "collect-then-update is REQUIRED"; under Approach A there is nothing to update.**
    - What we know: WSDATA-02 / D-07 model the hook on `BackfillProjectIcons`, which *fills* blank columns via SELECT→UPDATE. But Approach A satisfies NOT NULL *at migration time* by assigning every existing project via the column `DEFAULT 1`. With `NOT NULL + FK + DEFAULT`, no project can ever be workspace-less, so the reassignment loop finds zero rows.
    - What's unclear: whether the planner should (a) implement the lean "ensure default exists" hook (recommended, Code Examples §3) and treat the reassignment loop as vestigial, or (b) include a defensive-but-provably-empty collect-then-update loop for literal symmetry with D-07.
    - Recommendation: (a). The hook's *stated job* in D-07 ("guarantee a default workspace exists and no project is workspace-less") is fully met — invariant 1 by the hook, invariant 2 structurally by the schema. Note this reinterpretation of D-07 explicitly in the plan; optionally confirm in discuss-phase. This is the only place the recommended approach nuances a locked decision.
+   - **RESOLVED:** lean hook adopted (research recommendation (a)); the D-07 collect-then-update loop is vestigial under Approach A and omitted. **User-confirmed 2026-07-05 via /gsd:plan-phase.**
 
 2. **`PRAGMA foreign_key_check` is non-gating under goose.** Keep it for parity/documentation or drop it? Recommendation: keep it (harmless, signals intent), but the plan/verification must not treat it as a safety gate — safety comes from inserting Personal before the ADD COLUMN.
+   - **RESOLVED:** kept in the migration for parity/documentation; the plan and verification treat `PRAGMA foreign_key_check` as non-gating -- safety comes from inserting Personal (id 1) before the ADD COLUMN.
 
 ## Environment Availability
 
