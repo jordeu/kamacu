@@ -377,13 +377,18 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		GithubRepo  *string `json:"github_repo"`
 		IconLetters *string `json:"icon_letters"`
 		IconColor   *string `json:"icon_color"`
+		// WorkspaceID transfers the project to another workspace (WSPROJ-01 /
+		// D-17): transfer is an optional workspace_id on this same partial-PATCH,
+		// NOT a dedicated route. Omitted → left untouched; supplied → validated
+		// against the workspaces table before the row is touched.
+		WorkspaceID *int64 `json:"workspace_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Name == nil && req.Description == nil && req.GithubRepo == nil &&
-		req.IconLetters == nil && req.IconColor == nil {
+		req.IconLetters == nil && req.IconColor == nil && req.WorkspaceID == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
@@ -458,6 +463,25 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		}
 		sets = append(sets, "icon_color = ?")
 		args = append(args, color)
+	}
+	if req.WorkspaceID != nil {
+		// WSPROJ-01 / D-17 transfer + T-26-05 mitigation: validate the target
+		// workspace exists BEFORE appending (mirror the github_repo reject idiom).
+		// A forged/non-existent id → 400 "workspace not found" with the row left
+		// untouched (nothing appended to sets/args). The REFERENCES workspaces(id)
+		// FK is the backstop; this explicit check gives the clean 400.
+		var exists int
+		err := h.db.QueryRow(`SELECT 1 FROM workspaces WHERE id = ?`, *req.WorkspaceID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "workspace not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		sets = append(sets, "workspace_id = ?")
+		args = append(args, *req.WorkspaceID)
 	}
 
 	sets = append(sets, "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
