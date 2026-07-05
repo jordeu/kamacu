@@ -1,10 +1,11 @@
 ---
 phase: 26
 slug: workspace-switcher-management-assignment
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-07-05
+reviewed_at: 2026-07-05
 ---
 
 # Phase 26 — UI Design Contract
