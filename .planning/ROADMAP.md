@@ -147,7 +147,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 **Plans**: 6 plans in 4 waves
   - [x] 26-01-PLAN.md — Workspace CRUD API (list/create/rename/guarded-delete) + routes (wave 1)
   - [x] 26-02-PLAN.md — Project transfer PATCH + create-in-active-workspace (wave 1)
-  - [ ] 26-03-PLAN.md — Frontend data layer: types, useWorkspaces, mutations, shared active-workspace context (wave 2)
+  - [x] 26-03-PLAN.md — Frontend data layer: types, useWorkspaces, mutations, shared active-workspace context (wave 2)
   - [ ] 26-04-PLAN.md — Workspace switcher + create/rename dialog + Manage-workspaces hub (wave 3)
   - [ ] 26-05-PLAN.md — Workspace-aware redirect, empty state, URL-wins + create-in-active client (wave 3)
   - [ ] 26-06-PLAN.md — Mount switcher + filter sidebar + transfer submenu + end-of-phase human-verify (wave 4)
@@ -185,7 +185,7 @@ Phases execute in numeric order: 25 → 26
 | 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete | 2026-07-02 |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 4/4 | Complete | 2026-07-04 |
 | 25. Workspace Data Foundation | v1.9 | 3/3 | Complete    | 2026-07-05 |
-| 26. Workspace Switcher, Management & Assignment | v1.9 | 2/6 | In Progress|  |
+| 26. Workspace Switcher, Management & Assignment | v1.9 | 3/6 | In Progress|  |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*

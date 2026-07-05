@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
 status: executing
-stopped_at: Completed 26-02-PLAN.md
-last_updated: "2026-07-05T19:15:50.455Z"
+stopped_at: Completed 26-03-PLAN.md
+last_updated: "2026-07-05T19:28:50.690Z"
 last_activity: 2026-07-05
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 9
-  completed_plans: 4
-  percent: 44
+  completed_plans: 6
+  percent: 50
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 ## Current Position
 
 Phase: 26 (workspace-switcher-management-assignment) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-07-05
 
@@ -128,6 +128,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 19-sidebar-avatars-settings-editors P01 | 3min | 2 tasks | 2 files |
 | Phase 26 P01 | 6min | 3 tasks | 3 files |
 | Phase 26-workspace-switcher-management-assignment P02 | 6 min | 3 tasks | 2 files |
+| Phase 26-workspace-switcher-management-assignment P03 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -175,6 +176,9 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 - [Phase ?]: Phase 26-01: non-empty workspace delete uses explicit SELECT COUNT(*) FROM projects for a clean 409 count message; ON DELETE RESTRICT is the FK backstop (D-05)
 - [Phase 26]: Phase 26-02: project transfer is an optional workspace_id on the existing PATCH /api/projects/{id} — no dedicated transfer route (D-17)
 - [Phase 26]: Phase 26-02: create resolves workspace_id once via resolveCreateWorkspaceID (validate supplied id, else fall back to defaultWorkspaceID) and threads it through both create paths; defaultWorkspaceID keeps a single call site (D-10/D-14)
+- [Phase ?]: Phase 26-03: active workspace is a single shared React context (ActiveWorkspaceProvider in AppLayout), not a per-component localStorage hook, so the switcher and sidebar filter never desync
+- [Phase ?]: Phase 26-03: the active-workspace resolver validates the saved kamacu.workspace id against live useWorkspaces() rows and falls back to the is_default workspace (never the name 'Personal') for a stale/forged id — rename-proof (D-14, T-26-07)
+- [Phase ?]: Phase 26-03: useDeleteWorkspace invalidates both ['workspaces'] and ['projects']; useMoveProject (transfer via PATCH /api/projects/{id}) invalidates ['projects'] (the sidebar list key)
 
 ### Pending Todos
 
@@ -203,8 +207,8 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-05T19:15:50.442Z
-Stopped at: Completed 26-02-PLAN.md
+Last session: 2026-07-05T19:28:50.677Z
+Stopped at: Completed 26-03-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 25` to plan the Workspace Data Foundation (migration 00012 `workspaces` table + `projects.workspace_id` FK + idempotent Personal backfill). `/clear` first for a fresh context window.
 
