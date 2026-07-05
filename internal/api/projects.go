@@ -159,14 +159,31 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		RepoPath string `json:"repo_path"`
 		Repo     string `json:"repo"` // owner/name OR a GitHub URL → repo-first path
+		// WorkspaceID lands the new project in the client's active workspace
+		// (WSPROJ-02 / D-10). Omitted → the default Personal workspace (D-14
+		// baseline). Resolved ONCE below and passed to both create paths.
+		WorkspaceID *int64 `json:"workspace_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
+	// Resolve the target workspace up front (D-10): a supplied id is validated,
+	// an omitted one falls back to the default Personal workspace. Both create
+	// paths share this single resolved wsID.
+	wsID, status, werr := h.resolveCreateWorkspaceID(req.WorkspaceID)
+	if werr != nil {
+		msg := werr.Error()
+		if status == http.StatusBadRequest {
+			msg = "workspace not found"
+		}
+		writeError(w, status, msg)
+		return
+	}
+
 	if strings.TrimSpace(req.Repo) != "" {
-		h.createByRepo(w, r, req.Repo, req.Name)
+		h.createByRepo(w, r, req.Repo, req.Name, wsID)
 		return
 	}
 
@@ -189,16 +206,10 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = filepath.Base(abs)
 	}
-	// Resolve the default (Personal) workspace and set workspace_id explicitly
-	// (D-09). The column has DEFAULT 1 as a backstop, but the explicit resolve is
-	// the documented interim behavior Phase 26's WSPROJ-02 refines to the *active*
-	// workspace — and it guarantees create never silently produces a
-	// workspace-less project if the default is ever missing (500, not a default).
-	wsID, err := h.defaultWorkspaceID()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	// wsID was resolved up front (WSPROJ-02 / D-10): the client's active
+	// workspace when supplied, else the default Personal workspace. Set
+	// workspace_id explicitly so create never silently produces a workspace-less
+	// project (the column DEFAULT 1 is only a backstop).
 	p, err := scanProject(h.db.QueryRow(
 		`INSERT INTO projects (name, repo_path, icon_letters, icon_color, workspace_id) VALUES (?, ?, ?, ?, ?) RETURNING `+projectColumns,
 		name, abs, deriveLetters(name), pickColor(), wsID))
@@ -220,6 +231,33 @@ func (h *projectHandlers) defaultWorkspaceID() (int64, error) {
 	return id, err
 }
 
+// resolveCreateWorkspaceID resolves the workspace a new project lands in
+// (WSPROJ-02 / D-10 / T-26-06 mitigation). When req is non-nil it validates the
+// requested id (`SELECT 1 FROM workspaces WHERE id = ?`): a non-existent id
+// returns (0, 400, err) so the caller can reject with "workspace not found"
+// WITHOUT creating a row; any other error returns (0, 500, err). When req is nil
+// it falls back to the default Personal workspace via defaultWorkspaceID(),
+// mapping a missing default to 500. This is the SINGLE direct defaultWorkspaceID
+// call site — both create paths route through here.
+func (h *projectHandlers) resolveCreateWorkspaceID(req *int64) (int64, int, error) {
+	if req != nil {
+		var exists int
+		err := h.db.QueryRow(`SELECT 1 FROM workspaces WHERE id = ?`, *req).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, http.StatusBadRequest, err
+		}
+		if err != nil {
+			return 0, http.StatusInternalServerError, err
+		}
+		return *req, 0, nil
+	}
+	id, err := h.defaultWorkspaceID()
+	if err != nil {
+		return 0, http.StatusInternalServerError, err
+	}
+	return id, 0, nil
+}
+
 // reposBase is the hardcoded managed-clone root (D-02 / Claude's discretion: no
 // repos_base setting for v1.4). Clones nest under it as <owner>/<name>.
 const reposBase = "~/.kamacu/repos/"
@@ -228,7 +266,7 @@ const reposBase = "~/.kamacu/repos/"
 // research §"Clone-then-Create Ordering" 8-step sequence and is load-bearing for
 // atomicity: validate BEFORE any clone, clone BEFORE any row, row only after the
 // clone returns exit 0.
-func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, repoInput, nameInput string) {
+func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, repoInput, nameInput string, wsID int64) {
 	// 1. Parse/canonicalize the ref. The ONLY hard, host-independent reject.
 	if _, err := github.ParseRepoRef(repoInput); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -303,14 +341,10 @@ func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, r
 	// (the projects.description default) and NEVER blocks create. Applies to
 	// both the clone and reattach branches (this is their single INSERT).
 	desc := github.RepoDescription(r.Context(), canonical)
-	// Resolve + set the default workspace (D-09), same as the folder path. The
-	// literal `1` in the VALUES list is the `managed` marker (repo-first clones
-	// are Kamacu-owned) — workspace_id gets its own `?` placeholder + wsID arg.
-	wsID, err := h.defaultWorkspaceID()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	// wsID was resolved by create() (WSPROJ-02 / D-10): the client's active
+	// workspace when supplied, else the default Personal workspace. The literal
+	// `1` in the VALUES list is the `managed` marker (repo-first clones are
+	// Kamacu-owned) — workspace_id gets its own `?` placeholder + wsID arg.
 	p, err := scanProject(h.db.QueryRow(
 		`INSERT INTO projects (name, repo_path, github_repo, managed, description, icon_letters, icon_color, workspace_id) VALUES (?, ?, ?, 1, ?, ?, ?, ?) RETURNING `+projectColumns,
 		name, dest, canonical, desc, deriveLetters(name), pickColor(), wsID))
