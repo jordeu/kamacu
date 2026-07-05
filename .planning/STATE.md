@@ -4,8 +4,8 @@ milestone: v1.9
 milestone_name: Workspaces
 status: executing
 stopped_at: Phase 25 context gathered
-last_updated: "2026-07-05T07:33:02.559Z"
-last_activity: 2026-07-05 -- Phase 25 planning complete
+last_updated: "2026-07-05T07:42:04.924Z"
+last_activity: 2026-07-05 -- Phase 25 execution started
 progress:
   total_phases: 2
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-05)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** v1.9 Workspaces — Phase 25 (Workspace Data Foundation) ready to plan
+**Current focus:** Phase 25 — workspace-data-foundation
 
 ## Current Position
 
-Phase: 25 — Workspace Data Foundation (not started)
-Plan: —
-Status: Ready to execute
-Last activity: 2026-07-05 -- Phase 25 planning complete
+Phase: 25 (workspace-data-foundation) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 25
+Last activity: 2026-07-05 -- Phase 25 execution started
 
 ### v1.9 Roadmap (Phases 25–26, continues numbering from v1.8's Phase 24)
 
