@@ -18,6 +18,10 @@ import (
 func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client) {
 	p := &projectHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	t := &taskHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
+	wh := &workspaceHandlers{db: db}
+	mux.HandleFunc("GET /api/workspaces", wh.list)
+	mux.HandleFunc("POST /api/workspaces", wh.create)
+	mux.HandleFunc("PATCH /api/workspaces/{id}", wh.update)
 	mux.HandleFunc("GET /api/projects", p.list)
 	mux.HandleFunc("POST /api/projects", p.create)
 	mux.HandleFunc("PATCH /api/projects/{id}", p.update)
