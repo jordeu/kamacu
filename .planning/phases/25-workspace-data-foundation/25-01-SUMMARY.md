@@ -98,6 +98,14 @@ None. `go build ./...`, `go vet ./internal/store/...`, and `go test ./internal/s
 - Schema foundation is landed: the `workspaces` table and DB-enforced `projects.workspace_id` FK exist from migration 00012. Ready for the remaining Phase 25 backend work (`BackfillWorkspaces` startup hook, `Project`/`projectColumns`/`scanProject` wire change, create-path `workspace_id` resolution) and the Phase 26 switcher UI.
 - No blockers.
 
+## Self-Check: PASSED
+
+All created files exist on disk and all task/summary commits are present in git history:
+- `internal/store/migrations/00012_workspaces.sql` — FOUND
+- `internal/store/workspaces_migration_test.go` — FOUND
+- `.planning/phases/25-workspace-data-foundation/25-01-SUMMARY.md` — FOUND
+- Commits `5a00aac`, `3bc3d50`, `7d58b37` — all FOUND
+
 ---
 *Phase: 25-workspace-data-foundation*
 *Completed: 2026-07-05*
