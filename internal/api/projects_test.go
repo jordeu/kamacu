@@ -933,3 +933,27 @@ func TestProjectList(t *testing.T) {
 		t.Fatalf("len = %d, want 2: %v", len(list), list)
 	}
 }
+
+// TestProjectsWorkspaceWire proves migration 00012's workspace_id column flows
+// scan→JSON (D-10): a folder-created project (assigned Personal=1 by the
+// column DEFAULT) lists with "workspace_id": 1 on the read wire, ready for the
+// Phase 26 switcher to filter on.
+func TestProjectsWorkspaceWire(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	createProject(t, srv, gitRepo(t))
+
+	status, list := doJSONList(t, srv.URL+"/api/projects")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if len(list) != 1 {
+		t.Fatalf("len = %d, want 1: %v", len(list), list)
+	}
+	ws, ok := list[0]["workspace_id"]
+	if !ok {
+		t.Fatalf("response missing \"workspace_id\" key: %v", list[0])
+	}
+	if ws != float64(1) {
+		t.Errorf("workspace_id = %v, want 1 (Personal default)", ws)
+	}
+}
