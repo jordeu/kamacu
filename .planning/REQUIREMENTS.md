@@ -14,14 +14,14 @@ Requirements for the Workspaces milestone. Each maps to exactly one roadmap phas
 
 ### Workspace Management
 
-- [ ] **WSMGMT-01**: User can create a new workspace by name.
-- [ ] **WSMGMT-02**: User can rename any workspace, including the default Personal workspace.
-- [ ] **WSMGMT-03**: User can delete a workspace only when it contains no projects; attempting to delete a non-empty workspace is blocked with a clear message telling the user to transfer or remove its projects first.
-- [ ] **WSMGMT-04**: The default Personal workspace can never be deleted, and at least one workspace always exists — guaranteeing a permanent home for projects.
+- [x] **WSMGMT-01**: User can create a new workspace by name.
+- [x] **WSMGMT-02**: User can rename any workspace, including the default Personal workspace.
+- [x] **WSMGMT-03**: User can delete a workspace only when it contains no projects; attempting to delete a non-empty workspace is blocked with a clear message telling the user to transfer or remove its projects first.
+- [x] **WSMGMT-04**: The default Personal workspace can never be deleted, and at least one workspace always exists — guaranteeing a permanent home for projects.
 
 ### Switcher & Navigation
 
-- [ ] **WSNAV-01**: A workspace switcher sits at the top of the projects sidebar in its **expanded state only** (hidden in the collapsed icon rail); clicking it opens a dropdown to pick the active workspace and to reach add/rename/delete management.
+- [x] **WSNAV-01**: A workspace switcher sits at the top of the projects sidebar in its **expanded state only** (hidden in the collapsed icon rail); clicking it opens a dropdown to pick the active workspace and to reach add/rename/delete management.
 - [ ] **WSNAV-02**: The sidebar project list — both the expanded rows and the collapsed icon rail — shows only the projects belonging to the active workspace.
 - [ ] **WSNAV-03**: The active workspace is remembered in `localStorage` and restored on reload; switching workspaces navigates to that workspace's first project, and shows a clear empty state when the workspace has no projects.
 
@@ -71,11 +71,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 |-------------|-------|--------|
 | WSDATA-01 | Phase 25 | Complete |
 | WSDATA-02 | Phase 25 | Complete |
-| WSMGMT-01 | Phase 26 | Pending |
-| WSMGMT-02 | Phase 26 | Pending |
-| WSMGMT-03 | Phase 26 | Pending |
-| WSMGMT-04 | Phase 26 | Pending |
-| WSNAV-01 | Phase 26 | Pending |
+| WSMGMT-01 | Phase 26 | Complete |
+| WSMGMT-02 | Phase 26 | Complete |
+| WSMGMT-03 | Phase 26 | Complete |
+| WSMGMT-04 | Phase 26 | Complete |
+| WSNAV-01 | Phase 26 | Complete |
 | WSNAV-02 | Phase 26 | Pending |
 | WSNAV-03 | Phase 26 | Pending |
 | WSPROJ-01 | Phase 26 | Pending |

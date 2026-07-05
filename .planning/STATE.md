@@ -4,14 +4,14 @@ milestone: v1.9
 milestone_name: Workspaces
 status: executing
 stopped_at: Phase 26 UI-SPEC approved
-last_updated: "2026-07-05T18:51:42.739Z"
-last_activity: 2026-07-05 -- Phase 26 planning complete
+last_updated: "2026-07-05T19:06:53.000Z"
+last_activity: 2026-07-05
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 9
-  completed_plans: 3
-  percent: 33
+  completed_plans: 4
+  percent: 44
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-05)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Phase 26 — workspace switcher, management & assignment
+**Current focus:** Phase 26 — workspace-switcher-management-assignment
 
 ## Current Position
 
-Phase: 26
-Plan: Not started
+Phase: 26 (workspace-switcher-management-assignment) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-07-05 -- Phase 26 planning complete
+Last activity: 2026-07-05
 
 ### v1.9 Roadmap (Phases 25–26, continues numbering from v1.8's Phase 24)
 
@@ -126,6 +126,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 17-global-active-sessions-bar P01 | 9 min | 2 tasks | 3 files |
 | Phase 17-global-active-sessions-bar P02 | 9min active (+ human-verify gate) | 3 tasks | 2 files |
 | Phase 19-sidebar-avatars-settings-editors P01 | 3min | 2 tasks | 2 files |
+| Phase 26 P01 | 6min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,10 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 (Earlier v1.0–v1.6 per-phase decisions are preserved in the archived milestone files and PROJECT.md Key Decisions.)
 
+- [Phase ?]: Phase 26-01: workspace rename is never gated on is_default — the default Personal workspace is renamable (D-04)
+- [Phase ?]: Phase 26-01: workspace delete guards key off the is_default flag, never the literal name 'Personal' (D-06, rename-proof)
+- [Phase ?]: Phase 26-01: non-empty workspace delete uses explicit SELECT COUNT(*) FROM projects for a clean 409 count message; ON DELETE RESTRICT is the FK backstop (D-05)
+
 ### Pending Todos
 
 - Lint-cleanup pass: ~18–20 pre-existing react-hooks eslint errors + a possibly-remaining v1.3 `Date.now()`-in-render advisory in `ReviewColumn.tsx` — gating build green, but a dedicated pass is the right home.
@@ -195,9 +200,9 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-05T17:44:59.496Z
+Last session: 2026-07-05T19:04:46.397Z
 Stopped at: Phase 26 UI-SPEC approved
-Resume file: .planning/phases/26-workspace-switcher-management-assignment/26-UI-SPEC.md
+Resume file: None
 Next: `/gsd:plan-phase 25` to plan the Workspace Data Foundation (migration 00012 `workspaces` table + `projects.workspace_id` FK + idempotent Personal backfill). `/clear` first for a fresh context window.
 
 ## Operator Next Steps
