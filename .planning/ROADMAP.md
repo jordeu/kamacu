@@ -115,7 +115,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 
 **Milestone Goal:** Group projects into named workspaces (e.g. "Personal", "Professional"), switchable from the top of the expanded projects sidebar, while the global Active Sessions bar keeps showing agent work across every workspace.
 
-- [ ] **Phase 25: Workspace Data Foundation** - `workspaces` table + `projects.workspace_id` FK (migration 00012) with an idempotent startup backfill assigning every existing project to a protected default **Personal** workspace.
+- [x] **Phase 25: Workspace Data Foundation** - `workspaces` table + `projects.workspace_id` FK (migration 00012) with an idempotent startup backfill assigning every existing project to a protected default **Personal** workspace. (completed 2026-07-05)
 - [ ] **Phase 26: Workspace Switcher, Management & Assignment** - Sidebar workspace switcher (expanded-only) with add/rename/delete, per-workspace project filtering + navigation, project transfer via the `⋯` menu, create-in-active-workspace, and the cross-workspace sessions-bar guardrail.
 
 ## Phase Details
@@ -131,8 +131,8 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
   4. The projects API carries `workspace_id` on the wire, ready for the Phase 26 switcher to filter on.
 **Plans**: 3 plans in 2 waves
   - [x] 25-01-PLAN.md — Migration 00012: workspaces table + Personal + projects.workspace_id NOT NULL FK (wave 1)
-  - [ ] 25-02-PLAN.md — Wire workspace_id onto the projects read wire + default-to-Personal on create (wave 2)
-  - [ ] 25-03-PLAN.md — Idempotent BackfillWorkspaces startup hook + main.go wiring (wave 2)
+  - [x] 25-02-PLAN.md — Wire workspace_id onto the projects read wire + default-to-Personal on create (wave 2)
+  - [x] 25-03-PLAN.md — Idempotent BackfillWorkspaces startup hook + main.go wiring (wave 2)
 
 ### Phase 26: Workspace Switcher, Management & Assignment
 **Goal**: Users can create, rename, and delete named workspaces, switch the active one from the sidebar, and assign projects to workspaces — while the global Active Sessions bar stays cross-workspace.
@@ -178,7 +178,7 @@ Phases execute in numeric order: 25 → 26
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete | 2026-07-02 |
 | 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete | 2026-07-02 |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 4/4 | Complete | 2026-07-04 |
-| 25. Workspace Data Foundation | v1.9 | 1/3 | In Progress|  |
+| 25. Workspace Data Foundation | v1.9 | 3/3 | Complete   | 2026-07-05 |
 | 26. Workspace Switcher, Management & Assignment | v1.9 | 0/TBD | Not started | - |
 
 ---
