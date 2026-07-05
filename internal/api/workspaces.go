@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -175,4 +176,58 @@ func (h *workspaceHandlers) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ws)
+}
+
+// delete handles DELETE /api/workspaces/{id} (WSMGMT-03/04). Two server-side
+// guards, checked before any mutation (T-26-02):
+//
+//   - Default guard (D-06): the is_default workspace can never be deleted. Keyed
+//     off the flag, NEVER the name "Personal" (rename-proof).
+//   - Non-empty guard (D-05): a workspace still owning projects is refused with a
+//     count-carrying message. The explicit COUNT precedes the delete so the 409
+//     carries a clean message rather than a raw ON DELETE RESTRICT FK error (the
+//     FK at 00012:31 is the ultimate backstop, not the message source).
+//
+// An empty, non-default workspace is removed → 204. All SQL uses ? placeholders.
+func (h *workspaceHandlers) delete(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	// Load the marker (is_default) and branch — mirrors the project delete idiom.
+	var isDefault int
+	err := h.db.QueryRow(`SELECT is_default FROM workspaces WHERE id = ?`, id).Scan(&isDefault)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Default guard (WSMGMT-04, D-06): key off the flag, never the name.
+	if isDefault == 1 {
+		writeError(w, http.StatusConflict, "the default workspace can't be deleted")
+		return
+	}
+	// Non-empty guard (WSMGMT-03, D-05): explicit count → clean message.
+	var n int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE workspace_id = ?`, id).Scan(&n); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n > 0 {
+		writeError(w, http.StatusConflict, fmt.Sprintf("move or remove its %d project(s) first", n))
+		return
+	}
+	res, err := h.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
