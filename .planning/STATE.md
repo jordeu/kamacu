@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
 status: executing
-stopped_at: Phase 26 UI-SPEC approved
-last_updated: "2026-07-05T19:06:53.000Z"
+stopped_at: Completed 26-02-PLAN.md
+last_updated: "2026-07-05T19:15:50.455Z"
 last_activity: 2026-07-05
 progress:
   total_phases: 2
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 ## Current Position
 
 Phase: 26 (workspace-switcher-management-assignment) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-07-05
 
@@ -127,6 +127,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 17-global-active-sessions-bar P02 | 9min active (+ human-verify gate) | 3 tasks | 2 files |
 | Phase 19-sidebar-avatars-settings-editors P01 | 3min | 2 tasks | 2 files |
 | Phase 26 P01 | 6min | 3 tasks | 3 files |
+| Phase 26-workspace-switcher-management-assignment P02 | 6 min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -172,6 +173,8 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 - [Phase ?]: Phase 26-01: workspace rename is never gated on is_default — the default Personal workspace is renamable (D-04)
 - [Phase ?]: Phase 26-01: workspace delete guards key off the is_default flag, never the literal name 'Personal' (D-06, rename-proof)
 - [Phase ?]: Phase 26-01: non-empty workspace delete uses explicit SELECT COUNT(*) FROM projects for a clean 409 count message; ON DELETE RESTRICT is the FK backstop (D-05)
+- [Phase 26]: Phase 26-02: project transfer is an optional workspace_id on the existing PATCH /api/projects/{id} — no dedicated transfer route (D-17)
+- [Phase 26]: Phase 26-02: create resolves workspace_id once via resolveCreateWorkspaceID (validate supplied id, else fall back to defaultWorkspaceID) and threads it through both create paths; defaultWorkspaceID keeps a single call site (D-10/D-14)
 
 ### Pending Todos
 
@@ -200,8 +203,8 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-05T19:04:46.397Z
-Stopped at: Phase 26 UI-SPEC approved
+Last session: 2026-07-05T19:15:50.442Z
+Stopped at: Completed 26-02-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 25` to plan the Workspace Data Foundation (migration 00012 `workspaces` table + `projects.workspace_id` FK + idempotent Personal backfill). `/clear` first for a fresh context window.
 

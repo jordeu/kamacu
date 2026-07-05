@@ -27,8 +27,8 @@ Requirements for the Workspaces milestone. Each maps to exactly one roadmap phas
 
 ### Project Assignment
 
-- [ ] **WSPROJ-01**: User can transfer a project to a different workspace from the project's existing `⋯` menu.
-- [ ] **WSPROJ-02**: A newly created project is placed in the currently active workspace.
+- [x] **WSPROJ-01**: User can transfer a project to a different workspace from the project's existing `⋯` menu.
+- [x] **WSPROJ-02**: A newly created project is placed in the currently active workspace.
 
 ### Global Sessions Bar
 
@@ -78,8 +78,8 @@ Which phases cover which requirements. Populated during roadmap creation.
 | WSNAV-01 | Phase 26 | Complete |
 | WSNAV-02 | Phase 26 | Pending |
 | WSNAV-03 | Phase 26 | Pending |
-| WSPROJ-01 | Phase 26 | Pending |
-| WSPROJ-02 | Phase 26 | Pending |
+| WSPROJ-01 | Phase 26 | Complete |
+| WSPROJ-02 | Phase 26 | Complete |
 | WSBAR-01 | Phase 26 | Pending |
 
 **Coverage:**
