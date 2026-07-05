@@ -92,3 +92,8 @@ Threat register dispositions honored: T-25-01 (SQL injection) mitigated — only
 
 ## Known Stubs
 None.
+
+## Self-Check: PASSED
+- Files verified present: `internal/api/workspaces.go`, `internal/api/workspaces_test.go`, `cmd/kamacu/main.go`, `.planning/phases/25-workspace-data-foundation/25-03-SUMMARY.md`.
+- Commits verified present: `dc52a0e` (test), `d2093e3` (feat), `396c31f` (feat), `b965004` (docs).
+- Working tree clean (stray root `kamacu` build artifact from `go build ./cmd/kamacu/` verification removed; not part of this plan).
