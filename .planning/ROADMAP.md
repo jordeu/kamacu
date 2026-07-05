@@ -129,7 +129,10 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
   2. On first startup after upgrade, a default **Personal** workspace is created and every pre-existing project is assigned to it — all projects remain intact and accessible.
   3. The startup backfill is idempotent: restarting never creates a second Personal workspace or reassigns projects (mirrors the existing `BackfillProjectIcons` startup hook).
   4. The projects API carries `workspace_id` on the wire, ready for the Phase 26 switcher to filter on.
-**Plans**: TBD
+**Plans**: 3 plans in 2 waves
+  - [ ] 25-01-PLAN.md — Migration 00012: workspaces table + Personal + projects.workspace_id NOT NULL FK (wave 1)
+  - [ ] 25-02-PLAN.md — Wire workspace_id onto the projects read wire + default-to-Personal on create (wave 2)
+  - [ ] 25-03-PLAN.md — Idempotent BackfillWorkspaces startup hook + main.go wiring (wave 2)
 
 ### Phase 26: Workspace Switcher, Management & Assignment
 **Goal**: Users can create, rename, and delete named workspaces, switch the active one from the sidebar, and assign projects to workspaces — while the global Active Sessions bar stays cross-workspace.
@@ -175,7 +178,7 @@ Phases execute in numeric order: 25 → 26
 | 22. GitHub-Style Diff Review | v1.8 | 5/5 | Complete | 2026-07-02 |
 | 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete | 2026-07-02 |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 4/4 | Complete | 2026-07-04 |
-| 25. Workspace Data Foundation | v1.9 | 0/TBD | Not started | - |
+| 25. Workspace Data Foundation | v1.9 | 0/3 | Planned | - |
 | 26. Workspace Switcher, Management & Assignment | v1.9 | 0/TBD | Not started | - |
 
 ---
