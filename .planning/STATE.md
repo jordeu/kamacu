@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
 status: executing
-stopped_at: Completed 26-04-PLAN.md
-last_updated: "2026-07-05T19:41:21.170Z"
+stopped_at: Completed 26-05-PLAN.md
+last_updated: "2026-07-05T19:49:39.743Z"
 last_activity: 2026-07-05
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 8
   percent: 50
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 ## Current Position
 
 Phase: 26 (workspace-switcher-management-assignment) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-07-05
 
@@ -130,6 +130,7 @@ Historical per-plan timings preserved in `.planning/milestones/` archives and gi
 | Phase 26-workspace-switcher-management-assignment P02 | 6 min | 3 tasks | 2 files |
 | Phase 26-workspace-switcher-management-assignment P03 | 5min | 2 tasks | 5 files |
 | Phase 26-workspace-switcher-management-assignment P04 | 7 min | 3 tasks | 3 files |
+| Phase 26-workspace-switcher-management-assignment P05 | 6min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,9 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 - [Phase ?]: Phase 26-03: useDeleteWorkspace invalidates both ['workspaces'] and ['projects']; useMoveProject (transfer via PATCH /api/projects/{id}) invalidates ['projects'] (the sidebar list key)
 - [Phase 26]: Phase 26-04: WorkspaceNameDialog is one mode-switched dialog (create/rename) cloning RenameProjectDialog; it calls both useCreateWorkspace and useRenameWorkspace unconditionally and picks by mode (hooks-rules-safe)
 - [Phase 26]: Phase 26-04: disabled-delete guards use aria-disabled + a click no-op (never raw disabled) so the guard Tooltip stays discoverable; guard tooltips are muted (text-muted-foreground), never destructive-red
+- [Phase ?]: Phase 26-05: the index redirect filters projects to the active workspace before choosing [0] (first-by-name, D-11); returns null while activeWorkspaceId is unresolved so it never redirects to a foreign-workspace project
+- [Phase ?]: Phase 26-05: URL-wins reconciliation lives in a thin route-element wrapper (BoardWorkspaceSync) shared by both project routes; it only mutates the localStorage-backed active workspace, never the route path (D-14, workspace stays out of the URL)
+- [Phase ?]: Phase 26-05: AddProjectDialog threads workspace_id: activeWorkspaceId ?? undefined into both create bodies — a null active workspace omits the field so the backend falls back to Personal (WSPROJ-02, D-10)
 
 ### Pending Todos
 
@@ -210,11 +214,11 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-05T19:41:21.155Z
-Stopped at: Completed 26-04-PLAN.md
+Last session: 2026-07-05T19:48:53.741Z
+Stopped at: Completed 26-05-PLAN.md
 Resume file: None
-Next: `/gsd:plan-phase 25` to plan the Workspace Data Foundation (migration 00012 `workspaces` table + `projects.workspace_id` FK + idempotent Personal backfill). `/clear` first for a fresh context window.
+Next: Execute plan 26-06 (the phase's human-verify gate) with `/gsd:execute-phase 26` to runtime-verify workspace switch/restore, deep-link reconciliation, and create-in-active.
 
 ## Operator Next Steps
 
-- Plan Phase 25 (Workspace Data Foundation) with `/gsd:plan-phase 25`.
+- Execute plan 26-06 (Phase 26 human-verify gate) to complete the workspace-switcher phase.
