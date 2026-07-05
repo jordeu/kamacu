@@ -42,6 +42,13 @@ type Project struct {
 	// scanProject Scan order (they sit between managed and the timestamps).
 	IconLetters string `json:"icon_letters"`
 	IconColor   string `json:"icon_color"`
+	// WorkspaceID is the v1.8 workspace FK (migration 00012, D-10):
+	// INTEGER NOT NULL REFERENCES workspaces(id) — always present on the wire,
+	// never null (scan straight into int64, no sql.NullInt64). Every project
+	// belongs to exactly one workspace; migrated/created rows default to the
+	// Personal workspace (id 1). Column ORDER here MUST match projectColumns and
+	// the scanProject Scan order (it sits between icon_color and the timestamps).
+	WorkspaceID int64 `json:"workspace_id"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -87,7 +94,7 @@ func validateRepoPath(p string) (string, error) {
 	return abs, nil
 }
 
-const projectColumns = `id, name, repo_path, description, github_repo, managed, icon_letters, icon_color, created_at, updated_at`
+const projectColumns = `id, name, repo_path, description, github_repo, managed, icon_letters, icon_color, workspace_id, created_at, updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
@@ -98,9 +105,11 @@ func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	// timestamps).
 	var managedInt int
 	// icon_letters/icon_color are TEXT NOT NULL (migration 00009) — scan straight
-	// into string (no sql.NullString needed, D-12: never null). Order MUST match
-	// projectColumns: managed, icon_letters, icon_color, then the timestamps.
-	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.IconLetters, &p.IconColor, &p.CreatedAt, &p.UpdatedAt)
+	// into string (no sql.NullString needed, D-12: never null). workspace_id is
+	// INTEGER NOT NULL (migration 00012, D-10) — scan straight into int64 (never
+	// null). Order MUST match projectColumns: managed, icon_letters, icon_color,
+	// workspace_id, then the timestamps.
+	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.IconLetters, &p.IconColor, &p.WorkspaceID, &p.CreatedAt, &p.UpdatedAt)
 	if repo.Valid {
 		p.GithubRepo = &repo.String
 	}
@@ -180,14 +189,35 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = filepath.Base(abs)
 	}
+	// Resolve the default (Personal) workspace and set workspace_id explicitly
+	// (D-09). The column has DEFAULT 1 as a backstop, but the explicit resolve is
+	// the documented interim behavior Phase 26's WSPROJ-02 refines to the *active*
+	// workspace — and it guarantees create never silently produces a
+	// workspace-less project if the default is ever missing (500, not a default).
+	wsID, err := h.defaultWorkspaceID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	p, err := scanProject(h.db.QueryRow(
-		`INSERT INTO projects (name, repo_path, icon_letters, icon_color) VALUES (?, ?, ?, ?) RETURNING `+projectColumns,
-		name, abs, deriveLetters(name), pickColor()))
+		`INSERT INTO projects (name, repo_path, icon_letters, icon_color, workspace_id) VALUES (?, ?, ?, ?, ?) RETURNING `+projectColumns,
+		name, abs, deriveLetters(name), pickColor(), wsID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+// defaultWorkspaceID resolves the protected default workspace (D-02: identified
+// by the is_default flag, rename-proof — not by name "Personal"). Both create
+// paths call it before their INSERT to set workspace_id (D-09). A missing
+// default is surfaced as an error so create 500s rather than silently producing
+// a workspace-less project.
+func (h *projectHandlers) defaultWorkspaceID() (int64, error) {
+	var id int64
+	err := h.db.QueryRow(`SELECT id FROM workspaces WHERE is_default = 1`).Scan(&id)
+	return id, err
 }
 
 // reposBase is the hardcoded managed-clone root (D-02 / Claude's discretion: no
@@ -273,9 +303,17 @@ func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, r
 	// (the projects.description default) and NEVER blocks create. Applies to
 	// both the clone and reattach branches (this is their single INSERT).
 	desc := github.RepoDescription(r.Context(), canonical)
+	// Resolve + set the default workspace (D-09), same as the folder path. The
+	// literal `1` in the VALUES list is the `managed` marker (repo-first clones
+	// are Kamacu-owned) — workspace_id gets its own `?` placeholder + wsID arg.
+	wsID, err := h.defaultWorkspaceID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	p, err := scanProject(h.db.QueryRow(
-		`INSERT INTO projects (name, repo_path, github_repo, managed, description, icon_letters, icon_color) VALUES (?, ?, ?, 1, ?, ?, ?) RETURNING `+projectColumns,
-		name, dest, canonical, desc, deriveLetters(name), pickColor()))
+		`INSERT INTO projects (name, repo_path, github_repo, managed, description, icon_letters, icon_color, workspace_id) VALUES (?, ?, ?, 1, ?, ?, ?, ?) RETURNING `+projectColumns,
+		name, dest, canonical, desc, deriveLetters(name), pickColor(), wsID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
