@@ -24,10 +24,13 @@ import { ProjectAvatar } from "@/components/ui/ProjectAvatar";
 import { KamacuMark } from "@/components/brand/KamacuMark";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
 import { ProjectMenu } from "@/components/sidebar/ProjectMenu";
+import { WorkspaceSwitcher } from "@/components/sidebar/WorkspaceSwitcher";
+import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 
 export function ProjectSidebar() {
   const { data: projects } = useProjects();
   const { data: agentStatuses } = useAgentStatuses();
+  const { activeWorkspaceId } = useActiveWorkspace();
   const { projectId } = useParams();
   const location = useLocation();
   const [addOpen, setAddOpen] = useState(false);
@@ -65,8 +68,19 @@ export function ProjectSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
+        {/* WSNAV-01: the workspace switcher sits at the top of the content,
+            expanded-only — it self-hides in the icon rail via its own
+            group-data-[collapsible=icon]:hidden wrapper, so no wrapper here. */}
+        <WorkspaceSwitcher />
         <SidebarMenu className="gap-1 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-1 group-data-[collapsible=icon]:px-1">
-          {(projects ?? []).map((project) => {
+          {/* WSNAV-02 / D-12: a single filter over the project map feeds BOTH the
+              expanded rows and the collapsed rail avatars (same .map), so both
+              sidebar surfaces show only the active workspace's projects. While
+              activeWorkspaceId is null (hook still resolving) the list is empty
+              and fills in once useWorkspaces() resolves. */}
+          {(projects ?? [])
+            .filter((p) => p.workspace_id === activeWorkspaceId)
+            .map((project) => {
             const count = waitingByProject.get(project.id) ?? 0;
             const isActive = projectId === String(project.id);
             // Reuse the EXACT existing chip copy for the avatar a11y label.
