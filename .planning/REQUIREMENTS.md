@@ -9,8 +9,8 @@ Requirements for the Workspaces milestone. Each maps to exactly one roadmap phas
 
 ### Data & Migration
 
-- [ ] **WSDATA-01**: Every project belongs to exactly one workspace — a `workspaces` table plus a `projects.workspace_id` foreign key (migration `00012`), enforced so a project can never be workspace-less.
-- [ ] **WSDATA-02**: On first startup after upgrade, a one-time idempotent backfill creates a default **Personal** workspace and assigns every pre-existing project to it (mirrors the `BackfillProjectIcons` startup-hook pattern; safe to re-run).
+- [x] **WSDATA-01**: Every project belongs to exactly one workspace — a `workspaces` table plus a `projects.workspace_id` foreign key (migration `00012`), enforced so a project can never be workspace-less.
+- [x] **WSDATA-02**: On first startup after upgrade, a one-time idempotent backfill creates a default **Personal** workspace and assigns every pre-existing project to it (mirrors the `BackfillProjectIcons` startup-hook pattern; safe to re-run).
 
 ### Workspace Management
 
@@ -69,8 +69,8 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WSDATA-01 | Phase 25 | Pending |
-| WSDATA-02 | Phase 25 | Pending |
+| WSDATA-01 | Phase 25 | Complete |
+| WSDATA-02 | Phase 25 | Complete |
 | WSMGMT-01 | Phase 26 | Pending |
 | WSMGMT-02 | Phase 26 | Pending |
 | WSMGMT-03 | Phase 26 | Pending |
