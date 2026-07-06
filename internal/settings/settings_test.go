@@ -25,7 +25,6 @@ func testDB(t *testing.T) *sql.DB {
 
 func TestDefaultsValues(t *testing.T) {
 	want := map[string]string{
-		settings.KeyAgentExtraParams:  "--dangerously-skip-permissions",
 		settings.KeyWorktreeBase:      "~/.kamacu/worktrees/",
 		settings.KeyShell:             "bash",
 		settings.KeyBranchTemplate:    "task/{slug}-{id}",
@@ -93,20 +92,21 @@ func TestSetGetRoundTripAndUpsert(t *testing.T) {
 }
 
 func TestSetEmptyStringIsPreservedNotDefaulted(t *testing.T) {
-	// Pitfall 1: stored "" means "no extra parameters" — only an absent row
-	// (sql.ErrNoRows) falls back to the default.
+	// Pitfall 1: a stored "" is a real value — only an absent row
+	// (sql.ErrNoRows) falls back to the default. Proved with KeyPRReviewSeed
+	// (free-text, non-empty default) since agent_extra_params was retired in M001.
 	db := testDB(t)
 
-	if err := settings.Set(db, settings.KeyAgentExtraParams, ""); err != nil {
+	if err := settings.Set(db, settings.KeyPRReviewSeed, ""); err != nil {
 		t.Fatalf("Set empty: %v", err)
 	}
-	got, err := settings.Get(db, settings.KeyAgentExtraParams)
+	got, err := settings.Get(db, settings.KeyPRReviewSeed)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if got != "" {
 		t.Errorf("Get after storing empty string = %q, want \"\" (NOT the default %q)",
-			got, settings.Defaults[settings.KeyAgentExtraParams])
+			got, settings.Defaults[settings.KeyPRReviewSeed])
 	}
 }
 
@@ -131,15 +131,16 @@ func TestGetAllMergesStoredOverDefaults(t *testing.T) {
 	if err := settings.Set(db, settings.KeyShell, "bash"); err != nil {
 		t.Fatalf("Set shell: %v", err)
 	}
-	if err := settings.Set(db, settings.KeyAgentExtraParams, ""); err != nil {
-		t.Fatalf("Set extra params: %v", err)
+	// Overlay proof: a stored custom value for PRReviewSeed wins over its default.
+	if err := settings.Set(db, settings.KeyPRReviewSeed, "custom seed"); err != nil {
+		t.Fatalf("Set pr review seed: %v", err)
 	}
 	all, err = settings.GetAll(db)
 	if err != nil {
 		t.Fatalf("GetAll: %v", err)
 	}
-	if all[settings.KeyAgentExtraParams] != "" {
-		t.Errorf("GetAll[agent_extra_params] = %q, want \"\"", all[settings.KeyAgentExtraParams])
+	if all[settings.KeyPRReviewSeed] != "custom seed" {
+		t.Errorf("GetAll[pr_review_seed] = %q, want custom seed (stored overlays default)", all[settings.KeyPRReviewSeed])
 	}
 	if all[settings.KeyBranchTemplate] != settings.Defaults[settings.KeyBranchTemplate] {
 		t.Errorf("GetAll[branch_template] = %q, want untouched default", all[settings.KeyBranchTemplate])

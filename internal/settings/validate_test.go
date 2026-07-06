@@ -218,14 +218,6 @@ func TestValidatePRReviewSeed(t *testing.T) {
 	checkErrString(t, settings.Validate(settings.KeyPRReviewSeed, tooLong), "Prompt is too long.")
 }
 
-func TestValidateAgentExtraParamsIsPassThrough(t *testing.T) {
-	for _, v := range []string{"", "--dangerously-skip-permissions", "anything at all \"even unclosed", "--settings x"} {
-		if err := settings.Validate(settings.KeyAgentExtraParams, v); err != nil {
-			t.Errorf("Validate(agent_extra_params, %q) = %v, want nil (pass-through)", v, err)
-		}
-	}
-}
-
 func TestSetNeverStoresInvalidValue(t *testing.T) {
 	// BRANCH-02: validation failure means nothing is written.
 	db := testDB(t)

@@ -13,7 +13,6 @@ import (
 
 // Setting keys. The set of valid keys is exactly the Defaults map's keys.
 const (
-	KeyAgentExtraParams  = "agent_extra_params"
 	KeyWorktreeBase      = "worktree_base"
 	KeyShell             = "shell"
 	KeyBranchTemplate    = "branch_template"
@@ -24,10 +23,6 @@ const (
 
 // Defaults maps each setting key to its code default. Absent row = default.
 var Defaults = map[string]string{
-	// AGENT-02: intentionally defaults the skip-permissions flag ON — a
-	// deliberate reversal of v1.0's D-51 interactive-by-default posture.
-	// The user can clear the field to restore permission prompts.
-	KeyAgentExtraParams: "--dangerously-skip-permissions",
 	KeyWorktreeBase:     "~/.kamacu/worktrees/", // WT-01; stored raw, expanded at use
 	KeyShell:            "bash",                 // SHELL-01
 	KeyBranchTemplate:   "task/{slug}-{id}",     // BRANCH-01
@@ -43,8 +38,8 @@ var Defaults = map[string]string{
 
 // Get returns the stored value for key, or the code default when no row
 // exists. Only sql.ErrNoRows falls back to the default — a stored empty
-// string is a real value (Pitfall 1: "" for agent_extra_params means
-// "no extra parameters", not "use the default").
+// string is a real value (Pitfall 1: a stored "" is a real value, not
+// "use the default").
 func Get(db *sql.DB, key string) (string, error) {
 	var v string
 	err := db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&v)

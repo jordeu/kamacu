@@ -109,29 +109,6 @@ func TestSettingsPutInvalidTemplateStoresNothing(t *testing.T) {
 	}
 }
 
-func TestSettingsPutEmptyExtraParams(t *testing.T) {
-	srv, _, _ := newTestServer(t)
-
-	status, body := doJSON(t, http.MethodPut, srv.URL+"/api/settings/agent_extra_params",
-		map[string]string{"value": ""})
-	if status != http.StatusOK {
-		t.Fatalf("PUT empty = %d, want 200 (body %v)", status, body)
-	}
-	if v, ok := body["value"].(string); !ok || v != "" {
-		t.Errorf("PUT response value = %v, want \"\"", body["value"])
-	}
-
-	// Empty ≠ absent: GET shows value "" with the skip-permissions default.
-	_, all := doJSON(t, http.MethodGet, srv.URL+"/api/settings", nil)
-	entry := all["agent_extra_params"].(map[string]any)
-	if v, ok := entry["value"].(string); !ok || v != "" {
-		t.Errorf("GET value = %v, want \"\" (NOT the default)", entry["value"])
-	}
-	if entry["default"] != "--dangerously-skip-permissions" {
-		t.Errorf("GET default = %v, want --dangerously-skip-permissions", entry["default"])
-	}
-}
-
 func TestSettingsPutUnknownShell(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
