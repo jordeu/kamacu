@@ -2,8 +2,8 @@
 
 **Active Milestone:** M001: Configurable Agents
 **Active Slice:** S01: Agent data foundation and spawn engine
-**Phase:** planning
-**Requirements Status:** 6 active · 6 validated · 5 deferred · 0 out of scope
+**Phase:** evaluating-gates
+**Requirements Status:** 12 active · 6 validated · 5 deferred · 0 out of scope
 
 ## Milestone Registry
 - 🔄 **M001:** Configurable Agents
@@ -19,4 +19,4 @@
 - None
 
 ## Next Action
-Slice S01 has no DB tasks. Plan slice tasks before execution.
+Evaluate 2 quality gate(s) for S01 before execution.
