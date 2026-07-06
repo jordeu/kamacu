@@ -2,4 +2,4 @@
 
 ## Milestones
 
-- 🔄 **M001: Configurable Agents** (`depends:[—]`)
+- ✅ **M001: Configurable Agents** (`depends:[—]`)

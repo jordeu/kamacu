@@ -1,54 +1,55 @@
 ---
 id: T05
-parent: S01
+parent: S02
 milestone: M001
 key_files:
-  - internal/session/manager.go
-  - internal/api/sessions.go
+  - web/src/components/layout/ActiveSessionsBar.tsx
+  - internal/store/migrations/00014_agent_extra_params.sql
+  - internal/api/agents_backfill.go
   - internal/api/agents_crud.go
-  - internal/api/agents_crud_test.go
+  - internal/api/sessions.go
+  - internal/api/sessions_test.go
+  - web/src/components/settings/AgentNameDialog.tsx
+  - web/src/pages/SettingsPage.tsx
+  - web/src/api/types.ts
+  - web/src/api/mutations.ts
 key_decisions:
-  - Engine branch keyed on SpawnOpts.AgentEngine: 'claude' or '' (back-compat) -> existing argv unchanged byte-for-byte; any other value -> custom path (LookPath + exec.Command on AgentArgs). Fake-claude regression suite is the gate and passes unchanged
-  - Session stays a leaf: the API handler renders the template (renderAgentCommand) and passes already-tokenized AgentArgs; session does only LookPath + exec.Command. No session->settings import (avoids layering inversion)
-  - Tokenize-then-substitute-per-token order: a {{worktree}} value with spaces (e.g. /home/user/my projects/wt) stays a single token rather than re-splitting. The naive replace-then-tokenize broke this; the unit test caught it
-  - {{session_id}} is honored as an informational stable uuid for users who wire resume-style flags, even though custom agents don't resume (D-M001-2). Unknown placeholders ({{foo}}) are left literal — degrade-don't-break at the config layer
+  - (none)
 duration: 
 verification_result: passed
-completed_at: 2026-07-06T16:02:49.008Z
+completed_at: 2026-07-06T17:19:50.932Z
 blocker_discovered: false
 ---
 
-# T05: Spawn engine now branches on agent.engine: claude path byte-for-byte unchanged (fake-claude tests green = the milestone's key risk retired); custom path renders the command template (tokenize-then-substitute per token, fixing a spaces-in-path bug) in the worktree PTY.
+# T05: Human-verify gate PASSED (6-step loop approved); fixed two gate-surfaced gaps (custom agents in the Active Sessions bar; relocated extra claude params into the Claude agent edit dialog).
 
-**Spawn engine now branches on agent.engine: claude path byte-for-byte unchanged (fake-claude tests green = the milestone's key risk retired); custom path renders the command template (tokenize-then-substitute per token, fixing a spaces-in-path bug) in the worktree PTY.**
+**Human-verify gate PASSED (6-step loop approved); fixed two gate-surfaced gaps (custom agents in the Active Sessions bar; relocated extra claude params into the Claude agent edit dialog).**
 
 ## What Happened
 
-Refactored the KindAgent spawn block in internal/session/manager.go to branch on a new SpawnOpts.AgentEngine field. The CLAUDE path (engine=="claude" or "" back-compat) is byte-for-byte unchanged: same session-id/--resume fork, same --settings hook overlay, same ExtraArgs append, same env. The CUSTOM path (any other engine value) does exec.LookPath(opts.AgentArgs[0]) + exec.Command(bin, opts.AgentArgs[1:]...), cmd.Dir=worktree, same TERM/COLORTERM env posture. No hook overlay, no BEL scanning, no resume. Added SpawnOpts.AgentEngine + SpawnOpts.AgentArgs fields.
+The human-verify gate ran the full 6-step loop against a live binary and APPROVED. The gate surfaced two genuine gaps that became in-scope fixes (D012: the gate may drive redesign):
 
-The API handler (internal/api/sessions.go) resolves the project's agent alongside the existing worktree_path read (a JOIN tasks->projects->agents), hoists agentEngine/agentCommand to the spawn-handler scope, and for a custom agent calls renderAgentCommand to produce the split argv. renderAgentCommand lives in agents_crud.go (api package, so session stays a leaf with no settings import) and reuses settings.Tokenize for shell-splitting (no new deps, D007).
+1. Custom-agent sessions invisible in the Active Sessions bar — the bar's LIVE filter (built v1.6, pre-dating the 'running' state) only passed working/waiting/idle, so a custom agent's 'running' status was fetched but dropped. Fixed: widened the filter, added a running CountGroup (blue, via dotMeta), ranked running between working and idle in the expanded list, included it in the aria-label. SBAR-01's 'every active agent session' is now honest for custom agents.
 
-Hit one real bug caught by the unit test: the initial renderAgentCommand did string-replace-then-tokenize, which broke a {{worktree}} value containing spaces (the path re-split into multiple tokens). Rewrote to tokenize-first-then-substitute-per-token so a substituted value with spaces stays a single token -- both --cwd={{worktree}} and a bare {{worktree}} now survive intact. 7 unit cases cover bare command, flags, quoted args, worktree placeholder (with spaces), session_id placeholder, unknown placeholder (left literal), and empty template.
+2. Standalone 'Extra claude parameters' global Settings section felt orphaned — relocated onto the Claude agent row so the agent is configured wholly in its edit dialog. Migration 00014 (agents.extra_params) + BackfillAgentExtraParams startup hook (copies the effective setting value — code default OR user override — into the claude seed, idempotent) + spawn-path swap (reads extra_params from the joined agent row instead of settings.Get; fake-claude regression intact) + AgentNameDialog 'Extra parameters' field for claude-engine agents + removed the global section. This reversed M001's explicit deferral after the user confirmed (extra_params_move). 3 existing extra-params tests updated to the agent-row model.
 
-The fake-claude regression suite (TestAgentLifecycle -- full spawn + hooks + resume lifecycle) passes UNCHANGED, proving the claude argv is byte-for-byte preserved. This retires the milestone's key risk.
+The gate itself: (1) add a custom agent in Settings (echo/sleep), (2) set it default, (3) select it on a project, (4) spawn it in the Agent tab (saw running then exited), (5) switch back to Claude (working/waiting + resume + quota all returned with zero regression), (6) confirmed custom agents now appear in the Active Sessions bar AND the Claude agent's edit dialog carries the extra parameters. User: 'both look right, approved.'
 
 ## Verification
 
-go test ./internal/api/... -run TestAgentLifecycle -> PASS (claude path regression gate, 5.191s). go test ./internal/api/... ./internal/session/... -> both ok (89s/5.4s). TestRenderAgentCommand 7/7 cases (bare, flags, quoted, worktree-with-spaces, session_id, unknown-literal, empty). go vet ./internal/api/... ./internal/session/... ./cmd/kamacu/... clean. go build ./cmd/kamacu/... ok.
+Human-verify gate: user ran the full 6-step loop against a live binary (./bin/kamacu) and reported 'both look right, approved'. Confirmed: (a) custom agent runs in the Agent tab with running/exited status; (b) Claude non-regression (working/waiting + resume + quota intact); (c) custom-agent sessions now appear in the Active Sessions bar (gate-surfaced fix); (d) extra claude parameters now edited in the Claude agent dialog, global section removed (gate-surfaced relocation). Automated gates throughout: go test ./... all 13 packages green; go vet clean; tsc -b + vite build exit 0; fake-claude regression (TestAgentLifecycle) intact across every spawn-path change.
 
 ## Verification Evidence
 
 | # | Command | Exit Code | Verdict | Duration |
 |---|---------|-----------|---------|----------|
-| 1 | `go test ./internal/api/... -run TestAgentLifecycle` | 0 | ✅ pass (claude regression gate) | 5191ms |
-| 2 | `go test ./internal/api/... ./internal/session/...` | 0 | ✅ pass | 89142ms |
-| 3 | `go test ./internal/api/... -run TestRenderAgentCommand -v` | 0 | ✅ pass | 5000ms |
-| 4 | `go vet ./internal/api/... ./internal/session/... ./cmd/kamacu/...` | 0 | ✅ pass | 3000ms |
-| 5 | `go build ./cmd/kamacu/...` | 0 | ✅ pass | 3000ms |
+| 1 | `manual human-verify gate (6-step loop, ./bin/kamacu)` | 0 | ✅ pass (user-approved) | 0ms |
+| 2 | `go test ./... (after both gate fixes)` | 0 | ✅ pass | 170000ms |
+| 3 | `cd web && tsc -b && vite build` | 0 | ✅ pass | 13000ms |
 
 ## Deviations
 
-Two design refinements from the plan, both improving correctness: (1) The custom command is rendered (template substitute + tokenize) at the API layer, not in session — keeps session a pure leaf with no settings import; SpawnOpts carries already-split AgentArgs []string. (2) renderAgentCommand was initially string-replace-then-tokenize, which broke worktree paths containing spaces (they'd re-split into multiple tokens); rewritten to tokenize-first-then-substitute-per-token so a substituted value with spaces stays one token. Caught by the unit test, not at a live gate.
+The gate surfaced two genuine gaps that became in-scope fixes (the gate working as designed, per D012): (1) custom-agent sessions were invisible in the Active Sessions bar (status 'running' wasn't in the bar's LIVE filter / count groups) — fixed by widening the filter + adding a running CountGroup in ActiveSessionsBar.tsx; (2) the standalone 'Extra claude parameters' global Settings section felt orphaned now that Claude is one agent — relocated onto the Claude agent row (migration 00014 + BackfillAgentExtraParams + spawn-path swap + AgentNameDialog field), folding what M001's CONTEXT had explicitly deferred into the milestone because the gate showed the deferral shipped an inconsistency. The deferral reversal was user-approved (extra_params_move = 'Do it properly now').
 
 ## Known Issues
 
@@ -56,7 +57,13 @@ None.
 
 ## Files Created/Modified
 
-- `internal/session/manager.go`
-- `internal/api/sessions.go`
+- `web/src/components/layout/ActiveSessionsBar.tsx`
+- `internal/store/migrations/00014_agent_extra_params.sql`
+- `internal/api/agents_backfill.go`
 - `internal/api/agents_crud.go`
-- `internal/api/agents_crud_test.go`
+- `internal/api/sessions.go`
+- `internal/api/sessions_test.go`
+- `web/src/components/settings/AgentNameDialog.tsx`
+- `web/src/pages/SettingsPage.tsx`
+- `web/src/api/types.ts`
+- `web/src/api/mutations.ts`

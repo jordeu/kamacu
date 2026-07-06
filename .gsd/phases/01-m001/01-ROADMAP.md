@@ -18,7 +18,7 @@
 - [x] **S01: Agent data foundation and spawn engine** `risk:medium` `depends:[]`
   > After this: After this: a custom agent row can be created via API, a project assigned to it, and spawning that project's task runs the agent's command in the worktree PTY with running/exited status; a claude project still shows working/waiting + resume.
 
-- [ ] **S02: Agent management UI and per-project selection** `risk:low` `depends:[S01]`
+- [x] **S02: Agent management UI and per-project selection** `risk:low` `depends:[S01]`
   > After this: After this: the user adds a custom agent in Settings, picks it on a project, opens a task, and sees that agent run in the Agent tab with running/exited status and working terminal reattach; switching the project back to Claude restores working/waiting + resume with no UI regression.
 
 ## Boundary Map
