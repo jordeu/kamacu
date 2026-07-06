@@ -100,7 +100,9 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
               Selecting another workspace moves the project (and, if it is the
               open one, the view follows it — D-09). */}
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>Move to workspace</DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger aria-label="Move to workspace">
+              Move to
+            </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               <DropdownMenuRadioGroup value={String(project.workspace_id)}>
                 {sortedWorkspaces.map((ws) => (
