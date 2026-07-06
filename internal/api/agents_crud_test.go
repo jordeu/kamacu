@@ -260,3 +260,83 @@ func TestAgentSetDefault(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderAgentCommand covers the custom-engine template render: placeholder
+// substitution + settings.Tokenize shell-splitting.
+func TestRenderAgentCommand(t *testing.T) {
+	cases := []struct {
+		name       string
+		template   string
+		worktree   string
+		sessionID  string
+		wantBin    string
+		wantArgs   []string
+	}{
+		{
+			name:      "bare command",
+			template:  "gemini",
+			wantBin:   "gemini",
+			wantArgs:  nil,
+		},
+		{
+			name:      "command with flags",
+			template:  "aider --model sonnet",
+			wantBin:   "aider",
+			wantArgs:  []string{"--model", "sonnet"},
+		},
+		{
+			name:      "quoted arg with spaces",
+			template:  `aider --model "claude 3.5 sonnet"`,
+			wantBin:   "aider",
+			wantArgs:  []string{"--model", "claude 3.5 sonnet"},
+		},
+		{
+			name:      "worktree placeholder substituted",
+			template:  "myagent --cwd {{worktree}}",
+			worktree:  "/tmp/path with spaces/wt",
+			wantBin:   "myagent",
+			wantArgs:  []string{"--cwd", "/tmp/path with spaces/wt"},
+		},
+		{
+			name:      "session_id placeholder substituted",
+			template:  "myagent --session {{session_id}}",
+			sessionID: "abc-123",
+			wantBin:   "myagent",
+			wantArgs:  []string{"--session", "abc-123"},
+		},
+		{
+			name:      "unknown placeholder left literal (degrade-don't-break)",
+			template:  "myagent --foo {{bar}}",
+			wantBin:   "myagent",
+			wantArgs:  []string{"--foo", "{{bar}}"},
+		},
+		{
+			name:      "empty template yields nil",
+			template:  "   ",
+			wantBin:   "",
+			wantArgs:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderAgentCommand(tc.template, tc.worktree, tc.sessionID)
+			var gotBin string
+			var gotArgs []string
+			if len(got) > 0 {
+				gotBin = got[0]
+				gotArgs = got[1:]
+			}
+			if gotBin != tc.wantBin {
+				t.Errorf("bin = %q, want %q", gotBin, tc.wantBin)
+			}
+			if len(gotArgs) != len(tc.wantArgs) {
+				t.Fatalf("args = %v, want %v", gotArgs, tc.wantArgs)
+			}
+			for i, w := range tc.wantArgs {
+				if gotArgs[i] != w {
+					t.Errorf("args[%d] = %q, want %q", i, gotArgs[i], w)
+				}
+			}
+		})
+	}
+}

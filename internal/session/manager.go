@@ -56,8 +56,18 @@ type SpawnOpts struct {
 	Kind            Kind   // zero value = KindBash (full Phase 2/3 backward compatibility)
 	ResumeSessionID string // agent-only: spawn `claude --resume <id>` instead of minting a new --session-id (RCVR-02, D-55)
 	// ExtraArgs is agent-only: tokenized settings extras, appended after the
-	// fixed flags (AGENT-01).
+	// fixed flags (AGENT-01). Used only by the claude engine path.
 	ExtraArgs []string
+	// AgentEngine selects the agent spawn path (M001). "claude" (or "" for
+	// back-compat) runs the full claude argv (session-id/resume/--settings hook
+	// overlay); "custom" runs AgentArgs as a plain command in the worktree.
+	AgentEngine string
+	// AgentArgs is custom-engine-only: the already-split argv tokens (binary
+	// name at [0]) from the project's agent command template, placeholder-
+	// substituted and tokenized by the API handler. The claude path ignores
+	// this (it builds its own argv). Kept as a leaf concern: session does
+	// LookPath(args[0]) + exec.Command, no settings import.
+	AgentArgs []string
 	// Shell is bash-only: the settings shell; "" keeps the $SHELL fallback
 	// (back-compat for direct-Spawn tests).
 	Shell string
@@ -143,6 +153,26 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		cfg := m.agentCfg
 		m.mu.Unlock()
 
+		// M001: branch on the resolved agent's engine. "claude" (and "" for
+		// back-compat with any direct-Spawn caller) builds the full claude argv
+		// (session-id/resume/--settings hook overlay) BYTE-FOR-BYTE as before —
+		// the fake-claude regression suite is the gate. "custom" renders the
+		// agent's command template (already split by the API handler) as a plain
+		// command in the worktree, no hook overlay / no BEL / no resume.
+		if opts.AgentEngine != "" && opts.AgentEngine != "claude" {
+			if len(opts.AgentArgs) == 0 {
+				return nil, fmt.Errorf("custom agent spawn has no command")
+			}
+			bin, lperr := exec.LookPath(opts.AgentArgs[0])
+			if lperr != nil {
+				return nil, fmt.Errorf("agent binary not found on PATH: %w", lperr)
+			}
+			cmd = exec.Command(bin, opts.AgentArgs[1:]...)
+			cmd.Dir = dir
+			// Same env posture as the claude path: inherit everything the user's
+			// terminal would have, then pin terminal identity (D-52).
+			cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+		} else {
 		// Resume reuses the stored id (verified v2.1.173: --resume keeps the
 		// same session id, never forks); a fresh spawn mints a new one
 		// (D-55 newest-wins). NEVER pass --fork-session (it forks a new id,
@@ -182,6 +212,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		// (auth, MCP servers, node shims), then pins terminal identity. This
 		// deliberately differs from bash sessions' minimal explicit env.
 		cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+		} // end claude-engine branch (M001)
 	} else if opts.TmuxName != "" {
 		// tmux-backed tab (TMUX-02): the attach client is just another
 		// full-screen PTY child. LookPath-before-PTY posture preserved (D-84

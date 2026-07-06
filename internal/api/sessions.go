@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
 	"kamacu/internal/tmux"
@@ -209,9 +211,16 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// spawn time — a stale client Resume after a Reset minted a new id simply
 	// resumes the NEW id, which is correct newest-wins behavior).
 	var csid sql.NullString
+	var agentEngine, agentCommand string // M001: resolved alongside the task's worktree
 	if req.TaskID > 0 {
 		var path sql.NullString
-		err := h.db.QueryRow(`SELECT worktree_path, claude_session_id FROM tasks WHERE id = ?`, req.TaskID).Scan(&path, &csid)
+		err := h.db.QueryRow(
+			`SELECT t.worktree_path, t.claude_session_id, a.engine, a.command
+			 FROM tasks t
+			 JOIN projects p ON p.id = t.project_id
+			 JOIN agents a ON a.id = p.agent_id
+			 WHERE t.id = ?`, req.TaskID,
+		).Scan(&path, &csid, &agentEngine, &agentCommand)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
@@ -265,6 +274,17 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		opts.ExtraArgs = settings.Tokenize(raw)
+		// M001: carry the resolved agent's engine + (for custom) its rendered
+		// command into SpawnOpts. The claude path ignores AgentArgs and builds
+		// its own argv; the custom path runs AgentArgs as a plain command.
+		opts.AgentEngine = agentEngine
+		if agentEngine != "" && agentEngine != "claude" {
+			// Custom agents don't resume, but {{session_id}} is offered as an
+			// informational stable uuid for users who wire it into their
+			// template. Minted here (Manager.Spawn's internal id isn't visible
+			// to the handler); cheap, no persistence.
+			opts.AgentArgs = renderAgentCommand(agentCommand, opts.Cwd, uuid.NewString())
+		}
 	} else if reattach {
 		// Reattach variant (TMUX-05, D-88): reconnect to a surviving tmux row by
 		// name instead of minting a new one. The worktree query above already set

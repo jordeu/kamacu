@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"kamacu/internal/settings"
 )
 
 // Agent is the JSON shape of an agents row (migration 00013). Mirrors the
@@ -315,4 +317,35 @@ func (h *agentCRUDHandlers) setDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
+}
+
+// renderAgentCommand substitutes the {{worktree}} and {{session_id}} placeholders
+// in a custom agent's command template by shell-splitting FIRST (settings.Tokenize)
+// settings.Tokenize (reused -- no new deps, D007). Returns the full argv tokens
+// (binary name at [0]). The worktree is ALWAYS the spawn cwd (set by the
+// handler), so {{worktree}} lets a user pass an explicit path flag if their
+// agent needs one; {{session_id}} is a stable uuid for users who wire resume-
+// style flags (custom agents don't resume, but the placeholder is honored).
+//
+// Unknown placeholders (e.g. {{foo}}) are left literal -- safer than erroring on
+// a user's valid-but-unsupported token (D005 degrade-don't-break at the config
+// layer). An empty/whitespace template yields nil (the spawn handler rejects it
+// with a clear error before reaching the session layer).
+//
+// NOTE: this lives in the api package (not session) so session stays a leaf with
+// no settings import; the API handler owns template rendering + tokenization and
+// hands session already-split tokens.
+func renderAgentCommand(template, worktree, sessionID string) []string {
+	// Tokenize FIRST, then substitute per token: a substituted value with
+	// spaces (e.g. a worktree path under a directory with spaces) stays a
+	// single token rather than re-splitting. --cwd={{worktree}} and a bare
+	// {{worktree}} both survive intact. (Pre-substitution string replacement
+	// would break paths with spaces; this is the robust order.)
+	tokens := settings.Tokenize(template)
+	for i, tok := range tokens {
+		tok = strings.ReplaceAll(tok, "{{worktree}}", worktree)
+		tok = strings.ReplaceAll(tok, "{{session_id}}", sessionID)
+		tokens[i] = tok
+	}
+	return tokens
 }
