@@ -136,6 +136,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// One-shot idempotent agent guard (M001 AGENTDATA): guarantee a default
+	// Claude Code agent row always exists, mirroring BackfillWorkspaces. Ordering
+	// is load-bearing -- it MUST run after store.Migrate (the agents table must
+	// exist) and sits after the workspace backfill to keep the startup one-shots
+	// together. Cheap no-op on healthy boots; re-creates the claude seed only if
+	// the default is gone.
+	if err := api.BackfillAgents(db); err != nil {
+		slog.Error("backfilling agents", "error", err)
+		os.Exit(1)
+	}
+
 	// Kamacu-managed tmux config (D-79 status off, D-80 mouse on), regenerated
 	// at every start in the data dir next to the DB — a stable path that survives
 	// reboots, so a tmux server started by a previous Kamacu run still references

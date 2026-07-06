@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-07-06T13:45:20Z | Files: 208 | Described: 0/208
-<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T13:45:20Z","fingerprint":"e9d93b8264d963a1c0b12dbfeffac2b405574973","fileCount":208,"truncated":false} -->
+Generated: 2026-07-06T14:24:43Z | Files: 210 | Described: 0/210
+<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T14:24:43Z","fingerprint":"2fa9cc05d01355697ab96a9b0628f8eff5080d3b","fileCount":210,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -77,6 +77,7 @@ Generated: 2026-07-06T13:45:20Z | Files: 208 | Described: 0/208
 - `internal/settings/validate.go`
 
 ### internal/store/
+- `internal/store/agents_migration_test.go`
 - `internal/store/migrate.go`
 - `internal/store/store_test.go`
 - `internal/store/store.go`
@@ -95,6 +96,7 @@ Generated: 2026-07-06T13:45:20Z | Files: 208 | Described: 0/208
 - `internal/store/migrations/00010_muted_palette.sql`
 - `internal/store/migrations/00011_diff_viewed.sql`
 - `internal/store/migrations/00012_workspaces.sql`
+- `internal/store/migrations/00013_agents.sql`
 
 ### internal/tmux/
 - `internal/tmux/tmux_test.go`
