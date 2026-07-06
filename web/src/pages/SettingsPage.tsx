@@ -37,7 +37,6 @@ function withMono(text: string, tokens: string[]): ReactNode {
   return parts;
 }
 
-const AGENT_HELP = `Appended to every claude spawn, starting with the next Start agent. Remove --dangerously-skip-permissions to restore interactive permission prompts.`;
 const WORKTREE_HELP = `New task worktrees are created under this directory. Existing worktrees stay where they are.`;
 const SHELL_HELP = `Used when opening a new bash tab.`;
 const BRANCH_HELP = `Tokens: {slug}, {id}, {title}. Applied when a task is created — e.g. task/fix-login-42.`;
@@ -157,18 +156,6 @@ export default function SettingsPage() {
           </div>
         ) : (
           <div className="mt-6 flex flex-col gap-6">
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Agent`}</h2>
-              {/* No warning chrome — the configured default renders like any
-                  other field (D-51 reversal is specified behavior). */}
-              <SettingsField
-                settingKey="agent_extra_params"
-                label={`Extra claude parameters`}
-                entry={settings.agent_extra_params}
-                mono
-                help={withMono(AGENT_HELP, ["--dangerously-skip-permissions"])}
-              />
-            </section>
             <AgentsSection />
             <section className="flex flex-col gap-3">
               <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Worktrees`}</h2>

@@ -211,16 +211,16 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// spawn time — a stale client Resume after a Reset minted a new id simply
 	// resumes the NEW id, which is correct newest-wins behavior).
 	var csid sql.NullString
-	var agentEngine, agentCommand string // M001: resolved alongside the task's worktree
+	var agentEngine, agentCommand, agentExtraParams string // M001: resolved alongside the task's worktree
 	if req.TaskID > 0 {
 		var path sql.NullString
 		err := h.db.QueryRow(
-			`SELECT t.worktree_path, t.claude_session_id, a.engine, a.command
+			`SELECT t.worktree_path, t.claude_session_id, a.engine, a.command, a.extra_params
 			 FROM tasks t
 			 JOIN projects p ON p.id = t.project_id
 			 JOIN agents a ON a.id = p.agent_id
 			 WHERE t.id = ?`, req.TaskID,
-		).Scan(&path, &csid, &agentEngine, &agentCommand)
+		).Scan(&path, &csid, &agentEngine, &agentCommand, &agentExtraParams)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
@@ -266,14 +266,11 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// error (absent rows read as defaults) is exceptional on local SQLite:
 	// fail the spawn rather than silently falling back.
 	if kind == session.KindAgent {
-		// One read covers BOTH the fresh and resume variants — opts is shared
-		// (AGENT-01: extras ride every claude spawn).
-		raw, err := settings.Get(h.db, settings.KeyAgentExtraParams)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "couldn't start a session")
-			return
-		}
-		opts.ExtraArgs = settings.Tokenize(raw)
+		// M001 gate follow-up: extras now live on the agent row (relocated from
+		// the global agent_extra_params setting). AGENT-01 unchanged: extras
+		// ride every claude spawn. Custom agents ignore extras (their flags
+		// are in the command template).
+		opts.ExtraArgs = settings.Tokenize(agentExtraParams)
 		// M001: carry the resolved agent's engine + (for custom) its rendered
 		// command into SpawnOpts. The claude path ignores AgentArgs and builds
 		// its own argv; the custom path runs AgentArgs as a plain command.

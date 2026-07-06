@@ -47,6 +47,11 @@ export function AgentNameDialog({
   const [command, setCommand] = useState(
     mode === "edit" ? (agent?.command ?? "") : "",
   );
+  // M001 gate follow-up: claude-engine extra params (relocated from the global
+  // setting). Only shown for claude-engine agents (the system seed).
+  const [extraParams, setExtraParams] = useState(
+    mode === "edit" ? (agent?.extra_params ?? "") : "",
+  );
   const [error, setError] = useState<string | null>(null);
   const createAgent = useCreateAgent();
   const updateAgent = useUpdateAgent();
@@ -58,6 +63,7 @@ export function AgentNameDialog({
     if (open) {
       setName(mode === "edit" ? (agent?.name ?? "") : "");
       setCommand(mode === "edit" ? (agent?.command ?? "") : "");
+      setExtraParams(mode === "edit" ? (agent?.extra_params ?? "") : "");
       setError(null);
     }
   }, [open, mode, agent?.name, agent?.command]);
@@ -73,6 +79,9 @@ export function AgentNameDialog({
           id: agent!.id,
           name: name.trim(),
           command: command.trim(),
+          // Only the claude engine uses extra_params; send it when editing a
+          // claude agent so the field is persisted on the row.
+          ...(agent!.engine === "claude" ? { extra_params: extraParams } : {}),
         });
       }
       onOpenChange(false);
@@ -126,6 +135,23 @@ export function AgentNameDialog({
               {" to pass the path or an id."}
             </p>
           </div>
+          {mode === "edit" && agent?.engine === "claude" && (
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="agent-extra-params" className="text-xs font-medium">
+                Extra parameters
+              </label>
+              <Input
+                id="agent-extra-params"
+                value={extraParams}
+                onChange={(event) => setExtraParams(event.target.value)}
+                className="font-mono text-xs"
+                placeholder="--dangerously-skip-permissions"
+              />
+              <p className="text-xs text-muted-foreground">
+                {"Extra flags appended to every claude spawn. Clear to restore permission prompts."}
+              </p>
+            </div>
+          )}
           {error && <p className="text-xs text-destructive">{error}</p>}
           <DialogFooter>
             <Button

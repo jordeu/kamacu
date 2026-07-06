@@ -146,6 +146,13 @@ func main() {
 		slog.Error("backfilling agents", "error", err)
 		os.Exit(1)
 	}
+	// M001 gate follow-up: relocate the legacy agent_extra_params global setting
+	// onto the Claude agent row (one-shot, idempotent). Runs after BackfillAgents
+	// (the seed row must exist). A no-op once the seed carries a value.
+	if err := api.BackfillAgentExtraParams(db); err != nil {
+		slog.Error("backfilling agent extra params", "error", err)
+		os.Exit(1)
+	}
 
 	// Kamacu-managed tmux config (D-79 status off, D-80 mouse on), regenerated
 	// at every start in the data dir next to the DB — a stable path that survives

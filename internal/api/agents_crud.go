@@ -19,8 +19,11 @@ type Agent struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Command   string `json:"command"`
-	Engine    string `json:"engine"`
-	IsDefault bool   `json:"is_default"`
+	Engine      string `json:"engine"`
+	// ExtraParams is claude-engine only (M001 gate follow-up): extra argv flags
+	// appended after the fixed claude flags at spawn. Custom agents ignore it.
+	ExtraParams string `json:"extra_params"`
+	IsDefault   bool   `json:"is_default"`
 	IsSystem  bool   `json:"is_system"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -28,14 +31,14 @@ type Agent struct {
 
 // agentColumns is the canonical SELECT/RETURNING column list; its ORDER must
 // match the scanAgent Scan order.
-const agentColumns = `id, name, command, engine, is_default, is_system, created_at, updated_at`
+const agentColumns = `id, name, command, engine, extra_params, is_default, is_system, created_at, updated_at`
 
 // scanAgent scans one agents row. is_default/is_system come back as INTEGER 0/1;
 // scan into ints and map to bool (the managedInt != 0 idiom in scanWorkspace).
 func scanAgent(row interface{ Scan(...any) error }) (Agent, error) {
 	var a Agent
 	var isDefaultInt, isSystemInt int
-	err := row.Scan(&a.ID, &a.Name, &a.Command, &a.Engine, &isDefaultInt, &isSystemInt, &a.CreatedAt, &a.UpdatedAt)
+	err := row.Scan(&a.ID, &a.Name, &a.Command, &a.Engine, &a.ExtraParams, &isDefaultInt, &isSystemInt, &a.CreatedAt, &a.UpdatedAt)
 	a.IsDefault = isDefaultInt != 0
 	a.IsSystem = isSystemInt != 0
 	return a, err
@@ -126,25 +129,26 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name    *string `json:"name"`
-		Command *string `json:"command"`
-		Engine  *string `json:"engine"`
+		Name        *string `json:"name"`
+		Command     *string `json:"command"`
+		Engine      *string `json:"engine"`
+		ExtraParams *string `json:"extra_params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == nil && req.Command == nil && req.Engine == nil {
+	if req.Name == nil && req.Command == nil && req.Engine == nil && req.ExtraParams == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
 
 	// Load the existing row to enforce the system-engine lock and build the
 	// conditional UPDATE (mirrors the projects partial-PATCH pattern).
-	var curName, curCommand, curEngine string
+	var curName, curCommand, curEngine, curExtra string
 	var isSystem int
-	err := h.db.QueryRow(`SELECT name, command, engine, is_system FROM agents WHERE id = ?`, id).
-		Scan(&curName, &curCommand, &curEngine, &isSystem)
+	err := h.db.QueryRow(`SELECT name, command, engine, extra_params, is_system FROM agents WHERE id = ?`, id).
+		Scan(&curName, &curCommand, &curEngine, &curExtra, &isSystem)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -198,10 +202,16 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 	if req.Engine != nil {
 		engine = strings.TrimSpace(*req.Engine)
 	}
+	// Extra params is claude-engine config; an explicit empty string clears it,
+	// nil = untouched.
+	extra := curExtra
+	if req.ExtraParams != nil {
+		extra = *req.ExtraParams
+	}
 
 	a, err := scanAgent(h.db.QueryRow(
-		`UPDATE agents SET name = ?, command = ?, engine = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? RETURNING `+agentColumns,
-		name, command, engine, id))
+		`UPDATE agents SET name = ?, command = ?, engine = ?, extra_params = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? RETURNING `+agentColumns,
+		name, command, engine, extra, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return

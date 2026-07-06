@@ -60,6 +60,10 @@ export interface Agent {
   // hook/resume argv is built internally, not from this field).
   command: string;
   engine: "claude" | "custom";
+  // M001 gate follow-up: claude-engine only. Extra argv flags appended after
+  // the fixed claude flags at spawn (e.g. --dangerously-skip-permissions).
+  // Relocated from the global agent_extra_params setting. "" = none.
+  extra_params: string;
   is_default: boolean;
   is_system: boolean;
   created_at: string;

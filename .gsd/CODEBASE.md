@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-07-06T16:12:09Z | Files: 216 | Described: 0/216
-<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T16:12:09Z","fingerprint":"5cc56bb7eb09348ee78307e48d92cd53decaf97e","fileCount":216,"truncated":false} -->
+Generated: 2026-07-06T16:24:33Z | Files: 218 | Described: 0/218
+<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T16:24:33Z","fingerprint":"53e64b2957b0aa8d7c7dfd057427ec3498dba022","fileCount":218,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -172,6 +172,8 @@ Generated: 2026-07-06T16:12:09Z | Files: 216 | Described: 0/216
 - `web/src/components/quota/QuotaIndicator.tsx`
 
 ### web/src/components/settings/
+- `web/src/components/settings/AgentNameDialog.tsx`
+- `web/src/components/settings/AgentsSection.tsx`
 - `web/src/components/settings/CleanEligibleDialog.tsx`
 - `web/src/components/settings/ForceRemoveDialog.tsx`
 - `web/src/components/settings/SettingsField.tsx`

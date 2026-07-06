@@ -259,12 +259,14 @@ export function useUpdateAgent() {
       name,
       command,
       engine,
+      extra_params,
     }: {
       id: number;
       name?: string;
       command?: string;
       engine?: "claude" | "custom";
-    }) => patch<Agent>(`/api/agents/${id}`, { name, command, engine }),
+      extra_params?: string;
+    }) => patch<Agent>(`/api/agents/${id}`, { name, command, engine, extra_params }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },

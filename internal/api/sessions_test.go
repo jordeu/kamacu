@@ -485,8 +485,13 @@ func TestSessionFreshSpawnUnchangedByResumeField(t *testing.T) {
 // agent spawn carries the default --dangerously-skip-permissions AFTER the
 // fixed flags (AGENT-01/02 default-on — the deliberate D-51 reversal).
 func TestSessionAgentDefaultExtraParamsInArgv(t *testing.T) {
-	srv, _, _, _, argsFile := newResumeServer(t)
+	srv, _, db, _, argsFile := newResumeServer(t)
 	id, _ := worktreeTask(t, srv, "Default Extras")
+	// M001 gate follow-up: extras now come from the agent row; populate the
+	// default via the BackfillAgentExtraParams startup hook before spawning.
+	if err := BackfillAgentExtraParams(db); err != nil {
+		t.Fatalf("BackfillAgentExtraParams: %v", err)
+	}
 
 	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
 	if status != http.StatusCreated {
@@ -510,12 +515,16 @@ func TestSessionAgentDefaultExtraParamsInArgv(t *testing.T) {
 // removability + SET-03 next-spawn semantics; Pitfall 1: stored "" is a real
 // value, never re-defaulted).
 func TestSessionAgentExtraParamsRemovable(t *testing.T) {
-	srv, _, _, _, argsFile := newResumeServer(t)
+	srv, _, db, _, argsFile := newResumeServer(t)
 	id, _ := worktreeTask(t, srv, "No Extras")
-
-	status, body := doJSON(t, "PUT", srv.URL+"/api/settings/agent_extra_params", map[string]any{"value": ""})
+	// Populate the default first (production startup path), then clear it via
+	// the agent edit dialog (PATCH the claude seed extra_params to "").
+	if err := BackfillAgentExtraParams(db); err != nil {
+		t.Fatalf("BackfillAgentExtraParams: %v", err)
+	}
+	status, body := doJSON(t, "PATCH", srv.URL+"/api/agents/1", map[string]any{"extra_params": ""})
 	if status != http.StatusOK {
-		t.Fatalf("PUT agent_extra_params \"\": status = %d, want 200; body=%v", status, body)
+		t.Fatalf("PATCH agent extra_params \"\": status = %d, want 200; body=%v", status, body)
 	}
 
 	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
@@ -539,6 +548,11 @@ func TestSessionAgentExtraParamsRemovable(t *testing.T) {
 func TestSessionAgentResumeCarriesExtraParams(t *testing.T) {
 	srv, _, db, globRoot, argsFile := newResumeServer(t)
 	id, _ := worktreeTask(t, srv, "Resume Extras")
+	// M001 gate follow-up: extras now come from the agent row; populate the
+	// default via the startup hook before resuming.
+	if err := BackfillAgentExtraParams(db); err != nil {
+		t.Fatalf("BackfillAgentExtraParams: %v", err)
+	}
 
 	stored := uuid.NewString()
 	setTaskClaudeSession(t, db, id, stored)
