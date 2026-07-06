@@ -49,6 +49,12 @@ type Project struct {
 	// Personal workspace (id 1). Column ORDER here MUST match projectColumns and
 	// the scanProject Scan order (it sits between icon_color and the timestamps).
 	WorkspaceID int64 `json:"workspace_id"`
+	// AgentID is the M001 agent FK (migration 00013): INTEGER NOT NULL
+	// REFERENCES agents(id). Always present on the wire, never null (scan
+	// straight into int64). Every project has exactly one agent; migrated/
+	// created rows default to the Claude seed (id 1). Column ORDER here MUST
+	// match projectColumns (it sits between workspace_id and the timestamps).
+	AgentID int64 `json:"agent_id"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -94,7 +100,7 @@ func validateRepoPath(p string) (string, error) {
 	return abs, nil
 }
 
-const projectColumns = `id, name, repo_path, description, github_repo, managed, icon_letters, icon_color, workspace_id, created_at, updated_at`
+const projectColumns = `id, name, repo_path, description, github_repo, managed, icon_letters, icon_color, workspace_id, agent_id, created_at, updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
@@ -109,7 +115,7 @@ func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	// INTEGER NOT NULL (migration 00012, D-10) — scan straight into int64 (never
 	// null). Order MUST match projectColumns: managed, icon_letters, icon_color,
 	// workspace_id, then the timestamps.
-	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.IconLetters, &p.IconColor, &p.WorkspaceID, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.IconLetters, &p.IconColor, &p.WorkspaceID, &p.AgentID, &p.CreatedAt, &p.UpdatedAt)
 	if repo.Valid {
 		p.GithubRepo = &repo.String
 	}
@@ -163,6 +169,9 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// (WSPROJ-02 / D-10). Omitted → the default Personal workspace (D-14
 		// baseline). Resolved ONCE below and passed to both create paths.
 		WorkspaceID *int64 `json:"workspace_id"`
+		// AgentID (M001) lands the new project on a specific agent; omitted → the
+		// global default agent. Resolved ONCE below and passed to both create paths.
+		AgentID *int64 `json:"agent_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -181,9 +190,18 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, msg)
 		return
 	}
+	agID, status, aerr := h.resolveCreateAgentID(req.AgentID)
+	if aerr != nil {
+		msg := aerr.Error()
+		if status == http.StatusBadRequest {
+			msg = "agent not found"
+		}
+		writeError(w, status, msg)
+		return
+	}
 
 	if strings.TrimSpace(req.Repo) != "" {
-		h.createByRepo(w, r, req.Repo, req.Name, wsID)
+		h.createByRepo(w, r, req.Repo, req.Name, wsID, agID)
 		return
 	}
 
@@ -211,8 +229,8 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// workspace_id explicitly so create never silently produces a workspace-less
 	// project (the column DEFAULT 1 is only a backstop).
 	p, err := scanProject(h.db.QueryRow(
-		`INSERT INTO projects (name, repo_path, icon_letters, icon_color, workspace_id) VALUES (?, ?, ?, ?, ?) RETURNING `+projectColumns,
-		name, abs, deriveLetters(name), pickColor(), wsID))
+		`INSERT INTO projects (name, repo_path, icon_letters, icon_color, workspace_id, agent_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING `+projectColumns,
+		name, abs, deriveLetters(name), pickColor(), wsID, agID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -228,6 +246,15 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 func (h *projectHandlers) defaultWorkspaceID() (int64, error) {
 	var id int64
 	err := h.db.QueryRow(`SELECT id FROM workspaces WHERE is_default = 1`).Scan(&id)
+	return id, err
+}
+
+// defaultAgentID returns the global default agent id (M001 / R019). New projects
+// and projects whose agent is unset land on this agent (the Claude seed on a
+// fresh install). Mirrors defaultWorkspaceID.
+func (h *projectHandlers) defaultAgentID() (int64, error) {
+	var id int64
+	err := h.db.QueryRow(`SELECT id FROM agents WHERE is_default = 1`).Scan(&id)
 	return id, err
 }
 
@@ -258,6 +285,31 @@ func (h *projectHandlers) resolveCreateWorkspaceID(req *int64) (int64, int, erro
 	return id, 0, nil
 }
 
+// resolveCreateAgentID resolves the agent a new project uses (M001). When req is
+// non-nil it validates the requested id against the agents table: a non-existent
+// id returns (0, 400, err) so the caller rejects with "agent not found" WITHOUT
+// creating a row; any other error returns (0, 500, err). When req is nil it falls
+// back to the global default agent via defaultAgentID(). Mirrors
+// resolveCreateWorkspaceID.
+func (h *projectHandlers) resolveCreateAgentID(req *int64) (int64, int, error) {
+	if req != nil {
+		var exists int
+		err := h.db.QueryRow(`SELECT 1 FROM agents WHERE id = ?`, *req).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, http.StatusBadRequest, err
+		}
+		if err != nil {
+			return 0, http.StatusInternalServerError, err
+		}
+		return *req, 0, nil
+	}
+	id, err := h.defaultAgentID()
+	if err != nil {
+		return 0, http.StatusInternalServerError, err
+	}
+	return id, 0, nil
+}
+
 // reposBase is the hardcoded managed-clone root (D-02 / Claude's discretion: no
 // repos_base setting for v1.4). Clones nest under it as <owner>/<name>.
 const reposBase = "~/.kamacu/repos/"
@@ -266,7 +318,7 @@ const reposBase = "~/.kamacu/repos/"
 // research §"Clone-then-Create Ordering" 8-step sequence and is load-bearing for
 // atomicity: validate BEFORE any clone, clone BEFORE any row, row only after the
 // clone returns exit 0.
-func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, repoInput, nameInput string, wsID int64) {
+func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, repoInput, nameInput string, wsID, agID int64) {
 	// 1. Parse/canonicalize the ref. The ONLY hard, host-independent reject.
 	if _, err := github.ParseRepoRef(repoInput); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -346,8 +398,8 @@ func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, r
 	// `1` in the VALUES list is the `managed` marker (repo-first clones are
 	// Kamacu-owned) — workspace_id gets its own `?` placeholder + wsID arg.
 	p, err := scanProject(h.db.QueryRow(
-		`INSERT INTO projects (name, repo_path, github_repo, managed, description, icon_letters, icon_color, workspace_id) VALUES (?, ?, ?, 1, ?, ?, ?, ?) RETURNING `+projectColumns,
-		name, dest, canonical, desc, deriveLetters(name), pickColor(), wsID))
+		`INSERT INTO projects (name, repo_path, github_repo, managed, description, icon_letters, icon_color, workspace_id, agent_id) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?) RETURNING `+projectColumns,
+		name, dest, canonical, desc, deriveLetters(name), pickColor(), wsID, agID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -416,13 +468,17 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		// NOT a dedicated route. Omitted → left untouched; supplied → validated
 		// against the workspaces table before the row is touched.
 		WorkspaceID *int64 `json:"workspace_id"`
+		// AgentID (M001) changes the project's agent. Omitted → untouched;
+		// supplied → validated against the agents table before the row is touched.
+		AgentID *int64 `json:"agent_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Name == nil && req.Description == nil && req.GithubRepo == nil &&
-		req.IconLetters == nil && req.IconColor == nil && req.WorkspaceID == nil {
+		req.IconLetters == nil && req.IconColor == nil && req.WorkspaceID == nil &&
+		req.AgentID == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
@@ -516,6 +572,20 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		}
 		sets = append(sets, "workspace_id = ?")
 		args = append(args, *req.WorkspaceID)
+	}
+	if req.AgentID != nil {
+		var exists int
+		err := h.db.QueryRow(`SELECT 1 FROM agents WHERE id = ?`, *req.AgentID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "agent not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		sets = append(sets, "agent_id = ?")
+		args = append(args, *req.AgentID)
 	}
 
 	sets = append(sets, "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
