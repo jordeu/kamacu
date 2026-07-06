@@ -7,18 +7,19 @@ web/dist/*
 # Claude Code runtime artifacts
 .claude/scheduled_tasks.lock
 
-# ── GSD baseline (auto-generated) ──
-# Track planning markdown (matches the old .planning/ convention); ignore the binary DB + transient dirs.
-/.gsd/*
-!/.gsd/PROJECT.md
-!/.gsd/DECISIONS.md
-!/.gsd/REQUIREMENTS.md
-!/.gsd/KNOWLEDGE.md
-!/.gsd/CODEBASE.md
-!/.gsd/STATE.md
-!/.gsd/CONTEXT.md
-!/.gsd/PREFERENCES.md
-!/.gsd/milestones/
+# ── GSD baseline ──
+# Track all planning markdown + milestone artifacts (phases/, milestones/);
+# ignore only the binary DB, transient dirs, and logs.
+/.gsd/gsd.db
+/.gsd/gsd.db-shm
+/.gsd/gsd.db-wal
+/.gsd/runtime/
+/.gsd/audit/
+/.gsd/audit-log.jsonl
+/.gsd/event-log.jsonl
+/.gsd/notifications.jsonl
+/.gsd/state-manifest.json
+/.gsd/.compat.json
 .gsd-worktrees/
 .gsd-backups/
 .gsd-id

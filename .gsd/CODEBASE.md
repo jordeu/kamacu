@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-07-06T12:52:33Z | Files: 207 | Described: 0/207
-<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T12:52:33Z","fingerprint":"c8871db54444c249085dca80e43746acbad567d1","fileCount":207,"truncated":false} -->
+Generated: 2026-07-06T13:45:20Z | Files: 208 | Described: 0/208
+<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T13:45:20Z","fingerprint":"e9d93b8264d963a1c0b12dbfeffac2b405574973","fileCount":208,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -10,6 +10,7 @@ Generated: 2026-07-06T12:52:33Z | Files: 207 | Described: 0/207
 - `go.sum`
 - `Makefile`
 - `README.md`
+- `skills-lock.json`
 
 ### cmd/kamacu/
 - `cmd/kamacu/main_test.go`

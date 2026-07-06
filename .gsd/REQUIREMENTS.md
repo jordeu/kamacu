@@ -4,6 +4,86 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Active
 
+### R012 — An `agents` table (migration 00013) holds every runnable agent: name, command template, engine ('claude'|'custom'), is_default, is_system. Claude Code is pre-seeded as a non-deletable (is_system=1) row, marked the default (is_default=1). Exactly one row is_default=1 at all times (flag-keyed, rename-proof — mirrors workspaces D-002).
+- Class: core-capability
+- Status: active
+- Description: An `agents` table (migration 00013) holds every runnable agent: name, command template, engine ('claude'|'custom'), is_default, is_system. Claude Code is pre-seeded as a non-deletable (is_system=1) row, marked the default (is_default=1). Exactly one row is_default=1 at all times (flag-keyed, rename-proof — mirrors workspaces D-002).
+- Why it matters: Agents must be first-class configurable data, not hardcoded. The table is the single source of truth that both the spawn engine and the settings UI read. The claude seed guarantees the v1.9-and-prior default behavior survives unchanged for existing projects.
+- Source: M001
+- Primary owning slice: internal/store, internal/api
+
+### R013 — projects.agent_id foreign key (NOT NULL ... REFERENCES agents(id) ON DELETE RESTRICT, migration 00013), backfilling every existing project to the default agent in-SQL, plus an idempotent BackfillAgents startup hook (mirroring BackfillWorkspaces / BackfillProjectIcons) guaranteeing a project always has an agent.
+- Class: core-capability
+- Status: active
+- Description: projects.agent_id foreign key (NOT NULL ... REFERENCES agents(id) ON DELETE RESTRICT, migration 00013), backfilling every existing project to the default agent in-SQL, plus an idempotent BackfillAgents startup hook (mirroring BackfillWorkspaces / BackfillProjectIcons) guaranteeing a project always has an agent.
+- Why it matters: Per-project agent selection is the headline feature. The FK + RESTRICT + backfill ensure a project can never be agent-less and an agent in use can't be orphaned — the same invariant shape that made v1.9 workspaces safe.
+- Source: M001
+- Primary owning slice: internal/store, internal/api
+
+### R014 — The user can create a custom agent from global Settings by providing a name and a command template (e.g. "gemini", "aider --model sonnet"). The worktree is always the cwd; {{worktree}} and {{session_id}} placeholders are available for power users to wire custom flags.
+- Class: primary-user-loop
+- Status: active
+- Description: The user can create a custom agent from global Settings by providing a name and a command template (e.g. "gemini", "aider --model sonnet"). The worktree is always the cwd; {{worktree}} and {{session_id}} placeholders are available for power users to wire custom flags.
+- Why it matters: This is the primary user loop of the milestone — adding a non-Claude agent. The templated-command model (D-M001-1) lets users run arbitrary CLIs in the worktree and optionally wire resume/session flags for capable agents.
+- Source: M001
+- Primary owning slice: internal/api, web/src/components/settings
+
+### R015 — The user can edit any agent's name and command. The claude seed's engine stays 'claude' (its hook/resume plumbing is internal, not user-editable), but its name and command (binary path) are editable. Custom agents are fully editable. The is_system seed is non-deletable.
+- Class: primary-user-loop
+- Status: active
+- Description: The user can edit any agent's name and command. The claude seed's engine stays 'claude' (its hook/resume plumbing is internal, not user-editable), but its name and command (binary path) are editable. Custom agents are fully editable. The is_system seed is non-deletable.
+- Why it matters: Users need to correct a mis-typed command or point the claude seed at a specific binary path. Locking the claude engine (not the whole row) keeps the internal hook machinery safe while allowing the legitimate binary-path edit.
+- Source: M001
+- Primary owning slice: internal/api, web/src/components/settings
+
+### R016 — The claude engine spawn path is preserved byte-for-byte: session-id (fresh) / --resume (reattach), the --settings hook overlay (Notification/Stop/SessionStart), BEL fallback scanning, working/waiting/idle status, tasks.claude_session_id resume, and the Claude-OAuth quota indicator all continue to work with zero regression for any project whose agent is the claude seed.
+- Class: core-capability
+- Status: active
+- Description: The claude engine spawn path is preserved byte-for-byte: session-id (fresh) / --resume (reattach), the --settings hook overlay (Notification/Stop/SessionStart), BEL fallback scanning, working/waiting/idle status, tasks.claude_session_id resume, and the Claude-OAuth quota indicator all continue to work with zero regression for any project whose agent is the claude seed.
+- Why it matters: The existing Claude integration is the app's primary agent and is verified across 10 milestones. Generalizing the spawn path must not regress it. The fake-claude test stub must pass unchanged as regression proof.
+- Source: M001
+- Primary owning slice: internal/session
+
+### R017 — The custom engine spawn path renders the agent's command template (shell-words split, cwd=worktree, {{worktree}}/{{session_id}} substitution) in the task's worktree PTY. Custom-agent sessions report running/exited status only (PTY process liveness); no hook overlay, no BEL scanning, no --resume. Terminal detach/reattach works mid-run; on process exit, "Reset session" starts a fresh spawn (same as a bash tab today).
+- Class: core-capability
+- Status: active
+- Description: The custom engine spawn path renders the agent's command template (shell-words split, cwd=worktree, {{worktree}}/{{session_id}} substitution) in the task's worktree PTY. Custom-agent sessions report running/exited status only (PTY process liveness); no hook overlay, no BEL scanning, no --resume. Terminal detach/reattach works mid-run; on process exit, "Reset session" starts a fresh spawn (same as a bash tab today).
+- Why it matters: This is the mechanism that makes non-Claude agents actually run. The generic-status choice (D-M001-2) keeps it honest — we report what we can reliably know (process liveness) rather than guessing TUI state.
+- Source: M001
+- Primary owning slice: internal/session, internal/api
+
+### R018 — The user can delete a custom agent only when no project uses it (block-until-unassigned, never cascade-reassign) and never the claude seed (is_system=1 is non-deletable). The ON DELETE RESTRICT foreign key is the backstop; the count-guard gives a clear error message telling the user to reassign its projects first.
+- Class: primary-user-loop
+- Status: active
+- Description: The user can delete a custom agent only when no project uses it (block-until-unassigned, never cascade-reassign) and never the claude seed (is_system=1 is non-deletable). The ON DELETE RESTRICT foreign key is the backstop; the count-guard gives a clear error message telling the user to reassign its projects first.
+- Why it matters: Mirrors the v1.9 workspace-delete guard (WSMGMT-03/04, D006 destructive-defaults-leave-it). Never bulldoze a project's agent as a side effect of deleting another agent, and never let the claude seed disappear and orphan every legacy project.
+- Source: M001
+- Primary owning slice: internal/api, internal/store
+
+### R019 — The user can set any agent as the global default; exactly one agent is_default=1 at all times. Setting a new default clears the previous flag in the same transaction. The default is rename-proof (keyed off the is_default flag, never the literal name "Claude" — mirrors workspaces D-002). Existing projects do NOT auto-follow a default change; their agent_id is stable.
+- Class: core-capability
+- Status: active
+- Description: The user can set any agent as the global default; exactly one agent is_default=1 at all times. Setting a new default clears the previous flag in the same transaction. The default is rename-proof (keyed off the is_default flag, never the literal name "Claude" — mirrors workspaces D-002). Existing projects do NOT auto-follow a default change; their agent_id is stable.
+- Why it matters: The default agent is what new projects and the claude-compatibility baseline depend on. The exactly-one invariant plus rename-proof flag-keying guarantee a permanent home and a stable default even if the user renames the claude seed.
+- Source: M001
+- Primary owning slice: internal/api, internal/store
+
+### R020 — A project's agent resolves at spawn time from projects.agent_id (read fresh inside the spawn handler, never cached client-side). A newly created project is assigned the current global default agent. Changing a project's agent applies to the NEXT spawn only (read-at-use, no restart); running sessions are unaffected.
+- Class: primary-user-loop
+- Status: active
+- Description: A project's agent resolves at spawn time from projects.agent_id (read fresh inside the spawn handler, never cached client-side). A newly created project is assigned the current global default agent. Changing a project's agent applies to the NEXT spawn only (read-at-use, no restart); running sessions are unaffected.
+- Why it matters: Read-at-use is the established settings pattern (D011, v1.1 SET-03) and makes agent changes structural rather than requiring a restart. New-project-uses-default means a user who never configures agents gets Claude exactly as today.
+- Source: M001
+- Primary owning slice: internal/api, internal/session
+
+### R021 — Global Settings gains an Agents section: an ordered list of agents (name + command + engine badge), add (name + command-template fields with inline help for {{worktree}}/{{session_id}} placeholders), edit, delete (disabled with a tooltip when is_system or in-use by a project), and set-default (radio/flag). The claude seed renders as a system agent with its name + command editable but no delete affordance.
+- Class: primary-user-loop
+- Status: active
+- Description: Global Settings gains an Agents section: an ordered list of agents (name + command + engine badge), add (name + command-template fields with inline help for {{worktree}}/{{session_id}} placeholders), edit, delete (disabled with a tooltip when is_system or in-use by a project), and set-default (radio/flag). The claude seed renders as a system agent with its name + command editable but no delete affordance.
+- Why it matters: This is the management surface for the headline feature. Reuses the v1.9 WorkspaceNameDialog + ManageWorkspacesDialog shape (per D008 reuse-before-invent) so the CRUD UI is low-risk and visually consistent.
+- Source: M001
+- Primary owning slice: web/src/components/settings, web/src/pages/SettingsPage
+
 ## Validated
 
 ### R001 — Kanban board of tasks per project with worktree-per-task isolation — each task gets its own git worktree (task/<slug>-<id>) under ~/.kamacu/worktrees, with drag-and-drop (dnd-kit) across four columns (To Do / In Progress / Review / Done) and task CRUD.
@@ -113,10 +193,20 @@ This file is the explicit capability and coverage contract for the project.
 | R009 | differentiator | deferred | none | none | unmapped |
 | R010 | differentiator | deferred | none | none | unmapped |
 | R011 | differentiator | deferred | none | none | unmapped |
+| R012 | core-capability | active | internal/store, internal/api | none | unmapped |
+| R013 | core-capability | active | internal/store, internal/api | none | unmapped |
+| R014 | primary-user-loop | active | internal/api, web/src/components/settings | none | unmapped |
+| R015 | primary-user-loop | active | internal/api, web/src/components/settings | none | unmapped |
+| R016 | core-capability | active | internal/session | none | unmapped |
+| R017 | core-capability | active | internal/session, internal/api | none | unmapped |
+| R018 | primary-user-loop | active | internal/api, internal/store | none | unmapped |
+| R019 | core-capability | active | internal/api, internal/store | none | unmapped |
+| R020 | primary-user-loop | active | internal/api, internal/session | none | unmapped |
+| R021 | primary-user-loop | active | web/src/components/settings, web/src/pages/SettingsPage | none | unmapped |
 
 ## Coverage Summary
 
-- Active requirements: 0
+- Active requirements: 10
 - Mapped to slices: 0
 - Validated: 6 (R001, R002, R003, R004, R005, R006)
-- Unmapped active requirements: 0
+- Unmapped active requirements: 10
