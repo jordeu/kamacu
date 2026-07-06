@@ -47,6 +47,9 @@ function agentRail(
       return { barClass: "bg-amber-400", pulse: true, label: "waiting for input" };
     case "idle":
       return { barClass: "bg-blue-500/60", pulse: false, label: "idle" };
+    case "running":
+      // M001 custom-engine agent review session: alive, no finer state.
+      return { barClass: "bg-blue-500", pulse: false, label: "running" };
     case "exited":
       return { barClass: "bg-zinc-600", pulse: false, label: "exited" };
   }

@@ -50,6 +50,7 @@ type Info struct {
 	CreatedAt time.Time `json:"createdAt"`
 	TaskID    int64     `json:"taskId,omitempty"` // 0 omitted for dev sessions
 	Kind      Kind      `json:"kind,omitempty"`   // "bash" or "agent"
+	Engine    string    `json:"engine,omitempty"`   // agent only: "claude" | "custom" — lets the status handler/UI distinguish
 
 	// Agent-only fields (kind == "agent").
 	AgentStatus   string `json:"agentStatus,omitempty"`   // working | idle | waiting | exited
@@ -81,6 +82,7 @@ type Session struct {
 	taskID          int64        // 0 = unscoped dev session; immutable after Spawn
 	kind            Kind         // KindBash or KindAgent; immutable after Spawn
 	claudeSessionID string       // agent only ("" for bash); the --session-id uuid, immutable after Spawn
+	engine          string       // agent only: the resolved agent's engine ("claude" | "custom" | "" ); custom agents skip the working/waiting/idle heuristics (D-M001-2)
 	tmuxName        string       // tmux-backed bash tab: the kamacu-<task>-<n> session name ("" = not tmux)
 	tmuxClient      *tmux.Client // socket/config for lifecycle probes; nil unless tmuxName != ""
 	killer          func() error // non-nil: how Stop terminates the underlying work (assigned ONCE
@@ -211,6 +213,7 @@ func (s *Session) Info() Info {
 	}
 	if s.kind == KindAgent {
 		info.AgentStatus = s.agentStatusLocked()
+		info.Engine = s.engine
 	}
 	info.StopRequested = s.stopRequested
 	if s.status == StatusExited {
@@ -310,6 +313,14 @@ func (s *Session) ClearWaitingOnAttach() {
 func (s *Session) agentStatusLocked() string {
 	if s.status == StatusExited {
 		return "exited"
+	}
+	// M001 (D-M001-2): custom-engine agents report only running/exited. The
+	// working/waiting/idle heuristics below are claude-hook-driven (and a
+	// fallback activity estimate); applying them to a custom agent TUI we
+	// don't understand would be the unreliable heuristic this milestone
+	// explicitly rejected. claude (and "" back-compat) keeps the full states.
+	if s.engine != "" && s.engine != "claude" {
+		return "running"
 	}
 	if s.waiting {
 		return "waiting"

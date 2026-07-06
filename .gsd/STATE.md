@@ -2,7 +2,7 @@
 
 **Active Milestone:** M001: Configurable Agents
 **Active Slice:** S01: Agent data foundation and spawn engine
-**Phase:** evaluating-gates
+**Phase:** summarizing
 **Requirements Status:** 12 active · 6 validated · 5 deferred · 0 out of scope
 
 ## Milestone Registry
@@ -19,4 +19,4 @@
 - None
 
 ## Next Action
-Evaluate 2 quality gate(s) for S01 before execution.
+All tasks done in S01. Write slice summary and complete slice.

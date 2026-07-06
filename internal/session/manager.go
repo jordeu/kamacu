@@ -313,6 +313,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		taskID:          opts.TaskID,
 		kind:            kind,
 		claudeSessionID: claudeSessionID,
+		engine:          opts.AgentEngine,
 		tmuxName:        opts.TmuxName,
 		seq:             seq,
 		createdAt:       time.Now(),

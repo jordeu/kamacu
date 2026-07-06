@@ -22,6 +22,9 @@ export function dotMeta(
       };
     case "idle":
       return { className: "bg-zinc-400", tooltip: "Idle" };
+    case "running":
+      // M001 custom-engine agent: process alive, no finer state available.
+      return { className: "bg-blue-500", tooltip: "Running" };
     case "exited":
       if (entry.exitCode === null && !entry.stopRequested) {
         // Post-restart DB-derived entry (D-57 / Pitfall 3): a resumable past

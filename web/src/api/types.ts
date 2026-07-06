@@ -29,6 +29,9 @@ export interface Project {
   // present on the wire, never null. The backend serializes it as
   // json:"workspace_id" between icon_color and the timestamps.
   workspace_id: number;
+  // M001 (migration 00013): the agent this project runs. NOT NULL on the
+  // backend (DEFAULT 1 -> the Claude seed), always present on the wire.
+  agent_id: number;
   created_at: string;
   updated_at: string;
 }

@@ -5,7 +5,7 @@ export interface AgentStatusEntry {
   taskId: number;
   projectId: number;
   sessionId: string;
-  status: "working" | "idle" | "waiting" | "exited";
+  status: "working" | "idle" | "waiting" | "exited" | "running"; // M001: custom engines report running/exited only
   exitCode: number | null;
   stopRequested: boolean;
   resumable: boolean;
