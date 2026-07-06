@@ -23,6 +23,12 @@ func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.M
 	mux.HandleFunc("POST /api/workspaces", wh.create)
 	mux.HandleFunc("PATCH /api/workspaces/{id}", wh.update)
 	mux.HandleFunc("DELETE /api/workspaces/{id}", wh.delete)
+	ah := &agentCRUDHandlers{db: db}
+	mux.HandleFunc("GET /api/agents", ah.list)
+	mux.HandleFunc("POST /api/agents", ah.create)
+	mux.HandleFunc("PATCH /api/agents/{id}", ah.update)
+	mux.HandleFunc("DELETE /api/agents/{id}", ah.delete)
+	mux.HandleFunc("POST /api/agents/{id}/default", ah.setDefault)
 	mux.HandleFunc("GET /api/projects", p.list)
 	mux.HandleFunc("POST /api/projects", p.create)
 	mux.HandleFunc("PATCH /api/projects/{id}", p.update)
