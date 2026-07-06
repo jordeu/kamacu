@@ -305,6 +305,51 @@
 
 ---
 
+## Milestone: v1.8 — Kamacu Rebrand & UX Polish
+
+**Shipped:** 2026-07-04
+**Phases:** 5 (20–24) | **Plans:** 26 | **Tasks:** 53
+
+> _Retrospective note: v1.8's full retrospective section was not recorded at its close (2026-07-04) — this milestone was archived without appending here. The factual summary above and the trend-table rows below are backfilled from PROJECT.md / MILESTONES.md at the v1.9 close; the "what worked / lessons" narrative was not reconstructed. See `milestones/v1.8-ROADMAP.md` and the PROJECT.md phase entries for the detailed record._
+
+Headline: full kangent→kamacu rename (code identity + brand + README) with a one-time, idempotent, recoverable gated startup migration of the `~/.kangent` → `~/.kamacu` data dir (worktree repair + DB path rewrite + tmux socket/prefix flip + localStorage keys), plus daily-driver UX — GitHub-style two-pane diff review with persistent per-file "Viewed", a Settings worktree-cleanup queue with the D-01 blocked-dir degrade, renameable tmux tabs surviving restart, and session-bar/board polish.
+
+---
+
+## Milestone: v1.9 — Workspaces
+
+**Shipped:** 2026-07-06
+**Phases:** 2 (25–26) | **Plans:** 9 | **Tasks:** 22
+
+### What Was Built
+- (Phase 25, plans 25-01/02/03) Data foundation: migration `00012` creates the `workspaces` table (protected default **Personal** seeded id=1, `is_default` flag, `name COLLATE NOCASE` unique index) and adds `projects.workspace_id` as a `NOT NULL DEFAULT 1 REFERENCES workspaces(id) ON DELETE RESTRICT` FK, reassigning every existing project to Personal in-SQL (under `-- +goose NO TRANSACTION` + `PRAGMA foreign_keys OFF/ON`, reversible Down). `workspace_id` threaded through `projectColumns`/`scanProject` so `GET/POST/PATCH /api/projects` all carry it, both create paths defaulting to Personal; the idempotent `BackfillWorkspaces` startup hook (mirroring `BackfillProjectIcons`, wired after it in `main.go`) guarantees a default always exists (WSDATA-01/02).
+- (Phase 26, plans 26-01..06) The full user-facing feature: `internal/api/workspaces.go` CRUD (rename ungated for Personal, delete keyed off `is_default` + a `COUNT(*)` non-empty guard) + project transfer/create-into-workspace on the existing projects routes; the shared `useActiveWorkspace` context (localStorage `kamacu.workspace`, `is_default` fallback) in `AppLayout`; an expanded-only `WorkspaceSwitcher`, `WorkspaceNameDialog`, `ManageWorkspacesDialog`; a single `.filter` scoping both sidebar surfaces; workspace-aware routing (`BoardWorkspaceSync` URL-wins); a "Move to" ⋯ submenu; and the WSBAR-01 cross-workspace sessions-bar guardrail (WSMGMT/WSNAV/WSPROJ/WSBAR).
+
+### What Worked
+- **Backend-data → frontend-render phase split again (now the standard shape).** Phase 25 proved the schema/FK/backfill/wire with a real staged-upgrade test (existing install → every project under Personal, tasks intact, exactly one default, idempotent re-run) before any UI existed; Phase 26 was a CRUD-API + render layer over the typed wire path. Same shape as v1.4/v1.5/v1.6/v1.7.
+- **Reuse-before-invent kept the surface minimal.** Project transfer is an optional validated `workspace_id` on the *existing* `PATCH /api/projects/{id}` (no dedicated route, D-17); create-into-workspace is the symmetric optional field on `POST`. One `.filter` on the shared project `.map` scopes BOTH the expanded rows and the collapsed icon rail at once. The `BackfillWorkspaces` hook mirrors the proven `BackfillProjectIcons` pattern.
+- **One shared active-workspace context, not per-component hooks.** A single `useActiveWorkspace` provider in `AppLayout` means the switcher and the sidebar filter read the same source and can never desync; the `is_default` fallback makes a stale/forged saved id rename-proof.
+- **The `is_default`-keyed delete guard is rename-proof by construction** — guards key off the flag, never the literal name "Personal", so renaming the default workspace can't accidentally unlock its deletion; a non-empty `COUNT` guard + `ON DELETE RESTRICT` FK backstop guarantee at least one workspace always holds every project.
+
+### What Was Inefficient
+- **The empty-workspace-switch bug surfaced only at the human-verify gate and needed two post-gate fixes.** Switching to an EMPTY workspace did nothing because React-Router-v7 wraps `navigate()` in `React.startTransition`, so the URL change lags the synchronous `setActiveWorkspaceId()` and the still-mounted old project route's `BoardWorkspaceSync` re-anchored (reverted) the switch. The fix — gate reconciliation behind a `lastSyncedProjectId` ref so it fires only on a URL-`projectId` change — plus a "Move to workspace"→"Move to" label fix were both caught live, not at plan or review time. A framework-timing edge (state-set vs. router-transition ordering) isn't visible in token/unit review.
+- **No formal milestone audit was run.** v1.9 shipped on the strength of 12/12 requirements + a live human-verify gate (23/23 must-haves), skipping `/gsd:audit-milestone`. Acceptable for an all-internal feature milestone, but it means cross-phase integration wasn't independently re-audited the way v1.3–v1.6/v1.8 were.
+
+### Patterns Established
+- **Gate a URL→state sync effect behind a ref of the last-synced route param** so orthogonal state changes on the same route don't re-trigger it. When both a localStorage-backed state and the URL can drive navigation, a naive URL-wins effect will fight an async router transition (`navigate()` inside `startTransition`); re-anchor only when the route param actually changes.
+- **One `.filter` on a shared `.map` scopes every derived surface at once** — the expanded rows and the collapsed rail render from the same project map, so filtering the map filters both, with no second code path to keep in sync.
+
+### Key Lessons
+1. **Framework async-timing can defeat a naive URL-wins reconciliation.** When a localStorage state and the URL both drive navigation, verify the router's state-set-vs-URL-update ordering — React-Router-v7's `startTransition`-wrapped `navigate()` makes the URL lag synchronous state, so a same-route reconciliation effect must be ref-gated to the route param. This class of bug is invisible to token/unit review and only shows at a live gate; a plan-time "what re-renders when the active workspace changes under a stationary URL?" question would have surfaced it earlier.
+2. **An all-internal feature milestone with 100% requirement coverage + a live human-verify gate can reasonably skip the formal audit** — but record that it was skipped (done here in MILESTONES.md + STATE.md) so the reduced independent-verification is visible, not assumed.
+3. **The milestone-complete accomplishments list was clean this time** — the summary-extract one-liners (recurring misfire in v1.1–v1.4/v1.7) were usable as-is for v1.9; the per-plan SUMMARY one-liners were well-formed. Still worth a glance every time.
+
+### Cost Observations
+- Orchestrated on Opus 4.8 (inherit profile), 2026-07-05 → 2026-07-06. 2 phases, 9 plans, 22 tasks, 1 human-verify gate that drove 2 post-gate fixes. Zero new Go modules or npm deps; 1 migration (00012); one new API surface (`/api/workspaces`) + several new frontend components (switcher, dialogs, context).
+- Notable: the dominant late cost was the single framework-timing bug (the empty-workspace switch), not the CRUD/render bulk — reinforcing that the risk in an otherwise-mechanical feature concentrates at the framework-integration seam.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -319,6 +364,8 @@
 | v1.5 | 1 | 2 | Data→rendering plan split with the wire contract verified by an integration audit; reuse-before-invent (cloned the existing `gh` search + cache — no new endpoint/poll/dep/migration); the human-verify gate DROVE a design redesign (agent dot → left rail), not just blessed it; revise-the-contract-on-redesign keeps CONTEXT/UI-SPEC honest |
 | v1.6 | 1 | 2 | Extend-the-shared-feed (bar = 4th consumer of the one 5s `/api/agents/status` poll; sole backend change a JOIN — no endpoint/poll/dep/migration); data→UI plan split with all 6 seams integration-audited; overlay-not-dock to protect terminal layout, confirmed by the human gate's no-reflow check; research correctly skipped — discuss + ui-phase fully determined the build |
 | v1.7 | 2 | 6 | Backend-data → frontend-render phase split again; Go-source-of-truth mirrored as a TS `const` with no endpoint; one shared `<ProjectAvatar>` for both sidebar states; idempotent Go backfill for computed per-row defaults; UAT reversed 3 approved visual decisions (square→circle, ring→filled-row, palette re-mute) AND reached back into a shipped phase (a 2nd migration 00010) — second straight milestone the human gate flipped shape/color, so pre-build visual mock is now the standing recommendation |
+| v1.8 | 5 | 26 | _(retrospective section not recorded at close — backfilled facts only)_ Largest post-v1.0 milestone; a risk-split rebrand (code identity in Phase 20, the gated on-disk `~/.kangent`→`~/.kamacu` data migration deferred to Phase 21 as a one-shot idempotent recoverable startup migration); UAT-directed diff-view sticky/scroll redesign; a post-approval WTREE-01 refinement from "list every worktree" to a cleanup queue; renamed-tmux-tab-survives-restart caught at the human gate |
+| v1.9 | 2 | 9 | Backend-data → frontend-render split again; reuse-before-invent (transfer via optional `workspace_id` on the existing PATCH — no new route; one `.filter` scopes both sidebar surfaces; `BackfillWorkspaces` mirrors `BackfillProjectIcons`); one shared active-workspace context (no per-component desync); the human gate caught a framework-timing bug (React-Router-v7 `startTransition` lag defeating URL-wins reconciliation) needing 2 post-gate fixes; first milestone shipped without a formal audit (all-internal, 12/12 requirements + human-verify) |
 
 ### Cumulative Quality
 
@@ -332,6 +379,8 @@
 | v1.5 | 12 (github + api list paths extended) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no migration; cleared the `PRCard` `Date.now()`-in-render advisory (the `ReviewColumn` one may remain); pre-existing react-hooks advisories still carried |
 | v1.6 | 11 (api `agents` JOIN extended; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; no migration (JOIN onto existing columns); no new `ui/` primitive (reused `dotMeta()`/`ReviewColumn` idioms); pre-existing react-hooks advisories still carried |
 | v1.7 | 11 (api `icons` helpers + validators table-tested; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; 2 migrations (00009 columns + the UAT-driven 00010 palette remap); one new `ui/` primitive (`ProjectAvatar.tsx`) + one `lib/` const (`palette.ts`, Go mirror); pre-existing react-hooks advisories still carried |
+| v1.8 | 13 (+`migrate`; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across 5 phases; 1 migration (00011 `diff_viewed`); new `internal/migrate` package for the gated data-dir migration; pre-existing react-hooks advisories still carried |
+| v1.9 | 13 (api `workspaces` CRUD + backfill tested; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; 1 migration (00012 workspaces table + FK); new `/api/workspaces` surface + frontend switcher/dialogs/context; pre-existing react-hooks advisories still carried |
 
 ### Top Lessons (Verified Across Milestones)
 

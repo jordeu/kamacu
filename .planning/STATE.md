@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
-status: milestone_complete
-stopped_at: Milestone complete (Phase 26 was final phase)
-last_updated: 2026-07-06T05:54:21.113Z
-last_activity: 2026-07-06
+status: Awaiting next milestone
+stopped_at: Completed 26-05-PLAN.md
+last_updated: "2026-07-06T06:06:08.490Z"
+last_activity: 2026-07-06 — Milestone v1.9 completed and archived
 progress:
   total_phases: 2
   completed_phases: 2
@@ -18,17 +18,34 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-05)
+See: .planning/PROJECT.md (updated 2026-07-06 after v1.9)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent Claude Code session you can open, leave, and reattach to from the browser.
-**Current focus:** Milestone complete
+**Current focus:** Planning next milestone (v1.9 Workspaces shipped 2026-07-06)
+
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-07-06:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 260613-osu-warn-when-a-linked-github-repo-cannot-be | completed (committed 41f3d50) |
+| quick_task | 260613-ph5-make-github-repo-link-validation-mandato | completed (committed 9ea0df6) |
+| quick_task | 260616-8l7-the-refresh-button-at-review-column-seem | completed (committed ccdb2d5) |
+| quick_task | 260618-mlu-when-the-status-bottom-bar-is-expanded-a | completed (committed d3f7795) |
+| quick_task | 260625-9db-the-bottom-status-bar-is-hidding-the-bot | completed (committed 77fe135) |
+| quick_task | 260626-hwd-add-an-opt-in-insecure-allow-remote-flag | completed (committed ce03d84, verified) |
+| quick_task | 260704-9yn-fix-review-column-card-overlap-when-many | completed (committed f40fe8b, verified) |
+| quick_task | 260704-a6q-fix-board-drag-and-drop-overshooting-to- | completed (committed cf841e2, verified) |
+
+**Note:** The pre-close artifact audit reported these 8 quick tasks as `open`/`missing`, but all 8 are completed and committed (see "Quick Tasks Completed" below). This is a false positive on the audit's status-marker check — the directories lack a machine-readable status file — not real outstanding work. Same pattern was noted at the v1.7 close.
 
 ## Current Position
 
-Phase: 26
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-07-06
+Phase: Milestone v1.9 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-06 — Milestone v1.9 completed and archived
 
 ### v1.9 Roadmap (Phases 25–26, continues numbering from v1.8's Phase 24)
 
@@ -226,4 +243,4 @@ Next: Execute plan 26-06 (the phase's human-verify gate) with `/gsd:execute-phas
 
 ## Operator Next Steps
 
-- Execute plan 26-06 (Phase 26 human-verify gate) to complete the workspace-switcher phase.
+- Start the next milestone with /gsd-new-milestone

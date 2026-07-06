@@ -1,5 +1,27 @@
 # Milestones
 
+## v1.9 Workspaces (Shipped: 2026-07-06)
+
+**Phases completed:** 2 phases, 9 plans, 22 tasks
+
+**Key accomplishments:**
+
+- Migration 00012 adds a `workspaces` table + a DB-enforced `projects.workspace_id NOT NULL … REFERENCES … ON DELETE RESTRICT` FK, creating the protected default Personal (id=1) and assigning every existing project to it in-SQL — with a real staged-upgrade test proving no project/task data is lost.
+- `workspace_id` now ships on the projects read wire (GET/POST/PATCH) and both create paths resolve and set the default Personal workspace, so every new project satisfies the NOT NULL FK.
+- Every boot now guarantees a default Personal workspace exists via the idempotent `BackfillWorkspaces` startup hook, wired right after `BackfillProjectIcons` — the thin invariant-guard backstop for WSDATA-02.
+- The `/api/workspaces` CRUD surface — list (name-sorted), create-by-name (case-insensitive dup → 409), rename (Personal included), and a guarded delete that refuses the default and non-empty workspaces server-side — all proven green under `go test`.
+- Projects transfer between workspaces via an optional validated `workspace_id` on the existing PATCH, and new projects land in the requested (active) workspace with a safe fall-back to Personal — no new route (D-17).
+- The interface-first workspace contract layer: `Workspace` type + `workspace_id` on `Project`, `useWorkspaces()` query, workspace CRUD + project-move mutations, and a single shared `ActiveWorkspaceProvider` context (localStorage-persisted, is_default-fallback) mounted in AppLayout.
+- The full user-facing workspace-management surface — an expanded-only switcher dropdown (✓ active marker, switch-navigation), a mode-switched create/rename dialog, and a Manage-workspaces hub with client-side-guarded delete — all consuming the plan-03 data layer, awaiting mount in plan 06.
+- Routing and project creation now honor the active workspace: the index redirect lands on the active workspace's first project (or a workspace-scoped empty state), a deep-linked project flips the active workspace to its own (URL wins), and new projects are created into the active workspace.
+- The workspace layer is wired into the sidebar end-to-end: the switcher sits atop the expanded sidebar, both project surfaces filter to the active workspace, projects transfer (and the open one follows) from the ⋯ menu, and the cross-workspace Active Sessions bar is confirmed untouched — human-verified across all 10 checks after two post-gate fixes.
+
+**Known deferred items at close:** 8 (the pre-close artifact audit flagged 8 quick tasks as open; all 8 are completed + committed — a false positive on the status-marker check, matching the v1.7 close. See STATE.md → Deferred Items.)
+
+**Requirements:** 12/12 v1.9 requirements complete (WSDATA·WSMGMT·WSNAV·WSPROJ·WSBAR). No formal milestone audit was run; the final phase passed a live human-verify gate (23/23 must-haves).
+
+---
+
 ## v1.8 Kamacu Rebrand & UX Polish (Shipped: 2026-07-04)
 
 **Phases completed:** 5 phases, 26 plans, 53 tasks
