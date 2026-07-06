@@ -99,12 +99,16 @@ export function useUpdateProjectSettings() {
       github_repo,
       icon_letters,
       icon_color,
+      agent_id,
     }: {
       id: number;
       description: string;
       github_repo?: string;
       icon_letters?: string;
       icon_color?: string;
+      // M001: optional agent_id (conditional-PATCH, same omitted-=-untouched
+      // shape as the icon fields). Undefined = untouched.
+      agent_id?: number;
     }) => {
       // Build the PATCH body conditionally so an `undefined` field is never
       // sent (D-09: omitted key = untouched, matching the backend
@@ -114,10 +118,12 @@ export function useUpdateProjectSettings() {
         github_repo?: string;
         icon_letters?: string;
         icon_color?: string;
+        agent_id?: number;
       } = { description };
       if (github_repo !== undefined) body.github_repo = github_repo;
       if (icon_letters !== undefined) body.icon_letters = icon_letters;
       if (icon_color !== undefined) body.icon_color = icon_color;
+      if (agent_id !== undefined) body.agent_id = agent_id;
       return patch<Project>(`/api/projects/${id}`, body);
     },
     onSuccess: () => {

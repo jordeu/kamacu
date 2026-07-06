@@ -1,49 +1,40 @@
 ---
 id: T02
-parent: S01
+parent: S02
 milestone: M001
 key_files:
-  - internal/api/agents_backfill.go
-  - internal/api/agents_backfill_test.go
-  - cmd/kamacu/main.go
+  - web/src/components/sidebar/ProjectSettingsDialog.tsx
+  - web/src/api/mutations.ts
 key_decisions:
-  - BackfillAgents lives in its own file (agents_backfill.go), not the pre-existing agents.go (status handler), to avoid overwriting shared test helpers and keep the M001 CRUD concerns separable for T03
-  - The re-created seed preserves engine='claude' + is_system=1 (capability tier + non-deletability survive the defensive re-create path), asserted by the test
+  - (none)
 duration: 
 verification_result: passed
-completed_at: 2026-07-06T15:44:31.871Z
+completed_at: 2026-07-06T16:18:14.295Z
 blocker_discovered: false
 ---
 
-# T02: Added BackfillAgents startup hook (mirrors BackfillWorkspaces) + main.go wiring + idempotency test; verified the re-create path restores the Claude seed with engine/is_system markers.
+# T02: Added Agent selector (shadcn Select) to Project Settings with conditional-PATCH on change; extended useUpdateProjectSettings to carry agent_id. tsc + vite green.
 
-**Added BackfillAgents startup hook (mirrors BackfillWorkspaces) + main.go wiring + idempotency test; verified the re-create path restores the Claude seed with engine/is_system markers.**
+**Added Agent selector (shadcn Select) to Project Settings with conditional-PATCH on change; extended useUpdateProjectSettings to carry agent_id. tsc + vite green.**
 
 ## What Happened
 
-Added BackfillAgents(db) in a new file internal/api/agents_backfill.go, mirroring BackfillWorkspaces exactly: SELECT id FROM agents WHERE is_default=1; no-op if found; INSERT the Claude seed (engine='claude', is_default=1, is_system=1) only if the default is missing. Wired it in cmd/kamacu/main.go right after the BackfillWorkspaces block (preserving the documented ordering: BackfillProjectIcons -> BackfillWorkspaces -> BackfillAgents), with the same error-posture (log + os.Exit(1)).
-
-Added TestBackfillAgents in internal/api/agents_backfill_test.go mirroring TestBackfillWorkspaces: (1) healthy boot is a no-op (migration already seeded Claude), (2) missing-default re-creates the seed, (3) the re-created seed carries engine='claude' + is_system=1, (4) idempotent on a second call.
-
-Caught a self-inflicted clobber during verification: my first write replaced the pre-existing internal/api/agents.go (which holds the agent STATUS handler AgentRoutes + the agentHandlers type) and agents_test.go (which holds shared test helpers newAgentServer/setTaskClaudeSession used across sessions_test.go and tasks_test.go), breaking the whole api test build with undefined symbols. Root cause: I didn't read those files before writing. Fixed by git-restoring both originals and putting BackfillAgents + its test in dedicated companion files (agents_backfill.go / agents_backfill_test.go). Lesson reinforced: read-before-overwrite applies to test files too -- they often carry shared fixtures.
+Added an Agent selector (shadcn Select) to ProjectSettingsDialog. New agentId state (string, init from project.agent_id), reset on dialog open alongside the other fields, rendered as a Select populated by useAgents() with each option labeled "Name (default)" for the default agent. The Save handler sends agent_id via useUpdateProjectSettings only when it actually changed (the conditional-PATCH pattern, matching github_repo/icon_letters). Extended useUpdateProjectSettings in mutations.ts to accept agent_id (undefined = untouched). Verified tsc -b + vite build both exit 0.
 
 ## Verification
 
-go test ./internal/api/... -run TestBackfillAgents -v -> PASS (healthy-boot no-op, missing-default re-create, engine/is_system markers, idempotent re-run). Full api package test build green (shared test helpers intact). go build ./cmd/kamacu/... ok (BackfillAgents call compiles). go vet ./internal/api/... ./cmd/kamacu/... clean. Regression: TestBackfillWorkspaces still passes; internal/store green.
+cd web && npx tsc -b (exit 0) && npx vite build (exit 0). The selector renders from useAgents(), defaults to the project's current agent_id, and PATCHes only on change.
 
 ## Verification Evidence
 
 | # | Command | Exit Code | Verdict | Duration |
 |---|---------|-----------|---------|----------|
-| 1 | `go test ./internal/api/... -run TestBackfillAgents -v` | 0 | ✅ pass | 45000ms |
-| 2 | `go test ./internal/api/... -run 'TestBackfillWorkspaces|TestBackfillAgents'` | 0 | ✅ pass | 82000ms |
-| 3 | `go test ./internal/store/...` | 0 | ✅ pass | 1000ms |
-| 4 | `go build ./cmd/kamacu/...` | 0 | ✅ pass | 3000ms |
-| 5 | `go vet ./internal/api/... ./cmd/kamacu/...` | 0 | ✅ pass | 3000ms |
+| 1 | `cd web && npx tsc -b` | 0 | ✅ pass | 8000ms |
+| 2 | `cd web && npx vite build` | 0 | ✅ pass | 5000ms |
 
 ## Deviations
 
-None functionally. File placement changed: BackfillAgents lives in a new internal/api/agents_backfill.go (and its test in agents_backfill_test.go) rather than in the pre-existing internal/api/agents.go (which holds the agent STATUS handler + AgentRoutes, unrelated to this task). This keeps the status handler and the M001 CRUD concerns in separate files and avoids clobbering the existing agents_test.go's shared test helpers (newAgentServer, setTaskClaudeSession).
+Also extended useUpdateProjectSettings in mutations.ts to accept agent_id (conditional-PATCH, same shape as the icon fields). The agent_id is held as a string in component state (Select control value) and parsed to number on PATCH.
 
 ## Known Issues
 
@@ -51,6 +42,5 @@ None.
 
 ## Files Created/Modified
 
-- `internal/api/agents_backfill.go`
-- `internal/api/agents_backfill_test.go`
-- `cmd/kamacu/main.go`
+- `web/src/components/sidebar/ProjectSettingsDialog.tsx`
+- `web/src/api/mutations.ts`
