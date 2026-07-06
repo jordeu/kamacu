@@ -185,7 +185,7 @@ Phases execute in numeric order: 25 → 26
 | 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete | 2026-07-02 |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 4/4 | Complete | 2026-07-04 |
 | 25. Workspace Data Foundation | v1.9 | 3/3 | Complete    | 2026-07-05 |
-| 26. Workspace Switcher, Management & Assignment | v1.9 | 6/6 | Complete   | 2026-07-06 |
+| 26. Workspace Switcher, Management & Assignment | v1.9 | 6/6 | Complete    | 2026-07-06 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
