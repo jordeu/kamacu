@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-07-06T14:24:43Z | Files: 210 | Described: 0/210
-<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T14:24:43Z","fingerprint":"2fa9cc05d01355697ab96a9b0628f8eff5080d3b","fileCount":210,"truncated":false} -->
+Generated: 2026-07-06T16:12:09Z | Files: 216 | Described: 0/216
+<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T16:12:09Z","fingerprint":"5cc56bb7eb09348ee78307e48d92cd53decaf97e","fileCount":216,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -17,7 +17,7 @@ Generated: 2026-07-06T14:24:43Z | Files: 210 | Described: 0/210
 - `cmd/kamacu/main.go`
 
 ### internal/api/
-- *(38 files: 38 .go)*
+- *(43 files: 43 .go)*
 
 ### internal/api/testdata/
 - `internal/api/testdata/fake-claude`
@@ -58,6 +58,7 @@ Generated: 2026-07-06T14:24:43Z | Files: 210 | Described: 0/210
 - `internal/reaper/reaper.go`
 
 ### internal/session/
+- `internal/session/agent_engine_test.go`
 - `internal/session/agent_test.go`
 - `internal/session/agent.go`
 - `internal/session/manager.go`
