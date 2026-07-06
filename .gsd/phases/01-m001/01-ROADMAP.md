@@ -15,7 +15,7 @@
 
 ## Slices
 
-- [ ] **S01: Agent data foundation and spawn engine** `risk:medium` `depends:[]`
+- [x] **S01: Agent data foundation and spawn engine** `risk:medium` `depends:[]`
   > After this: After this: a custom agent row can be created via API, a project assigned to it, and spawning that project's task runs the agent's command in the worktree PTY with running/exited status; a claude project still shows working/waiting + resume.
 
 - [ ] **S02: Agent management UI and per-project selection** `risk:low` `depends:[S01]`

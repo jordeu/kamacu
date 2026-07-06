@@ -1,8 +1,8 @@
 # GSD State
 
 **Active Milestone:** M001: Configurable Agents
-**Active Slice:** S01: Agent data foundation and spawn engine
-**Phase:** summarizing
+**Active Slice:** S02: Agent management UI and per-project selection
+**Phase:** planning
 **Requirements Status:** 12 active · 6 validated · 5 deferred · 0 out of scope
 
 ## Milestone Registry
@@ -19,4 +19,4 @@
 - None
 
 ## Next Action
-All tasks done in S01. Write slice summary and complete slice.
+Slice S02 has no DB tasks. Plan slice tasks before execution.
