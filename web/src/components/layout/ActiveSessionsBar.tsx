@@ -73,22 +73,27 @@ export function ActiveSessionsBar() {
   const navigate = useNavigate();
   const { taskId: openTaskId } = useParams(); // current-task highlight (D-07)
 
-  // --- LIVE filter (D-09): only working / waiting / idle; `exited` (incl. the
-  // DB-derived/post-restart resumable rows) never appears. ---
+  // --- LIVE filter (D-09): working / waiting / idle (claude) AND running
+  // (custom-engine, M001). `exited` (incl. the DB-derived/post-restart
+  // resumable rows) never appears. ---
   const live = (data ?? []).filter(
     (e) =>
-      e.status === "working" || e.status === "waiting" || e.status === "idle",
+      e.status === "working" ||
+      e.status === "waiting" ||
+      e.status === "idle" ||
+      e.status === "running",
   );
 
   const working = live.filter((e) => e.status === "working").length;
   const waiting = live.filter((e) => e.status === "waiting").length;
   const idle = live.filter((e) => e.status === "idle").length;
+  const running = live.filter((e) => e.status === "running").length;
   const total = live.length;
 
   // --- Sorted list (SBAR-05 / D-05), attention-first, STABLE within a state
   // (Array.prototype.sort is stable in modern engines, so equal-rank rows keep
   // feed order — avoids 5s jitter). ---
-  const rank = { waiting: 0, working: 1, idle: 2 } as const;
+  const rank = { waiting: 0, working: 1, running: 2, idle: 3 } as const;
   const sorted = [...live].sort(
     (a, b) =>
       rank[a.status as keyof typeof rank] - rank[b.status as keyof typeof rank],
@@ -98,7 +103,7 @@ export function ActiveSessionsBar() {
 
   // --- Collapsed-bar aria-label describing current counts (mirror ReviewColumn /
   // ProjectSidebar pluralized count aria). ---
-  const barAriaLabel = `Active agent sessions: ${working} working, ${waiting} waiting, ${idle} idle — ${
+  const barAriaLabel = `Active agent sessions: ${working} working, ${waiting} waiting, ${idle} idle, ${running} running — ${
     collapsed ? "expand" : "collapse"
   }`;
 
@@ -159,6 +164,8 @@ export function ActiveSessionsBar() {
             <CountGroup status="waiting" count={waiting} />
             {/* Idle count */}
             <CountGroup status="idle" count={idle} />
+            {/* Running count (M001 custom-engine agents; no finer state) */}
+            <CountGroup status="running" count={running} />
           </>
         )}
 
@@ -194,7 +201,7 @@ function CountGroup({
   status,
   count,
 }: {
-  status: "working" | "waiting" | "idle";
+  status: "working" | "waiting" | "idle" | "running";
   count: number;
 }) {
   const { className: dotClassName, tooltip } = dotMeta({
