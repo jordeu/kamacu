@@ -7,6 +7,7 @@ import { useSaveSetting, useSettings, type Settings } from "@/api/settings";
 import { useGithubStatus } from "@/api/queries";
 import { SettingsField } from "@/components/settings/SettingsField";
 import { WorktreeCleanupSection } from "@/components/settings/WorktreeCleanupSection";
+import { AgentsSection } from "@/components/settings/AgentsSection";
 
 /**
  * Wraps the given substrings of a contract literal in the mono stack at
@@ -168,6 +169,7 @@ export default function SettingsPage() {
                 help={withMono(AGENT_HELP, ["--dangerously-skip-permissions"])}
               />
             </section>
+            <AgentsSection />
             <section className="flex flex-col gap-3">
               <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Worktrees`}</h2>
               <SettingsField
