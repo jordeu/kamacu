@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { usePullRequestDetail } from "@/api/pullRequests";
-import { useTask } from "@/api/queries";
+import { useAgents, useProjects, useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
 import { useAgentStatuses } from "@/api/agents";
@@ -54,6 +54,14 @@ function isTypingTarget(el: Element | null): boolean {
 export default function TaskPage() {
   const { projectId: projectIdParam, taskId: taskIdParam } = useParams();
   const projectId = Number(projectIdParam);
+  // M001: resolve the active project's agent engine to hide the Claude-only
+  // QuotaIndicator when the project runs a non-claude agent. Both queries are
+  // already cached app-wide (sidebar/settings), so this adds no fetches.
+  const { data: allProjects } = useProjects();
+  const { data: allAgents } = useAgents();
+  const projectAgentId = allProjects?.find((p) => p.id === projectId)?.agent_id;
+  const projectEngine = allAgents?.find((a) => a.id === projectAgentId)?.engine;
+  const isClaudeAgent = projectEngine !== "custom"; // undefined/"" (loading) or "claude" -> show
   const taskId = Number(taskIdParam);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -524,7 +532,7 @@ export default function TaskPage() {
             />
           )}
 
-          <QuotaIndicator />
+          {isClaudeAgent ? <QuotaIndicator /> : null}
 
           {/* ⋯ menu OMITTED for a PR review (D-10): no Delete-task, no
               Clean-up-worktree yet (Phase 13 re-adds cleanup). ↗ open-on-GitHub

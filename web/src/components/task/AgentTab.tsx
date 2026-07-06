@@ -103,7 +103,7 @@ export function AgentTab({
         <h2 className="text-xl font-medium">{`No agent session`}</h2>
         {hasWorktree ? (
           <p className="text-sm text-muted-foreground">
-            {`Runs the claude CLI in this task's worktree on `}
+            {`Runs the agent in this task's worktree on `}
             <span className="font-mono">{task.branch}</span>
             {`.`}
           </p>

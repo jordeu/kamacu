@@ -1,46 +1,41 @@
 ---
 id: T04
-parent: S01
+parent: S02
 milestone: M001
 key_files:
-  - internal/api/projects.go
-  - internal/api/projects_agent_test.go
+  - web/src/components/task/AgentTab.tsx
+  - web/src/pages/TaskPage.tsx
+  - web/src/pages/BoardPage.tsx
 key_decisions:
-  - agent_id threads through identically to workspace_id: Project field, projectColumns entry, scanProject slot, resolveCreateAgentID helper, defaultAgentID helper, both INSERT paths (folder + managed), PATCH validation block
-  - New projects default to the global default agent via resolveCreateAgentID -> defaultAgentID (read-at-use, no restart) — R020
-  - PATCH agent_id validates the target against the agents table before the row is touched (400 'agent not found', no mutation) — same posture as the workspace_id PATCH
+  - (none)
 duration: 
 verification_result: passed
-completed_at: 2026-07-06T15:55:20.972Z
+completed_at: 2026-07-06T16:22:50.307Z
 blocker_discovered: false
 ---
 
-# T04: Threaded agent_id through the projects API (columns/scan/create-default/both INSERT paths/PATCH validation) mirroring the workspace_id pattern; 4 tests green, no project/workspace regression.
+# T04: QuotaIndicator now hidden for non-claude projects (TaskPage + BoardPage via cached useProjects+useAgents lookups); AgentTab empty-state string generalized from "claude CLI" to "agent". tsc + vite green.
 
-**Threaded agent_id through the projects API (columns/scan/create-default/both INSERT paths/PATCH validation) mirroring the workspace_id pattern; 4 tests green, no project/workspace regression.**
+**QuotaIndicator now hidden for non-claude projects (TaskPage + BoardPage via cached useProjects+useAgents lookups); AgentTab empty-state string generalized from "claude CLI" to "agent". tsc + vite green.**
 
 ## What Happened
 
-Threaded projects.agent_id through the projects API, mirroring how workspace_id was threaded in Phase 26. Edits to internal/api/projects.go (13 coordinated changes): (1) AgentID field on Project; (2) agent_id added to projectColumns; (3) &p.AgentID added to scanProject; (4) new defaultAgentID() helper; (5) new resolveCreateAgentID() helper (validates supplied id, falls back to default); (6) create req struct gains AgentID; (7) create resolves agID up front and passes to both paths; (8) folder INSERT adds agent_id column + agID arg; (9) createByRepo signature gains agID; (10) managed INSERT adds agent_id + agID; (11) PATCH req struct gains AgentID; (12) PATCH "nothing to update" check includes req.AgentID; (13) PATCH agent_id set block (validates against agents table, 400 on unknown). New projects default to the global default agent (read-at-use).
-
-Added projects_agent_test.go with 4 tests: create-default-agent (lands on id 1), create-explicit-agent (honored), create-unknown-agent (400, no row), patch-agent (changes + validates, failed patch leaves it unchanged). All pass.
+Made the QuotaIndicator engine-aware and generalized a claude-specific AgentTab string. (1) AgentTab empty-state string changed from "Runs the claude CLI in this task's worktree" to "Runs the agent in this task's worktree" — honest for a custom-engine project. (2) TaskPage resolves the active project's agent engine via cached useProjects()+useAgents() lookups (project -> agent_id -> engine) and conditionally renders <QuotaIndicator /> only when engine !== "custom" (undefined/loading and "claude" both show; the loading case avoids a flash). (3) BoardPage got the same treatment for consistency — the board is project-scoped, so viewing a non-Claude project's board without the Claude quota widget is the honest state. The QuotaIndicator widget itself is unchanged (stays a self-contained Claude-OAuth-usage widget); the parent owns the show/hide decision. The running/exited status rendering was already handled in S01 T06 (the "running" case in StatusDot/PRCard), so no Agent-tab status work was needed here.
 
 ## Verification
 
-go test ./internal/api/... -run 'TestProjectCreateDefaultAgent|TestProjectCreateExplicitAgent|TestProjectCreateUnknownAgent|TestProjectPatchAgent' -v -> all 4 PASS. Regression: TestProject*+TestWorkspace*+TestCreate ok (1.187s) — the projectColumns/scanProject change did not regress existing project/workspace tests. Full api package ok (88.247s). go vet clean.
+cd web && npx tsc -b (exit 0) && npx vite build (exit 0). Engine resolution uses cached queries (no new fetches); undefined/loading engine -> show the indicator (avoids flash on load).
 
 ## Verification Evidence
 
 | # | Command | Exit Code | Verdict | Duration |
 |---|---------|-----------|---------|----------|
-| 1 | `go test ./internal/api/... -run 'TestProjectCreateDefaultAgent|TestProjectCreateExplicitAgent|TestProjectCreateUnknownAgent|TestProjectPatchAgent' -v` | 0 | ✅ pass | 171000ms |
-| 2 | `go test ./internal/api/... -run 'TestProject|TestWorkspace|TestCreate'` | 0 | ✅ pass | 1187000ms |
-| 3 | `go test ./internal/api/...` | 0 | ✅ pass | 88247ms |
-| 4 | `go vet ./internal/api/...` | 0 | ✅ pass | 3000ms |
+| 1 | `cd web && npx tsc -b` | 0 | ✅ pass | 8000ms |
+| 2 | `cd web && npx vite build` | 0 | ✅ pass | 5000ms |
 
 ## Deviations
 
-None functionally. Threading pattern mirrors workspace_id exactly (resolve helper + field + column + scan + both INSERT paths + PATCH block).
+QuotaIndicator engine-awareness implemented via conditional rendering in the parent pages (TaskPage + BoardPage) rather than a prop on QuotaIndicator — cleaner because QuotaIndicator stays a self-contained "show my Claude quota" widget with no project/agent coupling, and the parent owns the "should this show here?" decision. Both pages resolve the engine via cached useProjects()+useAgents() lookups (no new fetches). BoardPage got the same treatment as TaskPage for consistency — viewing a non-Claude project's board without the Claude quota widget is the honest state.
 
 ## Known Issues
 
@@ -48,5 +43,6 @@ None.
 
 ## Files Created/Modified
 
-- `internal/api/projects.go`
-- `internal/api/projects_agent_test.go`
+- `web/src/components/task/AgentTab.tsx`
+- `web/src/pages/TaskPage.tsx`
+- `web/src/pages/BoardPage.tsx`

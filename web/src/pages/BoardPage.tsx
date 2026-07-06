@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useProjects, useTasks } from "@/api/queries";
+import { useAgents, useProjects, useTasks } from "@/api/queries";
 import { STATUSES } from "@/api/types";
 import { Board } from "@/components/board/Board";
 import { NewTaskDialog } from "@/components/board/NewTaskDialog";
@@ -15,6 +15,11 @@ export default function BoardPage() {
   const { data: tasks, isLoading, isError, refetch } = useTasks(projectId);
   const { data: projects } = useProjects();
   const project = projects?.find((p) => p.id === projectId);
+  // M001: hide the Claude-only QuotaIndicator when this board's project runs a
+  // non-claude agent. Mirrors the TaskPage engine-awareness.
+  const { data: allAgents } = useAgents();
+  const projectEngine = allAgents?.find((a) => a.id === project?.agent_id)?.engine;
+  const isClaudeAgent = projectEngine !== "custom";
 
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -47,7 +52,7 @@ export default function BoardPage() {
       <header className="flex items-center justify-between px-6 py-4">
         <h1 className="text-base font-medium">{project?.name ?? ""}</h1>
         <div className="flex items-center gap-3">
-          <QuotaIndicator />
+          {isClaudeAgent ? <QuotaIndicator /> : null}
           {/* The only inverted high-contrast element on the page (UI-SPEC focal point). */}
           <Button onClick={() => setDialogOpen(true)}>New task</Button>
         </div>
