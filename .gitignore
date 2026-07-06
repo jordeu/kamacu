@@ -6,3 +6,60 @@ web/dist/*
 
 # Claude Code runtime artifacts
 .claude/scheduled_tasks.lock
+
+# ── GSD baseline (auto-generated) ──
+# Track planning markdown (matches the old .planning/ convention); ignore the binary DB + transient dirs.
+/.gsd/*
+!/.gsd/PROJECT.md
+!/.gsd/DECISIONS.md
+!/.gsd/REQUIREMENTS.md
+!/.gsd/KNOWLEDGE.md
+!/.gsd/CODEBASE.md
+!/.gsd/STATE.md
+!/.gsd/CONTEXT.md
+!/.gsd/PREFERENCES.md
+!/.gsd/milestones/
+.gsd-worktrees/
+.gsd-backups/
+.gsd-id
+.mcp.json
+.bg-shell/
+# Installed skills — reproducible from skills-lock.json (like node_modules)
+.agents/
+.DS_Store
+Thumbs.db
+nul
+nul.*
+con
+con.*
+prn
+prn.*
+aux
+aux.*
+com[1-9]
+com[1-9].*
+lpt[1-9]
+lpt[1-9].*
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+target/
+vendor/
+*.log
+coverage/
+.cache/
+tmp/
