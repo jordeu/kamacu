@@ -22,7 +22,7 @@ Requirements for the Workspaces milestone. Each maps to exactly one roadmap phas
 ### Switcher & Navigation
 
 - [x] **WSNAV-01**: A workspace switcher sits at the top of the projects sidebar in its **expanded state only** (hidden in the collapsed icon rail); clicking it opens a dropdown to pick the active workspace and to reach add/rename/delete management.
-- [ ] **WSNAV-02**: The sidebar project list — both the expanded rows and the collapsed icon rail — shows only the projects belonging to the active workspace.
+- [x] **WSNAV-02**: The sidebar project list — both the expanded rows and the collapsed icon rail — shows only the projects belonging to the active workspace.
 - [x] **WSNAV-03**: The active workspace is remembered in `localStorage` and restored on reload; switching workspaces navigates to that workspace's first project, and shows a clear empty state when the workspace has no projects.
 
 ### Project Assignment
@@ -32,7 +32,7 @@ Requirements for the Workspaces milestone. Each maps to exactly one roadmap phas
 
 ### Global Sessions Bar
 
-- [ ] **WSBAR-01**: The global Active Sessions bar continues to show agent sessions across all projects in every workspace, unaffected by the active-workspace filter (non-regression of the existing cross-project bar).
+- [x] **WSBAR-01**: The global Active Sessions bar continues to show agent sessions across all projects in every workspace, unaffected by the active-workspace filter (non-regression of the existing cross-project bar).
 
 ## Future Requirements
 
@@ -76,11 +76,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 | WSMGMT-03 | Phase 26 | Complete |
 | WSMGMT-04 | Phase 26 | Complete |
 | WSNAV-01 | Phase 26 | Complete |
-| WSNAV-02 | Phase 26 | Pending |
+| WSNAV-02 | Phase 26 | Complete |
 | WSNAV-03 | Phase 26 | Complete |
 | WSPROJ-01 | Phase 26 | Complete |
 | WSPROJ-02 | Phase 26 | Complete |
-| WSBAR-01 | Phase 26 | Pending |
+| WSBAR-01 | Phase 26 | Complete |
 
 **Coverage:**
 - v1.9 requirements: 12 total

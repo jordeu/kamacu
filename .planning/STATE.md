@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Workspaces
-status: executing
-stopped_at: Completed 26-05-PLAN.md
-last_updated: "2026-07-05T19:49:39.743Z"
-last_activity: 2026-07-05
+status: verifying
+stopped_at: Completed 26-06-PLAN.md
+last_updated: "2026-07-06T05:33:56.217Z"
+last_activity: 2026-07-06
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
-  percent: 50
+  completed_plans: 9
+  percent: 100
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 
 Phase: 26 (workspace-switcher-management-assignment) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
-Last activity: 2026-07-05
+Status: Phase complete — ready for verification
+Last activity: 2026-07-06
 
 ### v1.9 Roadmap (Phases 25–26, continues numbering from v1.8's Phase 24)
 
@@ -155,6 +155,11 @@ v1.8 roadmap-time decisions (settled at roadmap creation — treat as planning c
 - **Small UX items grouped (Phase 24):** TABS + REVMENU + POLISH are all daily-driver UX refinements to the session bar / board / task view and are grouped into one polish phase rather than three tiny phases.
 - **Out of scope (do not scope-creep in planning):** renaming the GitHub repo/remote; permanent dual-path `~/.kangent` + `~/.kamacu` support; auto-inserting any agent prompt; per-project diff/cleanup settings. See REQUIREMENTS.md "Out of Scope".
 
+v1.9 execution decisions (settled during Phase 26 — treat as constraints for future workspace/routing work):
+
+- **BoardWorkspaceSync only syncs on a URL-project change (Phase 26-06):** the URL→active-workspace reconciliation is gated behind a `lastSyncedProjectId` ref so it re-anchors ONLY when the URL's `projectId` actually changes (deep-link / navigation TO a project), never when `activeWorkspaceId` changes underneath a stationary URL. This fixed the empty-workspace-switch bug — React Router v7 runs `navigate()` inside `React.startTransition`, so the URL change lags the synchronous `setActiveWorkspaceId()` state update, and without the ref-gate the still-mounted old project route re-anchored (reverted) the switch. D-14 URL-wins deep-link reconciliation is preserved. Reusable pattern: gate a URL→state sync effect behind a ref of the last-synced route param so orthogonal state changes on the same route don't re-trigger it.
+- **Sidebar filters both surfaces with one `.filter` (Phase 26-06, D-12):** the expanded rows and the collapsed icon rail are rendered from the SAME project `.map`, so `.filter((p) => p.workspace_id === activeWorkspaceId)` on that map filters both at once. The global Active Sessions bar is deliberately left unfiltered (`useAgentStatuses`/`waitingByProject` untouched) — WSBAR-01.
+
 v1.7 milestone-time decisions (settled with the user before roadmapping — treat as constraints going into planning):
 
 - **Default letters (ICON-02):** word initials for multi-word names, else first two letters; uppercased; max 2 chars.
@@ -214,7 +219,7 @@ v1.7 codebase grounding (orchestrator-verified — treat as fact):
 
 ## Session Continuity
 
-Last session: 2026-07-05T19:48:53.741Z
+Last session: 2026-07-06T05:33:56.204Z
 Stopped at: Completed 26-05-PLAN.md
 Resume file: None
 Next: Execute plan 26-06 (the phase's human-verify gate) with `/gsd:execute-phase 26` to runtime-verify workspace switch/restore, deep-link reconciliation, and create-in-active.

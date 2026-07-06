@@ -116,7 +116,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 **Milestone Goal:** Group projects into named workspaces (e.g. "Personal", "Professional"), switchable from the top of the expanded projects sidebar, while the global Active Sessions bar keeps showing agent work across every workspace.
 
 - [x] **Phase 25: Workspace Data Foundation** - `workspaces` table + `projects.workspace_id` FK (migration 00012) with an idempotent startup backfill assigning every existing project to a protected default **Personal** workspace. (completed 2026-07-05)
-- [ ] **Phase 26: Workspace Switcher, Management & Assignment** - Sidebar workspace switcher (expanded-only) with add/rename/delete, per-workspace project filtering + navigation, project transfer via the `⋯` menu, create-in-active-workspace, and the cross-workspace sessions-bar guardrail.
+- [x] **Phase 26: Workspace Switcher, Management & Assignment** - Sidebar workspace switcher (expanded-only) with add/rename/delete, per-workspace project filtering + navigation, project transfer via the `⋯` menu, create-in-active-workspace, and the cross-workspace sessions-bar guardrail. (completed 2026-07-06)
 
 ## Phase Details
 
@@ -150,7 +150,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
   - [x] 26-03-PLAN.md — Frontend data layer: types, useWorkspaces, mutations, shared active-workspace context (wave 2)
   - [x] 26-04-PLAN.md — Workspace switcher + create/rename dialog + Manage-workspaces hub (wave 3)
   - [x] 26-05-PLAN.md — Workspace-aware redirect, empty state, URL-wins + create-in-active client (wave 3)
-  - [ ] 26-06-PLAN.md — Mount switcher + filter sidebar + transfer submenu + end-of-phase human-verify (wave 4)
+  - [x] 26-06-PLAN.md — Mount switcher + filter sidebar + transfer submenu + end-of-phase human-verify (wave 4)
 **UI hint**: yes
 
 ## Progress
@@ -185,7 +185,7 @@ Phases execute in numeric order: 25 → 26
 | 23. Worktree Cleanup Panel | v1.8 | 5/5 | Complete | 2026-07-02 |
 | 24. Session-Bar, Board & Tab Polish | v1.8 | 4/4 | Complete | 2026-07-04 |
 | 25. Workspace Data Foundation | v1.9 | 3/3 | Complete    | 2026-07-05 |
-| 26. Workspace Switcher, Management & Assignment | v1.9 | 5/6 | In Progress|  |
+| 26. Workspace Switcher, Management & Assignment | v1.9 | 6/6 | Complete   | 2026-07-06 |
 
 ---
 *v1.0 shipped 2026-06-11 — 5 phases, 28 plans, 74 tasks*
