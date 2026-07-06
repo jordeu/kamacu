@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { del, patch, post } from "./client";
-import type { Project, Status, Task, Workspace } from "./types";
+import type { Agent, Project, Status, Task, Workspace } from "./types";
 
 export type MoveArgs = { id: number; status: Status; afterId: number | null };
 
@@ -224,6 +224,67 @@ export function useMoveTask(projectId: number) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });
+    },
+  });
+}
+
+
+// ── M001: configurable agents CRUD ──────────────────────────────────────────
+// Mirrors the workspaces mutation shapes (useCreateWorkspace / useRenameWorkspace
+// / useDeleteWorkspace). Each invalidates ["agents"]; setDefault also invalidates
+// ["projects"] because the default affects new-project agent assignment.
+
+export function useCreateAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, command }: { name: string; command: string }) =>
+      post<Agent>("/api/agents", { name, command }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+}
+
+export function useUpdateAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      name,
+      command,
+      engine,
+    }: {
+      id: number;
+      name?: string;
+      command?: string;
+      engine?: "claude" | "custom";
+    }) => patch<Agent>(`/api/agents/${id}`, { name, command, engine }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+}
+
+export function useDeleteAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`/api/agents/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+// Set an agent as the global default (POST /api/agents/{id}/default). The
+// server preserves the exactly-one invariant transactionally.
+export function useSetDefaultAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => post<Agent>(`/api/agents/${id}/default`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });
 }

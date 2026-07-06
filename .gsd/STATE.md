@@ -2,7 +2,7 @@
 
 **Active Milestone:** M001: Configurable Agents
 **Active Slice:** S02: Agent management UI and per-project selection
-**Phase:** planning
+**Phase:** evaluating-gates
 **Requirements Status:** 12 active · 6 validated · 5 deferred · 0 out of scope
 
 ## Milestone Registry
@@ -19,4 +19,4 @@
 - None
 
 ## Next Action
-Slice S02 has no DB tasks. Plan slice tasks before execution.
+Evaluate 2 quality gate(s) for S02 before execution.

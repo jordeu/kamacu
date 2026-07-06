@@ -48,6 +48,24 @@ export interface Workspace {
   updated_at: string;
 }
 
+// M001 (migration 00013): a configurable agent. The Claude Code seed is
+// is_system + is_default + engine="claude"; user-added agents are engine="custom".
+// Mirrors the backend api.Agent struct. `is_default` marks the protected default
+// (key off this flag, never the name); `is_system` marks the non-deletable seed.
+export interface Agent {
+  id: number;
+  name: string;
+  // The command template; {{worktree}} and {{session_id}} placeholders are
+  // substituted at spawn. For engine="claude" this is the binary path (the
+  // hook/resume argv is built internally, not from this field).
+  command: string;
+  engine: "claude" | "custom";
+  is_default: boolean;
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Task {
   id: number;
   project_id: number;

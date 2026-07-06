@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./client";
-import type { Project, Task, Workspace } from "./types";
+import type { Agent, Project, Task, Workspace } from "./types";
 
 export function useProjects() {
   return useQuery({
@@ -13,6 +13,16 @@ export function useWorkspaces() {
   return useQuery({
     queryKey: ["workspaces"],
     queryFn: () => get<Workspace[]>("/api/workspaces"),
+  });
+}
+
+// M001: the configurable agents feed (default-first, then name-sorted -- the
+// backend orders it). Consumed by the Settings Agents section and the Project
+// Settings agent selector.
+export function useAgents() {
+  return useQuery({
+    queryKey: ["agents"],
+    queryFn: () => get<Agent[]>("/api/agents"),
   });
 }
 
