@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProjects, useWorkspaces } from "@/api/queries";
@@ -62,6 +62,18 @@ function RedirectToFirstProject() {
  * always visible under its workspace's sidebar filter. Workspace never enters
  * the URL — this only mutates the localStorage-backed active-workspace state.
  * Renders the underlying page unchanged.
+ *
+ * The reconciliation must fire ONLY when the URL's project itself changes
+ * (deep-link / navigation TO a project) — never when `activeWorkspaceId` changes
+ * underneath a stationary URL. React Router runs navigations inside a
+ * `startTransition`, so picking an EMPTY workspace in the switcher (which
+ * `setActiveWorkspaceId(target)` then `navigate("/")`) produces an intermediate
+ * render where the active workspace has already flipped but the URL is still the
+ * old project route — this effect would otherwise re-fire on the `activeWorkspaceId`
+ * change, see the URL project's (old) workspace differ, and REVERT the switch,
+ * so the index redirect bounces back to the old workspace. A ref tracking the
+ * last-synced projectId gates the reconcile to genuine URL-project changes,
+ * letting the switcher win while preserving the D-14 URL-wins deep-link behavior.
  */
 function BoardWorkspaceSync({ children }: { children: ReactNode }) {
   const params = useParams();
@@ -73,18 +85,28 @@ function BoardWorkspaceSync({ children }: { children: ReactNode }) {
     (p) => p.id === projectId,
   )?.workspace_id;
 
+  // The last projectId we reconciled against. Reconciliation is idempotent per
+  // URL project: a workspace switch under the same URL must not be reverted.
+  const lastSyncedProjectId = useRef<number | null>(null);
+
   useEffect(() => {
     // Only reconcile once both sides have resolved: the URL project exists in
     // useProjects() (T-26-07 — never trust a workspace_id we can't see) and the
-    // active workspace has settled (non-null). URL wins when they differ.
-    if (
-      projectWorkspaceId !== undefined &&
-      activeWorkspaceId !== null &&
-      projectWorkspaceId !== activeWorkspaceId
-    ) {
+    // active workspace has settled (non-null).
+    if (projectWorkspaceId === undefined || activeWorkspaceId === null) return;
+
+    // Reconcile ONLY when the URL project changed since our last sync — deep-link
+    // or navigation TO a project. A change driven by the switcher (activeWorkspaceId
+    // moves while the URL stays put) hits this guard and is left alone.
+    if (projectId === lastSyncedProjectId.current) return;
+    lastSyncedProjectId.current = projectId;
+
+    // URL wins on a genuine project change: flip the active workspace to the
+    // project's own workspace when they differ (D-14).
+    if (projectWorkspaceId !== activeWorkspaceId) {
       setActiveWorkspaceId(projectWorkspaceId);
     }
-  }, [projectWorkspaceId, activeWorkspaceId, setActiveWorkspaceId]);
+  }, [projectId, projectWorkspaceId, activeWorkspaceId, setActiveWorkspaceId]);
 
   return <>{children}</>;
 }
