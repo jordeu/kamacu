@@ -1,0 +1,20 @@
+{
+  "id": "9810d5eb-e493-4be0-b155-aabfe547c9dd",
+  "runtime": "bash",
+  "purpose": "T01 backfill test + full store/api regression",
+  "script_chars": 493,
+  "started_at": "2026-07-07T18:06:27.144Z",
+  "finished_at": "2026-07-07T18:06:57.154Z",
+  "exit_code": null,
+  "signal": "SIGTERM",
+  "timed_out": true,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 30010,
+  "stdout_bytes": 284,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/9810d5eb-e493-4be0-b155-aabfe547c9dd.stdout",
+  "stderr_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/9810d5eb-e493-4be0-b155-aabfe547c9dd.stderr"
+}

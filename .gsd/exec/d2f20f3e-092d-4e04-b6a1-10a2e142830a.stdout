@@ -1,0 +1,13 @@
+=== CANONICAL T01 VERIFY (from plan) ===
+BUILD_OK=0
+ok  	kamacu/internal/store	0.067s
+STORE_OPENCODE_EXIT=0
+=== NEW API BACKFILL TEST ===
+ok  	kamacu/internal/api	0.050s
+API_BACKFILL_EXIT=0
+=== AGENTS CRUD + BACKFILL REGRESSION (shared files) ===
+ok  	kamacu/internal/api	17.241s
+API_AGENT_EXIT=0
+=== STORE MIGRATION REGRESSION (shared file) ===
+ok  	kamacu/internal/store	0.119s
+STORE_MIG_EXIT=0

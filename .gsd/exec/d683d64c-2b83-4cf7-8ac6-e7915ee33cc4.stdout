@@ -1,0 +1,41 @@
+=== RUN   TestOpencodeAgentMigration
+2026/07/07 20:05:51 OK   00001_init.sql (638.6µs)
+2026/07/07 20:05:51 OK   00002_worktrees.sql (722.88µs)
+2026/07/07 20:05:51 OK   00003_agent_sessions.sql (297.28µs)
+2026/07/07 20:05:51 OK   00004_settings.sql (252.76µs)
+2026/07/07 20:05:51 OK   00005_tmux_sessions.sql (333.75µs)
+2026/07/07 20:05:51 OK   00006_task_status_timestamps.sql (1.65ms)
+2026/07/07 20:05:51 OK   00007_github_foundations.sql (1.45ms)
+2026/07/07 20:05:51 OK   00008_managed_checkout.sql (347.11µs)
+2026/07/07 20:05:51 OK   00009_project_icons.sql (542.1µs)
+2026/07/07 20:05:51 OK   00010_muted_palette.sql (291.06µs)
+2026/07/07 20:05:51 OK   00011_diff_viewed.sql (277.24µs)
+2026/07/07 20:05:51 OK   00012_workspaces.sql (968.75µs)
+2026/07/07 20:05:51 OK   00013_agents.sql (868.04µs)
+2026/07/07 20:05:51 OK   00014_agent_extra_params.sql (458.13µs)
+2026/07/07 20:05:51 goose: successfully migrated database to version: 14
+2026/07/07 20:05:51 OK   00015_opencode_agent.sql (218.19µs)
+2026/07/07 20:05:51 goose: successfully migrated database to version: 15
+2026/07/07 20:05:51 goose: no migrations to run. current version: 15
+--- PASS: TestOpencodeAgentMigration (0.04s)
+=== RUN   TestOpencodeAgentMigrationOnFreshDB
+2026/07/07 20:05:51 OK   00001_init.sql (427.72µs)
+2026/07/07 20:05:51 OK   00002_worktrees.sql (469.6µs)
+2026/07/07 20:05:51 OK   00003_agent_sessions.sql (202.52µs)
+2026/07/07 20:05:51 OK   00004_settings.sql (188.21µs)
+2026/07/07 20:05:51 OK   00005_tmux_sessions.sql (191.84µs)
+2026/07/07 20:05:51 OK   00006_task_status_timestamps.sql (593.98µs)
+2026/07/07 20:05:51 OK   00007_github_foundations.sql (1.28ms)
+2026/07/07 20:05:51 OK   00008_managed_checkout.sql (319.8µs)
+2026/07/07 20:05:51 OK   00009_project_icons.sql (525.65µs)
+2026/07/07 20:05:51 OK   00010_muted_palette.sql (213.3µs)
+2026/07/07 20:05:51 OK   00011_diff_viewed.sql (234.43µs)
+2026/07/07 20:05:51 OK   00012_workspaces.sql (670.59µs)
+2026/07/07 20:05:51 OK   00013_agents.sql (730.07µs)
+2026/07/07 20:05:51 OK   00014_agent_extra_params.sql (383.71µs)
+2026/07/07 20:05:51 OK   00015_opencode_agent.sql (201.95µs)
+2026/07/07 20:05:51 goose: successfully migrated database to version: 15
+--- PASS: TestOpencodeAgentMigrationOnFreshDB (0.03s)
+PASS
+ok  	kamacu/internal/store	0.068s
+TEST_EXIT=0
