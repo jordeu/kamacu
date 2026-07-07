@@ -37,7 +37,7 @@
 // Subagent (child session) events are suppressed — opencode tools spawn many
 // child sessions whose idle would otherwise flip the root task to idle early.
 
-export const KamacuStatusPlugin = async ({ $, client }) => {
+export const KamacuStatusPlugin = async ({ client }) => {
   // Singleton guard: opencode may re-import the plugin; load it once.
   if (globalThis.__kamacuOpencodePluginV1) return {}
   globalThis.__kamacuOpencodePluginV1 = true
@@ -49,7 +49,6 @@ export const KamacuStatusPlugin = async ({ $, client }) => {
   if (!sessionID || !token || !baseURL) return {}
 
   const url = baseURL.replace(/\/+$/, '') + '/api/hooks/sessions/' + sessionID
-  const header = 'X-Kangent-Token: ' + token
 
   // Root (non-child) session we attribute events to. The first non-child
   // session.created pins it; child/subagent events are ignored after that.
@@ -65,12 +64,28 @@ export const KamacuStatusPlugin = async ({ $, client }) => {
   // the opencode TUI (mirrors claude's async overlay + the reference plugin).
   const notify = async (hookEventName) => {
     const payload = JSON.stringify({ hook_event_name: hookEventName })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
     try {
-      // Reuses the exact proven wire path as claude's overlay (curl -s -m 3).
-      // Each ${} is a separate argv element (Bun $), so it is injection-safe.
-      await $`curl -s -m 3 -H ${header} --data-binary ${payload} ${url}`
+      // POSTs via global fetch() (Bun provides it; no import). The 3s
+      // AbortController matches claude's overlay `-m 3` timeout, so the wire
+      // contract is byte-for-byte equivalent WITHOUT a PATH-dependent
+      // subprocess (D014) — the previous shell-out silently no-oped when
+      // that binary was absent; fetch() removes that failure mode so
+      // hooksAlive reliably flips on the first POST.
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-Kangent-Token': token,
+          'Content-Type': 'application/json',
+        },
+        body: payload,
+        signal: controller.signal,
+      })
     } catch {
-      // curl missing / network down / receiver gone — swallow, never crash.
+      // receiver down / network error / abort — swallow, never crash.
+    } finally {
+      clearTimeout(timer)
     }
   }
 

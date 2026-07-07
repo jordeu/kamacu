@@ -7,7 +7,7 @@
 // empirically: the dir is the SINGULAR `plugin/`, mirroring the reference
 // slayzone-notify.js that already lives there). Kamacu therefore ships an
 // env-gated plugin (kamacu-status.js) that no-ops outside a Kamacu PTY and
-// curls the UNCHANGED claude hook receiver with claude-compatible event names
+// POSTs to the UNCHANGED claude hook receiver with claude-compatible event names
 // when Kamacu spawned the process.
 //
 // InstallPlugin is the single public entry point and is wired into startup

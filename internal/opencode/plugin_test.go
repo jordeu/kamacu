@@ -184,23 +184,33 @@ func assertPluginContent(t *testing.T, b []byte) {
 	t.Helper()
 	s := string(b)
 	mustContain := []string{
-		"kamacu-managed",                 // managed-file header (overwritten at startup)
-		"KAMACU_SESSION_ID",              // env gate reads it
-		"KAMACU_HOOK_TOKEN",              // env gate reads it
-		"KAMACU_HOOK_BASE",               // env gate reads it
-		"hook_event_name",                // claude-compatible wire contract key
-		"'SessionStart'",                 // session.created -> SessionStart -> MarkHooksAlive
-		"'Stop'",                         // idle -> Stop -> SetIdle
-		"'Notification'",                 // permission.ask -> Notification -> SetWaiting
-		"X-Kangent-Token",               // same header as claude's overlay
-		"/api/hooks/sessions/",          // UNCHANGED hook receiver path
-		"__kamacuOpencodePluginV1",       // singleton guard
-		"parentID",                       // child-session suppression
+		"kamacu-managed",           // managed-file header (overwritten at startup)
+		"KAMACU_SESSION_ID",        // env gate reads it
+		"KAMACU_HOOK_TOKEN",        // env gate reads it
+		"KAMACU_HOOK_BASE",         // env gate reads it
+		"hook_event_name",          // claude-compatible wire contract key
+		"'SessionStart'",           // session.created -> SessionStart -> MarkHooksAlive
+		"'Stop'",                   // idle -> Stop -> SetIdle
+		"'Notification'",           // permission.ask -> Notification -> SetWaiting
+		"X-Kangent-Token",          // same header as claude's overlay
+		"/api/hooks/sessions/",     // UNCHANGED hook receiver path
+		"__kamacuOpencodePluginV1", // singleton guard
+		"parentID",                 // child-session suppression
+		"fetch",                    // D014: POST via fetch(), not curl
+		"AbortController",          // 3s timeout matches claude overlay -m 3
 	}
 	for _, want := range mustContain {
 		if !contains(s, want) {
 			t.Errorf("plugin source missing required token %q (env gate / wire contract / child-suppression invariant)", want)
 		}
+	}
+	// Negative assertion: the plugin must NOT depend on curl. The original S01
+	// notify() shelled out to `curl -s -m 3` via Bun $, which silently no-ops
+	// when curl is absent from PATH — leaving hooksAlive stuck false and
+	// opencode tasks pinned on "working". fetch() + AbortController removes
+	// the PATH dependency (D014). If this fires, notify() regressed to curl.
+	if contains(s, "curl") {
+		t.Errorf("plugin source must not depend on curl (silent no-op when curl is absent from PATH); use fetch + AbortController. Found 'curl' substring.")
 	}
 }
 
