@@ -170,8 +170,23 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			cmd = exec.Command(bin, opts.AgentArgs[1:]...)
 			cmd.Dir = dir
 			// Same env posture as the claude path: inherit everything the user's
-			// terminal would have, then pin terminal identity (D-52).
-			cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+			// terminal would have, then pin terminal identity (D-52). The opencode
+			// engine reuses this custom command-render arm (opencode can't take a
+			// per-instance hook command via argv — its hooks come from an on-disk
+			// plugin), but additionally gets the D014 env contract
+			// (KAMACU_SESSION_ID / KAMACU_HOOK_TOKEN / KAMACU_HOOK_BASE) so that
+			// plugin can curl the hook receiver back with claude-compatible event
+			// names. Custom agents get none of these — the injection is
+			// opencode-gated, so the custom path is byte-for-byte unchanged.
+			envExtra := []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
+			if opts.AgentEngine == "opencode" {
+				envExtra = append(envExtra,
+					"KAMACU_SESSION_ID="+id, // minted at the top of Spawn; same id the settings overlay would embed
+					"KAMACU_HOOK_TOKEN="+cfg.Token,
+					"KAMACU_HOOK_BASE="+cfg.BaseURL, // D014
+				)
+			}
+			cmd.Env = append(os.Environ(), envExtra...)
 		} else {
 		// Resume reuses the stored id (verified v2.1.173: --resume keeps the
 		// same session id, never forks); a fresh spawn mints a new one

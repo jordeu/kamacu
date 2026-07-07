@@ -318,8 +318,10 @@ func (s *Session) agentStatusLocked() string {
 	// working/waiting/idle heuristics below are claude-hook-driven (and a
 	// fallback activity estimate); applying them to a custom agent TUI we
 	// don't understand would be the unreliable heuristic this milestone
-	// explicitly rejected. claude (and "" back-compat) keeps the full states.
-	if s.engine != "" && s.engine != "claude" {
+	// explicitly rejected. claude (and "" back-compat) and opencode (D013:
+	// opencode runs in a PTY like claude and its on-disk plugin drives the
+	// same SessionStart/Stop/Notification hooks) keep the full states.
+	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" {
 		return "running"
 	}
 	if s.waiting {
