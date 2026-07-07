@@ -206,21 +206,23 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := session.SpawnOpts{Kind: kind}
-	// csid holds the task's persisted claude session id, read fresh inside the
-	// handler (Pitfall 6: this in-handler read is the single source of truth at
-	// spawn time — a stale client Resume after a Reset minted a new id simply
-	// resumes the NEW id, which is correct newest-wins behavior).
-	var csid sql.NullString
+	// csid holds the task's persisted claude session id; ocsid holds its
+	// opencode counterpart (the opaque ses_… opencode mints, captured ASYNC in
+	// T03). Both are read fresh inside the handler (Pitfall 6: this in-handler
+	// read is the single source of truth at spawn time — a stale client Resume
+	// after a Reset minted a new id simply resumes the NEW id, which is correct
+	// newest-wins behavior).
+	var csid, ocsid sql.NullString
 	var agentEngine, agentCommand, agentExtraParams string // M001: resolved alongside the task's worktree
 	if req.TaskID > 0 {
 		var path sql.NullString
 		err := h.db.QueryRow(
-			`SELECT t.worktree_path, t.claude_session_id, a.engine, a.command, a.extra_params
+			`SELECT t.worktree_path, t.claude_session_id, t.opencode_session_id, a.engine, a.command, a.extra_params
 			 FROM tasks t
 			 JOIN projects p ON p.id = t.project_id
 			 JOIN agents a ON a.id = p.agent_id
 			 WHERE t.id = ?`, req.TaskID,
-		).Scan(&path, &csid, &agentEngine, &agentCommand, &agentExtraParams)
+		).Scan(&path, &csid, &ocsid, &agentEngine, &agentCommand, &agentExtraParams)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
@@ -247,14 +249,28 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Resume validation, AFTER the one-per-task gate: the server never trusts
-	// the client's resumable snapshot. A NULL stored id or a missing transcript
-	// is an honest 409 (the transcript glob self-heals D-56's resumable:false).
+	// the client's resumable snapshot. The gate is ENGINE-BRANCHED (M002/S03):
+	// opencode has NO transcript files (its sessions live in opencode.db, not
+	// ~/.claude/projects), so it keys off the persisted opencode_session_id alone
+	// — an empty/stale id is an honest 409 "no session to resume" (mirror claude's
+	// posture, NEVER silently fork a fresh session). The claude path is unchanged
+	// byte-for-byte (csid + the transcript glob that self-heals D-56's resumable).
 	if req.Resume {
-		if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
-			writeError(w, http.StatusConflict, "no session to resume")
-			return
+		if agentEngine == "opencode" {
+			if !ocsid.Valid {
+				writeError(w, http.StatusConflict, "no session to resume")
+				return
+			}
+			// opts.ResumeSessionID stays "" — opencode does NOT route through
+			// claude's --resume (MEM027); the `-s <id>` flag is appended to
+			// AgentArgs in the custom spawn arm below.
+		} else {
+			if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
+				writeError(w, http.StatusConflict, "no session to resume")
+				return
+			}
+			opts.ResumeSessionID = csid.String
 		}
-		opts.ResumeSessionID = csid.String
 	}
 	// reattachLabel carries the persisted tmux_sessions.label from the reattach
 	// branch below through to after Spawn, so a restored survivor keeps its custom
@@ -281,6 +297,15 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// template. Minted here (Manager.Spawn's internal id isn't visible
 			// to the handler); cheap, no persistence.
 			opts.AgentArgs = renderAgentCommand(agentCommand, opts.Cwd, uuid.NewString())
+			// M002/S03: an opencode task with a persisted opencode_session_id
+			// resumes by appending `opencode -s <id>` (opencode's own resume
+			// flag), NOT claude's --resume and NOT a fresh `opencode`. The
+			// fresh opencode spawn stays renderAgentCommand("opencode",...) ==
+			// ["opencode"] (NO -s; the seed command has no placeholders). The
+			// fake-opencode argv stub locks this exact fresh-vs-resume argv.
+			if agentEngine == "opencode" && req.Resume && ocsid.Valid {
+				opts.AgentArgs = append(opts.AgentArgs, "-s", ocsid.String)
+			}
 		}
 	} else if reattach {
 		// Reattach variant (TMUX-05, D-88): reconnect to a surviving tmux row by
