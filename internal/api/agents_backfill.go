@@ -71,6 +71,34 @@ func BackfillAgentExtraParams(db *sql.DB) error {
 	return err
 }
 
+// BackfillOpenCodeAgent guarantees the opencode system seed (M002 D013) exists
+// at startup, mirroring BackfillAgents: it runs ONCE right after store.Migrate(db)
+// and is IDEMPOTENT -- a cheap no-op on healthy boots. The seed is created by
+// migration 00015 (guarded by a NOT EXISTS predicate), so this hook's job is the
+// same safety net posture as BackfillAgents: re-create the row if it was somehow
+// dropped from a migrated DB (e.g. a partial-apply recovery, or a user who
+// manually deleted it past the is_system guard).
+//
+// The seed is engine='opencode' (its own capability tier: PTY spawn + on-disk
+// plugin status hooks, see internal/opencode/), command='opencode' (the host CLI),
+// is_default=0 (claude REMAINS the sole default -- R019 invariant intact), and
+// is_system=1 (non-deletable, R018). Mirrors the BackfillAgents literal-INSERT
+// posture: all SQL is parameterless/literal -- no string-concatenated input.
+func BackfillOpenCodeAgent(db *sql.DB) error {
+	var id int64
+	err := db.QueryRow(`SELECT id FROM agents WHERE engine = 'opencode' AND is_system = 1`).Scan(&id)
+	if err == nil {
+		return nil // opencode seed already exists -> no-op (the healthy-boot path)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err // a real DB error is propagated, never swallowed
+	}
+	// No opencode seed: re-create it (defensive; 00015 normally created it).
+	// is_default=0 preserves the exactly-one-default invariant (claude stays it).
+	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('opencode', 'opencode', 'opencode', 0, 1)`)
+	return err
+}
+
 // effectiveExtraParams returns the legacy setting's effective value without
 // importing the settings package (agents_backfill.go stays leaf-ish). The code
 // default ('--dangerously-skip-permissions', AGENT-02) is applied when the KV

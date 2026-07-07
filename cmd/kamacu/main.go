@@ -153,6 +153,14 @@ func main() {
 		slog.Error("backfilling agent extra params", "error", err)
 		os.Exit(1)
 	}
+	// M002 (opencode built-in agent engine): guarantee a second non-deletable
+	// system agent row for opencode exists (engine='opencode', is_system=1,
+	// is_default=0). Mirrors BackfillAgents; migration 00015 normally creates it,
+	// so this is a cheap no-op on healthy boots and a safety net on recovery.
+	if err := api.BackfillOpenCodeAgent(db); err != nil {
+		slog.Error("backfilling opencode agent", "error", err)
+		os.Exit(1)
+	}
 
 	// Kamacu-managed tmux config (D-79 status off, D-80 mouse on), regenerated
 	// at every start in the data dir next to the DB — a stable path that survives

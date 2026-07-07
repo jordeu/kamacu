@@ -23,7 +23,9 @@ func defaultAgentID(t *testing.T, srvURL string) int64 {
 }
 
 // TestAgentList proves GET /api/agents returns the seeded Claude agent with
-// is_default + is_system true and engine='claude' on a fresh migrated DB.
+// is_default + is_system true and engine='claude' on a fresh migrated DB. A
+// fresh DB now seeds TWO system agents (claude + opencode, M002 migration 00015),
+// so the test locates the CLAUDE seed by engine rather than assuming list[0].
 func TestAgentList(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
@@ -31,10 +33,19 @@ func TestAgentList(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status=%d, want 200", status)
 	}
-	if len(list) != 1 {
-		t.Fatalf("agents = %d, want 1 (seeded Claude)", len(list))
+	if len(list) < 1 {
+		t.Fatalf("agents = %d, want >= 1 (seeded system agents)", len(list))
 	}
-	a := list[0]
+	var a map[string]any
+	for _, x := range list {
+		if x["engine"] == "claude" {
+			a = x
+			break
+		}
+	}
+	if a == nil {
+		t.Fatalf("no claude agent in list %v", list)
+	}
 	if a["name"] != "Claude Code" {
 		t.Errorf("name = %v, want \"Claude Code\"", a["name"])
 	}
@@ -72,10 +83,11 @@ func TestAgentCreate(t *testing.T) {
 		t.Errorf("command = %v, want \"gemini\"", a["command"])
 	}
 
-	// The list now has the seed + the new agent.
+	// The list now has the system seeds (claude + opencode) + the new custom
+	// agent = 3.
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 2 {
-		t.Errorf("agents after create = %d, want 2", len(list))
+	if len(list) != 3 {
+		t.Errorf("agents after create = %d, want 3", len(list))
 	}
 }
 
@@ -165,10 +177,10 @@ func TestAgentDeleteUnused(t *testing.T) {
 		t.Errorf("delete unused custom: status=%d, want 204", resp.StatusCode)
 	}
 
-	// Back to one agent (the seed).
+	// Back to the two system seeds (claude + opencode).
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 1 {
-		t.Errorf("agents after delete = %d, want 1", len(list))
+	if len(list) != 2 {
+		t.Errorf("agents after delete = %d, want 2 (system seeds only)", len(list))
 	}
 }
 
