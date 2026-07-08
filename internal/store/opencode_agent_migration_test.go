@@ -58,7 +58,7 @@ func TestOpencodeAgentMigration(t *testing.T) {
 	}
 
 	// (a) The opencode system seed row now exists with the exact seed shape:
-	//     name='opencode', command='opencode', engine='opencode', is_system=1,
+	//     name='OpenCode', command='opencode', engine='opencode', is_system=1,
 	//     extra_params='' (the 00014 default; opencode ignores the column), and
 	//     is_default=0 (R019: claude stays the sole default).
 	var (
@@ -75,8 +75,8 @@ func TestOpencodeAgentMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("select opencode seed: %v", err)
 	}
-	if ocName != "opencode" {
-		t.Errorf("opencode seed name = %q, want \"opencode\"", ocName)
+	if ocName != "OpenCode" {
+		t.Errorf("opencode seed name = %q, want \"OpenCode\"", ocName)
 	}
 	if ocCommand != "opencode" {
 		t.Errorf("opencode seed command = %q, want \"opencode\"", ocCommand)

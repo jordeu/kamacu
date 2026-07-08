@@ -17,10 +17,10 @@
 -- so the migration is idempotent under the goose version table AND against any
 -- future re-run / partial-apply recovery (defence in depth, matching the
 -- idempotent backfill posture in internal/api/agents_backfill.go). The unique
--- name index (idx_agents_name_nocase, 00013) makes 'opencode' case-insensitively
+-- name index (idx_agents_name_nocase, 00013) makes 'OpenCode' case-insensitively
 -- unique among agent names.
 INSERT INTO agents (name, command, engine, is_default, is_system)
-SELECT 'opencode', 'opencode', 'opencode', 0, 1
+SELECT 'OpenCode', 'opencode', 'opencode', 0, 1
 WHERE NOT EXISTS (SELECT 1 FROM agents WHERE engine = 'opencode');
 
 -- +goose Down

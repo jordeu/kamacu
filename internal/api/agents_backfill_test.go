@@ -156,8 +156,8 @@ func TestBackfillOpenCodeAgent(t *testing.T) {
 	).Scan(&ocName, &ocCommand, &ocEngine, &ocIsDefault, &ocIsSystem); err != nil {
 		t.Fatalf("select re-created opencode seed: %v", err)
 	}
-	if ocName != "opencode" || ocCommand != "opencode" || ocEngine != "opencode" {
-		t.Errorf("re-created opencode seed = %q/%q/%q, want opencode/opencode/opencode", ocName, ocCommand, ocEngine)
+	if ocName != "OpenCode" || ocCommand != "opencode" || ocEngine != "opencode" {
+		t.Errorf("re-created opencode seed = %q/%q/%q, want OpenCode/opencode/opencode", ocName, ocCommand, ocEngine)
 	}
 	if ocIsSystem != 1 {
 		t.Errorf("re-created opencode seed is_system = %d, want 1", ocIsSystem)

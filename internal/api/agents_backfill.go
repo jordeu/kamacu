@@ -84,10 +84,14 @@ func BackfillAgentExtraParams(db *sql.DB) error {
 // is_default=0 (claude REMAINS the sole default -- R019 invariant intact), and
 // is_system=1 (non-deletable, R018). Mirrors the BackfillAgents literal-INSERT
 // posture: all SQL is parameterless/literal -- no string-concatenated input.
+// Also normalizes any existing system opencode row's name to 'OpenCode' for
+// display consistency (the seed was originally 'opencode' lowercase).
 func BackfillOpenCodeAgent(db *sql.DB) error {
 	var id int64
 	err := db.QueryRow(`SELECT id FROM agents WHERE engine = 'opencode' AND is_system = 1`).Scan(&id)
 	if err == nil {
+		// Normalize the display name: early M002 seeds used 'opencode' (lowercase).
+		_, _ = db.Exec(`UPDATE agents SET name = 'OpenCode' WHERE engine = 'opencode' AND is_system = 1 AND name = 'opencode'`)
 		return nil // opencode seed already exists -> no-op (the healthy-boot path)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -95,7 +99,7 @@ func BackfillOpenCodeAgent(db *sql.DB) error {
 	}
 	// No opencode seed: re-create it (defensive; 00015 normally created it).
 	// is_default=0 preserves the exactly-one-default invariant (claude stays it).
-	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('opencode', 'opencode', 'opencode', 0, 1)`)
+	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('OpenCode', 'opencode', 'opencode', 0, 1)`)
 	return err
 }
 
