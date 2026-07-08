@@ -1,0 +1,20 @@
+{
+  "id": "f8928429-7462-4d23-b2ad-56cd302ebe73",
+  "runtime": "bash",
+  "purpose": "T01 final store + build + vet verification",
+  "script_chars": 385,
+  "started_at": "2026-07-07T18:19:39.644Z",
+  "finished_at": "2026-07-07T18:19:41.251Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 1607,
+  "stdout_bytes": 138,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/f8928429-7462-4d23-b2ad-56cd302ebe73.stdout",
+  "stderr_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/f8928429-7462-4d23-b2ad-56cd302ebe73.stderr"
+}

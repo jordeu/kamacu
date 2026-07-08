@@ -1,0 +1,10 @@
+=== build (all) ===
+BUILD_OK=0
+=== internal/store full ===
+2026/07/07 20:06:28 goose: successfully migrated database to version: 15
+2026/07/07 20:06:28 goose: no migrations to run. current version: 15
+FAIL
+FAIL	kamacu/internal/store	0.260s
+FAIL
+STORE_EXIT=1
+=== internal/api full ===

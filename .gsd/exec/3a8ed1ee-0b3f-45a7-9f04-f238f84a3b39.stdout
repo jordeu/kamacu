@@ -1,0 +1,31 @@
+2026/07/07 20:10:09 OK   00009_project_icons.sql (399.9µs)
+2026/07/07 20:10:09 OK   00010_muted_palette.sql (156.41µs)
+2026/07/07 20:10:09 OK   00011_diff_viewed.sql (216.96µs)
+2026/07/07 20:10:09 OK   00012_workspaces.sql (519.14µs)
+2026/07/07 20:10:09 OK   00013_agents.sql (578.27µs)
+2026/07/07 20:10:09 OK   00014_agent_extra_params.sql (315.21µs)
+2026/07/07 20:10:09 OK   00015_opencode_agent.sql (170.37µs)
+2026/07/07 20:10:09 goose: successfully migrated database to version: 15
+--- PASS: TestBackfillOpenCodeAgent (0.03s)
+=== RUN   TestBackfillWorkspaces
+2026/07/07 20:10:09 OK   00001_init.sql (396.65µs)
+2026/07/07 20:10:09 OK   00002_worktrees.sql (482.19µs)
+2026/07/07 20:10:09 OK   00003_agent_sessions.sql (203.91µs)
+2026/07/07 20:10:09 OK   00004_settings.sql (167.2µs)
+2026/07/07 20:10:09 OK   00005_tmux_sessions.sql (207.88µs)
+2026/07/07 20:10:09 OK   00006_task_status_timestamps.sql (598.59µs)
+2026/07/07 20:10:09 OK   00007_github_foundations.sql (828.59µs)
+2026/07/07 20:10:09 OK   00008_managed_checkout.sql (204.27µs)
+2026/07/07 20:10:09 OK   00009_project_icons.sql (324.12µs)
+2026/07/07 20:10:09 OK   00010_muted_palette.sql (140.03µs)
+2026/07/07 20:10:09 OK   00011_diff_viewed.sql (166.49µs)
+2026/07/07 20:10:09 OK   00012_workspaces.sql (413µs)
+2026/07/07 20:10:09 OK   00013_agents.sql (477.54µs)
+2026/07/07 20:10:09 OK   00014_agent_extra_params.sql (272.96µs)
+2026/07/07 20:10:09 OK   00015_opencode_agent.sql (132.49µs)
+2026/07/07 20:10:09 goose: successfully migrated database to version: 15
+--- PASS: TestBackfillWorkspaces (0.02s)
+FAIL
+FAIL	kamacu/internal/api	0.101s
+FAIL
+EXIT=1

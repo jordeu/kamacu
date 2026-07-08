@@ -1,0 +1,25 @@
+=== RUN   TestAgentsMigration
+2026/07/07 20:07:15 OK   00001_init.sql (677.54µs)
+2026/07/07 20:07:15 OK   00002_worktrees.sql (1.01ms)
+2026/07/07 20:07:15 OK   00003_agent_sessions.sql (419.42µs)
+2026/07/07 20:07:15 OK   00004_settings.sql (313.06µs)
+2026/07/07 20:07:15 OK   00005_tmux_sessions.sql (400.87µs)
+2026/07/07 20:07:15 OK   00006_task_status_timestamps.sql (1.23ms)
+2026/07/07 20:07:15 OK   00007_github_foundations.sql (2.17ms)
+2026/07/07 20:07:15 OK   00008_managed_checkout.sql (391.03µs)
+2026/07/07 20:07:15 OK   00009_project_icons.sql (604.81µs)
+2026/07/07 20:07:15 OK   00010_muted_palette.sql (236.05µs)
+2026/07/07 20:07:15 OK   00011_diff_viewed.sql (263.72µs)
+2026/07/07 20:07:15 OK   00012_workspaces.sql (946.73µs)
+2026/07/07 20:07:15 goose: successfully migrated database to version: 12
+2026/07/07 20:07:15 OK   00013_agents.sql (1.02ms)
+2026/07/07 20:07:15 OK   00014_agent_extra_params.sql (580.58µs)
+2026/07/07 20:07:15 OK   00015_opencode_agent.sql (262.55µs)
+2026/07/07 20:07:15 goose: successfully migrated database to version: 15
+2026/07/07 20:07:15 goose: no migrations to run. current version: 15
+    agents_migration_test.go:199: agents after re-run = 2, want 1 (no second Claude)
+--- FAIL: TestAgentsMigration (0.04s)
+FAIL
+FAIL	kamacu/internal/store	0.046s
+FAIL
+EXIT=1

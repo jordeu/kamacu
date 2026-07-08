@@ -1,0 +1,20 @@
+{
+  "id": "1b947b6d-7272-4ec3-aaa2-b11bee7e70fe",
+  "runtime": "bash",
+  "purpose": "find failing api test names",
+  "script_chars": 179,
+  "started_at": "2026-07-07T18:13:35.486Z",
+  "finished_at": "2026-07-07T18:15:03.244Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 87758,
+  "stdout_bytes": 156,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/1b947b6d-7272-4ec3-aaa2-b11bee7e70fe.stdout",
+  "stderr_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/1b947b6d-7272-4ec3-aaa2-b11bee7e70fe.stderr"
+}

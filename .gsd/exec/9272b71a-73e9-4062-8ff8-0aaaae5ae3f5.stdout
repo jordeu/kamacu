@@ -1,0 +1,7 @@
+2026/07/07 20:17:41 OK   00014_agent_extra_params.sql (397.67µs)
+2026/07/07 20:17:41 OK   00015_opencode_agent.sql (199.93µs)
+2026/07/07 20:17:41 goose: successfully migrated database to version: 15
+FAIL
+FAIL	kamacu/internal/api	102.328s
+FAIL
+API_EXIT=1

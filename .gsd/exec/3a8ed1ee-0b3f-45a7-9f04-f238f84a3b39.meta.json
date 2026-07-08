@@ -1,0 +1,20 @@
+{
+  "id": "3a8ed1ee-0b3f-45a7-9f04-f238f84a3b39",
+  "runtime": "bash",
+  "purpose": "isolate api backfill regression",
+  "script_chars": 164,
+  "started_at": "2026-07-07T18:10:09.162Z",
+  "finished_at": "2026-07-07T18:10:09.816Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 654,
+  "stdout_bytes": 1638,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/3a8ed1ee-0b3f-45a7-9f04-f238f84a3b39.stdout",
+  "stderr_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/3a8ed1ee-0b3f-45a7-9f04-f238f84a3b39.stderr"
+}

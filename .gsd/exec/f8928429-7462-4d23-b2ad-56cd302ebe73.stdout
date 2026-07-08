@@ -1,0 +1,7 @@
+=== build (all) ===
+BUILD_OK=0
+=== internal/store full ===
+ok  	kamacu/internal/store	0.224s
+STORE_EXIT=0
+=== cmd/kamacu vet ===
+VET_OK=0

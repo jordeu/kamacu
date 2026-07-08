@@ -20,6 +20,7 @@ import (
 	"kamacu/internal/api"
 	"kamacu/internal/github"
 	"kamacu/internal/migrate"
+	"kamacu/internal/opencode"
 	"kamacu/internal/quota"
 	"kamacu/internal/reaper"
 	"kamacu/internal/session"
@@ -152,6 +153,29 @@ func main() {
 	if err := api.BackfillAgentExtraParams(db); err != nil {
 		slog.Error("backfilling agent extra params", "error", err)
 		os.Exit(1)
+	}
+	// M002 (opencode built-in agent engine): guarantee a second non-deletable
+	// system agent row for opencode exists (engine='opencode', is_system=1,
+	// is_default=0). Mirrors BackfillAgents; migration 00015 normally creates it,
+	// so this is a cheap no-op on healthy boots and a safety net on recovery.
+	if err := api.BackfillOpenCodeAgent(db); err != nil {
+		slog.Error("backfilling opencode agent", "error", err)
+		os.Exit(1)
+	}
+
+	// M002 (opencode built-in agent engine): ship + idempotently install the
+	// env-gated opencode status plugin. opencode cannot take a per-instance hook
+	// command via argv (unlike claude's --settings overlay), so it loads this
+	// static .js from ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/ and curls
+	// the UNCHANGED claude hook receiver with claude-compatible event names
+	// (D013/D014). Silent no-op when opencode is not installed (its config dir is
+	// absent) — never pollutes a non-opencode user's home dir. Skip-on-match is
+	// a cheap no-op on healthy boots; a drifted file is overwritten at startup,
+	// the same regenerate posture as tmux.WriteConfig below. A write failure is
+	// warn-only: status hooks degrade gracefully (session stays on activity-
+	// based status with the BEL fallback armed) and must never block booting.
+	if err := opencode.InstallPlugin(); err != nil {
+		slog.Warn("installing opencode status plugin", "error", err)
 	}
 
 	// Kamacu-managed tmux config (D-79 status off, D-80 mouse on), regenerated

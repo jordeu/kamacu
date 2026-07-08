@@ -1,0 +1,41 @@
+--- PASS: TestAgentStatusRunningNotResumable (0.08s)
+=== RUN   TestAgentStatusExitedResumable
+--- PASS: TestAgentStatusExitedResumable (0.09s)
+=== RUN   TestAgentStatusPRLinkFields
+--- PASS: TestAgentStatusPRLinkFields (0.08s)
+=== RUN   TestAgentStatusEmptyList
+--- PASS: TestAgentStatusEmptyList (0.03s)
+=== RUN   TestAgentStatusSingleEntry
+--- PASS: TestAgentStatusSingleEntry (5.12s)
+=== RUN   TestAgentStatusNewestWins
+--- PASS: TestAgentStatusNewestWins (0.10s)
+=== RUN   TestProjectCreateDefaultAgent
+--- PASS: TestProjectCreateDefaultAgent (0.04s)
+=== RUN   TestProjectCreateExplicitAgent
+--- PASS: TestProjectCreateExplicitAgent (0.04s)
+=== RUN   TestProjectCreateUnknownAgent
+--- PASS: TestProjectCreateUnknownAgent (0.03s)
+=== RUN   TestProjectPatchAgent
+--- PASS: TestProjectPatchAgent (0.03s)
+=== RUN   TestSessionResumeRequiresAgentKind
+--- PASS: TestSessionResumeRequiresAgentKind (0.06s)
+=== RUN   TestSessionAgentDefaultExtraParamsInArgv
+--- PASS: TestSessionAgentDefaultExtraParamsInArgv (0.13s)
+=== RUN   TestSessionAgentExtraParamsRemovable
+--- PASS: TestSessionAgentExtraParamsRemovable (0.13s)
+=== RUN   TestSessionAgentResumeCarriesExtraParams
+--- PASS: TestSessionAgentResumeCarriesExtraParams (0.13s)
+=== RUN   TestSessionTmuxReattachRejectsAgent
+--- PASS: TestSessionTmuxReattachRejectsAgent (0.06s)
+=== RUN   TestSessionAgentSpawn
+--- PASS: TestSessionAgentSpawn (0.08s)
+=== RUN   TestSessionAgentOnePerTask
+--- PASS: TestSessionAgentOnePerTask (0.08s)
+=== RUN   TestSessionAgentRestartAfterExit
+--- PASS: TestSessionAgentRestartAfterExit (0.10s)
+=== RUN   TestSessionAgentValidation
+--- PASS: TestSessionAgentValidation (5.12s)
+FAIL
+FAIL	kamacu/internal/api	17.152s
+FAIL
+EXIT=1

@@ -1,0 +1,20 @@
+{
+  "id": "d2f20f3e-092d-4e04-b6a1-10a2e142830a",
+  "runtime": "bash",
+  "purpose": "T01 final consolidated verification (canonical + regression)",
+  "script_chars": 809,
+  "started_at": "2026-07-07T18:19:55.533Z",
+  "finished_at": "2026-07-07T18:20:15.421Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 19888,
+  "stdout_bytes": 397,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/d2f20f3e-092d-4e04-b6a1-10a2e142830a.stdout",
+  "stderr_path": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002/.gsd/exec/d2f20f3e-092d-4e04-b6a1-10a2e142830a.stderr"
+}

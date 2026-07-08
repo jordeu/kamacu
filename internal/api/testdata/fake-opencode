@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# testdata/fake-opencode: opencode stand-in for CI (spawned via the custom
+# AgentArgs arm — AgentArgs[0] is this absolute path; the real binary is never
+# invoked). Mirrors testdata/fake-claude's argv diagnostic: records argv so
+# tests assert a fresh spawn is exactly [fake-opencode] (NO -s) and a resume
+# spawn is exactly [fake-opencode, "-s", "ses_test…"]. FAKE_OPENCODE_ARGS_FILE
+# is the recorder (defaults to /dev/null so a stray invocation never fails).
+# Preserves the same startup contract as real opencode/fake-claude:
+# bracketed-paste enable at startup and the SIGTERM -> exit 143 trap.
+printf '%s\n' "$@" > "${FAKE_OPENCODE_ARGS_FILE:-/dev/null}"
+printf '\x1b[?2004h'            # bracketed paste on (like real opencode)
+echo "fake opencode ready"
+trap 'exit 143' TERM            # mirrors verified SIGTERM behavior
+sleep 300 & wait                # idle until stopped
