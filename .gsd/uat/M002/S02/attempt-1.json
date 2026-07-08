@@ -1,0 +1,160 @@
+{
+  "runId": "uat:M002:S02:attempt-1",
+  "attempt": 1,
+  "milestoneId": "M002",
+  "sliceId": "S02",
+  "uatType": "runtime-executable",
+  "verdict": "PASS",
+  "gateVerdict": "pass",
+  "evaluatedAt": "2026-07-07T19:22:40.527Z",
+  "worktreeRoot": "/home/jordi/workspace/github/kangent/.gsd-worktrees/M002",
+  "browserToolsPresented": false,
+  "modePolicy": {
+    "browserTools": false,
+    "partialEligible": false,
+    "passWithHumanFollowUp": false,
+    "requiredAnyModes": [
+      "runtime"
+    ]
+  },
+  "checks": [
+    {
+      "description": "plugin uses fetch()+AbortController, NOT curl (content contract)",
+      "evidence": [
+        {
+          "kind": "gsd_uat_exec",
+          "note": "go test TestPluginSourceMatchesFile PASS; grep -c curl kamacu-status.js == 0; fetch( x3 + AbortController x2 present",
+          "ref": "eb2be1f5-7292-48e3-bd91-cebc88766fcf"
+        }
+      ],
+      "id": "UAT-01",
+      "mode": "runtime",
+      "notes": "Regression guard for the curl-absent silent-no-op defect holds: TestPluginSourceMatchesFile PASS (asserts fetch+AbortController present AND curl absent against //go:embed bytes); grep -c curl on kamacu-status.js == 0.",
+      "result": "PASS"
+    },
+    {
+      "description": "default opencode plugin suite still green (receiver-half regression intact)",
+      "evidence": [
+        {
+          "kind": "gsd_uat_exec",
+          "note": "go test ./internal/opencode/ -count=1 -> ok exit 0",
+          "ref": "63b1baad-da66-4c83-bfd6-5b0c702d779b"
+        }
+      ],
+      "id": "UAT-02",
+      "mode": "runtime",
+      "notes": "Full default internal/opencode suite green (ok, exit 0): no-op-when-absent, no-op-when-target-is-file, writes-when-present, idempotent-skip, overwrites-stale, config-dir-error, source-matches-file. e2e_test.go excluded by the opencode_e2e build tag as expected.",
+      "result": "PASS"
+    },
+    {
+      "description": "real-binary e2e: shipped plugin loads in opencode 1.17.15 and its POSTs reach a receiver (Stop -> idle unlocks)",
+      "evidence": [
+        {
+          "kind": "gsd_uat_exec",
+          "note": "E2E_RealTurnPostsLifecycle PASS in 6.89s; receiver counts SessionStart:1 Stop:1",
+          "ref": "fc142b49-81b7-432d-bd71-f943923866ec"
+        }
+      ],
+      "id": "UAT-03",
+      "mode": "runtime",
+      "notes": "Load-bearing assertion holds: go build -tags opencode_e2e ok; E2E_RealTurnPostsLifecycle PASS (6.89s) against the real opencode binary on PATH (opencode installed, provider config present, so not skipped). httptest receiver observed >=1 POST AND counts[Stop]>=1 from a real opencode run turn with the shipped fetch-based plugin installed into an isolated temp XDG_CONFIG_HOME. Plugin->receiver loop live, idle unlocks. (Did not t.Skip.)",
+      "result": "PASS"
+    },
+    {
+      "description": "real-binary e2e: env-gate no-ops against the real binary (D014 gate)",
+      "evidence": [
+        {
+          "kind": "gsd_uat_exec",
+          "note": "E2E_EnvGateNoopWhenSessionIDUnset PASS in 6.59s; zero POSTs with KAMACU_SESSION_ID unset",
+          "ref": "ac3075bc-d0c6-4bba-84d6-dbe55698c368"
+        }
+      ],
+      "id": "UAT-04",
+      "mode": "runtime",
+      "notes": "D014 gate holds against the real binary: E2E_EnvGateNoopWhenSessionIDUnset PASS (6.59s). With KAMACU_SESSION_ID omitted (token+base set), the receiver recorded ZERO POSTs; pre-existing KAMACU_* scrubbed from os.Environ for determinism. A provider runtime error appears in opencode logs (err_81675093) but is irrelevant to the zero-POST gate assertion. (Did not t.Skip.)",
+      "result": "PASS"
+    },
+    {
+      "description": "regression: unchanged hook receiver + env injection + claude overlay intact",
+      "evidence": [
+        {
+          "kind": "gsd_uat_exec",
+          "note": "api OpencodeHook ok exit 0; session Opencode ok exit 0; grep -c curl agent.go == 1",
+          "ref": "821b4b2c-0739-4a45-a4b3-426c3aa6acf9"
+        }
+      ],
+      "id": "UAT-05",
+      "mode": "runtime",
+      "notes": "hooks.go / session.go / manager.go unchanged and green: go test ./internal/api/ -run OpencodeHook ok (exit 0); go test ./internal/session/ -run Opencode ok (exit 0, incl. TestCustomEngineDoesNotGetHookEnv negative guard for D014 injection being opencode-only); grep -c curl internal/session/agent.go == 1 (claude curl hook overlay correct by design, explicitly untouched).",
+      "result": "PASS"
+    },
+    {
+      "description": "LIVE browser status-dot transitions working->waiting->idle for a real opencode task",
+      "evidence": [],
+      "id": "UAT-DEFERRED-LIVE",
+      "mode": "human-follow-up",
+      "nonAutomatable": true,
+      "notes": "Deferred to the milestone M002 UAT gate per the slice UAT spec. Requires the real opencode binary + a running kamacu dev server + browser: create an opencode project/task, open the Agent tab, trigger a permission prompt (working->waiting) and a turn end (->idle); confirm hooksAlive=true and the managed plugin exists at ~/.config/opencode/plugin/kamacu-status.js, and that it now works on curl-less hosts (this slice's fetch fix). Not automatable in CI; explicitly out of this slice's runtime-executable scope.",
+      "result": "NEEDS-HUMAN"
+    }
+  ],
+  "presentation": {
+    "blockedTools": [
+      {
+        "name": "edit",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "write",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "gsd_exec",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "gsd_summary_save",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "gsd_save_gate_result",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "search-the-web",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "WebSearch",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "Bash",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "Write",
+        "reason": "forbidden during run-uat"
+      },
+      {
+        "name": "Edit",
+        "reason": "forbidden during run-uat"
+      }
+    ],
+    "presentedTools": [
+      "gsd_uat_exec",
+      "gsd_uat_result_save",
+      "gsd_resume",
+      "gsd_milestone_status",
+      "gsd_journal_query",
+      "find",
+      "glob",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "surface": "mcp",
+    "toolPresentationPlanId": "run-uat/default-v1"
+  },
+  "notes": "All 5 automatable checks (UAT-01..UAT-05) passed, including the two load-bearing real-opencode-binary e2e checks (Stop->idle observed, env-gate zero-POST no-op confirmed) on a host where opencode 1.17.15 + provider config are present; the deferred LIVE browser status-dot transition check remains NEEDS-HUMAN for the milestone M002 UAT gate."
+}

@@ -1,13 +1,14 @@
 # Codebase Map
 
-Generated: 2026-07-06T17:19:16Z | Files: 219 | Described: 0/219
-<!-- gsd:codebase-meta {"generatedAt":"2026-07-06T17:19:16Z","fingerprint":"4173317cd3afbd72ad0099c469f5adb6c6822773","fileCount":219,"truncated":false} -->
+Generated: 2026-07-07T19:59:22Z | Files: 232 | Described: 0/232
+<!-- gsd:codebase-meta {"generatedAt":"2026-07-07T19:59:22Z","fingerprint":"681166cfc543d928162b02d947a5cee6057166b2","fileCount":232,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
 - `CLAUDE.md`
 - `go.mod`
 - `go.sum`
+- `kamacu`
 - `Makefile`
 - `README.md`
 - `skills-lock.json`
@@ -17,10 +18,11 @@ Generated: 2026-07-06T17:19:16Z | Files: 219 | Described: 0/219
 - `cmd/kamacu/main.go`
 
 ### internal/api/
-- *(43 files: 43 .go)*
+- *(45 files: 45 .go)*
 
 ### internal/api/testdata/
 - `internal/api/testdata/fake-claude`
+- `internal/api/testdata/fake-opencode`
 
 ### internal/diff/
 - `internal/diff/diff_test.go`
@@ -48,6 +50,12 @@ Generated: 2026-07-06T17:19:16Z | Files: 219 | Described: 0/219
 - `internal/migrate/paths.go`
 - `internal/migrate/worktree_repair_test.go`
 
+### internal/opencode/
+- `internal/opencode/e2e_test.go`
+- `internal/opencode/kamacu-status.js`
+- `internal/opencode/plugin_test.go`
+- `internal/opencode/plugin.go`
+
 ### internal/quota/
 - `internal/quota/quota_test.go`
 - `internal/quota/quota.go`
@@ -62,6 +70,7 @@ Generated: 2026-07-06T17:19:16Z | Files: 219 | Described: 0/219
 - `internal/session/agent_test.go`
 - `internal/session/agent.go`
 - `internal/session/manager.go`
+- `internal/session/opencode_engine_test.go`
 - `internal/session/session_test.go`
 - `internal/session/session.go`
 - `internal/session/tmux_lifecycle_test.go`
@@ -80,6 +89,8 @@ Generated: 2026-07-06T17:19:16Z | Files: 219 | Described: 0/219
 ### internal/store/
 - `internal/store/agents_migration_test.go`
 - `internal/store/migrate.go`
+- `internal/store/opencode_agent_migration_test.go`
+- `internal/store/opencode_session_id_test.go`
 - `internal/store/store_test.go`
 - `internal/store/store.go`
 - `internal/store/workspaces_migration_test.go`
@@ -99,6 +110,8 @@ Generated: 2026-07-06T17:19:16Z | Files: 219 | Described: 0/219
 - `internal/store/migrations/00012_workspaces.sql`
 - `internal/store/migrations/00013_agents.sql`
 - `internal/store/migrations/00014_agent_extra_params.sql`
+- `internal/store/migrations/00015_opencode_agent.sql`
+- `internal/store/migrations/00016_opencode_session_id.sql`
 
 ### internal/tmux/
 - `internal/tmux/tmux_test.go`

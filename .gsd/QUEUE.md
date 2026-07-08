@@ -1,3 +1,3 @@
 # Queue
 
-- No queued milestones.
+- 🔄 **M002: opencode built-in agent engine**
