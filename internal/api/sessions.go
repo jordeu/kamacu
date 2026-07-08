@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -396,6 +400,20 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
 			slog.Warn("persisting claude_session_id", "task", req.TaskID, "error", err)
 		}
+		// M002/S03/T03 (Strategy B — subprocess discovery): opencode mints its
+		// own opaque ses_… id (unlike claude, where kamacu mints --session-id),
+		// so kamacu must DISCOVER it. The opencode session row is NOT created
+		// until the user's first turn (a TUI boot with no input writes nothing
+		// to opencode.db — verified by a host-gated spike, MEM034), so the
+		// capture is an ASYNC bounded poll launched here, never a spawn-time
+		// read. It persists the discovered id to tasks.opencode_session_id,
+		// which is the restart-resume key (T02's resume argv reads it). Resume
+		// reuses the stored id (no discovery) — only a FRESH opencode spawn
+		// captures. Best-effort + warn-only: a capture failure costs only
+		// restart-resume, never the live session. Never block the reply.
+		if agentEngine == "opencode" && !req.Resume {
+			go captureOpencodeSessionAsync(h.db, sess.Done(), req.TaskID, opts.Cwd)
+		}
 	}
 	// GAP-01: restore the survivor's persisted custom label onto the reattached
 	// session. Spawn re-derived a fresh "Bash N" (it has no label param); without
@@ -519,5 +537,168 @@ func (h *sessionHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 	default:
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// --- opencode session-id discovery (M002/S03/T03, Strategy B) ---------------
+//
+// opencode owns + mints its own opaque ses_… id (stored in
+// ~/.local/share/opencode/opencode.db, keyed by the session's directory = the
+// worktree path). Unlike claude — where kamacu mints --session-id <uuid> and
+// always knows it — kamacu must DISCOVER opencode's id. Strategy A (capture
+// the id from the plugin's session.created hook) was ruled out by a host-gated
+// spike (MEM034): opencode 1.17.15 does NOT fire session.created for a TUI
+// spawn. Strategy B discovers the id by parsing `opencode session list
+// --format json` and filtering on directory == worktree.
+//
+// The session row only appears AFTER the user's first turn (a TUI boot with no
+// input writes nothing to opencode.db — verified empirically), so discovery is
+// an ASYNC bounded poll, never a spawn-time read (the async-capture-timing
+// pitfall: asserting a non-empty id immediately after Spawn would race).
+
+// discoverOpenCodeSession returns the opencode ses_… id whose directory matches
+// dir, choosing the most-recently-updated one, or "" if none. It is an
+// injectable package var so CI tests STUB it (no real opencode binary in CI);
+// the default implementation shells out to the real `opencode session list`.
+//
+// Two opencode behaviors make the cwd + $PWD pinning load-bearing (MEM035/MEM036):
+//   - opencode resolves a session's `directory` from $PWD, not getcwd().
+//   - `opencode session list` is scoped to the CURRENT project (resolved from
+//     $PWD), so it lists only the worktree's sessions — NOT every session on
+//     the host. Running it without PWD=worktree queries the wrong project.
+//
+// Both cmd.Dir and PWD are pinned to the worktree so the listing is scoped to
+// the right project AND the recorded directory matches the filter.
+var discoverOpenCodeSession = func(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "opencode", "session", "list", "--format", "json")
+	cmd.Dir = dir                       // scope the listing to the worktree's project
+	cmd.Env = append(os.Environ(), "PWD="+dir) // opencode resolves the project from $PWD
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("opencode session list: %w", err)
+	}
+	return parseOpenCodeSessionList(out, dir)
+}
+
+// opencodeSessionEntry is the JSON shape of one element of `opencode session
+// list --format json` (verified against opencode 1.17.15). directory is the
+// session's worktree path (== kamacu's spawn cwd), so it is the stable
+// per-task key across a restart; updated/created are ms-epoch.
+type opencodeSessionEntry struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Updated   int64  `json:"updated"`
+	Created   int64  `json:"created"`
+	ProjectID string `json:"projectId"`
+	Directory string `json:"directory"`
+}
+
+// parseOpenCodeSessionList returns the most-recently-updated opencode session id
+// whose directory matches dir, or "" if none. Tolerant of the "no sessions"
+// shapes opencode emits (empty output, [] , null). An unexpected non-array JSON
+// shape is an error so the caller logs it (rather than silently returning "",
+// which would look identical to "no session yet" and hide a parser drift).
+func parseOpenCodeSessionList(out []byte, dir string) (string, error) {
+	if len(bytes.TrimSpace(out)) == 0 {
+		return "", nil // opencode prints nothing when there are zero sessions
+	}
+	var entries []opencodeSessionEntry
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return "", fmt.Errorf("parse opencode session list json: %w", err)
+	}
+	var bestID string
+	var bestUpdated int64
+	for _, e := range entries {
+		if e.ID == "" || e.Directory != dir {
+			continue
+		}
+		// Most-recently-updated wins: a manual opencode in the same worktree
+		// would otherwise let an older id resume the wrong conversation.
+		if e.Updated > bestUpdated {
+			bestID = e.ID
+			bestUpdated = e.Updated
+		}
+	}
+	return bestID, nil
+}
+
+// captureOpencodeSessionAsync polls opencode's session DB until the freshly
+// spawned opencode session's ses_id appears (after the user's first turn) and
+// persists it to tasks.opencode_session_id. It runs in its own goroutine
+// launched by the create handler for a fresh opencode spawn.
+//
+// Exit conditions: discovery succeeds (id persisted + return); the session
+// exits (done fires — the opencode row persists in opencode.db keyed by
+// directory, so one final best-effort capture handles the case where the turn
+// ran after the active window); or the hard cap elapses (paranoia backstop —
+// done should always fire). The active window bounds subprocess churn (a poll
+// is one `opencode session list` invocation); after it, the goroutine idles
+// (blocked on the session's done channel) until the on-exit final attempt.
+// All failures are warn-only: capture is best-effort and must never affect the
+// live session.
+func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, taskID int64, worktreeDir string) {
+	const (
+		pollInterval = 2 * time.Second
+		activeWindow = 10 * time.Minute // bounds polling churn; covers realistic first-turn latency
+		hardCap      = 60 * time.Minute // goroutine-lifetime backstop; done should always fire first
+	)
+	// attempt runs ONE discovery + persist. Returns true once captured (caller stops).
+	attempt := func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		id, err := discoverOpenCodeSession(ctx, worktreeDir)
+		if err != nil {
+			slog.Warn("discovering opencode session id", "task", taskID, "error", err)
+			return false
+		}
+		if id == "" {
+			return false // no session row yet (the user hasn't run a turn)
+		}
+		if _, err := db.Exec(`UPDATE tasks SET opencode_session_id = ? WHERE id = ?`, id, taskID); err != nil {
+			slog.Warn("persisting opencode session id", "task", taskID, "error", err)
+			return false
+		}
+		slog.Info("captured opencode session id", "task", taskID, "opencode_session_id", id)
+		return true
+	}
+
+	active := time.NewTimer(activeWindow)
+	defer active.Stop()
+	hard := time.NewTimer(hardCap)
+	defer hard.Stop()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	// Immediate first attempt (cheap; occasionally the turn already ran).
+	if attempt() {
+		return
+	}
+	for {
+		select {
+		case <-done:
+			// Session exited. The opencode row persists in opencode.db, so one
+			// final capture handles a turn that ran late (even after the active
+			// window). If discovery still finds nothing, the user never ran a
+			// turn — there is genuinely nothing to resume.
+			attempt()
+			return
+		case <-hard.C:
+			return // backstop; done() should have fired
+		case <-active.C:
+			// Active window elapsed: stop polling, idle until the session exits
+			// (an idle goroutine is free), then make the final capture attempt.
+			ticker.Stop()
+			select {
+			case <-done:
+				attempt()
+				return
+			case <-hard.C:
+				return
+			}
+		case <-ticker.C:
+			if attempt() {
+				return
+			}
+		}
 	}
 }

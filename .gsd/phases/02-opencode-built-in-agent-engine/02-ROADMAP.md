@@ -11,10 +11,10 @@
 
 ## Slices
 
-- [ ] **S01: opencode engine spawn and activity-based status** `risk:low` `depends:[]`
+- [x] **S01: opencode engine spawn and activity-based status** `risk:low` `depends:[]`
   > After this: After this: create a task with the opencode agent, watch it launch in the terminal, status toggles working/idle as it runs.
 
-- [ ] **S02: Gated status plugin unlocks waiting and idle** `risk:high` `depends:[S01]`
+- [x] **S02: Gated status plugin unlocks waiting and idle** `risk:high` `depends:[S01]`
   > After this: After this: an opencode permission prompt flips the task status to waiting; turn end flips it to idle — same UX as claude.
 
 - [ ] **S03: Session resume and argv regression hardening** `risk:medium` `depends:[S01,S02]`

@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "taskId": "T01",
-  "unitId": "M002/S01/T01",
-  "timestamp": 1783448505211,
+  "unitId": "M002/S03/T01",
+  "timestamp": 1783453528190,
   "passed": true,
   "discoverySource": "task-plan",
   "checks": [
     {
-      "command": "go build ./... && go test ./internal/store/ -run Opencode -count=1",
+      "command": "go test ./internal/store/ -count=1",
       "exitCode": 0,
-      "durationMs": 940,
+      "durationMs": 556,
       "verdict": "pass"
     }
   ]

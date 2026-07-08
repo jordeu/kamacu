@@ -1,76 +1,86 @@
 ---
 id: T01
-parent: S01
+parent: S03
 milestone: M002
 key_files:
-  - internal/store/migrations/00015_opencode_agent.sql
-  - internal/api/agents_backfill.go
-  - cmd/kamacu/main.go
-  - internal/store/opencode_agent_migration_test.go
-  - internal/api/agents_backfill_test.go
-  - internal/store/agents_migration_test.go
-  - internal/api/agents_crud_test.go
+  - internal/store/migrations/00016_opencode_session_id.sql
+  - internal/store/opencode_session_id_test.go
 key_decisions:
-  - opencode seed uses NOT EXISTS guard (not INSERT OR IGNORE) to match the idempotent backfill posture and give partial-apply recovery without relying solely on the goose version table
-  - opencode is is_default=0 to preserve R019 (claude sole default) so existing/new projects are never silently switched
-  - BackfillOpenCodeAgent mirrors BackfillAgents literally rather than generalizing — keeps the two engine seeds decoupled and the diff minimal
+  - (none)
 duration: 
 verification_result: passed
-completed_at: 2026-07-07T18:21:27.074Z
+completed_at: 2026-07-07T19:45:20.943Z
 blocker_discovered: false
 ---
 
-# T01: Added migration 00015 + BackfillOpenCodeAgent to seed opencode as a non-deletable system agent (engine='opencode', is_default=0, is_system=1), wired into startup; plus regression-fixed the 3 shared tests that assumed a single system agent baseline.
+# T01: Added nullable tasks.opencode_session_id column (migration 00016) with upgrade + fresh-install migration tests
 
-**Added migration 00015 + BackfillOpenCodeAgent to seed opencode as a non-deletable system agent (engine='opencode', is_default=0, is_system=1), wired into startup; plus regression-fixed the 3 shared tests that assumed a single system agent baseline.**
+**Added nullable tasks.opencode_session_id column (migration 00016) with upgrade + fresh-install migration tests**
 
 ## What Happened
 
-Seeded opencode as a first-class built-in agent by mirroring the Claude Code seed pattern (00013_agents.sql + BackfillAgents) byte-for-byte in shape, with only the deliberate capability/default differences from D013.
+Added the strategy-invariant data-model foundation for opencode session resume: a nullable `tasks.opencode_session_id TEXT` column, the opencode analog of `tasks.claude_session_id` (00003). Unlike claude — where kamacu mints `--session-id <uuid>` and always knows it — opencode mints an opaque `ses_…` id internally, so kamacu must persist the id it later discovers (T03's capture path) for a restart to resume the conversation (T02's resume argv reads it).
 
-New artifacts:
-- `internal/store/migrations/00015_opencode_agent.sql`: a guarded INSERT (NOT EXISTS keyed on engine='opencode') inside goose's default transaction. Seeds name/command/engine='opencode', is_default=0 (claude stays the sole default — R019), is_system=1 (non-deletable — R018). The NOT EXISTS guard is belt-and-braces with the goose version table for partial-apply recovery. Down removes only the system seed.
-- `internal/api/agents_backfill.go` → new `BackfillOpenCodeAgent(db)`: the in-process safety-net counterpart to the migration, mirroring BackfillAgents exactly (no-op when the seed exists; re-creates it if dropped; real DB errors propagated, never swallowed). All literal SQL, no string concatenation.
-- `cmd/kamacu/main.go`: wired `BackfillOpenCodeAgent` immediately after `BackfillAgentExtraParams`, with the same slog-error-then-exit posture. Ordered after store.Migrate (table must exist).
-- `internal/store/opencode_agent_migration_test.go`: two REAL-goose-runner tests — `TestOpencodeAgentMigration` (stages pre-00015, applies 00015, asserts exact seed shape + R019 + is_system=2 + FK re-armed ON + idempotent re-run) and `TestOpencodeAgentMigrationOnFreshDB` (full-migrate fresh DB, both seeds present).
-- `internal/api/agents_backfill_test.go` → new `TestBackfillOpenCodeAgent`: idempotent no-op on healthy boot, re-creates after simulated drop, asserts opt-in shape, idempotent on second call.
+## What Happened
 
-Regression fixes (unavoidable consequence of T01's core deliverable — a second system seed raises the fresh-migrate baseline from 1→2 agents). All intent-preserving: the tests' actual concerns were per-engine/per-flag, not total count.
-- `internal/store/agents_migration_test.go` (9): the "1 agent after re-run" idempotency check now asserts per-engine (1 claude + 1 opencode).
-- `internal/api/agents_backfill_test.go` TestBackfillAgents: countAgents() total→countClaudeAgents() by engine (what BackfillAgents owns).
-- `internal/api/agents_crud_test.go`: TestAgentList finds the claude seed by engine instead of list[0]; TestAgentCreate expects 3 (2 seeds + 1 custom); TestAgentDeleteUnused expects 2 after delete.
+1. Created `internal/store/migrations/00016_opencode_session_id.sql` mirroring `00003_agent_sessions.sql` exactly in shape: `-- +goose Up / ALTER TABLE tasks ADD COLUMN opencode_session_id TEXT;` and `-- +goose Down / ALTER TABLE tasks DROP COLUMN opencode_session_id;`. This is plain transactional DDL (a nullable column ADD, no data, no FK toggle), so it does NOT need the `-- +goose NO TRANSACTION` + PRAGMA dance that 00013 needed. The existing `//go:embed migrations/*.sql` in `internal/store/migrate.go` picks the new file up with no other change — confirmed by the green whole-module `go build ./...`.
 
-Captured the regression-class gotcha to memory (MEM026) so future system-seed additions anticipate it.
+2. Created `internal/store/opencode_session_id_test.go` mirroring the 00015 migration-test posture (`opencode_agent_migration_test.go`): a `tasksColumnCount` helper runs `PRAGMA table_info(tasks)` and returns how many columns match a name + the first match's full info row. Two tests:
+   - `TestOpencodeSessionIdMigration` stages the DB at pre-00016 (`goose.UpTo(..., 15)`), asserts the column does NOT yet exist AND that `claude_session_id` (00003) is present (so 00016 runs against the real populated tasks schema), applies `Migrate`, then asserts: (a) `opencode_session_id` now exists exactly once as nullable TEXT (`notnull=0`, no default — no NOT NULL), (b) `PRAGMA foreign_keys == 1` (re-armed ON; 00016 is transactional and must not have left it off), (c) idempotency — a second `Migrate` is a clean no-op (column still exactly one), and the sibling `claude_session_id` column is unchanged.
+   - `TestOpencodeSessionIdMigrationOnFreshDB` runs `Migrate` from scratch and asserts the column lands alongside `claude_session_id` in one pass (nullable TEXT).
+
+3. Fixed two compile bugs in the test before it ran: added the missing `database/sql` import (needed for `sql.NullString` in the helper struct) and corrected the helper signature from `db DB` (no such type) to `db *sql.DB` (the actual `Open` return type).
+
+4. Verified per MEM026: a column ADD — unlike a new agent seed row — changes no agent COUNT, so the per-engine/per-flag count assertions in the opencode/workspace migration tests stay green. The full store suite confirms no regression.
+
+This task changes NO runtime behavior — it only lays the nullable column that T02 (resume argv) and T03 (capture path) depend on.
+
+## Failure Modes (Q5)
+
+The task's external dependencies are SQLite (modernc.org/sqlite, pure-Go transpiled, in-process — no network/CGO/external service) and goose (embedded migrations via `go:embed`). There are no APIs, network calls, or subprocesses.
+
+- **Migration apply failure:** 00016 is plain transactional DDL (`ALTER TABLE ADD COLUMN` of a nullable TEXT). goose wraps it in a transaction; if the ALTER failed, goose rolls back and `Migrate` returns the error, which the app surfaces at startup. For a nullable ADD COLUMN the only realistic failure is a duplicate column, which goose's version table prevents (proven by the idempotent re-run in the test). The test exercises the real goose runner on a real SQLite handle — not a stub — so the transactional rollback path is the same path production takes.
+- **Staging failure:** the test explicitly asserts that staging at 00015 leaves the column ABSENT before 00016 applies (`preCount != 0` → fatal "staging failed"), catching the failure mode where a prior migration didn't land.
+- **FK left off:** the test asserts `PRAGMA foreign_keys == 1` post-migration; a 00016 that accidentally left FK disabled (as 00013's PRAGMA toggle could) would be caught here.
+
+No silent error swallowing: goose errors propagate through `Migrate`'s return value and `t.Fatalf` in tests.
+
+## Load Profile (Q6)
+
+Omitted. 00016 is a one-time schema migration run at startup (`Migrate`) or once per test (`t.TempDir()`). The nullable column has no index and is never read/written in a per-request hot path until T03's capture path and T02's resume path are built (downstream tasks). There is no runtime load dimension to this task.
+
+## Negative Tests (Q7)
+
+`internal/store/opencode_session_id_test.go` covers these negative/boundary scenarios:
+
+- **Pre-migration absence (boundary):** `TestOpencodeSessionIdMigration` stages at 00015 and asserts `opencode_session_id` count == 0 before applying 00016 — fails fast with "staging failed" if a prior migration erroneously created it.
+- **Nullable, not NOT NULL (malformed-schema guard):** asserts `notnull == 0` and `dflt` is NULL/empty post-migration — catches an accidental `NOT NULL` that would break the "empty until T03 writes it" invariant on existing rows.
+- **Type guard:** asserts column type == "TEXT" exactly — catches a typo'd DDL.
+- **Exactly-once / no duplication (idempotency boundary):** asserts count == 1 after the first apply AND after a second `Migrate` no-op re-run — catches a non-idempotent migration that would error or duplicate.
+- **Sibling-column preservation:** asserts `claude_session_id` count stays 1 before and after — catches a migration that accidentally dropped the existing resume key.
+- **FK re-armed (state-leak guard):** asserts `PRAGMA foreign_keys == 1` post-migration — catches a migration that left FK disabled.
+- **Fresh-install coexistence:** `TestOpencodeSessionIdMigrationOnFreshDB` asserts both `opencode_session_id` and `claude_session_id` land together from scratch — catches a migration-ordering bug that only manifests on fresh installs.
 
 ## Verification
 
-Canonical task verify (`go build ./... && go test ./internal/store/ -run Opencode -count=1`) passes. The new migration tests (2 cases) and the new backfill test pass. Full-package regression confirms no breakage in the touched shared files: internal/store (full, incl. TestAgentsMigration fix) and internal/api (full, ~88s, incl. TestBackfillAgents + TestAgentList/Create/DeleteUnused fixes). go vet clean on cmd/kamacu, internal/api, internal/store. The R019 invariant (claude sole is_default=1) and R018 (opencode is_system=1) are asserted directly in the new tests.
+Ran `go test ./internal/store/ -count=1` (the plan's specified verification command): exit 0, `ok kamacu/internal/store 0.306s` — both new tests (TestOpencodeSessionIdMigration, TestOpencodeSessionIdMigrationOnFreshDB) pass alongside all existing store tests, confirming the nullable column ADD breaks no existing total-migration/per-engine-count assertions (MEM026). Also ran `go build ./...` (exit 0) to confirm the new embedded migration compiles into the binary cleanly via the existing `//go:embed migrations/*.sql` directive with no other change.
 
 ## Verification Evidence
 
 | # | Command | Exit Code | Verdict | Duration |
 |---|---------|-----------|---------|----------|
-| 1 | `go build ./...` | 0 | ✅ pass | 2825ms |
-| 2 | `go test ./internal/store/ -run Opencode -count=1` | 0 | ✅ pass | 625ms |
-| 3 | `go test ./internal/api/ -run TestBackfillOpenCodeAgent -count=1` | 0 | ✅ pass | 1623ms |
-| 4 | `go test ./internal/store/ -count=1 (full, incl. TestAgentsMigration regression fix)` | 0 | ✅ pass | 224ms |
-| 5 | `go test ./internal/api/ -count=1 (full, incl. Agent/Backfill regression fixes)` | 0 | ✅ pass | 87976ms |
-| 6 | `go vet ./cmd/kamacu/ ./internal/api/ ./internal/store/` | 0 | ✅ pass | 1607ms |
+| 1 | `go test ./internal/store/ -count=1` | 0 | ✅ pass | 735ms |
+| 2 | `go build ./...` | 0 | ✅ pass | 816ms |
 
 ## Deviations
 
-Regression-fixed 3 shared test files not named in T01's Files list (internal/store/agents_migration_test.go, internal/api/agents_backfill_test.go TestBackfillAgents, internal/api/agents_crud_test.go TestAgentList/Create/DeleteUnused). All assumed a single-system-agent baseline that 00015 legitimately raises to 2; fixes are intent-preserving (per-engine/per-flag assertions). This is an unavoidable consequence of the task's core deliverable (seeding a second system agent), not a plan defect — captured as MEM026.
+None.
 
 ## Known Issues
 
-None. (The is_system=1 deletion protection lives at the API handler, not the DB — by design, identical to the claude seed. TestOpencodeAgentMigration asserts the is_system flag on both seeds rather than attempting a SQL DELETE, which would succeed without FK references.)
+None.
 
 ## Files Created/Modified
 
-- `internal/store/migrations/00015_opencode_agent.sql`
-- `internal/api/agents_backfill.go`
-- `cmd/kamacu/main.go`
-- `internal/store/opencode_agent_migration_test.go`
-- `internal/api/agents_backfill_test.go`
-- `internal/store/agents_migration_test.go`
-- `internal/api/agents_crud_test.go`
+- `internal/store/migrations/00016_opencode_session_id.sql`
+- `internal/store/opencode_session_id_test.go`

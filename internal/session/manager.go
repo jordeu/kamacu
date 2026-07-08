@@ -184,6 +184,18 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 					"KAMACU_SESSION_ID="+id, // minted at the top of Spawn; same id the settings overlay would embed
 					"KAMACU_HOOK_TOKEN="+cfg.Token,
 					"KAMACU_HOOK_BASE="+cfg.BaseURL, // D014
+					// M002/S03/T03: opencode resolves a session's `directory` from
+					// $PWD (verified empirically), NOT from getcwd(). exec.Cmd's
+					// cmd.Dir sets the OS cwd but does NOT update $PWD (a Go
+					// gotcha — shells update both on `cd`, exec does not). Without
+					// this, opencode records kamacu's LAUNCH dir as the session's
+					// directory, so the restart-resume discovery (which filters
+					// `opencode session list` on directory == worktree) would
+					// never match. Pinning $PWD to the worktree makes the actual
+					// cwd and $PWD consistent — the state a shell `cd` produces.
+					// Last-value-wins over the os.Environ() PWD entry, matching
+					// the TERM/COLORTERM append pattern above.
+					"PWD="+dir,
 				)
 			}
 			cmd.Env = append(os.Environ(), envExtra...)
