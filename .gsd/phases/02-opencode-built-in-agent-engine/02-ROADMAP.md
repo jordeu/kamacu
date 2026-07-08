@@ -17,7 +17,7 @@
 - [x] **S02: Gated status plugin unlocks waiting and idle** `risk:high` `depends:[S01]`
   > After this: After this: an opencode permission prompt flips the task status to waiting; turn end flips it to idle — same UX as claude.
 
-- [ ] **S03: Session resume and argv regression hardening** `risk:medium` `depends:[S01,S02]`
+- [x] **S03: Session resume and argv regression hardening** `risk:medium` `depends:[S01,S02]`
   > After this: After this: restart kamacu, an opencode task's session resumes to the same conversation; the fake-opencode test guards the exact argv we build.
 
 ## Boundary Map
