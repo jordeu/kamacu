@@ -350,6 +350,45 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 
 ---
 
+## Milestone: v1.10 — Configurable Agents
+
+**Shipped:** 2026-07-11
+**Phases:** 5 (01–05) | **Plans:** 20 | **Tasks:** 18
+
+### What Was Built
+- (Phase 01, plans 01-01..06) Data foundation + spawn engine fork: migration 00013 creates the `agents` table (Claude Code seeded is_system/is_default/engine='claude', mirroring 00012 exactly) + `projects.agent_id` NOT NULL REFERENCES … ON DELETE RESTRICT FK + `BackfillAgents` startup hook; `/api/agents` CRUD + set-default (workspaces.go handler shape, is_system non-deletable + in-use block); `SpawnOpts.AgentEngine` forks the spawn path — claude byte-for-byte unchanged (`TestAgentLifecycle` fake-claude regression green), custom renders the command template (tokenize-first-then-substitute, `{{worktree}}`/`{{session_id}}`) with running/exited status only (D-M001-2). (AGDATA/AGMGMT/AGSPAWN, R012–R020)
+- (Phase 02, plans 02-01..05) Management UI: frontend agents API client + Settings Agents section (ordered list + engine badges + CRUD, reusing v1.9 `WorkspaceNameDialog`/`ManageWorkspacesDialog` shapes) + per-project agent selector + ActiveSessionsBar LIVE filter widened to `running` + extra Claude params consolidated onto the Claude agent row (migration 00014 + `BackfillAgentExtraParams`). Human-verify gate passed (6-step loop). (AGUI, R021)
+- (Phase 03, plans 03-01..04) opencode built-in engine: seeded (migration 00015 + `BackfillOpenCodeAgent`, engine='opencode') with its own spawn branch (exempt from custom-render, `KAMACU_*` hook env injected); `tasks.opencode_session_id` (nullable, migration 00016); build-tagged real-opencode e2e harness. (OCENG-01/02)
+- (Phase 04, plans 04-01/02) Status plugin defect fix: `notify()` rewritten from a curl shell-out (silent no-op when curl absent → waiting/idle never unlocked) to `fetch()`+`AbortController(3s)`; build-tagged e2e proves plugin loads + POSTs reach receiver + env-gate no-ops. (OCENG-03)
+- (Phase 05, plans 05-01..03) Restart-resume: `captureOpencodeSessionAsync` — async bounded poll discovers opencode's opaque `ses_…` id and persists it to `tasks.opencode_session_id` (best-effort, warn-only, Done-channel-gated); `--resume` argv closes the restart-resume loop. (OCRESUME)
+
+### What Worked
+- **Reusing the v1.9 workspaces pattern end-to-end made the data layer mechanical.** Migration 00013 mirrors 00012 byte-for-byte (NO TRANSACTION + PRAGMA FK off/on); `BackfillAgents` mirrors `BackfillWorkspaces`; the CRUD handler reuses `workspaces.go`'s shape; `agent_id` threads through projects identically to `workspace_id`. Every task in Phase 01 mirrored an existing v1.9 pattern — the lowest-risk path to a new first-class entity.
+- **The fake-claude regression suite (`TestAgentLifecycle`) retired the key risk before any UI existed.** Proving the claude spawn argv is byte-for-byte unchanged across the entire engine fork meant the riskiest change (generalizing spawn) was de-risked in Phase 01, plan 04 — not at a late human-verify gate.
+- **The typed `engine` column (not name-string matching) made the fork clean and extensible.** Each engine gets its own branch (`agentStatusLocked`, `sessions.go`); adding opencode was an enum addition + a new branch, not a string-parsing patch. Custom agents stay simple (running/exited); opencode gets real heuristics via its own branch + plugin — no conflation.
+
+### What Was Inefficient
+- **The curl silent-no-op defect survived into Phase 04.** The status plugin's `notify()` was a curl shell-out that silently no-op'd when curl was absent — so activity signals never reached the receiver and waiting/idle never unlocked. This was a load-bearing defect that blocked the entire opencode status story, and it wasn't caught until a dedicated phase (04) with a real-opencode e2e harness. A real-binary smoke earlier would have caught it sooner; the unit tests couldn't (they don't exercise the curl-absent path or the real plugin runtime).
+- **Two self-inflicted clobbers early in Phase 01** (overwrote pre-existing `agents.go`/`agents_test.go` before reading them — restored via git) reinforced read-before-overwrite applies to test files carrying shared fixtures, not just source files.
+- **No formal milestone audit was run.** v1.10 shipped on override_closeout — 6 stale prior-milestone quick tasks flagged by the audit, none v1.10 work. The opencode integration relied on build-tagged real-binary e2e (opt-in), which is weaker than always-on integration coverage.
+
+### Patterns Established
+- **A typed `engine` enum column is the spawn-fork primitive** — branch on it in every engine-aware code path (`SpawnOpts`, `agentStatusLocked`, `sessions.go`), never on agent name strings. New engines are an enum addition + a new branch.
+- **Foreign-minted opaque session ids are discovered via async bounded poll, not read at spawn.** opencode mints its `ses_…` id asynchronously after start, so kamacu must DISCOVER it (best-effort, warn-only, Done-channel-gated). This contrasts with claude's kamacu-minted id (present at spawn). Per-engine session identity columns are never mixed.
+- **Agent configuration belongs on the agent row, not in orphaned global settings.** Extra Claude params moved from a disconnected settings field onto the agent's own row (migration 00014 + backfill copying the effective value) — one place to configure an agent, no drift.
+- **Status-signal delivery must fail loudly or time out, not silently no-op.** The curl shell-out was a silent failure mode; `fetch()`+`AbortController(3s)` bounds the post and removes the silent path.
+
+### Key Lessons
+1. **A real-binary e2e harness (build-tagged, opt-in) is worth its weight for plugin/CLI integrations** — the curl-defect and the plugin-load proof both needed the real opencode binary; unit tests against the fetch API couldn't catch the silent-no-op or verify the plugin actually loads in the target runtime. Build-tagging keeps it opt-in so it doesn't burden the normal suite.
+2. **When generalizing a proven code path, freeze it with a regression test before forking.** The fake-claude `TestAgentLifecycle` suite made "claude path byte-for-byte unchanged" a verifiable property, not a hope — the fork was safe because the freeze was test-backed.
+3. **A capability tier (`engine` enum) beats name/string matching for extensible dispatch.** The milestone added two engines (custom + opencode) cleanly because dispatch keyed off a typed column; a string-match design would have required patches at every branch point and would break on renames.
+
+### Cost Observations
+- Orchestrated on inherit profile, 2026-07-06 → 2026-07-11 (6 days). 5 phases, 20 plans, 18 tasks, 1 human-verify gate (Phase 02). Zero new Go modules or npm deps; 4 migrations (00013–00016); one new API surface (`/api/agents`) + Settings Agents section + per-project selector.
+- Notable: the milestone reuses v1.9 patterns so heavily that the bulk of the work was mechanical mirroring — the genuine risk concentrated in (a) the spawn-engine fork (de-risked early by the fake-claude regression) and (b) the opencode integration defects (the curl silent-no-op + async session-id capture), both of which needed real-binary e2e to prove.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution

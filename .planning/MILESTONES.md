@@ -1,5 +1,26 @@
 # Milestones
 
+## v1.10 Configurable Agents (Shipped: 2026-07-11)
+
+**Phases completed:** 5 phases, 20 plans, 18 tasks
+
+**Key accomplishments:**
+
+- `agents` table (migration 00013, mirroring 00012 exactly) + `projects.agent_id` NOT NULL REFERENCES … ON DELETE RESTRICT FK backfilling every existing project to the Claude Code seed (is_system=1, is_default=1, engine='claude') in-SQL, plus an idempotent `BackfillAgents` startup hook — the whole data layer reuses the v1.9 workspaces pattern end-to-end.
+- `/api/agents` CRUD + set-default (create/edit/delete custom agents, block-until-unassigned + is_system non-deletable, exactly-one-default transactional invariant) reusing the workspaces.go handler shape; the claude seed's engine locked but name+command editable.
+- Spawn engine forked on `SpawnOpts.AgentEngine` — the claude path is byte-for-byte unchanged (`TestAgentLifecycle` fake-claude regression passes unchanged, retiring the key risk), while the custom path renders the command template (tokenize-first-then-substitute, `{{worktree}}`/`{{session_id}}` placeholders) in the worktree PTY with running/exited status only (D-M001-2).
+- Agent management UI — a Settings Agents section (ordered list + engine badges + add/edit/delete/set-default reusing v1.9 dialog shapes), a per-project agent selector, and the Active Sessions bar LIVE filter widened to include `running` so custom-agent sessions appear.
+- Extra Claude params (`--dangerously-skip-permissions`) consolidated from an orphaned global setting onto the Claude agent's own row (migration 00014 + `BackfillAgentExtraParams` copying the effective setting — no one loses their config), edited in the Claude agent's edit dialog; the spawn path reads `extra_params` from the joined agent row.
+- opencode seeded as a second non-deletable built-in engine (migration 00015 + `BackfillOpenCodeAgent`, engine='opencode') with its own spawn branch (exempt from the custom-render tokenize path, `KAMACU_*` hook env injected for activity-based status).
+- The opencode status plugin's `notify()` rewritten from a curl shell-out (a silent no-op when curl was absent, so waiting/idle never unlocked) to `fetch()`+`AbortController(3s)` — a load-bearing defect fix proven by a build-tagged real-opencode e2e harness (plugin loads in opencode 1.17.15, POSTs reach a receiver, env-gate no-ops).
+- opencode restart-resume: `tasks.opencode_session_id` (nullable, migration 00016) persists the opaque `ses_…` id; `captureOpencodeSessionAsync` discovers it via an async bounded poll (best-effort, warn-only, Done-channel-gated); `--resume` argv closes the restart-resume loop.
+
+**Known deferred items at close:** 6 (the pre-close artifact audit flagged 6 quick tasks as open; all 6 are from prior milestones v1.3–v1.7 — none are v1.10 work. See STATE.md → Deferred Items.)
+
+**Requirements:** 18/18 v1.10 requirements complete (AGDATA·AGMGMT·AGSPAWN·AGUI·OCENG·OCRESUME). No formal milestone audit was run (override closeout — the 6 flagged items are all prior-milestone stale quick tasks).
+
+---
+
 ## v1.9 Workspaces (Shipped: 2026-07-06)
 
 **Phases completed:** 2 phases, 9 plans, 22 tasks
