@@ -93,6 +93,16 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 		_ = h.wt.FetchRef(r.Context(), repo, baseName)
 		base = resolvePRBase(r.Context(), path, baseName)
 	} else {
+		// Best-effort fetch of the default branch so the merge-base reflects
+		// the latest upstream state (mirrors provisionWorktree's CKOUT-02
+		// fetch in tasks.go). Network-free projects (folder repos with no
+		// remote, offline work) simply skip — the fetch error is discarded
+		// and ResolveBase proceeds on the local base. Fetching only updates
+		// the remote-tracking ref (refs/remotes/origin/<branch>); it never
+		// touches the working tree or local branches.
+		if defaultBranch, derr := h.wt.DefaultBranch(r.Context(), repo); derr == nil {
+			_ = h.wt.FetchRef(r.Context(), repo, defaultBranch)
+		}
 		// Re-resolve the project base (its 4-step chain covers most base
 		// weirdness; failure routes to the error state).
 		base, err = h.wt.ResolveBase(r.Context(), repo)
