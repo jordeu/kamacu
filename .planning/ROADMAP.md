@@ -159,7 +159,7 @@ Plans:
 | 03. opencode engine spawn and activity-based status | v1.10 | 4/4 | Complete | 2026-07-07 |
 | 04. Gated status plugin unlocks waiting and idle | v1.10 | 2/2 | Complete | 2026-07-07 |
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
-| 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete   | 2026-07-21 |
+| 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete    | 2026-07-21 |
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 0/TBD | Not started | — |
 | 08. Sessions & Terminal Read Access | v1.11 | 0/TBD | Not started | — |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
