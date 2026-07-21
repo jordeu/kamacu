@@ -12,7 +12,7 @@ test:
 	go test ./...
 
 dev-backend:
-	go run ./cmd/kamacu
+	go run ./cmd/kamacu serve
 
 dev-frontend:
 	cd web && npm run dev

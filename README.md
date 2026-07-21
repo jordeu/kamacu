@@ -35,7 +35,7 @@ frontend together at localhost:
 
 ```sh
 make build      # builds the React frontend, then the Go binary → bin/kamacu
-./bin/kamacu    # starts the server; open the printed localhost URL in a browser
+./bin/kamacu serve    # starts the server; open the printed localhost URL in a browser
 ```
 
 `make build` runs the Vite production build and embeds the output into a single
