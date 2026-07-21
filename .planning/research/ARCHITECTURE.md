@@ -1,461 +1,685 @@
 # Architecture Research
 
-**Domain:** GitHub PR review integration into an existing Go + React local app (Kangent v1.3)
-**Researched:** 2026-06-13
-**Confidence:** HIGH (grounded in the real v1.2 source: every integration point below names the actual file/function/table/migration it touches; `gh` 2.82.0 command shapes were verified live on this host)
+**Domain:** MCP (Model Context Protocol) server capability added to an existing local-only Go single-binary app — a stdio MCP subcommand that bridges to the app's existing HTTP API, plus the spawn-time integration that auto-registers it with the agent CLIs Kamacu spawns.
+**Researched:** 2026-07-21
+**Confidence:** HIGH — every claim below is grounded in: (a) the live Kamacu codebase as it stands at v1.10 (every file/function name in the integration map was read in the actual repo); (b) the official `modelcontextprotocol/go-sdk` v1.6.1 on pkg.go.dev (hand-tested API shapes); (c) the MCP spec pages at `modelcontextprotocol.io/specification/2025-11-25` (read in full for cancellation, tools, lifecycle); (d) the live Claude Code MCP docs at `docs.anthropic.com/en/docs/claude-code/mcp` and the opencode config docs at `opencode.ai/docs/config/` (both fetched 2026-07-21). Aligned with STACK.md (official SDK pick) and FEATURES.md (tool surface).
 
 ---
 
-## Executive recommendation up front
+## TL;DR for the roadmap author
 
-**The key modeling question is settled: model a PR review as a `tasks` row with a `kind`/`source` discriminator, NOT a separate `pr_reviews` table.** Rationale and the full reuse-vs-fork map are in [§1](#1-the-modeling-question-pr-review-vs-task). Every other section flows from that decision.
-
-The integration is overwhelmingly **reuse, not new machinery**:
-- The session manager is keyed on `TaskID int64` and nothing else — a PR review must be a task to get sessions for free.
-- The diff endpoint, worktree gates, cleanup dialog, task view, and reaper are all `taskID`-addressed and become available the moment a PR review *is* a task.
-- The genuinely new code is small: one `internal/github` leaf package, one migration adding columns to `projects` + `tasks`, a poll-backed PR-list endpoint pair, a worktree "checkout existing branch" verb, and a frontend Review column + project-config UI.
+- **The architecture is overwhelmingly additive.** One new subcommand wired through stdlib subcommand dispatch, two new leaf packages (`internal/mcp` for the server, `internal/mcpconfig` for the spawn-time config writers), two new HTTP endpoints on the existing Kamacu server (`/api/sessions/{id}/snapshot`, `/api/sessions/{id}/tail`) to expose the existing ring buffer read-only to the bridge. No new long-running goroutines inside the Kamacu server binary. No migrations. No DB schema changes. No frontend changes. The v1.10 spawn engine gets one new step between worktree creation and PTY start: write `.mcp.json` (Claude) or `opencode.json` (opencode) into the worktree root.
+- **The subcommand is a child of the agent CLI, not of the Kamacu binary.** This is the central invariant. The agent CLI (`claude` or `opencode`) is the MCP *client*; `kamacu mcp serve` is the MCP *server* it spawns. The MCP subcommand then makes HTTP calls to the long-running Kamacu binary at `127.0.0.1:7333` — it is a thin stdio→HTTP *bridge*. This separates lifecycle concerns: the MCP subcommand lives and dies with the agent CLI; the Kamacu binary can restart independently.
+- **Per-task scoping comes from env inheritance, not config files.** Each Kamacu task spawn already injects `KAMACU_SESSION_ID` + `KAMACU_HOOK_TOKEN` + `KAMACU_HOOK_BASE` into the agent CLI's env (v1.10 opencode path; claude path uses the `--settings` overlay but the env is inherit-all). The agent CLI passes those through to the MCP subcommand it spawns. The subcommand reads them once at startup, resolves `KAMACU_SESSION_ID` → `task_id` via one HTTP GET, and every "my_*" tool reuses the result. No per-task MCP config file content — the *same* `.mcp.json`/`opencode.json` template works for every task because per-task identity rides on env.
+- **Cancellation works for free.** The official Go SDK's tool handler signature is `func(ctx context.Context, req *mcp.CallToolRequest, in Input) (...)`. When the agent CLI sends `notifications/cancelled`, the SDK cancels the context — the handler's `ctx.Done()` fires. For the long-running `subscribe_session_output` tool, this means: block on a `select { case <-ctx.Done(): ... case chunk := <-tailCh: ... }` loop, and cancellation just works. No bespoke plumbing.
+- **Two config-file shapes; one writer per engine.** Claude Code: `~/.claude.json` style would be global, but writing per-worktree `.mcp.json` at the worktree root is the **project-scoped** config Claude Code documents and prefers — each task gets exactly the kamacu entry it needs and nothing pollutes the user's global config. opencode: same idea, `opencode.json` at the worktree root under the `mcp` key. Getting either shape wrong (`mcpServers` vs `mcp`, `command: "bin"` + `args: [...]` vs `command: [bin, ...]`, `env` vs `environment`, `"stdio"` vs `"local"`) = silent tool discovery failure. The writer has to be engine-aware.
+- **Build order is dictated by three dependencies.** (1) The subcommand must exist and speak the protocol before config injection is useful. (2) Config injection must work before any tool that relies on `KAMACU_SESSION_ID` inheritance. (3) The two new HTTP read endpoints must exist before the snapshot/subscribe tools can call them. So the minimal vertical slice is: subcommand skeleton + ONE read-only tool (`get_my_task`) → agent-CLI config writer for ONE engine (Claude) → end-to-end "claude inside kamacu can call a tool" demo. Everything else fans out from that.
 
 ---
 
 ## Standard Architecture
 
-### System Overview — where the new pieces sit
+### System Overview
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  FRONTEND (React + TanStack Query)                                     │
-│  ┌────────────┐  ┌──────────────┐  ┌───────────────┐  ┌────────────┐ │
-│  │ Project    │  │  Board        │  │ Review column │  │ TaskPage   │ │
-│  │ config UI  │  │  (kanban)     │  │ (NEW, gated)  │  │ (REUSED    │ │
-│  │ (NEW)      │  │               │  │ usePullReqs() │  │  for PRs)  │ │
-│  └─────┬──────┘  └──────┬───────┘  └──────┬────────┘  └─────┬──────┘ │
-│        │ desc/repo      │ tasks query     │ poll-paused-hidden        │
-│        │                │                 │ + manual refresh          │
-├────────┼────────────────┼─────────────────┼──────────────┼──────────┤
-│  REST API (stdlib ServeMux)                                           │
-│  PATCH /api/projects/{id}      GET  /api/projects/{id}/pull-requests  │
-│  (desc + github_repo, NEW)     POST /api/projects/{id}/pull-requests/ │
-│                                       {n}/review   (open a review)     │
-│  GET /api/settings (github_integration toggle gates list endpoint)    │
-├──────────────────────────────────────────────────────────────────────┤
-│  SERVICES (leaf packages — same shape as worktree/quota/tmux)         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────┐ │
-│  │ internal/    │  │ internal/    │  │ internal/    │  │ internal/ │ │
-│  │ github (NEW) │  │ worktree     │  │ diff         │  │ session   │ │
-│  │ gh shell-out │  │ +CheckoutPR  │  │ (REUSED, PR  │  │ (REUSED,  │ │
-│  │ +cache/poll  │  │  (NEW verb)  │  │  base ref)   │  │  taskID)  │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────┘  └───────────┘ │
-│         │ gh CLI          │ git CLI                                    │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │ internal/reaper (REUSED + EXTENDED):  Done-TTL reap            │   │
-│  │   + NEW: PR-state reconcile loop → gated worktree auto-remove  │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────────────┤
-│  STORAGE (SQLite, goose migration 00007)                              │
-│  projects: + description TEXT, + github_repo TEXT                     │
-│  tasks:    + source TEXT NOT NULL DEFAULT 'manual'                    │
-│            + pr_number INTEGER, + pr_base_ref TEXT (PR-only)          │
-│  settings: github_integration KV key (code default 'on')             │
-└──────────────────────────────────────────────────────────────────────┘
+                              ┌─────────────────────────────┐
+                              │        Host filesystem       │
+                              │  (~.kamacu, worktrees, etc.) │
+                              └─────────────────────────────┘
+                                          ▲
+                                          │
+        ┌─────────────────────────────────┼─────────────────────────────────┐
+        │                                 │                                 │
+        │      KAMACU BINARY              │        AGENT CLI                 │
+        │      (long-lived, v1.10)        │        (claude / opencode)       │
+        │                                 │        child of kamacu,          │
+        │  ┌────────────────────┐         │        short-lived per task      │
+        │  │ HTTP + WS server   │         │                                 │
+        │  │ 127.0.0.1:7333     │         │   ┌──────────────────────┐      │
+        │  │                    │         │   │ PTY + TUI             │      │
+        │  │ Routes:            │         │   │ (the agent proper)    │      │
+        │  │  /api/projects     │         │   └──────────┬───────────┘      │
+        │  │  /api/tasks        │         │              │ spawns            │
+        │  │  /api/sessions     │         │              ▼                   │
+        │  │  /api/sessions/{id}/ws ◄─────┼─ WS attach  ┌──────────────────┐ │
+        │  │  /api/sessions/{id}/snapshot │   (browser)│ MCP CLIENT       │ │
+        │  │  /api/sessions/{id}/tail   ◄─┼─────────── │ in agent runtime │ │
+        │  │  /api/hooks/sessions/{id}  ◄─┼── hooks ───┤                  │ │
+        │  │  /api/agents        │       │            │ spawns (stdio)   │ │
+        │  │  /api/worktrees     │       │            ▼                   │ │
+        │  │  ... (rest)         │       │   ┌──────────────────────┐     │ │
+        │  │                    │       │   │ kamacu mcp serve     │     │ │
+        │  │ SessionManager     │       │   │ (MCP SERVER)         │     │ │
+        │  │  └ PTY children    │       │   │                      │     │ │
+        │  │  └ ring buffers    │       │   │ Reads env:           │     │ │
+        │  │ Reaper goroutine   │       │   │  KAMACU_SESSION_ID   │     │ │
+        │  └─────────┬──────────┘       │   │  KAMACU_HOOK_TOKEN   │     │ │
+        │            │                  │   │  KAMACU_HOOK_BASE    │     │ │
+        │            │                  │   │                      │     │ │
+        │            ▼                  │   │ Bridges → HTTP calls │     │ │
+        │  ┌────────────────────┐       │   │ to 127.0.0.1:7333    │     │ │
+        │  │ SQLite (~.kamacu)   │      │   │ (X-Kamacu-Token hdr) │     │ │
+        │  │ tasks, projects,    │ ◄────┼───│                      │     │ │
+        │  │ sessions, ...       │      │   │ Logs → stderr only   │     │ │
+        │  └────────────────────┘       │   │ (stdout = MCP wire)  │     │ │
+        │            ▲                  │   └──────────────────────┘     │ │
+        │            │                  │                                 │ │
+        │            │ KAMACU_SESSION_ID│                                 │ │
+        │            │ KAMACU_HOOK_TOKEN│  (inherited env at spawn)        │ │
+        │            │ KAMACU_HOOK_BASE │                                 │ │
+        │            └──────────────────┼─── spawn injects ───────────────┘ │
+        │                               │                                   │ │
+        │  ┌────────────────────┐       │                                   │
+        │  │ spawn engine       │       │   ALSO at spawn:                  │
+        │  │ (v1.10 + 1 new     │       │   writes .mcp.json (claude)       │
+        │  │  step: mcpconfig)  │       │   or opencode.json (opencode)     │
+        │  └────────────────────┘       │   into the worktree root          │
+        │                               │                                   │
+        └───────────────────────────────┼───────────────────────────────────┘
+                                         │
+                                  ┌──────┴──────┐
+                                  │  Browser    │
+                                  │  (the user) │
+                                  └─────────────┘
 ```
+
+Three processes are involved per task:
+
+1. **The Kamacu binary** (`kamacu` proper) — the long-lived HTTP/WS/PTY server. Started once by the user. Owns the DB, SessionManager, reaper, and the SPA. **Already exists unchanged from v1.10** plus two new read endpoints.
+2. **The agent CLI** (`claude` or `opencode`) — spawned per task by Kamacu's spawn engine inside the task's worktree PTY. Owns the TUI the browser renders. **Already exists unchanged from v1.10.**
+3. **The MCP subcommand** (`kamacu mcp serve`) — spawned by the agent CLI as a child process at agent startup, after the agent CLI reads the worktree-root `.mcp.json` or `opencode.json` Kamacu wrote at task-spawn time. **New in v1.11.**
+
+The three-process model is forced by MCP semantics: a stdio MCP server is a process whose stdin/stdout the client owns. The agent CLI is the MCP client; Kamacu's `kamacu mcp serve` is the MCP server. Kamacu-the-binary is the *upstream HTTP API* the server bridges to. The subcommand cannot live inside the Kamacu binary (would require HTTP/SSE transport, which is the wrong fit and explicitly out of scope per PROJECT.md) and cannot be replaced by the agent CLI talking HTTP directly (the agent would have to discover and re-implement every endpoint — MCP exists precisely to avoid that).
 
 ### Component Responsibilities
 
-| Component | Responsibility | New / Reused / Extended |
-|-----------|----------------|--------------------------|
-| `internal/github` | Shell out to `gh`; list review-requested PRs; get a PR's state; cache + degrade like quota | **NEW** |
-| `projects` table cols | Persist per-project description + linked `owner/name` | **NEW columns** (migration 00007) |
-| `tasks` table cols | Discriminate manual vs PR-backed; hold PR number + base ref | **NEW columns** (migration 00007) |
-| `internal/worktree` | Provision a worktree; add a `CheckoutPR` path (checkout existing branch, not `add -b`) | **EXTENDED** |
-| `internal/diff` `Compute(wt, base)` | Unchanged — already takes an explicit base ref | **REUSED as-is** |
-| `internal/session` `Manager` | Owns PTYs keyed on `taskID` | **REUSED as-is** (PR review = a task → free) |
-| `internal/reaper` | Done-TTL session reaping; gains a PR-state reconcile + gated worktree auto-remove pass | **EXTENDED** |
-| TaskPage / TaskTabs | Full task view with Agent/Description/Diff/bash tabs | **REUSED** (PR view IS a task view) |
-| Review column (frontend) | Render review-requested PR cards, poll paused-when-hidden, manual refresh | **NEW** (clone of the QuotaIndicator poll pattern) |
-| `github_integration` setting | Global on/off; hides all GitHub UI and gates the API | **NEW KV key** |
+| Component | Responsibility | Typical Implementation |
+|-----------|----------------|------------------------|
+| **`kamacu mcp serve` subcommand** | Be a stdio MCP server that translates MCP `tools/call` requests into HTTP calls against the running Kamacu binary. Read envelope env (`KAMACU_*`) once at startup; build one `*http.Client`; register tools; `mcpSrv.Run(ctx, &mcp.StdioTransport{})`. | New `internal/mcp` package. Stdlib subcommand dispatch in `cmd/kamacu/main.go` (no cobra). Uses `github.com/modelcontextprotocol/go-sdk/mcp` v1.6.1 (per STACK.md). |
+| **MCP tool handlers** | Per-tool: validate input, build an `http.Request`, attach `X-Kamacu-Token`, fire it at the right endpoint, translate the response into a `*mcp.CallToolResult`. No business logic. | One Go func per tool, registered via `mcp.AddTool(server, tool, handler)`. Typed-struct handlers so JSON Schemas are auto-derived. |
+| **Per-task scope resolver** | Map the inherited `KAMACU_SESSION_ID` to a `task_id` (one HTTP GET on startup), cache it in the `Server` struct. | One method on the MCP `Server`: `sessionProjectID(ctx) (string, error)`. Resolves via `GET /api/sessions/{KAMACU_SESSION_ID}` → `taskID` → `GET /api/tasks/{id}` → `projectID`. The first call's result is cached for the subcommand's lifetime; the task's project cannot change while the session is running. |
+| **Spawn-time MCP config writer** | At task spawn, after worktree creation, before the agent CLI starts: write the correct MCP config file into the worktree root for the configured agent's engine. | New `internal/mcpconfig` leaf package. Two writers: `WriteClaude(worktreeDir, env)` writes `.mcp.json`; `WriteOpenCode(worktreeDir, env)` writes `opencode.json`. Called from the existing spawn handler. |
+| **New Kamacu HTTP endpoints (terminal reads)** | Expose the existing Session ring buffer read-only for the MCP bridge to consume. Two endpoints: snapshot (full ring) + tail (incremental from offset). | New file under `internal/api/` (e.g. `terminal_reads.go`); route registration alongside the existing `SessionRoutes`. Reuse `mgr.Get(id).Snapshot()` and add an offset-aware variant. Auth: existing `X-Kamacu-Token` envelope. |
+| **Existing Kamacu binary** | Continue serving HTTP + WS + SPA, owning PTYs, reaping, hooks. Unchanged surface; the two new endpoints above are additive. | No change to `cmd/kamacu/main.go` startup except the route registration call (and the new subcommand dispatch). |
 
 ---
 
-## 1. The modeling question: PR review vs task
+## Recommended Project Structure
 
-### Recommendation: a `tasks` row with a `source` discriminator (option **b**)
+```
+cmd/kamacu/
+├── main.go                      # MODIFIED: subcommand dispatch (stdlib)
+├── main_test.go                 # existing
+└── mcp_subcommand.go            # NEW: the `mcp serve` dispatch entry (calls internal/mcp)
 
-Add to `tasks`:
-- `source TEXT NOT NULL DEFAULT 'manual'` — values `'manual'` | `'github_pr'`
-- `pr_number INTEGER` — NULL for manual tasks
-- `pr_base_ref TEXT` — the PR's base branch (e.g. `main`), NULL for manual tasks
-
-Board queries get a `WHERE source = 'manual'` filter so PR reviews never appear in any kanban column.
-
-### Why this, not a separate `pr_reviews` table (option a)
-
-The decision is forced by one hard fact in the existing code: **the session manager addresses everything by `TaskID int64` and nothing else.**
-
-- `Manager.Spawn(SpawnOpts{TaskID, Cwd, ...})`, `ListByTask(taskID)`, `StopAllForTask(taskID)`, `HasLiveTmux(name)` — all keyed on a task id (`internal/session/manager.go`).
-- `tmux_sessions.task_id` has an `FK REFERENCES tasks(id)` and `UNIQUE(task_id, n)` (`migration 00005`). tmux session names are minted as `kangent-<task>-<n>` (`internal/api/sessions.go`).
-- `tasks.claude_session_id` (`migration 00003`) holds the agent's resumable session id.
-- The diff endpoint reads `tasks.worktree_path` and the project's `repo_path` (`internal/api/diffs.go`).
-- The reaper queries `tasks` and calls `StopAllForTask(id)` (`internal/reaper/reaper.go`).
-- The whole frontend task view is `useTask(taskId)` / `useSessions(taskId)` (`web/src/pages/TaskPage.tsx`).
-
-A `pr_reviews` table would require **forking every one of these** to accept a second id space: a second FK column on `tmux_sessions`, a `SpawnOpts.PRReviewID` branch in the manager, a parallel diff handler, a parallel session-list handler, a parallel cleanup dialog, and a parallel task view. That is a large, bug-prone surface for zero benefit — a PR review genuinely *is* a task (it owns a worktree + agent + bash tabs + diff); it just isn't a *kanban* task.
-
-Option (b) makes a PR review a first-class task in every subsystem that matters and excludes it from exactly one place — the board — with a single `WHERE` clause. The discriminator is the smallest possible change that satisfies "owns everything a task owns, but is not on the board."
-
-### What gets reused vs forked under option (b)
-
-| Subsystem | Treatment | Detail |
-|-----------|-----------|--------|
-| `internal/session` Manager | **Reused untouched** | PR review has a `tasks.id`; `Spawn`/`ListByTask`/`StopAllForTask` work verbatim. |
-| `tmux_sessions` table + naming | **Reused untouched** | `kangent-<task>-<n>` is already a task id; the FK already points at `tasks`. |
-| `internal/diff` `Compute` | **Reused untouched** | Already `Compute(ctx, wt, base)` with an explicit base param. |
-| Diff endpoint `GET /api/tasks/{id}/diff` | **Reused, one branch** | Base resolution forks (see [§4](#4-worktree-for-pr-and-the-correct-diff-base)): PR tasks use `tasks.pr_base_ref`, manual tasks keep `ResolveBase`. |
-| TaskPage / TaskTabs / Agent/Bash/Diff tabs | **Reused untouched** | Open `/projects/{pid}/tasks/{taskId}` for the PR's task id; identical view. |
-| Worktree gates (sessions, dirty), cleanup dialog | **Reused untouched** | `worktreeHandlers` works on any `tasks.id`. |
-| Session/agent/worktree REST handlers | **Reused untouched** | All `{id}` = task id. |
-| Worktree *creation* | **Forked verb** | Manual tasks `worktree add -b`; PR tasks check out the existing PR branch (see [§4](#4-worktree-for-pr-and-the-correct-diff-base)). |
-| Board list query | **Filtered** | `GET /api/projects/{id}/tasks` adds `WHERE source = 'manual'`. |
-| `move` endpoint | **Guarded** | PR tasks must never receive a `/move` (they aren't on the board); reject with 409 if `source != 'manual'` — defense in depth. |
-| `provisionWorktree` | **Branched** | Detects `source='github_pr'` and routes to the checkout path. |
-
-### One caveat to flag for the roadmap
-
-Several existing queries (`listByProject`, board mutations) assume *every* row in `tasks` is a board card. **Audit every `SELECT ... FROM tasks` for the missing `source` filter** — a forgotten filter would leak PR reviews onto the board. This is the single highest-risk regression of the whole milestone; treat it as a checklist item per query. Known sites today: `listByProject` (`tasks.go`), and any future stats/cycle-time consumer of the `*_at` columns.
-
----
-
-## 2. Per-project config storage
-
-### Migration 00007 adds columns to `projects` (and `tasks`)
-
-```sql
--- +goose Up
-ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT '';
-ALTER TABLE projects ADD COLUMN github_repo TEXT;   -- nullable: NULL = not linked
-
-ALTER TABLE tasks ADD COLUMN source      TEXT NOT NULL DEFAULT 'manual';
-ALTER TABLE tasks ADD COLUMN pr_number   INTEGER;    -- NULL for manual tasks
-ALTER TABLE tasks ADD COLUMN pr_base_ref TEXT;       -- NULL for manual tasks
+internal/
+├── api/                         # existing package, extended
+│   ├── routes.go                # existing
+│   ├── sessions.go              # existing
+│   ├── terminal_reads.go        # NEW: GET /api/sessions/{id}/snapshot, /tail
+│   └── terminal_reads_test.go   # NEW
+├── mcp/                         # NEW PACKAGE: the MCP server
+│   ├── server.go                # mcp.NewServer + tool registration + StdioTransport.Run
+│   ├── server_test.go           # in-memory transport tests (mcp.NewInMemoryTransport)
+│   ├── bridge.go                # http.Client wrapper: getJSON/postJSON/doRequest with auth header
+│   ├── bridge_test.go           # round-trip tests against httptest.NewServer
+│   ├── scope.go                 # KAMACU_SESSION_ID → task_id/project_id resolution + caching
+│   ├── scope_test.go
+│   ├── tools.go                 # tool registration glue (one func per tool group)
+│   ├── tools_tasks.go           # list_tasks, get_task, create_task, move_task, ...
+│   ├── tools_sessions.go        # list_sessions, get_session, snapshot_session, subscribe_session
+│   ├── tools_projects.go        # list_projects, get_project, list_workspaces, list_agents
+│   ├── tools_terminal.go        # get_session_output (snapshot) + subscribe_session_output (long-running)
+│   ├── tools_github.go          # list_pr_reviews, get_pr_review
+│   ├── tools_diff.go            # get_task_diff, mark_file_viewed
+│   ├── tools_worktree.go        # list_worktree_cleanup_candidates, clean_worktree_eligible, remove_worktree
+│   └── tools_test.go            # per-tool handler tests (bridge mocked)
+├── mcpconfig/                   # NEW LEAF PACKAGE: spawn-time config writers
+│   ├── claude.go                # WriteClaude(worktreeDir, env) → .mcp.json
+│   ├── opencode.go              # WriteOpenCode(worktreeDir, env) → opencode.json
+│   ├── claude_test.go
+│   ├── opencode_test.go
+│   └── doc.go                   # package-level docs
+├── session/                     # existing — minor additive change
+│   └── session.go               # already has Snapshot(); add Tail(since int) if needed
+└── ... (existing packages unchanged)
 ```
 
-- `description` follows the migration-00006 pattern exactly: nullable-or-defaulted ADD COLUMN, one statement each (SQLite requirement, already established).
-- `github_repo` is **nullable** so "not linked" is `NULL`, distinct from "linked to empty string". This mirrors how the codebase treats `worktree_path`/`branch` nullability for state derivation (`tasks.go` D-26 comment).
-- Reuse the `projectColumns` constant pattern (`projects.go`): extend it and `scanProject` together so every read includes the new fields.
+### Structure Rationale
 
-### What "linked repo" stores: `owner/name`, validated via `gh repo view`
-
-Store the canonical **`owner/name`** string (e.g. `cli/cli`), not a full URL.
-
-- `gh` accepts `owner/name` directly via `-R/--repo` on every command, so storing the URL would force parsing on every call. Verified: `gh pr list -R cli/cli ...` and `gh repo view cli/cli` both work.
-- Validation mirrors `validateRepoPath` (`projects.go`) — same posture, different tool: on PATCH, run `gh repo view <owner/name> --json nameWithOwner` (verified live). Exit 0 with a matching `nameWithOwner` → accept and **store the canonical `nameWithOwner` gh returns** (normalizes case / casing drift). Nonzero (verified failure: `GraphQL: Could not resolve to a Repository...`) → reject with a 400 carrying gh's trimmed stderr, exactly as `worktree.gitRun` shapes git errors.
-- **Degrade-don't-break for validation:** if `gh` is absent/unauthenticated, do NOT hard-fail the PATCH — that would make linking impossible on a host where the integration is simply dormant. Accept a syntactically valid `owner/name` (regex `^[^/\s]+/[^/\s]+$`) and let the list endpoint degrade later. This matches the quota philosophy: the soft dependency never blocks core flows. (Decision to confirm with the roadmap author: strict-validate-when-gh-present vs. always-syntactic. Recommend: validate via `gh repo view` when `gh` is present, fall back to syntactic when it isn't.)
-
-### Where it surfaces
-
-- `PATCH /api/projects/{id}` already exists for rename (`projects.go`); extend its request struct with optional `description` and `github_repo` (pointer fields → "field omitted ≠ clear"). Accept clearing `github_repo` to `null` (unlink).
-- Frontend: a project-config surface (a dialog opened from `ProjectMenu`, or a small project settings panel) using the existing `useSaveSetting`-style per-field mutation pattern. No new patterns required.
+- **`internal/mcp/` (NEW)** mirrors `internal/api/` (REST handlers) and `internal/ws/` (WebSocket handlers): each is one network-facing translation layer over the same `internal/session` + DB substrate. Naming it `mcp` (not `mcpserver`, not `mcpbridge`) follows the existing one-word convention (`api`, `ws`, `diff`, `quota`, `tmux`, `reaper`). Dependency direction is enforced: `internal/mcp` imports `internal/api` types where they exist (the request/response structs) so wire shapes stay in one place, but it does NOT import `internal/session` — terminal reads go through HTTP, not direct Session access, keeping the subcommand a clean bridge.
+- **`internal/mcpconfig/` (NEW LEAF)** mirrors `internal/tmux` (CLI shell-out) and `internal/opencode` (plugin install): each is a leaf that owns one side effect at the OS boundary. Splitting it from `internal/mcp` is deliberate — `mcpconfig` runs *inside the Kamacu binary at task spawn* and writes files; `mcp` runs *inside the subcommand* and speaks the protocol. They share no code; conflating them would create an import cycle (the spawn engine shouldn't depend on the MCP SDK).
+- **Tool handlers split by domain** (`tools_tasks.go`, `tools_sessions.go`, etc.) — one file per Kamacu resource area, mirroring how `internal/api/` is split (`tasks.go`, `sessions.go`, `agents.go`, `workspaces.go`). Easier to navigate; smaller diffs.
+- **`cmd/kamacu/main.go` gets a single new function** (`runMCPSubcommand`) and a dispatch branch at the top. The subcommand body lives in `internal/mcp` so it's testable without spawning a process.
 
 ---
 
-## 3. The `internal/github` leaf package
+## Architectural Patterns
 
-### A new leaf package mirroring `internal/quota` + `internal/tmux`
+### Pattern 1: Stdlib subcommand dispatch (no framework)
 
-`internal/github/github.go` — stdlib + `os/exec` only, arg-array exec (never a shell), bounded context per call, exit-0-only success with trimmed stderr surfaced. This is the established leaf-package contract shared by `worktree.gitRun`, `tmux.run`, and `diff.run`.
+**What:** The Kamacu binary serves two modes from one binary. `kamacu [global flags]` runs the HTTP server (default, unchanged); `kamacu mcp serve` runs the MCP subcommand. Use stdlib `flag.FlagSet`, not cobra/spf13.
 
-### Surface
+**When to use:** Whenever a binary needs two modes and Kamacu's ethos is stdlib-only.
 
+**Trade-offs:** Slightly more code than cobra (~30 LOC vs ~5 LOC for the dispatch), but zero new dependencies, matches the existing `flag` style in `main.go` (which already uses `flag.String` for `--addr`, `--db`, etc.), and avoids pulling cobra's transitive deps. Cobra is justified if subcommands proliferate (5+) or have nested subcommands; Kamacu has exactly one.
+
+**Example:**
 ```go
-// PullRequest is the /api/.../pull-requests contract; JSON tags ARE the
-// frontend contract (mirrors quota.Window).
-type PullRequest struct {
-    Number     int    `json:"number"`
-    Title      string `json:"title"`
-    Author     string `json:"author"`      // author.login
-    HeadRef    string `json:"headRef"`     // headRefName
-    BaseRef    string `json:"baseRef"`     // baseRefName
-    URL        string `json:"url"`
-    UpdatedAt  string `json:"updatedAt"`
-    IsDraft    bool   `json:"isDraft"`
-    IsFork     bool   `json:"isFork"`      // isCrossRepository (see §4 caveat)
+// cmd/kamacu/main.go
+func main() {
+    if len(os.Args) >= 2 && os.Args[1] == "mcp" {
+        // Subcommand mode: kamacu mcp [serve]
+        os.Exit(runMCPSubcommand(os.Args[2:]))
+    }
+    // Default mode: kamacu (HTTP server) — existing flag.Parse() block unchanged
+    addr := flag.String("addr", "127.0.0.1:7333", "...")
+    // ... rest of existing main ...
 }
 
-// ListReviewRequestedPRs runs:
-//   gh pr list -R <repo> --search "is:open review-requested:@me"
-//     --json number,title,author,headRefName,baseRefName,url,updatedAt,isDraft,isCrossRepository
-// Verified live: returns a JSON array ([] when none). Parse into []PullRequest.
-func (c *Client) ListReviewRequestedPRs(ctx context.Context, repo string) ([]PullRequest, error)
-
-// PRState returns OPEN | CLOSED | MERGED for one PR. Runs:
-//   gh pr view <n> -R <repo> --json state
-// Verified: state is UPPERCASE OPEN/CLOSED/MERGED; `merged` is NOT a json
-// field — derive merged from state == "MERGED".
-func (c *Client) PRState(ctx context.Context, repo string, number int) (string, error)
-
-// ValidateRepo confirms a repo is resolvable (PATCH-time link validation).
-//   gh repo view <repo> --json nameWithOwner  -> returns canonical name
-func (c *Client) ValidateRepo(ctx context.Context, repo string) (string, error)
-```
-
-**No `gh`-based checkout helper here.** PR checkout into a worktree is a *git* operation, not a `gh` one (see [§4](#4-worktree-for-pr-and-the-correct-diff-base) — `gh pr checkout` checks out into the repo's current branch, which is wrong for a worktree). The checkout verb belongs in `internal/worktree`, keeping `internal/github` purely a read-only `gh` query surface.
-
-### Caching / poll / degradation — reuse the quota Service shape verbatim
-
-Model the `Service` on `quota.Service` (`internal/quota/quota.go`), which is the codebase's proven best-effort proxy pattern:
-
-- **Demand-driven cache, keyed by repo** (quota keys by token fingerprint; here key by `owner/name`). A `map[repo]cacheEntry` behind a mutex, each entry holding last-good `[]PullRequest`, `fetchedAt`, `lastAttempt`, `failures`, `lastErr`.
-- **TTL + attempt floor + backoff**: copy quota's `cacheTTL` (60s, matches the auto-poll cadence), `attemptFloor` (10s hard floor even on `?refresh=1`), and consecutive-failure drop (`maxFailures=3`). `gh` has its own rate limits; the floor protects against refresh-spam.
-- **Degradation states** mirror quota's `Result.State`: `"ok" | "no_gh" | "auth_required" | "error"`, plus `Stale bool`. Map:
-  - `exec.LookPath("gh")` fails → `no_gh` (first-class state, never an error to surface).
-  - `gh` exits with an auth message (stderr contains auth hints / exit on `gh auth status` probe) → `auth_required`.
-  - Any other nonzero / parse error → `error`, keep last-good windows until `maxFailures`.
-- **The endpoint is always 200** with the state in the body — identical to `UsageRoutes` (`internal/api/usage.go`). The browser never sees a 5xx for a dormant integration; the Review column just shows an empty/degraded state.
-- **No ticker in the service.** Like quota, the browser's poll is the only trigger (auto-poll paused when hidden). The one exception is the PR-state reconcile, which runs in the reaper goroutine (see [§5](#5-auto-cleanup-on-mergeclose)) — that reads state directly, separate from the list cache.
-
-### REST endpoints
-
-```
-GET  /api/projects/{id}/pull-requests            -> { state, stale, fetchedAt, pullRequests: [...] }
-GET  /api/projects/{id}/pull-requests?refresh=1  -> bypass TTL (10s floor still applies)
-POST /api/projects/{id}/pull-requests/{n}/review -> { task: Task }  (open/find the review task)
-```
-
-- The two GETs follow `UsageRoutes` exactly (always 200, state carries degradation). They first check the `github_integration` toggle ([§6](#6-global-toggle-plumbing)) and that the project has a `github_repo`; if either is off/absent, return `{state:"disabled"}` / `{state:"not_linked"}` — never an error.
-- `POST .../{n}/review` is the "click a PR card" action. It is **idempotent / find-or-create**: if a `tasks` row already exists for `(project_id, pr_number)` return it (and re-provision its worktree if missing, reusing the existing `worktree.create` Retry path); otherwise INSERT a `source='github_pr'` task with `pr_number`, `pr_base_ref` (from the cached PR's `baseRef`), a generated title (e.g. `#<n> <pr title>`), then provision the PR worktree ([§4](#4-worktree-for-pr-and-the-correct-diff-base)). Add a `UNIQUE(project_id, pr_number)` index for PR tasks to make find-or-create race-safe at single-user scale.
-- Reuse `writeJSON`/`writeError`/`pathID` (`respond.go`, `projects.go`) — no new HTTP helpers.
-
-### Wiring (`cmd/kangent/main.go`)
-
-Construct `ghSvc := github.New(github.Config{GHBin: ...})` next to `quotaSvc := quota.New(...)`, and register `api.PullRequestRoutes(mux, db, ghSvc, wtSvc, mgr)` next to `api.UsageRoutes`. Same shape as the existing service construction + route registration block.
-
----
-
-## 4. Worktree for PR, and the correct diff base
-
-### The checkout problem (verified `gh` behavior)
-
-`gh pr checkout <n>` checks out the PR branch **into the current branch of the repository it runs in** — it fetches the PR head and switches HEAD. It does **not** create a worktree, and run inside the main repo it would hijack the user's checkout. So the existing `worktree add -b <branch> <path> <base>` path is wrong (it creates a *new* branch), and naive `gh pr checkout` is wrong (it mutates the main checkout). **The correct mechanic is git, in two steps**, and it belongs in `internal/worktree` as a new verb.
-
-### New `worktree` verb: `CheckoutPR`
-
-```go
-// CheckoutPR provisions a worktree at `path` checked out on a PR head ref.
-// Same mutex/MkdirAll/path-precheck discipline as Create. Two-step:
-//   1. Fetch the PR head into a local ref (no network beyond this fetch — a
-//      deliberate exception to worktree's "never fetch" D-24 rule, because a
-//      PR review's whole point is fetching someone else's branch):
-//        git -C <repo> fetch origin pull/<n>/head:<localBranch>
-//      (works for fork PRs too — pull/<n>/head is the merged head ref on the
-//      base repo, sidestepping the isCrossRepository fork-remote problem.)
-//   2. Add a worktree on that local branch (NOT -b — the branch now exists):
-//        git -C <repo> worktree add <path> <localBranch>
-func (s *Service) CheckoutPR(ctx context.Context, repo, localBranch, path string, prNumber int) error
-```
-
-- Use `refs/pull/<n>/head` as the fetch source — this is the canonical GitHub PR-head ref reachable on the *base* repo, so it works uniformly for same-repo and fork PRs without configuring a fork remote. This is more robust than `gh pr checkout` for the worktree case and avoids `gh`'s current-checkout mutation entirely.
-- `localBranch` should be a Kangent-namespaced ref (e.g. `kangent-pr/<n>`) so it never collides with a branch the user already has, and so the existing branch-reuse path in `Create` (already handles "branch exists, add without -b") composes cleanly on a re-review.
-- This is a **deliberate, scoped exception to worktree's "never fetch" invariant (D-24)** — document it in the package doc comment, the same way the milestone scopes the "worktrees can be auto-removed" exception. The fetch is the one network call the package makes, gated to the PR path.
-
-### `provisionWorktree` branches on `source`
-
-`provisionWorktree` (`tasks.go`) is the single choke point for both creation paths today. Extend it: when the task's `source == 'github_pr'`, call `wt.CheckoutPR(...)` instead of the slug/template/`ResolveBase`/`Create` chain. Everything else (the D-25 failure-into-`worktree_error` handling, the 30s timeout, the `EnsureSubmodules` best-effort) is reused verbatim. The PR's base ref (`pr_base_ref`) is captured at task creation from the cached PR data, so no extra `gh` call is needed at provision time.
-
-### Diff base: read `pr_base_ref`, do not `ResolveBase`
-
-The diff endpoint (`diffs.go`) currently calls `wt.ResolveBase(repo)` to get the project default branch's tip, then `diff.Compute(wt, base)`. For a PR review the correct base is the **PR's base branch** (e.g. `main` the PR targets), not the project default — and `diff.Compute` already takes the base as a parameter, so **no change to `internal/diff` is needed.**
-
-The only change is in the handler: select the base by `source`.
-
-```go
-// in diffHandlers.get, after loading the task (now also select source, pr_base_ref):
-var base string
-if source == "github_pr" && prBaseRef.Valid {
-    // The diff is the PR's changes vs its own base branch's merge-base.
-    base = prBaseRef.String        // e.g. "main" / "origin/main"
-} else {
-    base, err = h.wt.ResolveBase(r.Context(), repo)   // manual tasks unchanged
+// cmd/kamacu/mcp_subcommand.go
+func runMCPSubcommand(args []string) int {
+    fs := flag.NewFlagSet("kamacu mcp", flag.ExitOnError)
+    // No flags today; room for --transport http later (future milestone)
+    fs.Usage = func() {
+        fmt.Fprintln(os.Stderr, "Usage: kamacu mcp serve")
+        fmt.Fprintln(os.Stderr, "  Runs the Kamacu MCP server over stdio (JSON-RPC).")
+    }
+    if err := fs.Parse(args); err != nil {
+        return 2
+    }
+    if fs.NArg() == 0 || fs.Arg(0) != "serve" {
+        fs.Usage()
+        return 2
+    }
+    ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer cancel()
+    if err := mcp.Run(ctx, mcp.OptionsFromEnv()); err != nil {
+        slog.Error("mcp server stopped", "error", err)
+        return 1
+    }
+    return 0
 }
-d, err := diff.Compute(r.Context(), path, base)
 ```
 
-`diff.Compute` does `merge-base base HEAD` then three-dot semantics (`diffs.go` / `diff.go`), which is exactly right for "what this PR changed vs its base." Use `origin/<pr_base_ref>` if the local base ref may be stale; prefer the local ref when it exists (mirror `ResolveBase`'s local-then-remote chain). Recommend storing `pr_base_ref` as the plain branch name and resolving local-vs-remote at diff time, reusing `ResolveBase`'s logic shape.
+Two-level dispatch (`mcp` then `serve`) leaves room for `kamacu mcp list-tools` or `kamacu mcp inspect` (debug subcommands) without further restructuring. If v2 ever adds more subcommands (`kamacu config`, `kamacu doctor`), the same pattern extends.
 
----
+### Pattern 2: HTTP-bridge, not in-process
 
-## 5. Auto-cleanup on merge/close
+**What:** The MCP subcommand talks to the running Kamacu binary exclusively over HTTP at `127.0.0.1:7333`. It does NOT import `internal/session`, `internal/store`, or any internal package directly. Auth is the existing `X-Kamacu-Token` envelope header.
 
-### Who detects the state change: the reaper goroutine, a new pass
+**When to use:** Always, for v1.11. The alternative — importing internal packages and running the MCP server inside the Kamacu binary — would require HTTP/SSE transport (out of scope) and entangle MCP request lifetimes with the long-lived server's goroutines.
 
-The codebase has exactly one background goroutine — the Done-TTL reaper (`internal/reaper`, started in `main.go` via `go reaper.New(db, mgr).Run(ctx)`). The milestone explicitly says to model PR-merge cleanup on "the gated-cleanup + the reaper background-goroutine pattern." So **add a second pass to the reaper's tick**, not a new goroutine.
+**Trade-offs:**
+- **Pros:** Clean separation; existing validation/side effects/reaper/hooks all apply unchanged; existing tests cover the data path; the bridge is trivially substitutable (swap `http.DefaultClient` for a fake in tests); the subcommand can be developed and tested in complete isolation from Kamacu's binary.
+- **Cons:** One extra TCP round-trip per tool call (~1ms on localhost — irrelevant); the bridge duplicates the request/response struct definitions (mitigated by sharing `internal/api/types.go` where they exist).
 
-The Review-column *list* poll (browser-driven, 60s, paused when hidden) is the wrong place to detect merges: it stops when the tab is hidden, and it only sees *open* review-requested PRs (a merged PR drops out of the list — the list can tell a PR *vanished*, but not authoritatively *why*, and only while the tab is open). Authoritative state detection must be server-side and always-on → the reaper.
+The "cons" list is short and minor. The bridge pattern is the documented happy path of the official Go SDK — its `examples/server/proxy/main.go` is structurally identical (stdio MCP→HTTP upstream). Kamacu's only adaptation is that the upstream is a REST API rather than another MCP server, which makes each handler *simpler* than the proxy example (no MCP-version negotiation with the upstream).
 
-### How the reconcile pass works
+**Example:**
+```go
+// internal/mcp/bridge.go
+type Bridge struct {
+    client  *http.Client
+    baseURL string                    // http://127.0.0.1:7333
+    token   string                    // KAMACU_HOOK_TOKEN
+}
 
-Extend `reaper.reapOnce` (or add `reconcilePRsOnce` called from the same `Run` ticker) to:
-
-1. `SELECT id, project_id, pr_number FROM tasks WHERE source='github_pr' AND worktree_path IS NOT NULL` joined to `projects.github_repo`.
-2. For each, call `ghSvc.PRState(ctx, repo, prNumber)` (verified: returns `OPEN`/`CLOSED`/`MERGED`). The reaper gains a dependency on a `PRStateGetter` interface — define it *locally in the reaper package* exactly like the existing `SessionStopper` interface, so tests inject a spy and the real `*github.Service` satisfies it. This keeps the reaper's clean test seam.
-3. If state is `MERGED` or `CLOSED`, attempt **the same gated cleanup the manual path already enforces** (`worktreeHandlers.remove` logic): check dirty-tree (`wt.DirtyCount`) and running/detached sessions (the folded `cleanupSessionCount` logic), and **only auto-remove when both gates pass clean**. If dirty or sessions are live, **skip and leave it** — the user reviews and cleans up manually. The branch is always kept (D-34). This is the milestone's deliberate exception ("worktrees CAN be auto-removed on merge/close") reconciled with the existing safety gates: auto-removal is *opt-out-by-state* (dirty/busy worktrees are never bulldozed).
-
-### Reuse the gated-cleanup logic — extract it once
-
-Today the gate logic (sessions count → dirty count → `StopAllForTask` → kill detached tmux → `wt.Remove` → null the columns) lives inline in `worktreeHandlers.remove` (`worktrees.go`). To avoid duplicating it in the reaper, **extract a shared helper** — e.g. `worktree`-adjacent `cleanupWorktreeGated(ctx, db, wt, mgr, tmuxClient, taskID, force=false) (removed bool, reason string)` — and call it from both the HTTP handler and the reaper pass. The reaper passes `force=false` always (auto-removal never forces past a dirty gate). This is the cleanest reconciliation of "new auto-removal" with "existing gated cleanup": one code path, two callers.
-
-### What the reaper must NOT do here
-
-- Never delete the branch (D-34 — global invariant).
-- Never force past the dirty gate or the sessions gate (auto-removal is conservative).
-- Never touch manual (`source='manual'`) tasks' worktrees — the Done-TTL reaper already keeps "worktrees never auto-removed" for those (D-87). The PR pass is gated on `source='github_pr'` exactly the way the Done pass is gated on `status='done'`.
-- Reconcile is best-effort: a `gh` failure (`no_gh`/`error`) on a given tick is a warn-and-skip, never a crash — same posture as `reapOnce` today.
-
-### Tick cadence
-
-The existing 10-minute reaper tick is fine for merge cleanup (a worktree lingering a few extra minutes after merge is harmless). Keep one ticker; run both passes per tick. If a snappier feel is wanted later, the Review column's manual refresh can additionally trigger a targeted reconcile — but that's optional polish, not core.
-
----
-
-## 6. Global toggle plumbing
-
-### Settings key → API gating → frontend hiding
-
-A new KV setting, fully reusing the migration-free settings pattern (`internal/settings/settings.go`):
-
-1. **`internal/settings`**: add `KeyGithubIntegration = "github_integration"` to the const block and `Defaults` map with default `"on"`. Add a `Validate` case accepting `on`/`off` (mirror the `KeyShell` enum check). No migration — absent row reads as the code default `"on"` (the established "defaults live in code" rule). Add a tiny `ParseBool`-style helper (or reuse the `on`/`off` literal) shared by API gating and validation, mirroring how `ParseDoneSessionTTL` / `AllowedShells` are single-source-of-truth helpers.
-
-2. **API gating** (read-at-use, managers stay DB-free — the established posture): the PR-list and PR-review endpoints check `settings.Get(db, KeyGithubIntegration)` at the top of each handler. When `off`, the GETs return `{state:"disabled"}` (always 200, never an error) and `POST .../review` returns 409/403. This is the same read-at-use pattern `provisionWorktree` uses for `branch_template`/`worktree_base`.
-
-3. **Frontend hiding**: the global `useSettings()` hook (`web/src/api/settings.ts`) already fetches all settings in one query. The Review column, the project-config "linked repo" field, and any PR affordance read `settings.github_integration.value === "on"` and render nothing when off. Because `useSettings` is one shared cached query, the toggle flips all GitHub UI atomically with no extra fetch. The SettingsPage gets one new `SettingsField` (an on/off select, reusing the existing `Options`-driven select the shell field already uses).
-
-The toggle is purely additive: when off, the board, tasks, sessions, and existing flows are byte-for-byte unchanged (no GitHub queries fire, no columns render).
-
----
-
-## 7. Data flow + build order
-
-### PR-list data flow (end to end)
-
-```
-[Review column mounts / 60s poll tick (paused when tab hidden) / manual refresh]
-        │  usePullRequests(projectId)  (refetchInterval 60s, refetchIntervalInBackground:false)
-        ▼
-GET /api/projects/{id}/pull-requests[?refresh=1]
-        │  handler: check github_integration toggle + project.github_repo
-        ▼
-github.Service.List(ctx, repo, force)
-        │  TTL/floor/backoff gate (quota shape, keyed by repo)
-        │  miss → exec: gh pr list -R <repo> --search "is:open review-requested:@me" --json ...
-        ▼
-parse JSON array → []PullRequest → cache → Result{state, stale, fetchedAt, pullRequests}
-        ▼
-always-200 JSON  →  Review column renders PR cards (or disabled/no_gh/empty state)
-        ▼
-[user clicks a PR card]
-        ▼
-POST /api/projects/{id}/pull-requests/{n}/review
-        │  find-or-create tasks row (source='github_pr', pr_number, pr_base_ref)
-        │  provisionWorktree → wt.CheckoutPR (fetch refs/pull/n/head → worktree add)
-        ▼
-navigate to /projects/{id}/tasks/{taskId}  →  REUSED TaskPage (Agent/Description/Diff/bash)
-
-[meanwhile, server-side, every reaper tick]
-reconcilePRsOnce → ghSvc.PRState(repo, n) → MERGED/CLOSED?
-        → gated cleanup (dirty + sessions clean) → wt.Remove (branch kept)
+func (b *Bridge) getJSON(ctx context.Context, path string, out any) error {
+    req, err := http.NewRequestWithContext(ctx, "GET", b.baseURL+path, nil)
+    if err != nil { return err }
+    req.Header.Set("X-Kamacu-Token", b.token)   // existing envelope
+    req.Header.Set("Accept", "application/json")
+    res, err := b.client.Do(req)
+    if err != nil { return fmt.Errorf("kamacu bridge: %w", err) }
+    defer res.Body.Close()
+    if res.StatusCode >= 400 {
+        return &bridgeError{Status: res.StatusCode, Path: path}
+    }
+    if out == nil { return nil }
+    return json.NewDecoder(res.Body).Decode(out)
+}
 ```
 
-### Suggested build order (dependency-honoring phases)
+### Pattern 3: Per-task scoping via env + lazy resolution
 
-**Phase A — Foundations: schema + settings toggle + project link (no PR fetching yet).**
-- Migration 00007 (projects + tasks columns); extend `projectColumns`/`scanProject` and `taskColumns`/`scanTask`.
-- `github_integration` setting + validation + SettingsPage field.
-- `PATCH /api/projects/{id}` extended for description + github_repo; `internal/github.ValidateRepo`.
-- Project-config frontend UI.
-- *Why first:* every later phase reads these columns and the toggle. No dependency on the others. Ships visible value (project config) immediately.
+**What:** Convenience tools (`get_my_task`, `list_my_tasks`, `subscribe_my_session_output`) need no parameters — they operate on the inherited `KAMACU_SESSION_ID`. The subcommand resolves it to a `task_id` lazily on first use, caches the result on the `Server` struct.
 
-**Phase B — `internal/github` package + read-only PR list + Review column.**
-- `internal/github` leaf package: `ListReviewRequestedPRs`, the quota-shaped cache/poll/degrade `Service`, wiring in `main.go`.
-- `GET /api/projects/{id}/pull-requests` (toggle- and link-gated, always 200).
-- Frontend `usePullRequests` hook (quota poll pattern) + collapsible Review column + PR cards.
-- *Depends on:* Phase A (needs `github_repo` + toggle). Pure read path; no worktree/task mutation yet — low risk, independently demoable.
+**When to use:** Whenever the subcommand has `KAMACU_SESSION_ID` in env (i.e., always — Kamacu injects it for every spawned agent).
 
-**Phase C — Open-a-review: PR task creation + PR worktree checkout + diff base.**
-- `worktree.CheckoutPR` verb (fetch `refs/pull/n/head` + `worktree add`).
-- `provisionWorktree` branch on `source`.
-- `POST .../{n}/review` find-or-create task + provision; `UNIQUE(project_id, pr_number)`.
-- Board query `WHERE source='manual'` filter (+ audit all `tasks` selects); `/move` guard.
-- Diff handler base selection by `source`/`pr_base_ref`.
-- Frontend: PR card click → review task view (reused TaskPage).
-- *Depends on:* Phase B (needs the PR list/cache to populate `pr_base_ref`) and Phase A (columns). This is the milestone's headline — the reused task view lights up for PRs.
+**Trade-offs:**
+- **Pros:** Zero per-tool-call overhead after the first resolution; clear separation of convenience tools (no params) and cross-task tools (explicit IDs); no SDK feature needed (plain Go struct field).
+- **Cons:** If the task is reassigned to another project mid-session (impossible today but a future concern), the cache is stale. Mitigation: cache for the subcommand's lifetime — a single MCP subcommand lives for one agent-CLI session, which is shorter than any conceivable reassignment flow.
 
-**Phase D — Auto-cleanup on merge/close (reaper extension).**
-- Extract shared `cleanupWorktreeGated` helper from `worktreeHandlers.remove`; refactor the handler to use it (regression-guarded).
-- `internal/github.PRState` + reaper `PRStateGetter` interface + `reconcilePRsOnce` pass.
-- Wire `ghSvc` into the reaper in `main.go`.
-- *Depends on:* Phase C (needs PR tasks with worktrees to clean up) and Phase B (needs `PRState`). Last because it operates on the artifacts the earlier phases create, and the shared-helper extraction is safest once the manual cleanup path is stable and the PR path exists.
+**Example:**
+```go
+// internal/mcp/scope.go
+type Scope struct {
+    bridge    *Bridge
+    sessionID string                  // KAMACU_SESSION_ID
+    cached    scopeCache
+}
 
-This order means each phase is independently shippable, every phase builds only on already-landed columns/services, and the riskiest change (the board-query `source` filter audit) lands in Phase C where it's the focus rather than buried.
+type scopeCache struct {
+    taskID    int64
+    projectID int64
+    resolved  bool
+}
+
+// taskID resolves KAMACU_SESSION_ID -> tasks.id via one GET. Cached.
+func (s *Scope) taskID(ctx context.Context) (int64, error) {
+    if s.cached.resolved { return s.cached.taskID, nil }
+    var info session.Info
+    if err := s.bridge.getJSON(ctx, "/api/sessions/"+s.sessionID, &info); err != nil {
+        return 0, err
+    }
+    if info.TaskID == 0 {
+        return 0, errUnscopedSession    // dev session, not a task
+    }
+    s.cached = scopeCache{taskID: info.TaskID, projectID: 0, resolved: true}
+    return s.cached.taskID, nil
+}
+```
+
+The lookup happens *lazily on first call*, not at startup. This is deliberate: if Kamacu restarts between agent-CLI spawn and the first MCP tool call (rare but possible), the session row may be briefly gone. A lazy resolver surfaces that as a clean MCP error on the failing tool call; an eager one crashes the subcommand at startup.
+
+### Pattern 4: Spawn-time config injection at the worktree root
+
+**What:** At task spawn, after `worktree.Add` and before `mgr.Spawn`, Kamacu writes a `.mcp.json` (Claude Code) or `opencode.json` (opencode) into the worktree root. The file contains exactly one MCP server entry pointing at `kamacu mcp serve`, with env vars carrying the per-task identity.
+
+**When to use:** For every task with `engine=claude` or `engine=opencode`. Custom agents are skipped — they may not speak MCP.
+
+**Trade-offs:**
+- **Pros:** Zero global-config pollution — each worktree's MCP entry is scoped to that worktree's agent; committed worktrees (rare but possible) don't leak credentials across projects; Claude Code's `--scope project` is the documented pattern for team-shareable MCP server registrations; opencode's per-project `opencode.json` is the highest-precedence standard config layer.
+- **Cons:** Two config shapes to maintain (Claude vs opencode — see table below); the agent CLI must be configured to look at the worktree-root config (Claude Code does this by default for `.mcp.json`; opencode does this by default for `opencode.json`); removing a task removes its worktree, which auto-cleans the config file — no separate GC needed.
+
+**The two shapes (critical to get right):**
+
+| Aspect | Claude Code `.mcp.json` | opencode `opencode.json` |
+|--------|-------------------------|---------------------------|
+| Top-level key | `mcpServers` | `mcp` |
+| Server entry discriminator | `"type": "stdio"` (optional, default) | `"type": "local"` (required) |
+| Command shape | `"command": "kamacu"` + `"args": ["mcp", "serve"]` | `"command": ["kamacu", "mcp", "serve"]` (single array) |
+| Env key | `"env": {...}` | `"environment": {...}` |
+| Env-value expansion | `${VAR}` and `${VAR:-default}` | `{env:VAR_NAME}` |
+| Approval | First-use prompt per project (project scope) | None — trusted from config file |
+| Per-project file location | `<worktree>/.mcp.json` | `<worktree>/opencode.json` |
+
+**Example (Claude):**
+```json
+{
+  "mcpServers": {
+    "kamacu": {
+      "type": "stdio",
+      "command": "kamacu",
+      "args": ["mcp", "serve"],
+      "env": {
+        "KAMACU_HOOK_TOKEN": "abc123...",
+        "KAMACU_SESSION_ID": "550e8400-e29b-41d4-a716-446655440000",
+        "KAMACU_HOOK_BASE": "http://127.0.0.1:7333"
+      }
+    }
+  }
+}
+```
+
+**Example (opencode):**
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "kamacu": {
+      "type": "local",
+      "command": ["kamacu", "mcp", "serve"],
+      "environment": {
+        "KAMACU_HOOK_TOKEN": "abc123...",
+        "KAMACU_SESSION_ID": "550e8400-e29b-41d4-a716-446655440000",
+        "KAMACU_HOOK_BASE": "http://127.0.0.1:7333"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+Kamacu writes the literal env values (not `${VAR}` placeholders) because the values are already per-process secret per the existing v1.10 injection posture — agent-CLI env expansion would just add a step that reads from a different env. Note: `kamacu mcp serve` resolves its own absolute path (or relies on PATH lookup by the agent CLI) — the writer should use `os.Executable()` to get the absolute path of the currently-running `kamacu` binary so the spawned subcommand is unambiguous regardless of the agent CLI's PATH.
+
+### Pattern 5: Long-running tool with cancellation + progress
+
+**What:** The `subscribe_session_output` tool is the only long-running tool in v1.11. Its handler blocks for up to `duration_seconds` (default 30, max 300) collecting output chunks via the existing ring buffer + a short-lived WS attach. On agent cancellation (`notifications/cancelled`), it returns immediately with whatever was collected so far.
+
+**When to use:** Whenever the agent wants a "watch this session for ~30s and tell me what happened" affordance. Single-shot snapshots use `get_session_output` instead.
+
+**Trade-offs:**
+- **Pros:** Reuses the existing attach/ring-buffer machinery (no new fan-out path); cancellation works for free via the SDK's context propagation; progress notifications keep the agent-CLI's idle timer from firing (Claude Code's stdio idle default is 30 min; opencode's similar — plenty of headroom); bounded duration means the tool always returns — agents handle bounded waits well and unbounded subscriptions poorly.
+- **Cons:** Two transports in one tool (HTTP for snapshot, WS for live tail) — minor complexity; if the agent-CLI ignores `notifications/progress` (some older versions might), the tool still works but the agent sees no incremental updates until the tool returns.
+
+**Mechanics (textual data flow):**
+
+```
+1. Agent calls subscribe_session_output(session_id, duration_seconds=30, lines?)
+2. MCP handler enters; ctx from SDK carries cancellation semantics
+3. Handler:
+   a. GET /api/sessions/{id}/snapshot?lines=N  (HTTP, ring-buffer slice)
+   b. Emit initial chunk via req.Session.NotifyProgress(ctx, {message:"snapshot", progress:0, total:estimated_bytes})
+   c. Open WS to ws://127.0.0.1:7333/api/sessions/{id}/ws (no input frames — READ-ONLY contract)
+   d. Loop:
+      select {
+      case chunk := <-wsRecvCh:
+         collected = append(collected, chunk...)
+         req.Session.NotifyProgress(ctx, {message:"tail", progress: bytes_so_far, total: budget_bytes})
+      case <-time.After(duration_seconds * time.Second):
+         return final_result(collected)
+      case <-ctx.Done():
+         return final_result(collected)    // cancellation: clean exit, no error
+      }
+4. Final result: *mcp.CallToolResult with TextContent of the collected bytes (base64 if non-UTF-8).
+```
+
+**Critical detail — no PTY writes:** The WS the tool opens is *read-only by contract*. The existing WS handler accepts `FrameData` frames as PTY input — the MCP subcommand MUST NOT send those. Implement this as a `wsReader` wrapper that exposes only the read channel and has no public Write method. (Alternatively, the new `/api/sessions/{id}/tail` HTTP endpoint can be a polled fallback that doesn't even open a WS — simpler, no input risk at all. Recommend the HTTP tail endpoint as the primary path, with the WS as a future optimisation.)
+
+**Cancellation correctness:** The MCP cancellation spec says the receiver SHOULD stop processing and not send a response. The Go SDK's Cancellation example confirms: when the client sends `notifications/cancelled`, the handler's `ctx.Done()` fires. The handler returns `(result, nil)` normally — the SDK suppresses the response for a cancelled request, so the agent sees no spurious reply. Returning the partial result is therefore safe; if the SDK throws away the response, no harm done.
+
+**Max duration:** Hard-cap at 300s (configurable via flag/env). This matches Claude Code's default 30-min stdio idle timeout with ample headroom; tools that run longer should be split into multiple calls. Document this in the tool description so the LLM knows.
 
 ---
 
-## Anti-Patterns (specific to this integration)
+## Data Flow
 
-### Anti-Pattern 1: A separate `pr_reviews` table
-**What people do:** Model PR reviews in their own table for "cleanliness."
-**Why it's wrong:** The session manager, tmux table, diff/session/worktree handlers, reaper, and the entire task view are all `taskID`-keyed. A second id space forks all of them for no gain — a PR review is a task in every way that matters except board membership.
-**Do this instead:** One `source` discriminator column + a board-query filter.
+### Request Flow: MCP tool call → Kamacu HTTP
 
-### Anti-Pattern 2: `gh pr checkout` into a worktree
-**What people do:** Reach for the obvious `gh pr checkout` verb.
-**Why it's wrong:** `gh pr checkout` switches the *current repo's* HEAD; it doesn't make a worktree and would hijack the user's main checkout. (Verified: it has `-b`/`--detach`/`--force` but no worktree mode.)
-**Do this instead:** `git fetch origin pull/<n>/head:<localBranch>` then `git worktree add <path> <localBranch>` — robust for forks via the `refs/pull/n/head` ref.
+```
+Agent (LLM)
+   │ decides to call a tool
+   ▼
+Agent CLI (claude/opencode)
+   │ tools/call JSON-RPC over stdio
+   │ {"method":"tools/call","params":{"name":"list_tasks","arguments":{...}}}
+   ▼
+kamacu mcp serve (subcommand)
+   │ SDK parses request, dispatches to handler by name
+   │ handler reads input struct (auto-unmarshalled + JSON-Schema-validated)
+   │ handler calls bridge.getJSON(ctx, "/api/projects/123/tasks", &out)
+   ▼
+Bridge (in subcommand)
+   │ http.NewRequestWithContext + X-Kamacu-Token header
+   ▼
+Kamacu binary (HTTP server, 127.0.0.1:7333)
+   │ hostCheck middleware, X-Kamacu-Token validated (existing envelope)
+   │ existing GET /api/projects/123/tasks handler
+   │ SELECT FROM tasks WHERE project_id=123 ORDER BY position
+   ▼
+Response flows back:
+   Kamacu JSON → Bridge → handler packs into CallToolResult → SDK serialises → stdout
+   ▼
+Agent CLI receives tool result, hands to LLM
+```
 
-### Anti-Pattern 3: Detecting merges from the browser poll
-**What people do:** Trigger cleanup when a PR drops out of the Review list.
-**Why it's wrong:** The list poll pauses when the tab is hidden and only sees *open* review-requested PRs — it can't authoritatively tell merged from closed-without-merge, and it's off entirely when nobody's looking.
-**Do this instead:** Server-side `PRState` reconcile in the always-on reaper goroutine.
+### State Management: Per-task scope resolution
 
-### Anti-Pattern 4: Letting `gh` failures break core flows
-**What people do:** Hard-fail link validation / list endpoints when `gh` is missing or unauthenticated.
-**Why it's wrong:** `gh` is a soft dependency by milestone decision; a dormant integration must never block the board, tasks, or project linking.
-**Do this instead:** First-class degraded states (`no_gh`/`auth_required`/`disabled`), always-200 endpoints — copy `quota.Result` exactly.
+```
+At task spawn (existing v1.10 + new step):
+   session.Manager.Spawn
+       ├ injects env (KAMACU_SESSION_ID, KAMACU_HOOK_TOKEN, KAMACU_HOOK_BASE)
+       ├ NEW: writes .mcp.json / opencode.json into worktree root
+       └ starts agent CLI in worktree PTY
 
-### Anti-Pattern 5: Auto-removing dirty/busy PR worktrees
-**What people do:** Treat "PR merged" as unconditional permission to delete the worktree.
-**Why it's wrong:** It would destroy uncommitted review notes / running agent work — violating the same invariants the manual cleanup gates protect.
-**Do this instead:** Auto-remove only when the dirty gate AND the sessions gate pass clean; otherwise leave it for manual cleanup. Branch always kept.
+Agent CLI starts:
+   ├ reads worktree-root MCP config (one entry: kamacu mcp serve)
+   ├ spawns `kamacu mcp serve` as child process
+   └ inherits env through to subcommand
+
+kamacu mcp serve starts:
+   ├ reads KAMACU_* env once
+   ├ builds Bridge{baseURL, token}
+   ├ builds Scope{sessionID}
+   ├ registers tools
+   └ server.Run(ctx, StdioTransport{})  -- blocks here
+
+On first my_* tool call:
+   Scope.taskID(ctx)
+       ├ GET /api/sessions/{KAMACU_SESSION_ID}
+       ├ parse Info.TaskID
+       └ cache on Scope struct
+
+Subsequent my_* calls:
+   reuse cached taskID, projectID  -- zero HTTP overhead for scoping
+```
+
+### Lifecycle: normal exit, kamacu restart, agent-CLI death
+
+| Event | What happens | Detection |
+|-------|--------------|-----------|
+| **Agent CLI exits normally** | Closes stdin of `kamacu mcp serve`. The SDK's StdioTransport sees EOF on stdin, `server.Run` returns, subcommand exits 0. | Stdin EOF — clean. |
+| **Agent CLI crashes / killed** | Same as above from the OS's perspective — closing the parent's stdout pipe to the child's stdin causes an EOF or EIO. The subcommand exits within a few ms. | Stdin EOF or SIGPIPE on stdout write. |
+| **`kamacu mcp serve` crashes** | The agent CLI sees the stdio stream close. Most agent CLIs mark the server as failed in their `/mcp` panel and either retry once or stop calling its tools. The Kamacu binary is unaffected. | Tool call returns a transport error; agent CLI handles per its own retry policy. |
+| **Kamacu binary restarts** | All in-flight HTTP calls from the subcommand fail with connection-refused. The subcommand's tool handlers return MCP error results (`CallToolResult{IsError:true, ...}` with a clear message). The Kamacu binary comes back; the *next* tool call succeeds. The subcommand itself stays alive — its stdin/stdout are still connected to the agent CLI. | HTTP 5xx or connection-refused → `bridgeError` → tool returns `isError` result. |
+| **Kamacu binary dies and stays dead** | Same as above but every subsequent tool call also fails. The agent CLI may eventually give up on the kamacu server (after N consecutive failures). The subcommand stays alive — agent can still see the failed state in `/mcp`. | Repeated bridge errors. |
+| **Subcommand outlives agent CLI** (shouldn't happen) | If a bug causes the subcommand to ignore stdin EOF (e.g., a leaked goroutine holding the context), the process could linger. Mitigation: the SDK's `server.Run` returns on stdin EOF; subcommand also installs `signal.NotifyContext(SIGTERM, SIGINT)`. | None needed if SDK behaves; verify with a "kill -9 agent CLI, check no kamacu mcp processes" test. |
+| **Kamacu binary outlives subcommand** (normal) | The Kamacu binary has no idea the subcommand existed. It just served HTTP requests. No state to clean up. The task's PTY, ring buffer, etc. are owned by the Kamacu binary and continue independently. | None. |
+
+**Key invariants:**
+- The subcommand holds **no Kamacu state** that isn't derivable from env or HTTP. It is a stateless translator.
+- The Kamacu binary holds **no per-subcommand state** — it doesn't know which HTTP requests come from the subcommand vs the SPA. (Could add an `X-Kamacu-Source: mcp` header later for observability, but not required.)
+- A subcommand outliving its agent CLI by more than seconds is a **bug**. Test explicitly.
+
+### Key Data Flows
+
+1. **Task spawn → MCP auto-discovery:** `session.Manager.Spawn` → worktree creation → `mcpconfig.Write(worktree, engine, env)` → PTY start → agent CLI reads worktree-root config → spawns `kamacu mcp serve` → subcommand resolves `KAMACU_SESSION_ID` → tools available. End-to-end, no user action.
+2. **Tool call → Kamacu state change:** `create_task` MCP tool → bridge POST → existing `POST /api/projects/{id}/tasks` handler → `provisionWorktree` runs (worktree + branch auto-created) → task row written → response flows back → MCP tool returns the new task ID. The browser-attached user sees the new card appear via the existing board-poll.
+3. **Terminal subscribe (long-running):** `subscribe_session_output` MCP tool → HTTP snapshot → optional WS attach → progress notifications stream chunks → return final result after duration OR cancellation. The browser-attached user is unaffected (the WS attach is read-only; the existing fan-out treats it like any other client).
+
+---
+
+## Scaling Considerations
+
+| Scale | Architecture Adjustments |
+|-------|--------------------------|
+| **1–5 concurrent task agents** (typical Kamacu load) | One `kamacu mcp serve` process per active agent CLI. Each makes a handful of HTTP calls/min against the Kamacu binary. Negligible load. No adjustment needed. |
+| **20–50 concurrent task agents** (heavy user) | ~20–50 subcommand processes, each holding an `*http.Client` (cheap — Go pools connections). Kamacu binary sees ~100–500 HTTP req/min from MCP, indistinguishable from a busy SPA. The Kamacu binary's `hostCheck` middleware and SQLite handle this trivially. Still no adjustment. |
+| **100+ concurrent task agents** | Not a v1.11 concern — Kamacu is single-user local. If reached: add request rate-limiting per token, switch the bridge to HTTP keep-alive with a shared `*http.Client` (already does), consider an SSE-broadcast endpoint to replace per-subcommand polling. |
+
+### Scaling Priorities
+
+1. **First bottleneck:** none expected at single-user scale. The Kamacu binary's HTTP server, SQLite, and SessionManager were built for v1.0's full-board-with-10-agents scenario; MCP traffic is a marginal addition.
+2. **Second bottleneck (theoretical):** per-subcommand goroutine count. Each `subscribe_session_output` call holds one goroutine for up to 5 minutes. With 50 concurrent subscriptions across 50 agents, that's 50 goroutines — Go handles tens of thousands trivially.
+
+---
+
+## Anti-Patterns
+
+### Anti-Pattern 1: Importing Kamacu internals in the MCP subcommand
+
+**What people do:** `import "kamacu/internal/session"` in the MCP server code so it can call `mgr.Get(id).Snapshot()` directly, "saving an HTTP round-trip."
+**Why it's wrong:** (a) Couples the subcommand's lifecycle to the Kamacu binary's in-memory state — if the Kamacu binary restarts, the subcommand's reference is to a *different* process's memory. (b) Requires the subcommand to run in the same process as the Kamacu binary, which means HTTP/SSE transport, which is out of scope. (c) Bypasses all the existing HTTP-layer validation, hooks, and audit surfaces. (d) Creates an import cycle risk between `internal/mcp` and `internal/session`.
+**Do this instead:** Bridge over HTTP. One extra millisecond per call is irrelevant on localhost.
+
+### Anti-Pattern 2: Writing the MCP config to the user-global file
+
+**What people do:** Patch `~/.claude.json` or `~/.config/opencode/opencode.json` at task spawn, with the per-task KAMACU_SESSION_ID baked in.
+**Why it's wrong:** (a) Pollutes the user's global config with a per-task entry — every time a task is created or deleted, the global file changes. (b) For opencode, the global config is the *second-highest* precedence layer — a per-project file in the worktree root overrides it cleanly, which is what we want. (c) For Claude Code, the *project-scope* `.mcp.json` is the documented "team-shared" mechanism, while the user-global `mcpServers` is for personal cross-project tools. Per-task MCP entries are neither. (d) Concurrent task spawns would race on the global file.
+**Do this instead:** Write `.mcp.json` / `opencode.json` at the worktree root. The worktree is per-task; the file is per-task; deleting the worktree (on task delete or PR merge) auto-cleans the config. Zero global pollution.
+
+### Anti-Pattern 3: One config writer for both engines
+
+**What people do:** Write a generic `WriteMCPConfig(worktreeDir, env)` that emits the same JSON for both engines, "because they're both MCP."
+**Why it's wrong:** The two config shapes are *subtly* different (table above). Claude Code uses `mcpServers` + `command` + `args` + `env` + optional `type:"stdio"`. opencode uses `mcp` + `command:[array]` + `environment` + required `type:"local"`. Get any one of these wrong and the agent CLI silently fails to discover the server — no error, no tools, just an agent that "doesn't know about Kamacu."
+**Do this instead:** Two functions in `internal/mcpconfig`: `WriteClaude` and `WriteOpenCode`. Each emits exactly the right shape. The spawn engine branches on `agent.engine` (the existing v1.10 discriminator).
+
+### Anti-Pattern 4: Long-running tool with no cancellation story
+
+**What people do:** Implement `subscribe_session_output` as an unbounded loop that only returns when the session exits or the agent explicitly sends a "stop" parameter.
+**Why it's wrong:** (a) LLMs don't naturally send "stop" parameters — they wait for the tool to return. (b) Claude Code's stdio idle timeout (30 min) would eventually kill the call, but that's a poor experience. (c) The agent can't decide "I have enough output, let me move on" — it's stuck.
+**Do this instead:** Always include a `duration_seconds` parameter (default 30, max 300). Use the SDK's `ctx.Done()` channel for cancellation — when the agent CLI sends `notifications/cancelled`, the context cancels and the handler returns immediately. Emit `notifications/progress` regularly so the agent sees incremental output and can decide to cancel when satisfied.
+
+### Anti-Pattern 5: PTY write from the MCP bridge
+
+**What people do:** Add a `send_input_to_session` tool that calls the existing WS `FrameData` path "because the agent asked nicely."
+**Why it's wrong:** Explicitly out of scope per PROJECT.md. An agent observing a sibling session must never inject bytes into its PTY — it conflicts with the browser-attached user (the user's keystrokes would race the agent's) and with the other agent's intent (the other agent didn't consent to being driven). Read + subscribe is the contract.
+**Do this instead:** Read-only tools only. If an agent needs to *drive* another session, the user can open that task's view in the browser and type themselves. (Future milestone could add a *user-initiated* "inject prompt" affordance with explicit UI confirmation; that's not the MCP bridge's job.)
+
+### Anti-Pattern 6: Hand-rolling JSON-RPC
+
+**What people do:** "The MCP wire protocol is just newline-delimited JSON-RPC 2.0 — I'll write the 300 LOC myself and skip the SDK dependency."
+**Why it's wrong:** (a) The spec is mid-rewrite (2026-07-28 is a near-complete redesign — stateless model, `server/discover` replacing `initialize`, `subscriptions/listen` stream, MRTR for elicitation). The SDK absorbs that churn; a hand-rolled server would re-implement it for zero benefit. (b) Edge cases are easy to get wrong: JSON-RPC error codes, cancellation propagation, progress tokens, batched requests, partial frames on stdin. (c) No conformance tests. (d) The SDK's transitive deps are all pure Go (no CGO) — the "zero deps" benefit is marginal.
+**Do this instead:** Use `github.com/modelcontextprotocol/go-sdk` v1.6.1 (per STACK.md).
+
+### Anti-Pattern 7: Mounting MCP inside the Kamacu HTTP server
+
+**What people do:** Run the MCP server on a goroutine inside `cmd/kamacu/main.go`, exposed via the SDK's `StreamableHTTPHandler` on `/mcp`.
+**Why it's wrong:** Out of scope per PROJECT.md ("MCP server for external AI editors" is a future milestone). Stdio is the right transport for agents spawned inside Kamacu — they're already subprocesses. An HTTP listener adds auth surface (DNS-rebinding protection, Origin checks, OAuth) that the envelope-token auth avoids. The Kamacu binary would also need to know which agent CLI is calling, breaking the stateless-bridge invariant.
+**Do this instead:** `kamacu mcp serve` as a dedicated subcommand. If a future milestone wants external-editor MCP, add `--transport http` then — the handler registrations don't change.
 
 ---
 
 ## Integration Points
 
-### External Services
+### New files
 
-| Service | Integration Pattern | Notes / gotchas |
-|---------|---------------------|-----------------|
-| `gh` CLI (2.82.0 verified) | `os/exec` arg-array, bounded ctx, exit-0-only | `gh pr list --json` returns `[]` when none; `gh pr view --json state` is UPPERCASE `OPEN/CLOSED/MERGED` (no `merged` field); `gh repo view --json nameWithOwner` validates + canonicalizes a link. Soft dependency — degrade like quota. |
-| git CLI (PR fetch) | `git fetch origin pull/<n>/head:<branch>` + `worktree add` | The one network call `internal/worktree` makes (scoped D-24 exception); `refs/pull/n/head` handles forks. |
-| GitHub auth | `gh` host auth (keyring) — no tokens stored | App never reads/stores tokens; `gh auth status` is the only auth signal, and only to pick the `auth_required` state. |
+| File | Purpose | Lines (est.) |
+|------|---------|--------------|
+| `cmd/kamacu/mcp_subcommand.go` | Subcommand dispatch entry; parses `mcp serve`, calls `internal/mcp.Run` | ~40 |
+| `internal/mcp/server.go` | `mcp.NewServer` + tool registration + `StdioTransport.Run` | ~80 |
+| `internal/mcp/bridge.go` | Authenticated HTTP client to Kamacu binary | ~80 |
+| `internal/mcp/scope.go` | `KAMACU_SESSION_ID` → task/project resolution + cache | ~60 |
+| `internal/mcp/tools*.go` | Per-domain tool handlers (one file per Kamacu resource area) | ~400 (across 6–8 files) |
+| `internal/mcpconfig/claude.go` | Writes `.mcp.json` at worktree root | ~50 |
+| `internal/mcpconfig/opencode.go` | Writes `opencode.json` at worktree root | ~50 |
+| `internal/api/terminal_reads.go` | `GET /api/sessions/{id}/snapshot`, `/tail` HTTP handlers | ~100 |
+| (Tests for all of the above) | | ~800 |
+
+**Estimated new code: ~1,600 LOC including tests** (within the typical range for a Kamacu milestone phase).
+
+### Modified files
+
+| File | Change | Why |
+|------|--------|-----|
+| `cmd/kamacu/main.go` | Add subcommand dispatch at the top of `main()`: `if len(os.Args) >= 2 && os.Args[1] == "mcp" { os.Exit(runMCPSubcommand(os.Args[2:])) }`. Add a new import (`kamacu/internal/mcp`). | One new branch; existing HTTP-server path unchanged. |
+| `internal/api/routes.go` or `sessions.go` | Register the two new read endpoints: `mux.HandleFunc("GET /api/sessions/{id}/snapshot", s.snapshot)` and `mux.HandleFunc("GET /api/sessions/{id}/tail", s.tail)`. | One new `SessionRoutes`-adjacent function. |
+| `internal/session/session.go` | Possibly add `Tail(since int) []byte` if the existing `Snapshot()` isn't sufficient. (Likely unnecessary — `Snapshot()` returns the full ring; the tail endpoint can compute a slice server-side from a byte-offset parameter.) | Only if the read endpoints need a method `Session` doesn't already expose. |
+| `internal/session/manager.go` or `internal/api/sessions.go` | One new step in the spawn path: after `provisionWorktree` returns, before `mgr.Spawn`, call `mcpconfig.Write(engine, worktreePath, env)`. Engine-branch on `agent.engine` (`claude` → `WriteClaude`, `opencode` → `WriteOpenCode`, others → skip). | The single integration point with the v1.10 spawn engine. |
+| `go.mod` | Add `github.com/modelcontextprotocol/go-sdk v1.6.1` and its transitive deps (all pure Go, no CGO). | One `go get` + `go mod tidy`. |
 
 ### Internal Boundaries
 
 | Boundary | Communication | Notes |
 |----------|---------------|-------|
-| `internal/github` ↔ API | `Service.List/PRState/ValidateRepo` | Always-200 result struct (quota shape); per-repo cache. |
-| `internal/github` ↔ reaper | `PRStateGetter` interface (defined in reaper) | Local interface for the test-spy seam, mirroring `SessionStopper`. |
-| `internal/worktree` ↔ `provisionWorktree` | `CheckoutPR` vs `Create` chosen by `tasks.source` | Single choke point already exists; add one branch. |
-| diff handler ↔ `internal/diff` | base ref selected by `source`/`pr_base_ref` | `diff.Compute(wt, base)` unchanged — already parameterized. |
-| reaper ↔ shared cleanup helper | `cleanupWorktreeGated` extracted from `worktrees.go` | One gated-cleanup path, two callers (HTTP + reaper). |
-| settings KV ↔ API gating | `settings.Get(db, KeyGithubIntegration)` read-at-use | Managers stay DB-free; handlers read the toggle. |
+| `internal/mcp` ↔ Kamacu binary | HTTP (loopback) + envelope token | Clean network boundary. The subcommand cannot access Kamacu's in-memory state. |
+| `internal/mcp` ↔ `internal/api` types | Go import (compile-time) | The bridge shares request/response struct definitions with the API layer where they exist, so wire shapes stay in one place. Import direction: `internal/mcp` imports `internal/api`, never the reverse. |
+| `internal/mcp` ↔ `internal/mcpconfig` | None (separate packages, separate processes) | The subcommand reads env; the config writer writes env into a file. They share no code. Don't merge them. |
+| `internal/mcpconfig` ↔ spawn engine | Function call | `mcpconfig.WriteClaude(worktreePath, env)` is called from the existing spawn handler. Pure function, no state. |
+| Agent CLI ↔ `kamacu mcp serve` | stdio (JSON-RPC) | The agent CLI spawns the subcommand; stdin/stdout are the MCP wire. |
+| `kamacu mcp serve` ↔ Kamacu binary WS | WS (read-only) | For the long-running subscribe tool. The subcommand opens a WS as a read-only client — it MUST NOT send `FrameData` (PTY input) frames. Enforced by a `wsReader` wrapper with no Write method. |
+
+---
+
+## Suggested Build Order (dependency-aware)
+
+The build order is forced by three dependencies: (1) the subcommand must speak MCP before config injection is useful; (2) config injection must work before any `KAMACU_SESSION_ID`-inheriting tool is meaningful end-to-end; (3) the new HTTP read endpoints must exist before the terminal tools can call them. The minimal vertical slice that proves the architecture is **subcommand skeleton + one tool + Claude config injection + end-to-end demo**.
+
+### Phase 1 — Subcommand skeleton + minimal vertical slice
+
+**Goal:** Prove the architecture end-to-end. `kamacu mcp serve` exists, speaks the protocol, and answers ONE read-only tool (`get_my_task`) by bridging to the existing Kamacu HTTP API. The agent CLI (Claude Code) discovers it via a worktree-root `.mcp.json` and successfully calls the tool from inside a Claude session.
+
+**Delivers:**
+- `cmd/kamacu/mcp_subcommand.go` — stdlib dispatch
+- `internal/mcp/server.go` + `bridge.go` + `scope.go` — minimal SDK-wired server
+- `internal/mcp/tools_tasks.go` — `get_my_task` tool only
+- `internal/mcpconfig/claude.go` — writes `.mcp.json` at worktree root
+- One-line modification to the spawn engine: call `mcpconfig.WriteClaude` for `engine=claude` after `provisionWorktree`
+- `go.mod` updated with the official SDK
+- End-to-end smoke test: spawn a Claude task, observe `kamacu mcp serve` start, call `get_my_task` from inside Claude, verify the response matches the task
+
+**Avoids:** Anti-patterns 1 (importing internals), 5 (PTY write — none in this phase), 6 (hand-rolled JSON-RPC).
+
+**Success criterion:** "From inside a Claude session spawned by Kamacu, I can ask Claude 'what task am I working on?' and it correctly answers by calling the Kamacu MCP tool."
+
+**Why first:** Establishes the architecture (subcommand, dispatch, bridge, scope, config injection) before any of the long tail of tools is built. If the architecture is wrong, this is the cheapest place to discover it.
+
+### Phase 2 — Full table-stakes tool surface
+
+**Goal:** Every "table-stakes" tool from FEATURES.md is implemented and tested. The agent can drive the full Kamacu API: tasks, projects, workspaces, agents, sessions, diff, worktree cleanup.
+
+**Depends on:** Phase 1 (server skeleton + scope + bridge).
+**Delivers:**
+- `internal/mcp/tools_tasks.go` (rest of task tools)
+- `internal/mcp/tools_projects.go`, `tools_sessions.go`, `tools_diff.go`, `tools_worktree.go`, `tools_github.go`
+- Per-tool tests with mocked bridge
+
+**Avoids:** Anti-pattern 7 (no mounting inside Kamacu binary — all tools bridge).
+
+### Phase 3 — opencode integration + custom-engine decision
+
+**Goal:** `mcpconfig.WriteOpenCode` ships; opencode tasks get the same auto-discovery. Custom agents are explicitly skipped (documented).
+
+**Depends on:** Phase 1 (the writer pattern is established).
+**Delivers:**
+- `internal/mcpconfig/opencode.go`
+- Spawn engine branch on `engine=opencode` calls `WriteOpenCode`
+- Decision documented: custom agents don't get auto-injection (their CLIs may not speak MCP; users can drop their own config file if they want)
+
+**Why third:** Decoupled from Phase 2 — could ship in parallel. Stays third because Claude Code is the default agent and proves the pattern first; opencode is the second engine and surfaces any engine-specific config quirks.
+
+### Phase 4 — Terminal read access (snapshot + subscribe)
+
+**Goal:** The headline differentiator. The agent can read terminal state. Ship the snapshot tool first, then the bounded subscribe tool with cancellation + progress.
+
+**Depends on:** Phase 1 (server skeleton); the two new HTTP endpoints in `internal/api/terminal_reads.go`.
+**Delivers:**
+- `internal/api/terminal_reads.go` — `GET /api/sessions/{id}/snapshot`, `/tail`
+- `internal/mcp/tools_terminal.go` — `get_session_output` (snapshot) + `subscribe_session_output` (long-running)
+- The `wsReader` wrapper enforcing the read-only contract
+- Cancellation + progress tests using the SDK's `mcp.NewInMemoryTransport`
+
+**Avoids:** Anti-pattern 4 (long-running tool with no cancellation — `duration_seconds` parameter + `ctx.Done()` are explicit), Anti-pattern 5 (PTY write — `wsReader` enforces).
+
+**Success criterion:** "From inside a Claude session, I can ask 'watch my other agent's terminal for 30 seconds and summarise what it did' and Claude correctly calls the subscribe tool, waits for it to return, and summarises the output."
+
+**Why fourth:** The genuinely new capability. Everything before it is translation; this is the one place v1.11 adds a behaviour Kamacu didn't have. Saving it for after the surface is built lets it land on a stable foundation.
+
+### Phase 5 — Polish + edge cases
+
+**Goal:** Lifecycle edge cases tested (kamacu restart mid-tool-call, agent-CLI crash, leaked goroutines). The `get_my_brief` composite tool ships. Observability (`X-Kamacu-Source: mcp` header? logging?) is added if needed.
+
+**Depends on:** All earlier phases.
+
+---
+
+## Phase-Specific Warnings (for PITFALLS.md and PLAN-phase)
+
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| Phase 1 (subcommand dispatch) | Forgetting that `flag.Parse()` consumes `os.Args[1:]` — must dispatch BEFORE flag.Parse, not after | Check `os.Args[1] == "mcp"` at the very top of `main()`, before any flag registration. |
+| Phase 1 (config injection) | Writing `${KAMACU_HOOK_TOKEN}` (template) instead of the literal value — Claude Code does env expansion in its *own* env, which doesn't have the token | Write literal values from the in-memory `hookToken` variable in `main.go`. Pass them through the spawn call chain. |
+| Phase 1 (binary path) | Hard-coding `"kamacu"` in the config — breaks if the user installed to a non-PATH location | Use `os.Executable()` in the Kamacu binary at spawn time to get the absolute path; write that into the config. |
+| Phase 4 (WS read-only) | Accidentally sending `FrameData` frames from the subscribe tool — would inject bytes into the sibling agent's PTY | `wsReader` wrapper with no Write method; compile-time guarantee. Reviewer-enforced. |
+| Phase 4 (cancellation) | Returning an error from the handler when `ctx.Done()` fires — SDK treats this as a tool failure, agent sees error | Return `(finalResult, nil)` — the SDK suppresses the response on cancellation; returning a clean result is safe. |
+| Phase 4 (idle timeout) | Tool call blocking past Claude Code's stdio idle timeout (30 min default) — agent kills it | Hard-cap `duration_seconds` at 300; document in the tool description. |
+| All phases (logging) | `fmt.Println` or `log.Println` to stdout — corrupts the MCP JSON-RPC stream | All logging goes through `log/slog` to stderr. Add a test that asserts stdout contains only valid JSON-RPC messages. |
 
 ---
 
 ## Sources
 
-- Live codebase inspection (HIGH) — `internal/{worktree,quota,tmux,reaper,diff,session,settings}`, `internal/api/{routes,projects,tasks,worktrees,diffs,usage,settings,sessions}.go`, `internal/store/migrations/0000{1,3,5,6}_*.sql`, `cmd/kangent/main.go`, `web/src/{pages/TaskPage,components/board/Board,components/task/TaskTabs,api/{queries,usage,settings,agents}}.{tsx,ts}`
-- `.planning/PROJECT.md` — v1.3 milestone scope, settled decisions, D-* decision log (HIGH)
-- `gh` 2.82.0 verified live on host (HIGH): `gh pr list --search "is:open review-requested:@me" --json ...` (array, `[]` when empty); `gh pr view <n> --json state` (`OPEN`/`CLOSED`/`MERGED`, no `merged` field); `gh repo view <owner/name> --json nameWithOwner,defaultBranchRef` (validation + canonical name; `GraphQL: Could not resolve...` on bad repo); `gh pr checkout --help` (no worktree mode — confirms the git-fetch approach); `isCrossRepository`/`headRepositoryOwner` fields present for fork PRs
-- git PR-head ref convention `refs/pull/<n>/head` (MEDIUM — standard GitHub mechanic, the robust fork-safe path vs configuring fork remotes)
+### Primary (HIGH confidence)
+
+- **Live Kamacu codebase at v1.10** — every integration point above (`cmd/kamacu/main.go`, `internal/api/{routes,sessions,hooks}.go`, `internal/session/{manager,session}.go`, `internal/ws/{handler,proto}.go`, `internal/opencode/plugin.go`, `internal/store/migrations/`) was read in full from the working tree on 2026-07-21. Every file/function/table name in the integration map is real.
+- **[pkg.go.dev/github.com/modelcontextprotocol/go-sdk](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk) v1.6.1** — official Go SDK, 4.8k stars, Apache-2.0/MIT, maintained with Google. `mcp.NewServer` + `mcp.AddTool` + `mcp.StdioTransport` API verified; Cancellation example read in full (confirms `ctx.Done()` fires on `notifications/cancelled`); Progress example read in full (confirms `req.Session.NotifyProgress`).
+- **[pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp@v1.6.1](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk@v1.6.1/mcp)** — full API surface: Server, CallToolRequest/Result, sessions, middleware, all transport types.
+- **[MCP spec 2025-11-25: Cancellation](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation)** — `notifications/cancelled` flow, behavior requirements, timing considerations.
+- **[MCP spec 2025-11-25: Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)** — tool definition shape, tool result types (text/image/structured), error handling (protocol vs execution), security considerations.
+- **[Claude Code MCP docs](https://docs.anthropic.com/en/docs/claude-code/mcp)** — three scopes (local/project/user), `.mcp.json` shape, `${VAR}` expansion, `CLAUDE_PROJECT_DIR` env, stdio idle timeout (30min default), `MCP_TOOL_TIMEOUT`, per-server `timeout` field.
+- **[opencode config docs](https://opencode.ai/docs/config/)** — `mcp` key (NOT `mcpServers`), `type: "local"` vs `"remote"`, `command` as single array, `environment` (NOT `env`), precedence order, `{env:VAR_NAME}` interpolation.
+- **[github-mcp-server install-opencode.md](https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-opencode.md)** — corroborating real-world example of the opencode MCP config shape.
+- **[Subcommands with Go's flag package (Abhinav Gupta)](https://abhinavg.net/2022/08/13/flag-subcommand/)** — stdlib subcommand pattern with `flag.NewFlagSet` + `flag.Args()[0]` dispatch; matches Kamacu's stdlib-only ethos.
+
+### Aligned research (this milestone)
+
+- **[.planning/research/STACK.md](./STACK.md)** — official `modelcontextprotocol/go-sdk` v1.6.1 pick, bridge pattern from `examples/server/proxy/main.go`, transitive deps verified, agent-CLI config shapes for both engines.
+- **[.planning/research/FEATURES.md](./FEATURES.md)** — tool surface (28 tools + 2 spawn integrations), `ToolAnnotations` discipline, two-class error handling, subscribe mechanics. (Note: FEATURES.md initially recommended `mark3labs/mcp-go`; STACK.md overrules with the official SDK. This document aligns with STACK.md.)
 
 ---
-*Architecture research for: GitHub PR review integration into Kangent v1.3*
-*Researched: 2026-06-13*
+
+*Architecture research for: MCP (Model Context Protocol) server capability added to an existing local-only Go single-binary app — stdio MCP subcommand bridging to the existing HTTP API, plus spawn-time agent-CLI integration.*
+*Researched: 2026-07-21*
+*Ready for roadmap: yes*
