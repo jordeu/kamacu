@@ -10,7 +10,7 @@
 ### Process Foundation (MCPPROC)
 
 - [x] **MCPPROC-01**: `kamacu mcp serve` stdio subcommand starts an MCP server using `github.com/modelcontextprotocol/go-sdk` (v1.6.1) and bridges tool calls to the running Kamacu HTTP API at `127.0.0.1:7333`
-- [ ] **MCPPROC-02**: MCP subcommand authenticates to the Kamacu HTTP API via `KAMACU_HOOK_TOKEN` env (reuses the existing envelope — already injected into spawned agents)
+- [x] **MCPPROC-02**: MCP subcommand authenticates to the Kamacu HTTP API via `KAMACU_HOOK_TOKEN` env (reuses the existing envelope — already injected into spawned agents)
 - [ ] **MCPPROC-03**: MCP subcommand locates the Kamacu HTTP base URL via `KAMACU_HOOK_BASE` env (already injected) with a `127.0.0.1:7333` default
 
 ### Task Management (MCPTASK)
