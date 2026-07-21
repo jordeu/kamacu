@@ -93,7 +93,11 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
   2. An MCP client connecting to the subcommand's stdio can call `tools/list` and receive a valid JSON-RPC response over stdout — stdout contains ONLY valid MCP messages (a malformed-tool regression test confirms a stray print becomes a clean JSON-RPC error on stdout, never a stream desync).
   3. A tool call routed through the bridge returns real Kamacu data using `KAMACU_HOOK_TOKEN` for auth — proving the bridge end-to-end via ONE read-only tool (e.g. `list_tasks` or `list_projects`). The chosen tool's production completion is credited in Phase 07; here it is the architecture proof.
   4. When `KAMACU_HOOK_BASE` is set, the subcommand connects to that URL; when unset, it defaults to `127.0.0.1:7333` and works without further configuration.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 06-01-cli-dispatcher-refactor-PLAN.md — Adopt google/subcommands; refactor cmd/kamacu/main.go into a thin dispatcher, move today's main body into serveCmd, break clean on `kamacu serve` (D-01..D-05). Wave 1.
+- [ ] 06-02-mcp-serve-subcommand-PLAN.md — Build internal/mcp/ package (server.go + bridge.go), wire kamacu mcp serve via Pattern 2 nested Commander, register list_projects tool, ship SC2 malformed-tool unit test (D-08..D-12). Delivers SC1-SC4 + MCPPROC-01/02/03. Wave 2 (depends on 06-01).
+- [ ] 06-03-token-header-rename-PLAN.md — Coordinated X-Kangent-Token → X-Kamacu-Token rename across 7 files / 11 occurrences; no fallback (D-07). Wave 1 (parallel with 06-01).
 
 ### Phase 07: Tasks, Projects & Workspaces Tools
 **Goal**: An agent inside a Kamacu task PTY can fully drive Kamacu's task, project, and workspace surface — every CRUD action the browser-attached user can do via the SPA, the agent can do via a tool. The mechanical bulk of the milestone: 13 thin HTTP-bridge tools repeating Phase 06's pattern over existing endpoints.
@@ -138,7 +142,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 03. opencode engine spawn and activity-based status | v1.10 | 4/4 | Complete | 2026-07-07 |
 | 04. Gated status plugin unlocks waiting and idle | v1.10 | 2/2 | Complete | 2026-07-07 |
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
-| 06. MCP Subcommand Foundation | v1.11 | 0/TBD | Not started | — |
+| 06. MCP Subcommand Foundation | v1.11 | 0/3 | Not started | — |
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 0/TBD | Not started | — |
 | 08. Sessions & Terminal Read Access | v1.11 | 0/TBD | Not started | — |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
