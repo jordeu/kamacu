@@ -192,7 +192,7 @@ func assertPluginContent(t *testing.T, b []byte) {
 		"'SessionStart'",           // session.created -> SessionStart -> MarkHooksAlive
 		"'Stop'",                   // idle -> Stop -> SetIdle
 		"'Notification'",           // permission.ask -> Notification -> SetWaiting
-		"X-Kangent-Token",          // same header as claude's overlay
+		"X-Kamacu-Token",          // same header as claude's overlay
 		"/api/hooks/sessions/",     // UNCHANGED hook receiver path
 		"__kamacuOpencodePluginV1", // singleton guard
 		"parentID",                 // child-session suppression

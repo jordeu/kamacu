@@ -133,7 +133,7 @@ func (c *receiverCounts) total() int {
 }
 
 // recordReceiver starts an httptest.Server that mirrors the production hook
-// receiver contract (X-Kangent-Token constant-time compare, decode
+// receiver contract (X-Kamacu-Token constant-time compare, decode
 // hook_event_name, 204 on success) and counts each accepted event by name. It
 // returns the server (its URL is the KAMACU_HOOK_BASE) and the counts. The
 // server is closed on test cleanup.
@@ -141,7 +141,7 @@ func recordReceiver(t *testing.T, token string) (*httptest.Server, *receiverCoun
 	t.Helper()
 	counts := &receiverCounts{n: map[string]int{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get("X-Kangent-Token")
+		got := r.Header.Get("X-Kamacu-Token")
 		if token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return

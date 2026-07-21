@@ -84,7 +84,7 @@ func postHook(t *testing.T, url, token, body string) int {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
-		req.Header.Set("X-Kangent-Token", token)
+		req.Header.Set("X-Kamacu-Token", token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -100,7 +100,7 @@ func hookURL(srv *httptest.Server, id string) string {
 }
 
 // TestHookTokenGate: the receiver answers 401 to a missing or wrong
-// X-Kangent-Token and never mutates session state (research gap #2 — any
+// X-Kamacu-Token and never mutates session state (research gap #2 — any
 // webpage can fire a no-CORS POST at localhost; the token is the gate).
 func TestHookTokenGate(t *testing.T) {
 	srv, mgr := newHookServer(t)
