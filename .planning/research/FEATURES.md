@@ -1,182 +1,250 @@
 # Feature Research
 
-**Domain:** GitHub "PRs that need my review" surface added to a local kanban + agent app (Kangent v1.3)
-**Researched:** 2026-06-13
-**Confidence:** HIGH on `gh` CLI capabilities and field availability (verified against cli.github.com manuals + cli/cli issues); MEDIUM on comparable-tool UX patterns (gh-dash, Graphite, vibe-kanban docs); MEDIUM-HIGH on fork-PR + worktree mechanics (verified against cli/cli#972 and #3231).
-
-> Scope note: v1.3 adds a *read-only PR-review surface* to an already-built app. Everything below is scoped to the NEW surface. Existing Kangent capabilities (task view, worktree service, server-owned PTY sessions, diff tab, auto-poll-when-visible pattern, gated cleanup) are treated as **dependencies to reuse**, never re-proposed.
+**Domain:** MCP (Model Context Protocol) server capability added to an existing local-only Go + React single-binary app — exposing Kamacu's existing HTTP API surface as MCP primitives so agents running inside Kamacu task PTYs can drive the app as the user's delegate.
+**Researched:** 2026-07-21
+**Confidence:** HIGH — all primitive semantics, lifecycle requirements, error codes, and config-file shapes below are taken live from the MCP spec (2025-06-18, the version both Claude Code and opencode currently negotiate to), the canonical `modelcontextprotocol/servers` reference implementations (`everything`, `git`, `filesystem`), the `mark3labs/mcp-go` framework README + source tree, and the official opencode MCP docs (all fetched 2026-07-21).
 
 ---
 
-## How the "PRs that need my review" workflow actually works
+## TL;DR for the roadmap author
 
-The settled mental model for this milestone matches the dominant industry pattern (Graphite PR Inbox, GitHub's own "Review requested" filter, gh-dash's "Needs My Review" section):
+- **One new subcommand, one new Go package, zero new HTTP surface.** `kamacu mcp serve` is a stdio JSON-RPC process that bridges to the *existing* Kamacu HTTP API on localhost. Every tool handler is a thin HTTP client call — the validation, side effects, and SQLite writes stay in the existing API layer. Do **not** reimplement business logic in the MCP server.
+- **Default everything to Tools.** Despite the spec offering three primitives (Tools, Resources, Prompts), the dominant 2026 reality is: agent-CLIs (Claude Code, opencode) auto-invoke **Tools**; Resources are application-pulled via host context-pickers (the user picks them, not the LLM); Prompts are slash-command templates. **Kamacu reads/writes should be Tools**, with two narrow exceptions: a `kamacu://tasks/{id}/brief` resource for host-context-injection, and 2–3 prompts for canned workflows.
+- **Per-task auto-scoping is a Tool Filter, not a separate tool set.** mcp-go's `server.WithToolFilter(func(ctx, tools) []Tool)` reads `KAMACU_SESSION_ID` from env (already injected at spawn) and rewrites the visible tool list per session — convenience tools (`list_my_tasks`, `get_my_session`) appear when scoped, generic tools (`list_tasks`, `get_session`) always present.
+- **The "subscribe terminal output" question has three correct answers; ship them in order.** (1) **Snapshot tool** — `tail_session_output(session_id, lines=200)` returns a bounded slice from the existing ring buffer (table stakes, trivial). (2) **Bounded live-tail tool** with progress notifications — `tail_session_output_live(session_id, duration_seconds=30)` streams `notifications/progress` chunks then returns (differentiator, medium complexity). (3) **Resource + subscribe** — `kamacu://sessions/{id}/output` as a subscribable resource (semantically pure, but verify host support before building; defer to v1.12+).
+- **No keystroke injection. Ever.** Surfaced as the headline anti-feature. An agent observing a sibling session must never write bytes into its PTY — it conflicts with the browser-attached user and the other agent's intent. Read-only terminal access is the contract.
+- **Two different config-file shapes for the two supported agent CLIs.** Claude Code reads `~/.claude.json` → `mcpServers` (separate `command` + `args` fields). opencode reads `opencode.json` → `mcp` (single `command` array). The spawn-time integrator writes the right shape per engine. Getting this wrong = silent tool discovery failure.
+- **`KAMACU_HOOK_TOKEN` is the auth, full stop.** MCP spec explicitly says stdio servers retrieve credentials from the environment; Kamacu already injects the token at spawn. No OAuth, no API key, no new auth surface.
 
-1. **A queue, not a board.** Reviewers want a *filtered list* of "open PRs where my review is requested," ordered by recency/staleness. It is explicitly **not** a kanban they drag through — it mirrors live GitHub state. Kangent's settled decision (sync'd column, PRs never enter To Do/Done) is exactly right and matches Graphite ("Needs your review" section is read-from-GitHub) and gh-dash (`is:open review-requested:@me` section).
-2. **Triage → open → review locally.** The list answers "what needs me?"; clicking one answers "what changed and is it OK?" Kangent's differentiator is the third step most tools lack: **drop the PR into a real local worktree with an agent and a terminal**, so review is hands-on (run it, read it, ask the agent), not just read-a-web-diff.
-3. **Cards vanish as state changes.** Once you approve/the author re-requests/the PR merges, it leaves your queue. This appear/disappear-on-sync behavior is core to the workflow's value and must feel calm, not jarring.
+---
 
-**Key CLI grounding that shapes the whole feature** (verified):
-- The natural global query is `gh search prs --review-requested=@me --state=open`, but `gh search prs --json` exposes only a **thin** field set: `assignees, author, authorAssociation, body, closedAt, commentsCount, createdAt, id, isDraft, isLocked, isPullRequest, labels, number, repository, state, title, updatedAt, url`. It has **no `reviewDecision`, no `statusCheckRollup`, no `headRefName`/`baseRefName`, no additions/deletions** (cli/cli#13239).
-- The **rich** fields (`reviewDecision`, `statusCheckRollup`, `additions`, `deletions`, `headRefName`, `baseRefName`, `isCrossRepository`, `reviewRequests`, `comments`, `labels`, `updatedAt`) come from `gh pr list --json …` / `gh pr view`, which are **repo-scoped**.
-- **This resolves cleanly for Kangent because the column is per-linked-project (one repo).** Use `gh pr list --repo OWNER/REPO --search "review-requested:@me" --state open --json <rich fields>`. One repo-scoped call gets the review-requested filter *and* the rich card fields in a single command — no cross-repo aggregation, no thin-field problem. This is the single most important implementation fact for the requirements author.
+## Recommended Stack (referenced from FEATURES perspective)
+
+The full technology rationale belongs in STACK.md; this section captures only the **feature-shaping** choices.
+
+| Choice | Why it shapes the feature surface |
+|--------|----------------------------------|
+| **`mark3labs/mcp-go`** as the MCP framework | Implements spec 2025-11-25 with back-compat to 2025-06-18 (the version Claude Code/opencode negotiate to). Provides `server.NewMCPServer` + `server.ServeStdio` (so `kamacu mcp serve` is a 10-line main), `mcp.NewTool` builder with `WithString`/`WithNumber`/`Enum`/`Pattern`/`Required` for input schemas, `s.AddTool(tool, handler)` registration, `mcp.NewToolResultText`/`NewToolResultError`, and crucially `server.WithToolFilter` for per-session scoping. Without this framework, you'd hand-roll JSON-RPC + capability negotiation + the tools dispatcher — weeks of work for zero product value. |
+| **stdio transport** (not HTTP/SSE) | The agent CLI spawns `kamacu mcp serve` as a child process; stdin/stdout is the JSON-RPC transport. No port to allocate, no firewall, no auth header — the parent (agent CLI) is the only client. HTTP/SSE/streamable-HTTP transports exist in mcp-go but are for the external-editor use case (explicitly out of scope per PROJECT.md). |
+| **HTTP-bridge architecture** (MCP tool → localhost:7333 HTTP) | Every tool handler is a thin `http.Client` call to the existing API, attaching `X-Kamacu-Token: $KAMACU_HOOK_TOKEN`. Zero business logic in the MCP server. This means: existing validation runs, existing side effects fire (reaper, hooks, status updates), existing tests cover the data path. The MCP layer is a translation, not a reimplementation. |
+| **JSON Schema (inputSchema) generated from Go struct tags** | mcp-go's `mcp.NewTool` builder produces the JSON Schema the agent-CLI shows the LLM. The LLM decides which tool to call based on `name` + `description` + `inputSchema` — so descriptions must be LLM-legible (state the unit, the side effect, the return shape). |
 
 ---
 
 ## Feature Landscape
 
-### Table Stakes (Users Expect These)
+### Table Stakes (Users — i.e., Agents — Expect These)
 
-Features the review surface must have to not feel broken.
+A v1.11 MCP server that omits any of these feels broken: the agent can see the board in the UI but can't reproduce the action programmatically. Every item maps 1:1 to an existing Kamacu HTTP endpoint.
+
+#### Protocol & Lifecycle (Required by the MCP spec)
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| **PR card: number + title** | The minimum identity of a PR; every comparable tool leads with `#123 Title`. | LOW | From `number`, `title`. Title likely truncated/clamped to 2 lines like a task card. |
-| **PR card: author (login + avatar)** | "Who is asking me" is the first triage signal; gh-dash and GitHub both show author prominently. | LOW–MEDIUM | `author.login` is free; avatar = one `<img>` to `avatars.githubusercontent.com/u/…` or `author.avatarUrl`. Avatar is a small polish lift, no GitHub write. |
-| **PR card: draft badge** | Draft PRs usually shouldn't be in a "needs my review" queue at all; if shown, must be visually distinct. | LOW | `isDraft`. Recommend **filtering drafts out by default** (GitHub rarely requests review on drafts); if shown, dim + "Draft" pill. |
-| **PR card: relative updatedAt** | Staleness is the #1 ordering signal in every reviewer-queue tool (Graphite, gh-dash sort by updated). | LOW | `updatedAt` → "2h ago". Reuse whatever relative-time helper the quota "Updated Xs ago" footer already uses. |
-| **List filter = review-requested-from-me, open only** | This *is* the feature. Anything else is a different list. | LOW | `gh pr list --repo … --search "review-requested:@me" --state open`. Note: GitHub drops a PR from `review-requested:@me` once you submit a review, which gives the desired auto-disappear for free. |
-| **Auto-poll, paused when tab hidden + manual refresh** | Users expect the queue to be live but not to hammer the API in a background tab. Kangent already established this exact contract with the quota indicator. | LOW (reuse) | Reuse the quota auto-poll pattern (visibility-gated interval + cache-bypassing manual refresh). Poll interval should be slower than quota (PR state changes on the order of minutes, not seconds) — 60–120s is plenty. |
-| **Empty state: "No PRs need your review"** | A queue that's empty is the *success* state; it must read as "you're caught up," not "something's broken." | LOW | Distinct copy from the error/degraded states below. |
-| **Loading state (first fetch)** | First paint before `gh` returns; skeleton or spinner so the column isn't a flash of "empty = caught up." | LOW | Distinguish "loading" from "empty" so the user never misreads in-flight as done. |
-| **Degraded state: `gh` missing / unauthenticated** | `gh` is a soft dependency (settled). The column must degrade gracefully exactly like the quota indicator does, not error the board. | MEDIUM | Detect `gh` not on PATH vs `gh auth status` failing vs repo not found / no GitHub remote. Show an inline, non-blocking notice ("GitHub CLI not found" / "Run `gh auth login`") — never a modal, never block the kanban. |
-| **Collapse/expand the column, persisted** | A right-side column that can't be collapsed steals board width permanently; persistence is expected so the choice sticks across reloads. | LOW | Persist per-project (or global) in SQLite/localStorage. Default expanded for linked projects. |
-| **Click PR → task-like review view (worktree on PR branch)** | The headline of the milestone; without it this is just a read-only list. Users expect "open it" to mean "I can work on it locally." | HIGH | Depends on worktree service + `gh pr checkout` semantics — see Review-View section and Dependencies. |
-| **Review view reuses Agent / bash / Diff tabs** | Once open, a PR should behave like a task (settled). Users expect parity, not a stripped-down view. | MEDIUM (reuse) | Reuse the existing tab strip + session manager + diff tab. New work is plumbing the worktree + correct diff base, not new tab UI. |
-| **Diff tab base = PR's base branch merge-base (not project default)** | A PR diff against the wrong base is *wrong data* — silently misleading during review. | MEDIUM | Existing diff tab computes "vs base branch merge-base." For a PR it must use the **PR's `baseRefName`** (e.g. `develop`), not the project's default branch. This is a real behavioral change to the diff tab's base resolution, not just config. |
-| **Auto-remove review worktree on PR merge/close (gated)** | Settled. Reviewers expect closed PRs to clean up after themselves; leaving stale worktrees is the failure mode vibe-kanban explicitly built cleanup for. | MEDIUM | Reuse existing gated-cleanup (dirty-tree + running-sessions gates, branch kept). Trigger = poll observes the PR's `state` became `MERGED`/`CLOSED`. |
+| `initialize` handshake + capability negotiation | Spec-mandated. Without it the agent-CLI drops the connection. mcp-go handles this; you only set `serverInfo{name, version}` + capability flags. | LOW | mcp-go auto-advertises `tools` capability when you call `s.AddTool`. Set `listChanged: true` if you ship dynamic tool filtering. |
+| `tools/list` (with pagination cursor) | Spec-mandated for the `tools` capability. Agent-CLI calls this once at startup; the result defines the agent's entire tool vocabulary. | LOW | mcp-go handles. Cap at 100 tools/page; with ~30 tools you'll fit on one page. |
+| `tools/call` dispatch | Spec-mandated. Routes `(name, arguments)` to the registered handler. | LOW | mcp-go handles. Your job is per-tool handlers. |
+| `ping` | Spec-mandated cheap keepalive. Some agent-CLIs ping every 30s to detect dead servers. | LOW | mcp-go handles. |
+| `notifications/initialized` | Spec-mandated (client → server). Gates when you can start sending requests. | LOW | mcp-go handles. |
+| Clean stdio shutdown (close stdin → SIGTERM → SIGKILL) | Spec-mandated. If `kamacu mcp serve` leaks when the agent-CLI exits, you get zombie processes. | LOW | mcp-go handles via `server.ServeStdio` context cancellation. Verify with a "spawn agent → kill -9 agent CLI → check no kamacu mcp processes" test. |
+| `ToolAnnotations` on **every** tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) | Clients (Claude Code, opencode) use these to decide whether to prompt the user for confirmation before calling. The reference `git` server annotates every tool; you should too. Trust/safety surface. | LOW | All Kamacu tools are `openWorldHint: false` (they operate on local Kamacu state, not the open internet). Reads get `readOnlyHint: true`. Moves/creates/deletes get the appropriate flags. |
+| Two-class error handling | Spec: protocol errors (JSON-RPC error codes: `-32602` unknown tool / invalid args, `-32603` internal, `-32002` not-found) vs tool execution errors (`result.isError: true` with a `text` block). Mixing them confuses agent-CLIs. | LOW | mcp-go: return `(nil, err)` for protocol errors; return `(mcp.NewToolResultError(msg), nil)` for tool execution errors. |
+
+#### Task Lifecycle Tools (Core Delegate Surface)
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `list_tasks(project_id?, status?)` | The agent needs to read the board. Maps to `GET /api/tasks`. | LOW | Paginate via cursor; support filters. With KAMACU_SESSION_ID set, a `list_my_tasks` variant narrows to the calling session's project. |
+| `get_task(task_id)` | Read one task's full state (title, description, status, timestamps). `GET /api/tasks/{id}`. | LOW | Return as structured content + text mirror (spec backwards-compat). |
+| `create_task(title, description?, project_id?)` | Create a sibling task. `POST /api/tasks`. | LOW | When KAMACU_SESSION_ID is set, default `project_id` to the calling session's project — the agent doesn't need to discover it. |
+| `update_task(task_id, title?, description?, status?)` | Edit task fields. `PATCH /api/tasks/{id}`. | LOW | Partial PATCH semantics (only send changed fields). |
+| `move_task(task_id, status, before_id?, after_id?)` | Move card on the board (manual order). `POST /api/tasks/{id}/move`. | LOW | Existing endpoint already handles positioning. |
+| `delete_task(task_id)` | Remove a task. `DELETE /api/tasks/{id}`. | LOW | Existing gated worktree-cleanup runs server-side; no special handling. |
+
+#### Session Lifecycle Tools (Limited — Read + Control, No Write)
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `list_sessions(project_id?, status?)` | What's running. `GET /api/sessions`. | LOW | Filtered to live sessions by default. |
+| `get_session(session_id)` | Session metadata (status, started_at, task link). `GET /api/sessions/{id}`. | LOW | |
+| `start_session(task_id)` | Spawn the agent for a task (the same Start button the UI has). `POST /api/tasks/{id}/sessions`. | MEDIUM | Side-effecting (spawns a PTY); annotate `destructiveHint: false, idempotentHint: false`. Useful for "kick off a review session on this PR" workflows. |
+| `stop_session(session_id)` | Stop a session. `POST /api/sessions/{id}/stop`. | MEDIUM | Side-effecting (kills PTY); annotate `destructiveHint: true`. Useful for an agent to clean up after itself. |
+
+#### Project / Workspace / Agent Metadata Tools
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `list_projects(workspace_id?)` | Discover what projects exist. `GET /api/projects`. | LOW | Scoped to active workspace by default. |
+| `get_project(project_id)` | Full project metadata (repo, agent, github link). `GET /api/projects/{id}`. | LOW | |
+| `list_workspaces()` | Discover workspaces. `GET /api/workspaces`. | LOW | |
+| `list_agents()` | Discover configured agents. `GET /api/agents`. | LOW | |
+| `get_settings()` | Read the global Kamacu config. `GET /api/settings`. | LOW | Read-only view; the agent shouldn't usually change settings. |
+
+#### GitHub PR Review Tools (Read-Only — Matches Existing App Policy)
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `list_pr_reviews(project_id)` | List PRs awaiting review. `GET /api/projects/{id}/pull-requests`. | LOW | Mirrors the Review column; cached `gh` cycle server-side. |
+| `get_pr_review(project_id, pr_number)` | Open-or-reattach a review workspace. `POST /api/projects/{id}/pull-requests/{n}/review` + `GET`. | MEDIUM | Side-effecting (creates a worktree); reuse existing gated path. |
+
+#### Diff & Worktree Tools
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `get_task_diff(task_id)` | The diff a task produced. Reuse the existing `/api/tasks/{id}/diff` renderer output. | LOW | Returns markdown/unified diff as text. |
+| `mark_file_viewed(task_id, file_path, viewed)` | Toggle the per-file Viewed flag. `POST /api/tasks/{id}/diff/viewed`. | LOW | Annotate `idempotentHint: true`. |
+| `list_worktree_cleanup_candidates()` | List orphan/stale/finished worktrees. `GET /api/worktrees`. | LOW | |
+| `clean_worktree_eligible()` | Bulk safe cleanup. `POST /api/worktrees/clean-eligible`. | MEDIUM | Reuses existing never-forces path. |
+| `remove_worktree(worktree_path, force?)` | Force-remove one worktree (always keeps the branch). `POST /api/worktrees/remove`. | MEDIUM | `destructiveHint: true`. |
+
+#### Agent-CLI Integration (Spawn-Time Registration)
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Write `mcpServers.kamacu` into Claude Code config at spawn | Without this, the agent never discovers Kamacu tools. | MEDIUM | Patch `~/.claude.json` → `mcpServers.kamacu = {command: "kamacu", args: ["mcp", "serve"], env: {KAMACU_HOOK_TOKEN, KAMACU_SESSION_ID}}`. Must be the *user-level* file, not `settings.json` (silently ignored per danielmiessler/Personal_AI_Infrastructure#646). |
+| Write `mcp.kamacu` into opencode config at spawn | Same as above, different shape. | MEDIUM | Patch `opencode.json` → `mcp.kamacu = {type: "local", command: ["kamacu", "mcp", "serve"], environment: {...}, enabled: true}`. **Note: `command` is an array** (command + args combined), and the config key is `mcp` not `mcpServers`. Getting either wrong = silent no-op. |
+
+**Table-stakes count: 28 tools + 2 spawn integrations.** This matches the milestone target of "~30 tools."
+
+---
 
 ### Differentiators (Competitive Advantage)
 
-Features that make Kangent's PR review better than a web tab or a TUI — align with Core Value ("one place to drive all agent work").
+These are not expected by agents (no agent has them today), but they materially increase agent autonomy and align with Kamacu's core value ("one place to see and drive all agent work").
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Agent pre-pointed at the PR diff in a real checkout** | The whole reason to review *in Kangent*: ask `claude` "summarize this PR / does this introduce a regression?" against a live worktree, not a pasted diff. No comparable list-tool (gh-dash, Graphite inbox) does this. | LOW (reuse) | Falls out of "worktree on PR branch + existing agent session." The differentiator is mostly free once the worktree is correct. |
-| **CI / checks rollup status on the card** | Lets you skip PRs whose CI is red/pending before opening them — a real triage accelerator. GitHub and gh-dash both surface this. | MEDIUM | `statusCheckRollup` from `gh pr list --json`. Reduce to a single dot/pill: success / failure / pending / none. Rolling up the array correctly (any failure → fail; any pending → pending; all pass → pass) is the work; the data is one field. |
-| **Review-decision pill (approved / changes-requested / review-required)** | Shows whether *others* have already weighed in — useful context, and lets the card distinguish "fresh" from "already-approved-by-others." | MEDIUM | `reviewDecision`. Note: for the `review-requested:@me` list the PR is by definition still wanting review, so the most useful states are "REVIEW_REQUIRED" (default) vs "CHANGES_REQUESTED" (others already pushed back). Modest value; treat as P2. |
-| **head→base branch line on the card** | Disambiguates PRs targeting non-default bases (e.g. `feature/x → develop`) and is needed anyway to compute the diff base. | LOW | `headRefName`, `baseRefName`. Cheap to show; doubles as the data the diff base needs. Show compactly, possibly only when base ≠ default branch. |
-| **Additions/deletions (+/−) size hint** | "Is this a 5-line typo fix or a 2,000-line refactor" is a strong triage/ordering signal; reviewers batch by size. | LOW | `additions`, `deletions`. Render as `+120 −30` in green/red. Pure display. |
-| **Fork PR indicator** | A heads-up that this PR comes from a fork (different checkout mechanics, can't push back trivially, security caution on running untrusted code). | LOW | `isCrossRepository` / `headRepositoryOwner`. A small "fork" pill. Pairs with the fork checkout handling below. |
-| **Labels on the card** | Quick context (`bug`, `security`, `dependencies`); reviewers use labels to prioritize. | LOW | `labels[].name` (+ color). Cap to N labels with "+k more" to avoid card bloat. Differentiator, not table-stakes for a single-user tool. |
-| **Comments count** | Signals discussion volume / contentiousness before opening. | LOW | `comments` count. Low value alone; fine as a tiny icon+count. P3. |
-| **Stale/needs-attention sort or subtle aging cue** | Surfaces the PR that's been waiting longest on *you* — the reviewer-queue superpower (Graphite leans on this). | LOW–MEDIUM | Sort by `updatedAt` asc/desc; optionally a faint "waiting N days" tint. Cheap, high triage value. |
+| **Per-task auto-scoping tool filter** | The agent doesn't have to pass `project_id`/`session_id` on every call — the server reads `KAMACU_SESSION_ID` from env and scopes convenience tools (`list_my_tasks`, `get_my_session`, `tail_my_output`) automatically. Removes ~50% of the boilerplate args an agent would otherwise need. | MEDIUM | mcp-go's `server.WithToolFilter(func(ctx, tools) []Tool)` is the hook. When `KAMACU_SESSION_ID` is set, append the scoped variants; otherwise hide them. The scoped variants have simpler schemas → less LLM confusion. |
+| **Bounded live-tail tool** (`tail_session_output_live(session_id, duration_seconds=30, lines?)`) | An agent can watch a sibling session for "is it done yet?" / "did it produce errors?" without leaving its own context. Bounded duration means the tool call always returns — agents don't do well with infinite subscriptions. | HIGH | Uses `notifications/progress` to stream chunks of the existing ring buffer + live PTY output. Server-side goroutine reads the existing Session's broadcast channel, chunks every 500ms or 4KB, sends each as a progress notification with `{progress: bytes_sent, total: budget_bytes, progressToken}`. Cancels on context.Done(). Honors the "no write" contract. This is the headline differentiator. |
+| **`get_my_brief` tool** | Returns a single structured blob the agent reads at session-start: "You are working on task X (id, title, description, status) in project Y (repo path, agent) — your worktree is at Z, the base branch is B, here are your sibling tasks [list]." One tool call instead of 4. | MEDIUM | Composite read: `get_task` + `get_project` + `list_tasks(siblings)` + worktree path. Cached for 30s. Drops cold-start token cost dramatically. |
+| **Resource subscriptions for terminal output** (`kamacu://sessions/{id}/output`) | The semantically-correct way to expose live terminal state: agent subscribes once, gets `notifications/resources/updated` whenever new output arrives. Matches the MCP spec's intent for "data that changes over time." | HIGH | Requires verifying Claude Code/opencode actually wire up resource subscription loops in their agent loop. If they don't (likely in 2026), this is invisible to agents and becomes v1.12 work. Resource + subscribe is the right *long-term* shape; the bounded live-tail tool is the pragmatic *now* shape. Ship the tool first. |
+| **Task-brief Resource** for host-context-injection (`kamacu://tasks/{id}/brief`) | A Resource the user can `@mention` in Claude Code / opencode to inject task context into the agent's prompt. Resources are application-pulled (host picks them via UI), which is exactly the @mention semantic. | LOW | Cheap to expose — same data as `get_task`, different primitive. Useful even if no agent actively subscribes; Claude Code's `@`-picker surfaces it. |
+| **Prompts for canned workflows** | `open-pr-review(pr_number)`, `start-task(title, description)`, `prepare-for-review(task_id)` — multi-message prompt templates that pre-fill the agent's context with the right task/diff/repo data. User-triggered via `/open-pr-review` slash-command-style UI in the agent CLI. | MEDIUM | Each prompt returns a `GetPromptResult` with a sequence of `PromptMessage`s (text + embedded resources). mcp-go: `s.AddPrompt(mcp.NewPrompt("open-pr-review", mcp.WithArgument(...)), handler)`. |
+| **Completion providers** for task/project IDs | When the user types a tool argument in the agent CLI, Kamacu autocompletes from live DB state. "list_tasks(project_id=|"<tab>" → list of project names. | MEDIUM | mcp-go: `server.WithCompletions()` + `WithPromptCompletionProvider` / `WithResourceCompletionProvider`. Optional polish; defer if scope is tight. |
+| **Structured output schemas** (`outputSchema` on read tools) | Tools that return `structuredContent` validated against a JSON Schema let agent-CLIs (and downstream programmatic consumers) parse results reliably instead of regexing text. Spec-recommended for any tool with non-trivial return shape. | MEDIUM | mcp-go supports via `mcp.WithOutputSchema(...)` (or by registering a typed tool — `examples/typed_tools/`). Adds ~30 min per tool but materially improves agent accuracy on `list_tasks`/`get_session`/etc. |
+| **Logging notifications** (`notifications/log` + `logging/setLevel`) | Kamacu emits structured log lines for tool calls (debug-level) and lifecycle events (info-level). Agent-CLI surfaces these in its own UI for debugging. Cheap observability win. | LOW | mcp-go: `server.WithHooks(...)` to wrap every tool call with `slog.Debug`. Set the `logging` capability on the server. |
+
+---
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
+Each anti-feature is documented with *why* it's tempting, *why* it breaks something, and *what to do instead*. The first one is the milestone's headline contract.
+
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| **In-app approve / request-changes / comment / merge** | "I'm already looking at the PR, let me act." | Explicitly out of scope (settled): breaks the manual-git philosophy, needs write scopes, and reimplements GitHub review UI poorly. Review comments especially are a deep feature (line anchors, suggestions, threads). | User acts in the terminal — `gh pr review`, `gh pr comment`, `gh pr merge` — in the worktree's bash/agent tab. Kangent already gives them a terminal in the right directory. |
-| **Drag a PR into a kanban column / convert PR ⇄ task** | "It's on a board, let me move it." | PRs mirror live GitHub state; making them mutable kanban items creates a dual source of truth and sync conflicts (which wins, GitHub or the board?). Settled: PRs never enter columns. | Keep the PR list strictly read-synced and visually distinct (separate collapsible column on the right, not a draggable column). |
-| **Aggregate "all repos" review inbox** | "Show me every PR across all my projects needing review" (Graphite/gh-dash do this globally). | Cross-repo means `gh search prs`, which **loses the rich fields** (no reviewDecision/checks/branches/diffstat — cli/cli#13239) and is on the heavily rate-limited search API. It also breaks the per-project model and the worktree story (which repo's worktree?). | Per-linked-project column using `gh pr list --repo … --search review-requested:@me` (rich fields, per-repo rate limit). Aggregation is a possible far-future feature, not v1.3. |
-| **Render the PR diff in a custom in-app GitHub-style review UI** | "Make it look like github.com." | Reimplements GitHub's diff/review surface; huge surface area; Kangent already has a perfectly good local diff tab against the real checkout. | Reuse the existing Diff tab (pointed at the PR base merge-base) + the agent. The local checkout *is* the review surface. |
-| **Store a GitHub token / PAT in the app** | "Faster API calls / works without `gh`." | Explicitly out of scope (settled): credential storage is a security liability and a maintenance burden; mirrors the quota indicator's "never write credentials" stance. | Shell out to the host's already-authenticated `gh`. Degrade gracefully when absent. |
-| **Auto-delete the PR branch on merge** | "Clean up everything." | Settled rule is *branch always kept*; deleting branches is irreversible and can surprise the user mid-review. | Remove the *worktree* (gated), keep the branch — consistent with task cleanup. |
-| **Real-time push of PR changes (webhooks/WS to GitHub)** | "Instant updates." | Requires a public endpoint / webhook plumbing — impossible for a localhost-only app and overkill for single-user. | Polling (settled), visibility-gated, like the quota indicator. Minutes-fresh is fine for review triage. |
-| **Auto-start the agent when a PR view opens** | "Save me a click." | Conflicts with the established "explicit Start button, no accidental agent runs" decision — and running an agent unprompted on **fork** code (untrusted) is a security smell. | Keep the explicit Start button. The worktree is checked out; starting the agent stays a deliberate action. |
-| **Auto-create a worktree for every PR in the list on sync** | "Have them ready." | Would spawn dozens of worktrees/checkouts for PRs you may never open; expensive `gh pr checkout`/fetch per card; cleanup nightmare. | Create the worktree lazily — only when the user clicks the PR (open = checkout), mirroring how a task's worktree is created. |
-
----
-
-## Fork-PR behavior & diff-base semantics (called out for the requirements author)
-
-**Diff base (must-get-right):** A PR's diff is `head` vs the **merge-base of `head` and the PR's `baseRefName`**, where `baseRefName` is the branch the PR targets on the *upstream* repo (often `main`, sometimes `develop`/a release branch). Kangent's existing diff tab computes "vs base merge-base" using the project's default branch; for a PR it must substitute the PR's `baseRefName`. Getting this wrong silently shows the wrong changeset.
-
-**Checkout mechanics — and a real gotcha:** `gh pr checkout <n>` handles fork vs same-repo uniformly: it fetches the PR head ref and creates/updates a local tracking branch (`--branch` to rename, `--detach` for detached HEAD, `--force` to reset, `-R/--repo` to target a repo). **However, `gh pr checkout` is not worktree-aware and has known failures when run from inside a linked worktree, especially for branch names containing `/`** (cli/cli#972 is an open request to add worktree support; cli/cli#3231 documents `gh pr checkout` failing for `/`-containing PR branch names inside a worktree — git can't resolve `origin/user/branch` as a tracking ref in a fresh detached worktree). Implications:
-- **Don't assume `gh pr checkout` "just works" in the worktree Kangent creates.** Plan for the manual-git path Kangent already prefers (CLAUDE.md: "shell out, parse `--porcelain`"): `git fetch origin pull/<n>/head:<local-ref>` (works for forks too, since `pull/<n>/head` is on the *base* repo's refs) then `git worktree add <path> <local-ref>`. This sidesteps the worktree-unaware `gh pr checkout` entirely and is robust to fork PRs and `/`-in-branch-name.
-- Either way, **flag this as the highest-risk integration point of the milestone** — it deserves a focused feasibility/spike in the relevant phase (the requirements author should mark the checkout phase "needs deeper research").
-
-**Fork specifics to handle:**
-- A fork PR's head lives in another owner's repo; `pull/<n>/head` on the base repo is the reliable, auth-free-of-fork-remote way to fetch it. Surface a **fork pill** (`isCrossRepository`) so the user knows.
-- Pushing back to a fork PR branch is not generally possible from Kangent's checkout (it's the contributor's branch; `maintainerCanModify` governs upstream pushes) — fine, since v1.3 does **no writes**. The worktree is for *reading/running/asking-the-agent*, not pushing.
-- Security: fork PR code is untrusted. This reinforces the anti-feature "don't auto-start the agent" — keep Start explicit, especially for forks.
-
----
-
-## Column behaviors (states, sync feel)
-
-| State | Expected behavior | Source/Notes |
-|-------|-------------------|--------------|
-| **Loading (first fetch)** | Skeleton/spinner in the column; never read as "empty/caught up." | LOW |
-| **Empty (query returns 0)** | "You're all caught up — no PRs need your review." Calm success copy. | gh-dash/Graphite both treat empty queue as a positive. |
-| **Populated** | Cards sorted by `updatedAt` (configurable later); newest-or-stalest first. | Match reviewer-queue norm. |
-| **Refreshing (background poll)** | Subtle, non-jarring; keep existing cards, diff in/out changes. Don't blank the column on each poll. | Mirror quota "Updated Xs ago" + manual refresh affordance. |
-| **Manual refresh** | A refresh control (icon) that bypasses cache, like the quota popup's refresh. | Reuse pattern. |
-| **`gh` missing** | Inline degraded notice: "GitHub CLI (`gh`) not found." No board breakage. | Detect via PATH lookup (mirror the tmux `LookPath` pattern). |
-| **`gh` unauthenticated** | Inline: "Run `gh auth login` to see review requests." | `gh auth status` non-zero. |
-| **Repo not on GitHub / not linked** | Column simply doesn't render for unlinked projects (GitHub link is per-project, optional). | Settled: column only on linked projects. |
-| **Global GitHub toggle off** | All GitHub UI disappears (settled). Column, link config, pills — gone. | Settings flag, default on. |
-| **Card appears (new review request)** | Animate in gently; don't steal focus. | Sync feel matters; avoid flashes. |
-| **Card disappears (reviewed/merged/closed/re-requested elsewhere)** | Animate out gently. If the PR's review view is currently open, **don't yank it** — keep the worktree/session until gated cleanup runs (merge/close) or the user closes it. | Important interaction with the open review view. |
-| **Collapse/expand** | Persisted; collapsing reclaims board width. Show a count badge on the collapsed column ("Review · 3"). | Count-on-collapsed is a small, high-value touch. |
+| **PTY keystroke injection** (`send_input(session_id, bytes)`, `type_in_terminal(...)`) | "If the agent can read the terminal, surely it should write to it too — to nudge a sibling, answer a prompt, send Ctrl-C." | (1) Conflicts with the browser-attached user — two writers to one PTY produce garbage interleaving and confusing TUI redraws. (2) Conflicts with the *other* agent's intent — the agent in the PTY is a separate actor with its own goals; injecting bytes hijacks it. (3) Bypasses Claude Code's permission prompt UX (the agent would effectively have keyboard power of attorney). (4) PROJECT.md explicitly rules this out: "MCP write to live PTYs (keystroke injection) — v1.11 deliberately exposes read + subscribe only." | Read-only tools: `tail_session_output`, `get_session_status`. If an agent wants to stop a sibling, `stop_session(session_id)` (clean, gated, side-effects fire properly). If it wants to send a message, surface it in the *task description* via `update_task` and let the sibling agent pick it up. |
+| **Direct DB access** (`run_sql(query)`, raw SQLite reads) | "Faster than HTTP — skip the API layer, just query the DB." | (1) Bypasses all validation and side effects (reaper, hooks, status updates, worktree gates). (2) Schema migrations break the agent silently. (3) Single escape hatch that punches a hole in the entire data model. | Always go through the HTTP API. The MCP server is a *translation layer*, not a data layer. If you need a query the API doesn't expose, add an HTTP endpoint first. |
+| **One mega-tool with `action` parameter** (`kamacu(action: "list_tasks"|"create_task"|..., ...args)`) | "Simpler to register — one handler." | (1) The LLM sees a single tool with a giant union schema; it picks `action` less reliably than it picks between 30 named tools. (2) ToolAnnotations become meaningless (one tool can't be both read-only and destructive). (3) The reference `git` server deliberately ships 12 separate tools (`git_status`, `git_diff_staged`, `git_commit`, ...) for exactly this reason. | One verb-noun tool per action: `list_tasks`, `create_task`, `move_task`, etc. The LLM's tool-selection accuracy goes up sharply with named verbs. |
+| **External/internet fetches** (`fetch_url`, `search_web`) | "The agent needs to read docs anyway — let's add a fetch tool." | (1) Scope creep — Kamacu is a local-only agent *orchestrator*, not a general-purpose toolkit. (2) `openWorldHint: true` tools erode the trust model (the agent can now exfiltrate). (3) Other MCP servers (the `fetch` reference server) already do this better. | Let the agent use its own host's fetch/Context7/etc. tools. Kamacu's tools are `openWorldHint: false` — they only touch local Kamacu state. |
+| **Cross-user / admin tools** (`delete_all_tasks`, `reset_database`, `stop_all_sessions`) | "Useful for cleanup." | (1) An agent inside Kamacu is acting as the user's *delegate on a specific task* — admin powers violate least-privilege. (2) One bad agent prompt could nuke the board. | Surface only per-task / per-session operations. Bulk operations stay in the human-driven Settings UI. |
+| **Static token in mcpServers config file** | "Just write the token into the config and forget about it." | (1) Token rotation invalidates the config silently — agent loses tool access with no error message. (2) Config file on disk = at-rest credential. | Inject env at spawn (`environment: {KAMACU_HOOK_TOKEN: "<rotated-token>"}`); the existing v1.10 spawn path already does this. Config file references the env name, never the literal token. |
+| **Tool for tool-discovery** (`list_available_tools`, `describe_tool(...)`) | "Let the agent introspect the tool surface." | (1) Redundant — `tools/list` already does this at the protocol level. (2) An agent that needs to ask "what tools do you have?" is an agent that didn't read `tools/list` output. | Rely on the protocol. Improve tool `description` fields if the LLM is misusing tools — that's the root cause. |
+| **Subscribing to ALL sessions** (`subscribe_all_sessions()`) | "Let the agent watch the whole board." | (1) Firehose — most agents only need *their* session. (2) Privacy / least-privilege violation across tasks. | Per-session subscriptions only: `tail_session_output(session_id)`. If global observability is needed, `list_sessions(status="running")` is enough. |
+| **MCP server exposed to external editors (Claude Desktop / Cursor)** | "I want to use Cursor to drive Kamacu too." | Explicitly out of scope per PROJECT.md ("MCP server for external AI editors — separate future milestone"). Different transport (HTTP/SSE, not stdio), different auth (token-on-the-wire), different threat model (network reachable). | Stay stdio-only for v1.11. External-editor MCP is a separate v1.13+ milestone with its own research. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-PR review view (worktree on PR branch)
-    └──requires──> Worktree service (existing, Phase 3)
-    └──requires──> gh pr checkout / git fetch pull/N/head + worktree add  [HIGH-RISK, fork+worktree gotcha]
-    └──requires──> Server-owned PTY session manager (existing, Phases 2/4/5)
-    └──requires──> Diff tab with PR-base resolution (existing diff tab, MODIFIED base)
-    └──requires──> Agent/bash/tmux tabs (existing, Phases 4/8/9)
+[kamacu mcp serve stdio subcommand]
+    │
+    ├──requires──> [mark3labs/mcp-go dependency added to go.mod]
+    │
+    ├──requires──> [KAMACU_HOOK_TOKEN env contract (existing from v1.10)]
+    │
+    └──enables──> [Tool surface — each tool is an HTTP bridge to existing API]
 
-PR review column (synced list)
-    └──requires──> Per-project GitHub link config (new this milestone)
-    └──requires──> gh availability detection (mirror tmux LookPath + quota degrade pattern)
-    └──requires──> Auto-poll-when-visible + manual refresh (existing quota pattern, reused)
-    └──enhanced-by──> CI rollup / reviewDecision / diffstat / labels (extra --json fields)
+[Tool surface — table-stakes CRUD]
+    │
+    ├──requires──> [Existing Kamacu HTTP API (v1.0–v1.10 — all built)]
+    │
+    ├──enhances──> [Per-task auto-scoping tool filter]
+    │                  └──requires──> [KAMACU_SESSION_ID env (existing from v1.4)]
+    │
+    └──enhances──> [ToolAnnotations on every tool]
 
-Auto-cleanup of review worktree on merge/close
-    └──requires──> Poll observing PR.state == MERGED/CLOSED
-    └──requires──> Gated cleanup (existing: dirty-tree + running-sessions gates, branch kept)
+[Bounded live-tail tool — tail_session_output_live]
+    │
+    ├──requires──> [Snapshot tool — tail_session_output]  (ship snapshot first)
+    │
+    ├──requires──> [Existing ring buffer + Session broadcast channel (v1.0 Phase 2)]
+    │
+    └──requires──> [mcp-go progress notification support]
 
-Global GitHub toggle (settings)
-    └──gates──> everything above (off ⇒ all GitHub UI hidden)
+[Resource subscriptions for terminal output]
+    │
+    ├──requires──> [Bounded live-tail tool — proves the read path]
+    │
+    ├──requires──> [Verify host (Claude Code / opencode) actually subscribes]
+    │                  └── if NO ──> defer to v1.12+
+    │
+    └──conflicts──> [None — coexists with the bounded tool]
 
-Per-project GitHub link
-    └──gates──> the review column for that project
+[Spawn-time mcpServers integration]
+    │
+    ├──requires──> [kamacu mcp serve subcommand exists]
+    │
+    ├──branches──> [Claude Code path: ~/.claude.json mcpServers.kamacu]
+    │
+    └──branches──> [opencode path: opencode.json mcp.kamacu]
 
-[Cross-repo "all-repos inbox"] ──conflicts──> [rich card fields + per-project worktree model]
-    (gh search prs loses reviewDecision/checks/branches — cli/cli#13239)
+[Prompts (canned workflows)]
+    │
+    └──requires──> [Tool surface exists]  (prompts embed tool results as resources)
+
+[Completion providers]
+    │
+    └──enhances──> [Tool input schemas]  (autocomplete task_id, project_id from live DB)
 ```
 
 ### Dependency Notes
 
-- **Review view requires the worktree-checkout path, which is the milestone's risk center.** `gh pr checkout` is not worktree-aware (cli/cli#972) and fails on `/`-branches inside worktrees (cli/cli#3231); prefer the manual `git fetch origin pull/<n>/head:<ref>` + `git worktree add` path consistent with Kangent's shell-out philosophy. Phase that does this needs a spike.
-- **Diff tab base must switch from project-default to PR `baseRefName`.** This is a behavioral modification to an existing feature, not pure reuse — call it out so it isn't underscoped.
-- **Card richness depends on staying repo-scoped.** `gh pr list --repo … --search review-requested:@me --json …` gives the filter *and* the rich fields in one call; going cross-repo (`gh search prs`) silently strips them. The per-project column model is what makes the rich card cheap.
-- **Auto-cleanup reuses the exact existing gated-cleanup contract** (dirty-tree + running-session gates, branch kept). The only new part is the *trigger* (poll sees MERGED/CLOSED) — and the deliberate, settled exception that worktrees may be auto-removed here.
-- **Everything is gated by two new config switches** (global toggle, per-project link) — these are the cheapest, earliest dependencies and should land first.
+- **`kamacu mcp serve` requires the HTTP API** — every tool handler is an HTTP client call. The MCP server is structurally a *client* of the existing Kamacu API, not a peer. This is the most important architectural constraint: **no business logic in the MCP layer.**
+- **Per-task auto-scoping requires `KAMACU_SESSION_ID`** — already injected at agent spawn (Phase 4 / v1.10). The MCP server reads it once at startup; the tool filter appends/removes scoped tools based on its presence.
+- **Bounded live-tail requires the snapshot tool first** — the snapshot tool (`tail_session_output`) exercises the ring-buffer read path with no streaming complexity. Ship it first, prove the data path, then add live streaming.
+- **Resource subscriptions require host-side verification** — before building the resource + subscribe surface, verify that Claude Code and opencode actually wire up `resources/subscribe` → `notifications/resources/updated` → `resources/read` loops in their agent loop. If they only consume Tools (likely in 2026), the resource is invisible and the work is wasted. Defer to v1.12+ if unverified.
+- **Prompts require the tool surface to exist** — a prompt like `open-pr-review` embeds a resource link to `kamacu://tasks/{id}/brief`; the resource handler calls `get_task`. Build tools first, then layer prompts.
+- **Claude Code vs opencode integration paths diverge at the config-file shape** — two separate code paths in the spawn integrator, one per engine branch (mirrors the existing v1.10 engine fork on `agent.engine`).
 
 ---
 
 ## MVP Definition
 
-### Launch With (v1.3)
+### Launch With (v1.11 — Table-Stakes Milestone)
 
-- [ ] Global GitHub toggle (default on) + per-project link config (optional description + repo) — gates everything; cheap; land first.
-- [ ] Collapsible right-side **Review column** on linked projects, `gh pr list --repo … --search "review-requested:@me" --state open`, auto-poll (visibility-gated) + manual refresh — the core list.
-- [ ] **Loading / empty / degraded (`gh` missing/unauth) states** — non-negotiable for a soft-dependency surface.
-- [ ] **PR card (table-stakes set):** number + title, author + avatar, relative `updatedAt`, draft handling (filter drafts by default). — minimum recognizable card.
-- [ ] **PR card (cheap differentiators, recommend including at launch):** CI/checks rollup pill (`statusCheckRollup`), additions/deletions, fork pill (`isCrossRepository`), head→base when base ≠ default. — all one `--json` field each, high triage value, low cost.
-- [ ] **Click PR → task-like review view** with worktree checked out on the PR branch (via the robust fetch+worktree-add path), reusing Agent/bash/Diff tabs.
-- [ ] **Diff tab pointed at the PR's `baseRefName` merge-base** (the correctness item).
-- [ ] **Auto-remove review worktree on merge/close**, gated (dirty + sessions), branch kept.
-- [ ] Collapse/expand persistence + count-on-collapsed badge.
+The minimum surface that delivers on PROJECT.md's "agent can drive the entire app as the user's delegate" promise. This is the milestone's must-have list.
 
-### Add After Validation (v1.x)
+- [ ] **`kamacu mcp serve` stdio subcommand** — the runnable thing. mcp-go `server.NewMCPServer + ServeStdio`.
+- [ ] **Task CRUD tools** (6) — `list_tasks`, `get_task`, `create_task`, `update_task`, `move_task`, `delete_task`. The agent must be able to read and modify the board.
+- [ ] **Session lifecycle tools, read + control** (4) — `list_sessions`, `get_session`, `start_session`, `stop_session`. Side-effecting ones get appropriate ToolAnnotations.
+- [ ] **Project/workspace/agent/settings metadata tools** (5) — `list_projects`, `get_project`, `list_workspaces`, `list_agents`, `get_settings`. Read-only context.
+- [ ] **GitHub PR review tools** (2) — `list_pr_reviews`, `get_pr_review`. Read-only + open-review-workspace (reuses existing gated path).
+- [ ] **Diff & worktree tools** (5) — `get_task_diff`, `mark_file_viewed`, `list_worktree_cleanup_candidates`, `clean_worktree_eligible`, `remove_worktree`.
+- [ ] **Snapshot terminal-output tool** (1) — `tail_session_output(session_id, lines=200)`. The read-only "what did the agent print?" surface. Honors the no-injection contract.
+- [ ] **Spawn-time agent-CLI integration** (2 paths) — write `mcpServers.kamacu` (Claude Code) and `mcp.kamacu` (opencode) at agent spawn, with rotated env. Without this, tools exist but no agent discovers them.
+- [ ] **Per-task auto-scoping tool filter** — `KAMACU_SESSION_ID` from env → scoped convenience tools appear (`list_my_tasks`, `get_my_session`, etc.). The differentiator that makes the table-stakes surface usable in practice.
+- [ ] **ToolAnnotations on every tool** — `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint: false` everywhere. Trust/safety surface.
 
-- [ ] `reviewDecision` pill (changes-requested vs review-required) — add if users want "has someone already pushed back?" context.
-- [ ] Labels + comments-count on cards — add if cards feel information-poor; cap with "+k more."
-- [ ] Stale-aging visual cue / configurable sort — add if the queue gets long enough to need prioritization.
+**v1.11 = ~23 tools + 2 spawn integrations + 1 tool filter.** This is the realistic milestone scope.
 
-### Future Consideration (v2+)
+### Add After Validation (v1.12 — Differentiator Round)
 
-- [ ] Cross-project "all repos needing review" aggregate inbox — only worth it if/when the per-project model feels limiting; accept the thin-field tradeoff or do N per-repo calls.
-- [ ] Author-side PRs ("PRs I opened" status) — different list, different value; out of this milestone.
-- [ ] Any in-app write actions — currently a hard anti-feature; revisit only if the manual-git philosophy is ever relaxed.
+Ship these once v1.11 is proven in real agent sessions.
+
+- [ ] **Bounded live-tail tool** (`tail_session_output_live`) — once you see agents wanting to "watch" sibling sessions, build the streaming-progress version. Trigger: agents doing "wait for sibling to finish" loops via repeated snapshot polls.
+- [ ] **`get_my_brief` composite tool** — once you see agents making 4 calls at session start, fold them into one. Trigger: cold-start token cost > 2K tokens.
+- [ ] **Prompts for canned workflows** (`open-pr-review`, `start-task`) — trigger: users typing the same multi-step sequences repeatedly.
+- [ ] **Completion providers** — trigger: users mistyping IDs in the agent CLI.
+- [ ] **Structured output schemas on all read tools** — trigger: agents mis-parsing text results.
+- [ ] **Logging notifications** — trigger: debugging agent tool-selection issues.
+
+### Future Consideration (v1.13+)
+
+- [ ] **Resource subscriptions for terminal output** (`kamacu://sessions/{id}/output`) — defer until Claude Code/opencode verifiably subscribe to resources in their agent loop. Likely a v1.13 item once hosts catch up.
+- [ ] **External-editor MCP server (HTTP/SSE transport)** — explicitly a separate milestone per PROJECT.md. Different auth, different threat model.
+- [ ] **Bidirectional MCP Tasks (SEP-1686)** — for truly long-running agent operations (a Kamacu task that takes 30+ minutes). mcp-go supports it via `WithTaskSupport`; likely overkill for v1.x.
+- [ ] **Sampling integration** — let a Kamacu-driving agent delegate sub-queries back to the host LLM via `sampling/createMessage`. Advanced; not needed for the delegate use case.
 
 ---
 
@@ -184,65 +252,150 @@ Per-project GitHub link
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| Global toggle + per-project GitHub link | HIGH (gates all) | LOW | P1 |
-| Review column (review-requested list, repo-scoped) | HIGH | MEDIUM | P1 |
-| Loading / empty / `gh`-degraded states | HIGH | LOW–MEDIUM | P1 |
-| Auto-poll (visibility-gated) + manual refresh | HIGH | LOW (reuse quota pattern) | P1 |
-| Card: number, title, author+avatar, updatedAt | HIGH | LOW | P1 |
-| Click → review view (worktree on PR branch) | HIGH | HIGH (checkout risk) | P1 |
-| Diff tab at PR `baseRefName` merge-base | HIGH (correctness) | MEDIUM | P1 |
-| Auto-cleanup worktree on merge/close (gated) | MEDIUM–HIGH | MEDIUM (reuse cleanup) | P1 |
-| Collapse/expand persistence + count badge | MEDIUM | LOW | P1 |
-| Card: CI/checks rollup pill | HIGH (triage) | MEDIUM (rollup logic) | P1–P2 |
-| Card: additions/deletions | MEDIUM–HIGH | LOW | P1–P2 |
-| Card: fork pill | MEDIUM | LOW | P2 |
-| Card: head→base branch line | MEDIUM | LOW | P2 |
-| Card: reviewDecision pill | MEDIUM | MEDIUM | P2 |
-| Card: labels | MEDIUM | LOW | P2 |
-| Card: comments count | LOW | LOW | P3 |
-| Stale-aging cue / sort options | MEDIUM | LOW–MEDIUM | P3 |
-| In-app review/merge actions | — | — | Anti-feature |
-| Cross-repo aggregate inbox | LOW (now) | MEDIUM | Anti-feature (v1.3) |
+| `kamacu mcp serve` stdio subcommand | HIGH (foundation) | LOW (mcp-go handles) | **P1** |
+| Task CRUD tools (6) | HIGH (core delegate) | LOW (HTTP bridges) | **P1** |
+| Session lifecycle tools (4) | HIGH (core delegate) | MEDIUM (side effects) | **P1** |
+| Project/workspace/agent/settings tools (5) | MEDIUM (context) | LOW (read bridges) | **P1** |
+| GitHub PR review tools (2) | MEDIUM | LOW (reuses existing) | **P1** |
+| Diff & worktree tools (5) | MEDIUM | LOW–MEDIUM | **P1** |
+| Snapshot terminal-output tool | HIGH (headline contract: read-only terminal) | LOW (ring buffer exists) | **P1** |
+| Spawn-time mcpServers integration (Claude Code + opencode) | HIGH (without it, nothing works) | MEDIUM (two config shapes) | **P1** |
+| Per-task auto-scoping tool filter | HIGH (usable-in-practice) | MEDIUM (filter logic) | **P1** |
+| ToolAnnotations everywhere | MEDIUM (trust/safety) | LOW (annotations on each tool) | **P1** |
+| Bounded live-tail tool | HIGH (differentiator) | HIGH (streaming + progress) | **P2** |
+| `get_my_brief` composite tool | MEDIUM | LOW (composite read) | **P2** |
+| Prompts (canned workflows) | MEDIUM | MEDIUM | **P2** |
+| Completion providers | LOW | MEDIUM | **P3** |
+| Structured output schemas | MEDIUM (agent accuracy) | MEDIUM (per-tool schema) | **P2** |
+| Logging notifications | LOW (debugging) | LOW | **P3** |
+| Resource subscriptions for terminal output | MEDIUM (semantic purity) | HIGH (verify host support first) | **P3** |
+
+**Priority key:**
+- **P1**: Must have for v1.11 launch — without these, the milestone doesn't deliver.
+- **P2**: Differentiators — ship in v1.12 once v1.11 is validated.
+- **P3**: Polish/future — defer until hosts/clients catch up or trigger conditions hit.
 
 ---
 
-## Competitor Feature Analysis
+## Competitor / Reference Implementation Analysis
 
-| Aspect | gh-dash (TUI) | Graphite PR Inbox | vibe-kanban | GitHub "Review requested" filter | Kangent's Approach |
-|--------|---------------|-------------------|-------------|----------------------------------|--------------------|
-| The list | "Needs My Review" section, filter `is:open review-requested:@me`; configurable columns (width/visibility) | "Needs your review" section, email-client-like, customizable/shareable sections | N/A (its flow is task→PR, polls PR status to flip task state) | A saved search/filter (`review-requested:@me is:open`) | Per-project synced right-side collapsible column, repo-scoped `gh pr list --search review-requested:@me` |
-| Card fields | number, title, author, repo, review status, CI, +/− lines, comments, updated (columnar) | author, title, status pills, age, review state | task card maps to PR after creation | number, title, author, labels, checks, review state | number, title, author+avatar, updatedAt + (checks, +/−, fork, base) as cheap richness |
-| Open/act | Opens PR on github.com or in browser; no local checkout | In-app GitHub-style review (web) | Opens its own diff/agent view on the task's worktree | github.com web review | **Local worktree + agent + terminal + local diff** (the differentiator) |
-| Writes | Some shortcuts (comment/approve via gh) | Full in-app review actions | Creates PRs, can merge | Full web actions | **None** — user acts in terminal (settled) |
-| Refresh | Manual + interval | Live | Background PrMonitorService polling | Page reload | Visibility-gated poll + manual refresh (reuse quota pattern) |
-| Anti-feature avoided | (TUI: no local checkout) | (Heavy web review UI we deliberately skip) | (Sunsetting; cleanup of orphan/expired worktrees worth copying) | (No local workspace) | Lazy per-click checkout; no cross-repo thin-field list; no in-app writes |
+What existing MCP servers do, and what Kamacu copies vs. does differently.
 
-**Patterns worth copying:**
-- gh-dash's exact filter (`is:open review-requested:@me`) and columnar card field set — it's the proven minimal-yet-useful set.
-- Graphite's "empty = you're caught up" framing and section-based, calm read-only queue.
-- vibe-kanban's **PR-status polling that drives lifecycle actions** (it flips task state on merge; Kangent flips to worktree-cleanup on merge/close) and its **orphan/expired worktree cleanup** discipline.
+| Aspect | `everything` (reference showcase) | `git` (closest CLI-wrapper analog) | `filesystem` (allowed-roots pattern) | **Kamacu's approach** |
+|--------|-----------------------------------|------------------------------------|--------------------------------------|----------------------|
+| **Tool naming** | hyphen-case (`trigger-long-running-operation`) | snake_case (`git_status`, `git_diff_staged`) | hyphen-case (`read_file`, `list_directory`) | **snake_case, no namespace prefix** (`list_tasks`, not `kamacu_list_tasks`) — the host CLI namespaces automatically (`kamacu_list_tasks` is what the LLM sees). |
+| **Tool count** | ~18 (showcase) | 12 (one per verb) | ~8 | ~23 in v1.11, ~30 with differentiators. Larger surface than most; justified by UI parity. |
+| **ToolAnnotations** | On every tool | On every tool ( readOnlyHint/destructiveHint/idempotentHint/openWorldHint ) | On every tool | **Copy this discipline.** Every Kamacu tool gets annotations; clients use them for confirmation prompts. |
+| **Input validation** | Zod schemas | Pydantic schemas + injection defense (reject args starting with `-`); path validation | Path validation (allowed roots) | **mcp-go `mcp.WithString(... Enum(...), Pattern(...))`** for declarative validation; explicit `strings.HasPrefix(arg, "-")` rejection not needed (no shell-out from tools — tools call HTTP). Validate `session_id`/`task_id` ownership via the existing HTTP layer. |
+| **Long-running ops** | `trigger-long-running-operation` (progress notifications); SEP-1686 tasks (`simulate-research-query`) | None (all synchronous) | None | **Bounded live-tail tool** with progress notifications (Phase-2 differentiator). |
+| **Resources** | Dynamic text/blob templates, session-scoped resources, static docs | None (tools only) | Files as resources (`file://` URIs) | **One resource for host-context-injection** (`kamacu://tasks/{id}/brief`); terminal-output resource deferred to v1.13. |
+| **Prompts** | 4 demos (simple, args, completable, resource) | None | None | **2–3 canned workflows** in v1.12 (`open-pr-review`, `start-task`). |
+| **Auth** | n/a (showcase) | n/a (local) | n/a (local) | **`KAMACU_HOOK_TOKEN` env**, attached as `X-Kamacu-Token` header on every HTTP call to the existing API. Spec-compliant (stdio: "retrieve credentials from the environment"). |
+| **CLI shell-out** | n/a | Wraps `GitPython` (which shells out to `git`) | Direct filesystem ops | **Wraps Kamacu HTTP** — no CLI shell-out from the MCP layer. The existing API handles git/claude/gh/tmux shell-outs. |
+| **Discovery config** | `mcpServers.everything = {command: "npx", args: [...]}` | `mcpServers.git = {command: "uvx", args: [...]}` | `mcpServers.filesystem = ...` | **Per-engine shape**: Claude Code uses `mcpServers` (separate `command`+`args`); opencode uses `mcp` (single `command` array). Spawn integrator writes the right shape. |
 
-**Anti-features to avoid (seen in the wild):**
-- Graphite-style full in-app review/approve/merge UI (out of scope; huge surface).
-- Cross-repo aggregation when it costs you the rich fields (the `gh search prs` thin-field trap — cli/cli#13239).
-- Any flow that assumes `gh pr checkout` works inside a worktree without verification (cli/cli#972, #3231).
+### What to copy from each reference
+
+- **From `everything`**: ToolAnnotations on every tool (non-negotiable); the `trigger-long-running-operation` progress-notification pattern for the bounded live-tail; the resource subscription demo (if you build the terminal-output resource).
+- **From `git`**: The verb-per-tool discipline (12 separate `git_*` tools, not one mega-tool); the per-tool input-schema discipline (Pydantic in their case, mcp-go builder in ours); the `validate_repo_path` style of defense-in-depth (validate `task_id`/`session_id` belong to the calling agent's project before returning data — least-privilege).
+- **From `filesystem`**: Allowed-paths enforcement → for Kamacu, "allowed sessions" enforcement (an agent scoped to task X should not be able to read task Y's terminal output unless explicitly granted).
+- **From `sequentialthinking`**: Proof that a stateful server with even one tool is fine if the abstraction is right. Don't pad the tool count for its own sake.
+
+### What to do differently
+
+- **HTTP bridge, not direct state.** Most reference servers (git, filesystem) operate directly on the resource (filesystem, repo). Kamacu's MCP server operates on the *HTTP API* — the existing validation, side effects, and tests all still apply. This is unusual but correct for Kamacu: the API is the source of truth, the MCP server is one more (very privileged) client.
+- **Per-task auto-scoping.** No reference server does this (they have no notion of "the calling session"). Kamacu's `KAMACU_SESSION_ID` env contract makes it possible and it's the headline DX feature.
+- **Read-only terminal access by contract.** Most terminal-MCP servers (gotty-style) expose bidirectional PTY. Kamacu's agents-get-read-only is a deliberate safety choice tied to the browser-attached user.
+
+---
+
+## Tool Surface Reference (Concrete v1.11 List)
+
+For the roadmap author and PLAN-phase. Each tool maps to an existing HTTP endpoint — the MCP handler is a thin HTTP client call.
+
+### Task Lifecycle (6 tools)
+
+| Tool | Input | Output | HTTP Bridge | Annotations |
+|------|-------|--------|-------------|-------------|
+| `list_tasks` | `project_id?`, `status?`, `limit?`, `cursor?` | Task[] (structured) | `GET /api/tasks` | RO, idempotent, !openWorld |
+| `get_task` | `task_id` | Task (structured) | `GET /api/tasks/{id}` | RO, idempotent, !openWorld |
+| `create_task` | `title`, `description?`, `project_id?`, `status?` | Task | `POST /api/tasks` | !RO, !destructive, !idempotent, !openWorld |
+| `update_task` | `task_id`, `title?`, `description?`, `status?` | Task | `PATCH /api/tasks/{id}` | !RO, !destructive, idempotent, !openWorld |
+| `move_task` | `task_id`, `status`, `before_id?`, `after_id?` | Task | `POST /api/tasks/{id}/move` | !RO, !destructive, idempotent, !openWorld |
+| `delete_task` | `task_id` | `{deleted: true}` | `DELETE /api/tasks/{id}` | !RO, destructive, !idempotent, !openWorld |
+
+### Session Lifecycle (4 tools)
+
+| Tool | Input | Output | HTTP Bridge | Annotations |
+|------|-------|--------|-------------|-------------|
+| `list_sessions` | `project_id?`, `status?` | Session[] | `GET /api/sessions` | RO, idempotent, !openWorld |
+| `get_session` | `session_id` | Session | `GET /api/sessions/{id}` | RO, idempotent, !openWorld |
+| `start_session` | `task_id` | Session | `POST /api/tasks/{id}/sessions` | !RO, !destructive, !idempotent, !openWorld |
+| `stop_session` | `session_id` | `{stopped: true}` | `POST /api/sessions/{id}/stop` | !RO, destructive, !idempotent, !openWorld |
+
+### Terminal Output — Read Only (1 table-stakes + 1 differentiator)
+
+| Tool | Input | Output | HTTP Bridge | Annotations |
+|------|-------|--------|-------------|-------------|
+| `tail_session_output` | `session_id`, `lines?=200`, `bytes?=131072` | Text (raw terminal bytes, UTF-8 lossy) | `GET /api/sessions/{id}/output` (new endpoint, reads ring buffer) | RO, idempotent, !openWorld |
+| `tail_session_output_live` *(v1.12)* | `session_id`, `duration_seconds?=30`, `lines?` | Text + `notifications/progress` chunks | WS attach to existing session broadcast | RO, idempotent, !openWorld |
+
+### Project / Workspace / Agent / Settings (5 tools)
+
+| Tool | Input | Output | HTTP Bridge | Annotations |
+|------|-------|--------|-------------|-------------|
+| `list_projects` | `workspace_id?` | Project[] | `GET /api/projects` | RO, idempotent, !openWorld |
+| `get_project` | `project_id` | Project | `GET /api/projects/{id}` | RO, idempotent, !openWorld |
+| `list_workspaces` | — | Workspace[] | `GET /api/workspaces` | RO, idempotent, !openWorld |
+| `list_agents` | — | Agent[] | `GET /api/agents` | RO, idempotent, !openWorld |
+| `get_settings` | — | Settings | `GET /api/settings` | RO, idempotent, !openWorld |
+
+### GitHub PR Review (2 tools)
+
+| Tool | Input | Output | HTTP Bridge | Annotations |
+|------|-------|--------|-------------|-------------|
+| `list_pr_reviews` | `project_id` | PR[] | `GET /api/projects/{id}/pull-requests` | RO, idempotent, !openWorld |
+| `get_pr_review` | `project_id`, `pr_number` | Review workspace Task | `POST /api/projects/{id}/pull-requests/{n}/review` | !RO, !destructive, idempotent, !openWorld |
+
+### Diff & Worktree (5 tools)
+
+| Tool | Input | Output | HTTP Bridge | Annotations |
+|------|-------|--------|-------------|-------------|
+| `get_task_diff` | `task_id` | Text (unified diff) | `GET /api/tasks/{id}/diff` | RO, idempotent, !openWorld |
+| `mark_file_viewed` | `task_id`, `file_path`, `viewed` | `{updated: true}` | `POST /api/tasks/{id}/diff/viewed` | !RO, !destructive, idempotent, !openWorld |
+| `list_worktree_cleanup_candidates` | — | CleanupCandidate[] | `GET /api/worktrees` | RO, idempotent, !openWorld |
+| `clean_worktree_eligible` | — | `{removed: N}` | `POST /api/worktrees/clean-eligible` | !RO, destructive, idempotent, !openWorld |
+| `remove_worktree` | `worktree_path`, `force?=false` | `{removed: true}` | `POST /api/worktrees/remove` | !RO, destructive, !idempotent, !openWorld |
+
+### Scoped Variants (auto-injected when `KAMACU_SESSION_ID` set)
+
+These appear *in addition to* the generic tools above when the MCP server detects the env var. They have simpler schemas (no `project_id`/`session_id` arg).
+
+| Tool | Input | Output | Maps to |
+|------|-------|--------|---------|
+| `list_my_tasks` | `status?` | Task[] | `list_tasks(project_id=<from session>)` |
+| `get_my_task` | — | Task | `get_task(task_id=<from session>)` |
+| `get_my_session` | — | Session | `get_session(session_id=$KAMACU_SESSION_ID)` |
+| `tail_my_output` | `lines?` | Text | `tail_session_output($KAMACU_SESSION_ID)` |
+| `get_my_brief` *(v1.12)* | — | Brief (composite) | composite of get_task + get_project + list_tasks(siblings) |
+
+**Total v1.11: 23 generic tools + 4 scoped variants + 2 spawn integrations = 29 surfaces.** Matches the milestone's ~30 target.
 
 ---
 
 ## Sources
 
-- [gh-dash PR section docs](https://www.gh-dash.dev/configuration/pr-section/) and [examples](https://www.gh-dash.dev/configuration/examples/) — default sections incl. "Needs My Review" `is:open review-requested:@me`, configurable columns (MEDIUM)
-- [gh pr checkout manual](https://cli.github.com/manual/gh_pr_checkout) — fork vs same-repo handling, `--branch/--detach/--force/--recurse-submodules/-R` (HIGH)
-- [cli/cli#972 — checkout PR by creating a new worktree](https://github.com/cli/cli/issues/972) — `gh pr checkout` is not worktree-aware; manual `git fetch` + `git worktree add` workaround (HIGH)
-- [superset-sh/superset#3231](https://github.com/superset-sh/superset/issues/3231) — `gh pr checkout` fails for `/`-containing PR branch names inside a worktree (MEDIUM-HIGH)
-- [cli/cli#13239 — gh search prs missing reviewDecision/mergeStateStatus](https://github.com/cli/cli/issues/13239) — thin field set of `gh search prs` vs `gh pr list` (HIGH)
-- [gh search prs manual](https://cli.github.com/manual/gh_search_prs) + [discussion #6801](https://github.com/cli/cli/discussions/6801) — `--review-requested=@me`, available JSON fields, search API rate-limiting (HIGH)
-- [gh pr list manual](https://cli.github.com/manual/gh_pr_list) + [discussion #5902](https://github.com/cli/cli/discussions/5902) — full `--json` field list incl. statusCheckRollup, reviewDecision, additions/deletions, head/baseRefName, isCrossRepository (HIGH)
-- [Graphite PR inbox / review-requests guides](https://graphite.com/guides/github-review-requests-guide) and [review-pull-requests docs](https://graphite.com/docs/review-pull-requests) — "Needs your review" reviewer-queue UX, section model (MEDIUM)
-- [vibe-kanban GitHub integration & PR workflow (DeepWiki)](https://deepwiki.com/BloopAI/vibe-kanban/2.4-github-integration-and-pr-workflow) and [git+GitHub integration](https://deepwiki.com/BloopAI/vibe-kanban/6-git-and-github-integration) — worktree-per-attempt, PrMonitorService polling drives lifecycle, orphan worktree cleanup (MEDIUM)
-- [GitHub Changelog: clearer PR reviewer status (2025-08)](https://github.blog/changelog/2025-08-14-clearer-pull-request-reviewer-status-and-enhanced-email-filtering/) — reviewer status / review-decision semantics (MEDIUM)
-- [GitHub Code Review feature page](https://github.com/features/code-review) — canonical PR components (title/description/diff/metadata: labels, reviewers, CI status) (MEDIUM)
+- [MCP Specification 2025-06-18 — Base Protocol (lifecycle, messages, auth)](https://modelcontextprotocol.io/specification/2025-06-18/basic/index) — HIGH (official spec)
+- [MCP Specification 2025-06-18 — Server Tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) — HIGH (official spec; tools/list, tools/call, ToolAnnotations, structuredContent, outputSchema, two-class error handling)
+- [MCP Specification 2025-06-18 — Server Resources](https://modelcontextprotocol.io/specification/2025-06-18/server/resources) — HIGH (official spec; resources/subscribe, notifications/resources/updated, URI schemes, annotations)
+- [MCP Specification 2025-06-18 — Lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle) — HIGH (initialize/initialized handshake, capability negotiation, stdio shutdown contract, timeouts)
+- [`modelcontextprotocol/servers/src/everything`](https://github.com/modelcontextprotocol/servers/tree/main/src/everything) — HIGH (canonical reference; `docs/features.md` enumerates every protocol feature; `tools/trigger-long-running-operation.ts` is the canonical progress-notification pattern)
+- [`modelcontextprotocol/servers/src/git/src/mcp_server_git/server.py`](https://github.com/modelcontextprotocol/servers/blob/main/src/git/src/mcp_server_git/server.py) — HIGH (closest CLI-wrapper analog; 12 verb-per-tool discipline; per-tool Pydantic schemas; per-tool `ToolAnnotations`; input injection defense; `validate_repo_path` defense-in-depth)
+- [`mark3labs/mcp-go` README + source tree](https://github.com/mark3labs/mcp-go) — HIGH (the Go MCP framework; spec 2025-11-25 with back-compat to 2025-06-18; `server.NewMCPServer` + `server.ServeStdio` is the entire main; `mcp.NewTool` builder; `server.WithToolFilter` for per-session scoping; `mcp.WithTaskSupport` + `s.AddTaskTool` for SEP-1686 tasks; `server.WithHooks`, `server.WithRecovery`, `server.WithToolHandlerMiddleware` for observability)
+- [opencode MCP servers docs](https://opencode.ai/docs/mcp-servers/) — HIGH (official; opencode.json `mcp` key with `type: "local"` + `command: [array]` shape; `environment`, `cwd`, `enabled`, `timeout` options; per-agent tool glob filters; `{env:VAR}` interpolation)
+- Web search corroboration on Claude Code `mcpServers` config (klymentiev.com 2026 guide, claudelog.com configuration guide, github.com/anthropics/claude-code/issues/5037, modelcontextprotocol discussions #681) — MEDIUM–HIGH (consistent: `~/.claude.json` → `mcpServers` with separate `command`+`args` fields; `--mcp-config` flag for one-shot; `settings.json` mcpServers silently ignored)
+- MCP spec authorization note: "implementations using STDIO transport SHOULD NOT follow [the HTTP Authorization spec], and instead retrieve credentials from the environment" — HIGH (official; confirms `KAMACU_HOOK_TOKEN` env pattern is spec-compliant)
 
 ---
-*Feature research for: GitHub "PRs needing my review" surface in a local kanban + agent app*
-*Researched: 2026-06-13*
+*Feature research for: MCP (Model Context Protocol) server capability added to an existing local-only Go + React single-binary app — Kamacu v1.11*
+*Researched: 2026-07-21*
