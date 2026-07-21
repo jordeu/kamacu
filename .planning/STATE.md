@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: M001
-milestone_name: configurable-agents
-current_phase: 05
-status: milestone_complete
-last_updated: "2026-07-11T18:00:00.000Z"
+milestone: v1.11
+milestone_name: Kamacu MCP Server
+status: planning
+last_updated: "2026-07-21T09:14:46.045Z"
+last_activity: 2026-07-21
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 20
-  completed_plans: 20
-  percent: 100
-stopped_at: v1.10 Configurable Agents shipped 2026-07-11
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -36,3 +35,10 @@ Items acknowledged and deferred at milestone close on 2026-07-11:
 | quick_task | 260626-hwd-add-an-opt-in-insecure-allow-remote-flag | unknown |
 
 Known verification overrides: 6 (all prior-milestone quick tasks, none v1.10)
+
+## Current Position
+
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-07-21 — Milestone v1.11 started

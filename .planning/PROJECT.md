@@ -10,7 +10,9 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ## Milestone Status
 
-**Between milestones.** v1.10 Configurable Agents shipped 2026-07-11 (18/18 requirements; archived to `milestones/v1.10-*`). The next milestone is not yet scoped — run `/gsd:new-milestone` to define it. Banked candidates are parked under "Next Milestone" below.
+**Active: v1.11 Kamacu MCP Server** — started 2026-07-21. Goal: expose Kamacu's full surface (tasks, sessions, projects, workspaces, reviews, agents) as MCP tools so an agent running inside Kamacu can drive the entire app as the user's delegate. Promotes AGNT-01 from backlog.
+
+**Just shipped:** v1.10 Configurable Agents shipped 2026-07-11 (18/18 requirements; archived to `milestones/v1.10-*`).
 
 ---
 
@@ -241,7 +243,16 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-**Next milestone not yet scoped.** v1.10 Configurable Agents shipped 2026-07-11 — its requirements are now in Validated above. Run `/gsd:new-milestone` to define the next set. Banked candidates worth pulling forward are listed under "Next Milestone" below.
+**v1.11 Kamacu MCP Server** — defined 2026-07-21. Expose Kamacu's full surface as MCP tools so agents running inside Kamacu task PTYs can drive the entire app as the user's delegate. Requirements being scoped via `.planning/REQUIREMENTS.md`.
+
+Target capabilities:
+- `kamacu mcp serve` stdio MCP subcommand bridging to the running Kamacu HTTP API
+- Agent-CLI integration: at spawn, Kamacu writes an `mcpServers` entry into the agent's config (Claude Code, opencode) so tools auto-discover
+- Per-task auto-scoping via the inherited `KAMACU_SESSION_ID` (convenience tools need no params; cross-task tools accept explicit IDs)
+- Full UI parity tool surface: tasks, sessions, projects, workspaces, agents, reviews, diff, settings, worktree cleanup
+- Read + subscribe terminal access (snapshots + live tail; **no keystroke injection** — read-only, never conflicts with the browser-attached user)
+
+Settled decisions (milestone-time): actor = agents inside Kamacu (the original AGNT-01 framing expanded from self-report to full delegate); transport = stdio MCP subcommand spawned by the agent CLI (one binary serves both modes, reuses `KAMACU_HOOK_TOKEN` envelope); session I/O = read + subscribe only (write would conflict with browser-attached user).
 
 ### Out of Scope
 
@@ -254,6 +265,8 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 - Non-GitHub forges (GitLab, Bitbucket, Gitea) — GitHub-only for v1.3
 - Custom kanban columns, labels, priorities — fixed columns and lean task cards for v1
 - Auto-starting agents on task creation — sessions start only via explicit Start button
+- **MCP write to live PTYs (keystroke injection)** — v1.11 deliberately exposes read + subscribe only; an agent observing a sibling session must never inject bytes into its PTY (would conflict with the browser-attached user and the other agent's intent). PTY write stays browser-only
+- **MCP server for external AI editors (Claude Desktop / Cursor / VS Code)** — v1.11 targets agents running inside Kamacu; an external-editor MCP surface (with its own auth + transport considerations) is a separate future milestone
 
 ## Current State
 
@@ -396,4 +409,6 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-11 after v1.10 Configurable Agents milestone. Full evolution review: "What This Is" now names configurable agents + multiple engines; the v1.10 milestone block added to shipped history; all 18 v1.10 requirements (AGDATA·AGMGMT·AGSPAWN·AGUI·OCENG·OCRESUME) moved to Validated (Phases 01–05); Active reset to "next milestone not yet scoped"; six v1.10 Key Decisions logged (typed engine column, custom running/exited-only status, extra-params consolidated on the agent row, fetch-based status plugin, async opencode session-id capture, opencode restart-resume). "Multiple agent CLIs" Out-of-Scope item revised (configurable agents + opencode shipped; additional first-class engines deferred as AGFUT-03). v1.10 shipped 2026-07-11 — 5 phases, 20 plans, 18 tasks; archived to `milestones/v1.10-*`. Next: `/gsd:new-milestone`.*
+*Last updated: 2026-07-21 to start v1.11 Kamacu MCP Server. Active section reset to the v1.11 milestone scope (the promoted-and-expanded AGNT-01 — full-surface MCP server for agents running inside Kamacu). Three settled decisions logged in Active (actor = agents-inside, transport = stdio subcommand, session I/O = read + subscribe only). Two new Out-of-Scope items (MCP PTY writes; MCP for external editors). Prior evolution entry preserved below.*
+
+*Last updated: 2026-07-11 after v1.10 Configurable Agents milestone. Full evolution review: "What This Is" now names configurable agents + multiple engines; the v1.10 milestone block added to shipped history; all 18 v1.10 requirements (AGDATA·AGMGMT·AGSPAWN·AGUI·OCENG·OCRESUME) moved to Validated (Phases 01–05); Active reset to "next milestone not yet scoped"; six v1.10 Key Decisions logged (typed engine column, custom running/exited-only status, extra-params consolidated on the agent row, fetch-based status plugin, async opencode session-id capture, opencode restart-resume). "Multiple agent CLIs" Out-of-Scope item revised (configurable agents + opencode shipped; additional first-class engines deferred as AGFUT-03). v1.10 shipped 2026-07-11 — 5 phases, 20 plans, 18 tasks; archived to `milestones/v1.10-*`.*
