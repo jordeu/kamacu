@@ -1,274 +1,310 @@
 # Stack Research
 
-**Domain:** GitHub PR-review integration (read-only surfacing + worktree checkout) added to an existing single-binary Go + React local app
-**Researched:** 2026-06-13
-**Confidence:** HIGH (all `gh`/`git` commands, flags, and `--json` field lists below were run live against the host's `gh 2.82.0` and real GitHub repos, not recalled from training data)
+**Domain:** MCP (Model Context Protocol) server capability added to an existing Go-backend single-binary app — a stdio MCP subcommand that bridges to the app's existing HTTP API.
+**Researched:** 2026-07-21
+**Confidence:** HIGH — all versions, go.mod requirements, and API shapes below were verified live on pkg.go.dev, raw GitHub `go.mod` files, and the official MCP / Claude Code / opencode docs (2026-07-21). The Go SDK's `examples/server/proxy/main.go` was read in full to confirm the bridge pattern.
 
 ## TL;DR for the roadmap author
 
-- **No new Go dependency. No new npm dependency. No stored token.** Shell out to the already-authenticated host `gh` CLI exactly the way Kangent already shells out to `git` and `claude`. A new `internal/github` (or `internal/gh`) leaf package mirroring `internal/tmux` / `internal/quota` is the whole backend footprint.
-- **List PRs:** `gh pr list -R <owner/repo> --search "review-requested:@me" --state open --json <fields>` — per-repo, rich card fields, drives the Review column.
-- **Detect merge/close:** `gh pr view <n> -R <owner/repo> --json state,closed,closedAt,mergedAt,mergeCommit,headRefOid` — poll `state` (`OPEN`/`CLOSED`/`MERGED`).
-- **Check out the PR branch into the pre-made worktree:** do NOT use `gh pr checkout` (it has no target-directory arg and is fork-remote-fragile). Instead resolve the ref yourself and use the existing git-worktree service:
-  `git fetch origin refs/pull/<n>/head:refs/kangent/pr-<n>` then `git worktree add -b review/pr-<n> <dir> refs/kangent/pr-<n>`. Verified end-to-end; fork-agnostic.
-- **Degrade:** `exec.LookPath("gh")` for presence; `gh auth status` (exit code **4** = needs auth, **1** = other auth issue) or `gh auth status --json hosts` for state. Treat like the quota indicator: best-effort, never break.
-- **Rate limits:** `gh pr list`/`gh pr view` hit the **core** GraphQL/REST budget (5000/hr) — fine. `gh search prs` hits the **search** budget (**30/min**) — avoid it for polling.
+- **Use the official `github.com/modelcontextprotocol/go-sdk` v1.6.1.** Stable v1.x, Apache-2.0/MIT, MCP conformance-tested, supports MCP spec `2025-11-25` (current published) with `2026-07-28` support in pre-release (`v1.7.0-pre.3`). `go.mod` requires `go 1.25.0` — Kamacu's `go 1.26` satisfies it.
+- **The bridge pattern is the SDK's documented happy path.** Its `examples/server/proxy/main.go` is *exactly* the shape Kamacu needs: an `mcp.NewServer` whose tool handlers call an upstream over a client transport. The only adaptation is that Kamacu's upstream is its own HTTP REST API at `http://127.0.0.1:7333` (with the existing `X-Kamacu-Token` envelope header) rather than another MCP server — so each tool handler does a plain `http.Client.Do(req)`, not `clientSession.CallTool`. No new architectural pattern needs inventing.
+- **Stdio is the transport.** MCP stdio = newline-delimited JSON-RPC 2.0 over stdin/stdout (NOT LSP-style `Content-Length` headers — verified against the 2025-06-18 spec, still current in `2025-11-25`). One call: `server.Run(ctx, &mcp.StdioTransport{})`. Logging MUST go to `stderr` — never `stdout`.
+- **Auth is already done.** Kamacu already injects `KAMACU_SESSION_ID`, `KAMACU_HOOK_TOKEN`, `KAMACU_HOOK_BASE` into spawned agent CLIs (v1.10). The MCP subcommand inherits those env vars when the agent CLI spawns it. No OAuth, no MCP-level auth needed — the bridge just copies `KAMACU_HOOK_TOKEN` into the `X-Kamacu-Token` request header the way the existing hook receiver paths already do.
+- **Agent-CLI config wiring differs by engine.** Claude Code consumes `.mcp.json` at the worktree root (shape `{type: "stdio", command, args, env}` with `${VAR}` expansion). opencode consumes `opencode.json` at the worktree root (shape `{type: "local", command: [array], environment}` — note: different field names). At task spawn, Kamacu writes the appropriate file for the configured agent's engine.
+- **Do NOT hand-roll the MCP wire protocol.** It is thin (newline-delimited JSON-RPC) and a tools-only server is technically ~300 LOC, but the spec is in active flux — `2026-07-28` is a near-complete rewrite (stateless model, `server/discover` RPC replacing `initialize`, `subscriptions/listen` stream, MRTR). The official SDK absorbs that churn; a hand-rolled server would re-implement it for zero benefit and a handful of transitive deps (all pure Go, no CGO).
+
+---
 
 ## Recommended Stack
 
-### Core Technologies
+### Core Technologies — Backend (Go, additive only)
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `gh` CLI (host binary) | **2.82.0 floor** (host has exactly this) | All GitHub reads: list review-requested PRs, fetch single-PR state, auth detection | Already installed and authenticated on the host (`✓ Logged in to github.com`, scopes `repo, read:org, gist, project`). Mirrors Kangent's settled philosophy of shelling out to real CLIs (`git`, `claude`) instead of reimplementing them. No token ever touches Kangent's DB — `gh` owns credentials, refresh, and host config. This is the milestone's *settled* decision; research confirms it is also the technically correct one. |
-| `os/exec` + system `git` (existing `worktree` service) | system git | Materialize the PR head into a worktree | Kangent already shells out to `git worktree add/remove/list --porcelain`. The PR-checkout flow is a *new variant of the existing worktree-create path*, not a new subsystem: fetch the universal pull ref, then `git worktree add` on it. `gh pr checkout` is deliberately **not** used (see "What NOT to Use"). |
-| `internal/github` Go package (new) | n/a | Typed wrapper over `gh` invocations | One leaf package owning `exec.Command("gh", ...)`, JSON unmarshalling into Go structs, and the auth/degrade state machine — the same shape as the existing `internal/quota` (best-effort server proxy) and `internal/tmux` (CLI shell-out) packages. |
+| `github.com/modelcontextprotocol/go-sdk` | **v1.6.1** (May 22, 2026 stable; v1.7.0-pre.3 Jul 17 targets MCP `2026-07-28`) | The MCP SDK — server, handlers, stdio transport | The official Go implementation of the MCP spec, maintained under the `modelcontextprotocol` GitHub org (Anthropic-backed). Stable v1.x with tagged releases and an active pre-release track. Conformance-tested against the official MCP test suite (added v1.7.0-pre.2). Ships a documented proxy example that is structurally identical to Kamacu's bridge use case. 4.8k GitHub stars; the `mcp` package is imported by 1,443 other modules (pkg.go.dev, v1.6.1). License Apache-2.0 + MIT (new contributions Apache-2.0, original code MIT). Pinned to `go 1.25.0` in go.mod — Kamacu's `go 1.26` is above the floor. |
+| `github.com/modelcontextprotocol/go-sdk/mcp` | v1.6.1 | Primary import — server, tools, transport types | One import, one package. `mcp.NewServer`, `mcp.AddTool`, `mcp.StdioTransport`, `mcp.CallToolRequest`/`Result`. No sub-package juggling. |
+| `net/http` (stdlib, already in go.mod via existing API server) | stdlib | The MCP subcommand calls Kamacu's existing REST API | The bridge calls `http.NewRequest` + `http.DefaultClient.Do` against `http://127.0.0.1:7333/api/...` with the `X-Kamacu-Token` header. No new HTTP library; reuse a thin client wrapper. |
+| `os`, `os/exec`, `encoding/json`, `log/slog` (all stdlib) | stdlib | Env-var reads, JSON marshalling, structured logging to stderr | The MCP subcommand is a leaf — env-var reads for `KAMACU_HOOK_TOKEN` / `KAMACU_SESSION_ID` / `KAMACU_HOOK_BASE`, slog to stderr (NEVER stdout — that's the MCP wire). |
 
-### Frontend
-
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| (existing) React 19 + TanStack Query + shadcn card/column | already in repo | Review column + PR cards | **Zero new npm deps.** The Review column reuses the existing board column/card components; the PR list is one more TanStack Query query (`useQuery(['pr-reviews', projectId])`) with the auto-poll-paused-when-hidden pattern already built for the quota indicator (Phase 7). PR cards are presentational variants of the existing task card. |
-
-### Supporting Libraries
+### Supporting Libraries (transitive, via the SDK)
 
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| `encoding/json` (stdlib) | stdlib | Unmarshal `gh --json` output into typed structs | Always — `gh` emits clean JSON; define a `PRSummary` struct matching the field list below. |
-| `log/slog` (stdlib) | stdlib | Log `gh` failures at debug/warn without breaking the request | Already the project logger; degrade-don't-throw on every `gh` non-zero exit. |
-| (existing) `goose` migration | v3.27.1 | Persist per-project linked-repo config + the global GitHub toggle + review-worktree metadata | One new migration: add `github_repo` (nullable) and `description` (nullable) to `projects`; a global setting row `github_integration_enabled` (default true); and a way to tag a worktree/task row as a PR review (store `pr_number`, `pr_repo`, `pr_head_oid` so the merge/close reaper knows what to poll). |
+| `github.com/google/jsonschema-go` | v0.4.3 | JSON Schema generation from Go types | Auto-used by `mcp.AddTool` when you pass a typed Go handler — derives the tool's `inputSchema`/`outputSchema` from struct tags. No direct call needed. |
+| `github.com/yosida95/uritemplate/v3` | v3.0.2 | RFC 6570 URI templates (resource templates) | Auto-used by the SDK for resource-template URIs. Only relevant if Kamacu later exposes MCP *resources* (e.g., `kamacu://task/{id}/diff`) — v1.11 is tools-only per PROJECT.md. |
+| `github.com/segmentio/encoding` | v0.5.4 | Faster JSON encoding | Internal optimisation in the SDK's JSON-RPC layer. Invisible to consumers. |
+| `golang.org/x/oauth2` + `github.com/golang-jwt/jwt/v5` | v0.35.0 / v5.3.1 | OAuth flows | **NOT USED** by Kamacu (auth is the existing envelope token, not OAuth). They appear in `go.mod` because the SDK's `auth`/`oauthex` sub-packages reference them. Go's lazy package loading means they are not compiled into a binary that doesn't import those sub-packages — `go mod tidy` keeps them in go.mod but they don't bloat the binary. |
+| `golang.org/x/tools` | v0.42.0 | Internal SDK tooling | Only used by the SDK's own code-generation; pulled because the SDK ships generated code. Harmless indirect dep. |
 
 ### Development Tools
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| `gh <cmd> --help` | Authoritative flag + `--json` field discovery | The JSON field lists below were copied from `gh pr list --help` / `gh pr view --help` on 2.82.0. Re-run `--help` when bumping gh; field names are stable but new ones are additive. |
-| `gh help exit-codes` | Degradation logic | Documents the exit-code contract used in the auth-detection section. |
+| `go get github.com/modelcontextprotocol/go-sdk@v1.6.1` | Add the dependency | One line; `go mod tidy` resolves the four transitive deps above. No CGO, no system libraries. |
+| `mcp-cli` / inspector (optional) | Local MCP debugging | The `examples/server/proxy` shape lets you spin up the bridge against a fake Kamacu HTTP server for isolated testing. The wider MCP ecosystem has inspector tools; not required for v1.11. |
+| stdio framing test | Verify the server speaks correct newline-delimited JSON-RPC | Trivial smoke test: pipe `{"jsonrpc":"2.0","id":1,"method":"initialize",...}\n` into `kamacu mcp serve` and parse the response from stdout. The SDK handles this; do it once as a regression guard. |
 
-## The exact commands (verified live on gh 2.82.0)
+---
 
-### 1. List OPEN PRs awaiting your review, for ONE linked repo (drives the Review column)
+## The bridge pattern in concrete shape (for the plan-phase author)
 
-**Use `gh pr list` with a `review-requested:@me` search qualifier — NOT `gh search prs`.**
+The official SDK's `examples/server/proxy/main.go` demonstrates an HTTP→HTTP MCP proxy. Kamacu's adaptation — **stdio MCP → HTTP REST** — is even simpler because there's no upstream MCP to speak; each tool is one or two `http.Client.Do` calls. Skeleton:
 
-```bash
-gh pr list \
-  --repo <owner>/<repo> \
-  --search "review-requested:@me" \
-  --state open \
-  --limit 50 \
-  --json number,title,author,headRefName,baseRefName,isDraft,reviewDecision,statusCheckRollup,additions,deletions,updatedAt,url,headRepositoryOwner,headRepository,isCrossRepository,headRefOid
+```go
+package mcpserve
+
+import (
+    "context"
+    "net/http"
+    "os"
+
+    "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+type Server struct {
+    httpClient *http.Client
+    baseURL    string         // http://127.0.0.1:7333
+    authToken  string         // from KAMACU_HOOK_TOKEN
+    sessionID  string         // from KAMACU_SESSION_ID (per-task convenience scope)
+}
+
+func Run(ctx context.Context) error {
+    s := &Server{
+        httpClient: http.DefaultClient,
+        baseURL:    envDefault("KAMACU_HOOK_BASE", "http://127.0.0.1:7333"),
+        authToken:  os.Getenv("KAMACU_HOOK_TOKEN"),
+        sessionID:  os.Getenv("KAMACU_SESSION_ID"),
+    }
+
+    mcpSrv := mcp.NewServer(&mcp.Implementation{Name: "kamacu", Version: buildVersion}, nil)
+    s.registerTools(mcpSrv)   // ~15 tools: list_tasks, move_task, create_task, read_terminal, ...
+
+    // Stdio transport. Reads JSON-RPC from stdin, writes to stdout, logs to stderr.
+    return mcpSrv.Run(ctx, &mcp.StdioTransport{})
+}
+
+// Typed handler — input/output JSON schemas auto-derived from the struct tags.
+type listTasksInput struct {
+    ProjectID  string `json:"project_id,omitempty" jsonschema:"the project to list tasks in; omit to use the inherited session's project"`
+    Status     string `json:"status,omitempty"     jsonschema:"one of todo|in_progress|in_review|done"`
+}
+
+type listTasksOutput struct {
+    Tasks []taskSummary `json:"tasks"`
+}
+
+func (s *Server) listTasks(ctx context.Context, req *mcp.CallToolRequest, in listTasksInput) (*mcp.CallToolResult, listTasksOutput, error) {
+    // Convenience scope: if ProjectID omitted, use the inherited session's project.
+    projectID := in.ProjectID
+    if projectID == "" {
+        projectID = s.sessionProjectID(ctx)  // resolves KAMACU_SESSION_ID → project_id via one GET
+    }
+    // Bridge: call Kamacu's existing REST endpoint with the envelope auth.
+    var out listTasksOutput
+    if err := s.getJSON(ctx, "/api/projects/"+projectID+"/tasks", &out.Tasks); err != nil {
+        return nil, listTasksOutput{}, err
+    }
+    return nil, out, nil
+}
 ```
 
-Verified output (real PR, fields trimmed):
+Two structural points worth flagging in plan-phase:
+
+1. **The SDK's typed handler signature is `func(ctx, *mcp.CallToolRequest, In) (*mcp.CallToolResult, Out, error)`** — return `(*mcp.CallToolResult, Out, error)`. Pass `nil` for the first when you want the SDK to wrap `Out` automatically (its schema was derived at registration). Return a non-nil `*mcp.CallToolResult` only when you need to attach text content, errors via `SetError`, or structured content side-by-side. This is documented in the package example and the `toolschemas` example.
+2. **`req.Extra.Header` exists** (the SDK propagates MCP transport metadata) but for Kamacu it's irrelevant — auth is env-var-derived, not header-derived. Don't over-engineer per-request auth.
+
+### Session scoping (per-task vs cross-task tools)
+
+PROJECT.md specifies two scopes:
+- **Per-task convenience tools** (no params) — use the inherited `KAMACU_SESSION_ID` from env at startup. ~80% of the tool surface (read *this* task's terminal, list *this* project's tasks, etc.).
+- **Cross-task tools** (explicit IDs) — accept `task_id` / `project_id` / `session_id` params and route accordingly. Needed for "move a task in *another* project", "list *all* my review-requested PRs", etc.
+
+Both fall out of the same pattern — `s.sessionID` is read once at startup and used as the default in handlers that take an optional ID param. No SDK feature is needed for this; it's plain Go.
+
+---
+
+## Agent-CLI config wiring (the spawn-time integration)
+
+This is the part that connects Kamacu's spawn engine (v1.10) to the new MCP subcommand. At task spawn, after the worktree is created and before the agent CLI starts, Kamacu writes the agent's MCP config file into the worktree root.
+
+### Claude Code (engine = `claude`)
+
+Claude Code looks for `.mcp.json` at the project (worktree) root — the project-scoped config (committed per VCS, but each worktree gets its own copy). Shape verified from `code.claude.com/docs/en/mcp` (2026-07-21):
+
 ```json
-{"number":1457,"title":"feat(metrics): ...","author":{"login":"alberto-miranda","is_bot":false},
- "headRefName":"COMP-1819/provider-request-metrics","baseRefName":"master","isDraft":false,
- "reviewDecision":"REVIEW_REQUIRED","additions":1993,"deletions":32,
- "headRefOid":"7b80ca5a514d68e57a88d8fa680da330d67c7624",
- "headRepositoryOwner":{"login":"seqeralabs"},"isCrossRepository":false,
- "updatedAt":"2026-06-12T17:58:09Z","url":"https://github.com/seqeralabs/fusion/pull/1457"}
+{
+  "mcpServers": {
+    "kamacu": {
+      "type": "stdio",
+      "command": "kamacu",
+      "args": ["mcp", "serve"],
+      "env": {
+        "KAMACU_HOOK_TOKEN": "<inherited-from-spawn-env>",
+        "KAMACU_SESSION_ID": "<task-session-uuid>",
+        "KAMACU_HOOK_BASE": "http://127.0.0.1:7333"
+      }
+    }
+  }
+}
 ```
 
-Field-by-field (all present in `gh pr list --json` on 2.82.0; confirmed returning data):
+Notes:
+- `type: "stdio"` is the implicit default (an entry without `type` is read as stdio) but explicit is safer.
+- `${VAR}` and `${VAR:-default}` expansion is supported in `command`/`args`/`env`. Useful if Kamacu wants to write the file once with `${KAMACU_HOOK_TOKEN}` and let the agent CLI expand the env at spawn — but writing the literal values at task-spawn time is simpler and matches how the existing hook-token env injection works.
+- Claude Code sets `CLAUDE_PROJECT_DIR` to the worktree root in the spawned server's env; Kamacu can read this as a fallback path resolver but it's redundant since `KAMACU_SESSION_ID` already disambiguates.
+- Reserved server names to avoid: `workspace`, `claude-in-chrome`, `computer-use`, `Claude Preview`, `Claude Browser`. `kamacu` is safe.
 
-| `--json` field | Card use |
-|----------------|----------|
-| `number` | PR id, also the arg to `gh pr view` / fetch |
-| `title` | card title |
-| `author` (object: `login`, `name`, `is_bot`, `id`) | "by @login" |
-| `headRefName` | branch label; informs the local review branch name |
-| `baseRefName` | "→ base" label |
-| `isDraft` | draft badge / dim |
-| `reviewDecision` | `REVIEW_REQUIRED` / `APPROVED` / `CHANGES_REQUESTED` / `""` — status pill |
-| `statusCheckRollup` (array of CheckRun/StatusContext: `conclusion`, `status`, `name`, `workflowName`) | CI pass/fail/pending dot. Roll up in the backend to one of pass/fail/pending; do not ship the raw array to the browser. |
-| `additions`, `deletions` | "+838 −2" diffstat |
-| `updatedAt` | sort key + "updated Xh ago" |
-| `url` | open-in-browser link (reuse `@xterm/addon-web-links` philosophy; just an `<a>`) |
-| `headRepositoryOwner.login` | fork owner; with `isCrossRepository` distinguishes forks |
-| `headRepository` (`name`; `nameWithOwner` is **empty for same-repo PRs**) | fork repo name when cross-repo |
-| `isCrossRepository` | **the reliable fork flag** (`true` ⇒ head is a fork) |
-| `headRefOid` | exact head commit SHA — pre-resolves the worktree checkout and lets the poller detect "PR got new commits" |
+### opencode (engine = `opencode`)
 
-Why `gh pr list` and not `gh search prs`:
-- `gh pr list` is scoped to one repo (the linked project repo) — exactly the Review column's scope.
-- Its `--json` set is **rich** (includes `statusCheckRollup`, `additions/deletions`, `reviewDecision`, `headRefName`, `headRefOid`). `gh search prs --json` is **poor** by comparison: only `number, title, repository, state, isDraft, labels, author, url, createdAt, updatedAt, ...` — **no `headRefName`, no `statusCheckRollup`, no diffstat, no `reviewDecision`, no `headRefOid`** (verified from `gh search prs --help`). You'd then need a second `gh pr view` per card anyway.
-- **Rate budget:** `gh pr list` consumes the **core** budget (verified `rate_limit.resources.core` = 5000/hr). `gh search prs` consumes the **search** budget = **30 requests/min** (verified `rate_limit.resources.search.limit` = 30) — far too tight for an auto-poller across multiple linked projects.
+opencode looks for `opencode.json` (or `.jsonc`) at the workspace root. Shape verified from `opencode.ai/docs/mcp-servers` (2026-07-21):
 
-`review-requested:@me` is a GitHub server-side search qualifier (long predates the CLI). Verified it returns the authenticated user's review queue on a real repo. `@me` resolves server-side to the `gh`-authenticated user, so Kangent never needs to know the username.
-
-### 2. Single-PR detail for the auto-cleanup-on-merge/close poll
-
-```bash
-gh pr view <number> \
-  --repo <owner>/<repo> \
-  --json number,state,closed,closedAt,mergedAt,mergeCommit,headRefOid,headRefName,baseRefName,isCrossRepository,headRepositoryOwner
-```
-
-Verified output:
 ```json
-{"number":13642,"state":"OPEN","closed":false,"closedAt":null,"mergedAt":null,"mergeCommit":null,
- "headRefOid":"a74367d8...","headRefName":"...","baseRefName":"trunk","isCrossRepository":false}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "kamacu": {
+      "type": "local",
+      "command": ["kamacu", "mcp", "serve"],
+      "environment": {
+        "KAMACU_HOOK_TOKEN": "<inherited-from-spawn-env>",
+        "KAMACU_SESSION_ID": "<task-session-uuid>",
+        "KAMACU_HOOK_BASE": "http://127.0.0.1:7333"
+      },
+      "enabled": true
+    }
+  }
+}
 ```
 
-**Decision logic for the reaper:** key off `state`, which is `OPEN` | `CLOSED` | `MERGED`.
-- `state == "MERGED"` ⇒ merged (also `mergedAt`/`mergeCommit` populated).
-- `state == "CLOSED"` ⇒ closed-without-merge (also `closed:true`, `closedAt` set, `mergedAt:null`).
-- `state == "OPEN"` ⇒ still in review; keep the worktree.
+**Critical differences from Claude Code's shape** (these are easy to get wrong):
+| Field | Claude Code (`.mcp.json`) | opencode (`opencode.json`) |
+|-------|--------------------------|------------------------------|
+| Top-level key | `mcpServers` | `mcp` |
+| Server type for stdio | `"stdio"` | `"local"` |
+| Command shape | `"command": "kamacu"` + `"args": ["mcp", "serve"]` | `"command": ["kamacu", "mcp", "serve"]` (single array) |
+| Env vars key | `"env"` | `"environment"` |
+| Expansion | `${VAR}` / `${VAR:-default}` | `{env:VAR}` (different syntax — `opencode.ai/docs/config`) |
 
-**Caveat (verified):** `gh pr view --json` has a `merged`-related field? **No top-level boolean named `merged` is exposed** in the `--json` field list on 2.82.0 — the available fields are `state, closed, closedAt, mergedAt, mergeCommit, mergedBy` (no bare `merged`). Use `state` (or `mergedAt != null`) for the merged test; do **not** request a `merged` field (gh will error on an unknown field name). This corrects a common assumption.
+A custom-engine agent (`engine: custom`) has no first-class MCP discovery mechanism in Kamacu v1.11 — those CLIs are user-defined and may or may not speak MCP. Leave their config alone; if the user's custom CLI happens to consume `.mcp.json` (some do), they can drop one in the worktree themselves.
 
-The merge/close poll can ride the **same** auto-poll loop as the Review column list (paused-when-hidden), or run server-side on the existing Done-TTL-reaper-style background goroutine — either way, removal stays gated on the existing dirty-tree + running-session gates, and the branch is kept (consistent with the project's worktree-cleanup rules).
-
-### 3. Check out the PR branch into the (already-created) worktree directory
-
-**Recommendation: resolve the ref yourself and reuse the existing `git worktree` service. Do NOT use `gh pr checkout`.**
-
-Why `gh pr checkout` is the wrong tool here (verified from `gh pr checkout --help`):
-- Signature is `gh pr checkout [<number>|<url>|<branch>] [-b|--detach|--force|--recurse-submodules]`. **There is no target-directory argument.** It checks out *into the working directory of the repo it's run from* (`cmd.Dir`) by switching the current branch — it is built for the "I'm in my clone, put me on this PR" flow, not "materialize this PR into a separate, pre-created worktree dir."
-- For **fork** PRs it adds the fork as a remote and fetches the contributor's branch — extra remote-management state in the user's real checkout, and failure modes (fork deleted, branch force-pushed) that you'd have to detect and recover from.
-- It would mutate the *project's primary checkout*, which Kangent must never disturb.
-
-**The recommended sequence (verified end-to-end against a real `cli/cli` PR, including the worktree-dir-must-be-created-by-us constraint):**
-
-```bash
-# Run with cmd.Dir = the project repo root (same as every other worktree op).
-# <n>   = PR number from step 1
-# <dir> = the worktree path Kangent assigns (under the configured worktree base)
-
-# 1. Fetch the PR head into a Kangent-namespaced local ref.
-#    refs/pull/<n>/head is a GitHub server-side ref that resolves to the PR's head
-#    commit REGARDLESS of whether the head is a fork — no fork remote needed.
-git fetch origin "refs/pull/<n>/head:refs/kangent/pr-<n>"
-
-# 2. Create the worktree on that ref with a named local review branch.
-#    (Use the existing worktree-create code path; this is just a different base ref
-#     and a PR-derived branch name instead of task/<slug>-<id>.)
-git worktree add -b "review/pr-<n>" "<dir>" "refs/kangent/pr-<n>"
-```
-
-Verified result: the new worktree's `HEAD` equals the PR's `headRefOid` from step 1 (`a74367d8...` matched exactly), it carries a clean named branch `review/pr-<n>`, and it appears normally in `git worktree list --porcelain` (the format the existing service already parses):
-```
-worktree /.../pr-worktree
-HEAD a74367d8282228856f9edc6bf4d2631545cbb354
-branch refs/heads/review/pr-13642
-```
-
-Notes / variants:
-- **Detached vs named branch:** prefer `-b review/pr-<n>` (named) so the diff tab's merge-base logic and the worktree-list parser behave like a normal task; `--detach` worktrees show `detached HEAD` in porcelain and complicate the existing UI. (`git worktree add --detach <dir> <oid>` also works and is the pure-OID fallback if a branch-name collision occurs.)
-- **Origin remote name:** Kangent should resolve the actual remote name rather than hard-coding `origin` (most clones use `origin`, but parse `git remote` or use `git rev-parse --abbrev-ref --symbolic-full-name @{u}` / `git remote get-url`). For GitHub repos the pull ref lives on whichever remote points at the PR's base repo.
-- **Fork PRs need no special-casing** with this approach — that's the whole point of `refs/pull/<n>/head`. (Confirmed 7/20 sampled `cli/cli` open PRs were `isCrossRepository:true`; the pull-ref fetch is identical for them.)
-- **Branch-name collision / re-open:** if `review/pr-<n>` already exists from a prior review, either reuse it (`git worktree add <dir> review/pr-<n>` without `-b`, then `git reset --hard refs/kangent/pr-<n>` if you want to fast-forward) or fall back to `--detach`. Keep it simple: the milestone says cleanup keeps the branch, so a re-open can reuse it.
-- **Cleanup** uses the existing `git worktree remove` path (gated), keeping the `review/pr-<n>` branch and the `refs/kangent/pr-<n>` ref (or prune the ref — cheap either way).
-
-### 4. Auth detection, presence, and rate-limit surfacing
-
-**Presence:** `exec.LookPath("gh")` (same call-time pattern Kangent already uses for the tmux dropdown). Missing ⇒ hide all GitHub UI / report "gh not installed".
-
-**Auth state — exit codes (verified via `gh help exit-codes` + `gh auth status --help`):**
-
-```bash
-gh auth status            # exit 0 = authed; exit 1 = an account has auth issues; exit 4 = requires authentication
-gh auth status --active   # only the active account
-gh auth status --json hosts   # ALWAYS exits 0 (unless fatal); inspect JSON for issues — better for programmatic use
-```
-
-- Exit **0** ⇒ authenticated; proceed.
-- Exit **4** ⇒ "requires authentication" — show the degrade banner ("Run `gh auth login`").
-- Exit **1** ⇒ an account has an auth problem (e.g. token scope/expiry) — degrade with the stderr message.
-- `gh auth status --json hosts` is the cleaner programmatic probe: it exits 0 even on auth issues and returns a `hosts` object you can inspect, so you parse state rather than branch on exit codes. (Available on 2.82.0; introduced via cli/cli issue #8637.)
-
-Verified on host: `gh auth status` ⇒ `✓ Logged in to github.com account ... (keyring)`, exit 0; scopes include `repo, read:org`.
-
-**Rate-limit surfacing (optional, nice-to-have):**
-```bash
-gh api rate_limit --jq '.resources.core, .resources.search'
-# core:   {"limit":5000,"remaining":...,"reset":<epoch>,"used":...}   <- pr list / pr view live here
-# search: {"limit":30,  "remaining":...,"reset":<epoch>,"used":...}    <- gh search prs lives here (why we avoid it)
-```
-Every `gh api` (and the GraphQL calls behind `gh pr list/view`) also returns `X-RateLimit-Remaining` / `X-RateLimit-Reset` headers (verified via `gh api -i`); if you ever call `gh api` directly you can read them with `-i`. For the degrade UX, mirroring the quota indicator's "best-effort, show stale, back off on failure" model is sufficient — explicit rate-limit polling is optional.
+---
 
 ## Installation
 
 ```bash
-# Nothing to install. gh is a HOST dependency (soft), already present:
-gh --version   # gh version 2.82.0 (2025-10-15)   <-- verified floor
+# Add the SDK to the existing Go module
+go get github.com/modelcontextprotocol/go-sdk@v1.6.1
 
-# No Go module additions:
-#   the new internal/github package uses only os/exec, encoding/json, log/slog (all stdlib)
-#   and reuses the existing git-worktree service.
+# Verify
+go mod tidy && go build ./...
 
-# No npm additions:
-#   Review column + PR cards reuse existing shadcn card/column + TanStack Query.
+# Transitive deps pulled in (verified from the v1.6.1 go.mod):
+#   github.com/google/jsonschema-go v0.4.3
+#   github.com/yosida95/uritemplate/v3 v3.0.2
+#   github.com/segmentio/encoding v0.5.4 (+ asm v1.1.3 indirect)
+#   golang.org/x/oauth2 v0.35.0   (only used by auth sub-packages, NOT by stdio-only consumers)
+#   golang.org/x/tools v0.42.0
+#   github.com/golang-jwt/jwt/v5 v5.3.1  (only used by auth sub-packages)
+#   golang.org/x/sys (already in go.mod via creack/pty et al.)
 ```
+
+No npm additions — v1.11 is Go-backend-only per the milestone brief. No frontend framework changes needed; the React app already talks to the existing HTTP API which the MCP subcommand will reuse unchanged.
+
+---
 
 ## Alternatives Considered
 
 | Recommended | Alternative | When to Use Alternative |
 |-------------|-------------|-------------------------|
-| Shell out to `gh` | `github.com/google/go-github` v74 (REST) or `shurcooL/githubv4` (GraphQL) + a Go OAuth/token flow | Only if Kangent ever needed to **store its own token**, run **without `gh` installed**, or do high-volume API work. None apply: it's single-user, local, `gh` is present and authed, and the whole project philosophy is "drive real CLIs." A Go GitHub lib would force Kangent to own credential storage/refresh — the exact thing the milestone explicitly rules out. |
-| `gh pr list --search "review-requested:@me"` (per repo) | `gh search prs --review-requested=@me` (cross-repo) | If a future milestone wants a *global* "all my review requests across every repo" view independent of linked projects. For the per-linked-project Review column it's wrong: poorer JSON fields, and the 30/min search rate budget. |
-| Self-resolve `refs/pull/<n>/head` + `git worktree add` | `gh pr checkout <n>` (with `cmd.Dir` = a fresh clone) | If you wanted gh to manage fork remotes for you AND you were operating in a normal single-checkout clone (not a worktree). Not applicable: Kangent pre-creates the worktree dir and must not touch the primary checkout. |
-| Named review branch `review/pr-<n>` | `git worktree add --detach <dir> <headRefOid>` | If a branch name collides or you explicitly want a throwaway detached review with no local branch. Detached HEAD complicates the existing porcelain parser and diff/merge-base UX, so named branch is the default. |
-| `gh auth status` exit codes | `gh auth status --json hosts` | Use the `--json` form when you want to *parse* state without exit-code branching (it always exits 0). Use plain exit codes for a quick "is it usable" gate. Both work on 2.82.0; pick one consistently. |
+| **Official `modelcontextprotocol/go-sdk` v1.6.1** | `github.com/mark3labs/mcp-go` v0.56.0 | If you specifically want the builder-pattern API (`mcp.NewTool("x", mcp.WithString("y", mcp.Required()))` instead of typed-struct handlers), or need one of its batteries-included features for an HTTP/SaaS deployment (CORS, OAuth Protected Resource Metadata endpoint, DNS-rebinding protection, OpenTelemetry tracing). None of these apply to a localhost stdio bridge — see "Why NOT mcp-go" below. |
+| Official go-sdk | `github.com/metoro-io/mcp-golang` | No reason in 2026. The metoro SDK was an early community effort; the official README acknowledges it as a viable alternative but it's largely dormant now that the official SDK exists. Smaller community, no conformance tests. |
+| Official go-sdk | `github.com/ThinkInAIXYZ/go-mcp` | Same — early community SDK, smaller adoption. The official SDK supersedes it. |
+| Official go-sdk | **Hand-rolled stdio JSON-RPC** | See dedicated section below — technically feasible for a tools-only v1 server, but a false economy. Only justified if you're building for a wildly resource-constrained target or want to learn the protocol internals. |
+| `mcp.NewServer` + `server.Run(ctx, &mcp.StdioTransport{})` | Mount MCP inside the existing Kamacu HTTP server on `/mcp` (Streamable HTTP transport) | When (if) a future milestone exposes Kamacu as an MCP server to *external* editors (Claude Desktop, Cursor, VS Code). That's explicitly out of scope for v1.11 per PROJECT.md (Out of Scope: "MCP server for external AI editors"). Stdio is the right transport for agents spawned *inside* Kamacu because the agent CLI is already a subprocess Kamacu owns — adding an HTTP listener gains nothing and adds auth surface. |
+| Typed-struct handlers via `mcp.AddTool` | Untyped handlers via `s.AddTool(tool, func(ctx, req) (...))` + raw `map[string]any` args | If a tool's input schema is so dynamic it can't be expressed as a Go struct (e.g., user-defined shapes from settings). All Kamacu tools have fixed shapes — use typed handlers for the auto-generated JSON schema and input validation. |
+
+---
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `go-github` / `githubv4` / any Go GitHub SDK | Forces Kangent to own a token (storage + refresh) — explicitly out of scope; contradicts the "shell out to real CLIs, no stored creds" philosophy; adds a dependency for zero benefit at single-user localhost scale. | `gh` CLI shell-out |
-| Storing a PAT / OAuth token in SQLite or env | Out of scope per PROJECT.md; `gh` already holds creds in the OS keyring and handles refresh/SSO. | Let `gh` own auth |
-| `gh pr checkout` for the worktree flow | No target-dir arg (checks out into `cmd.Dir`, mutating the primary checkout); adds fork remotes; harder to make idempotent for a pre-created worktree. | `git fetch origin refs/pull/<n>/head:<ref>` + existing `git worktree add` |
-| `gh search prs` for the per-repo polling column | Sparse `--json` fields (no `headRefName`/`statusCheckRollup`/diffstat/`reviewDecision`/`headRefOid`) ⇒ needs a second call per card; consumes the **30/min** search rate budget. | `gh pr list -R <repo> --search "review-requested:@me" --json <rich set>` |
-| Requesting a `merged` boolean field from `gh pr view --json` | No top-level `merged` field exists in 2.82.0's field list; gh errors on unknown field names. | `state` (`MERGED`/`CLOSED`/`OPEN`) or `mergedAt != null` |
-| Hard-coding the remote as `origin` blindly | Most clones use `origin`, but Kangent points at user repos that may differ. | Resolve the remote (`git remote`, upstream of base branch) before the pull-ref fetch |
-| Parsing human-readable `gh`/`git` output | Same trap the project already avoids for `git worktree list`. | Always `--json` (gh) / `--porcelain` (git) |
-| New npm DnD/state libs for the Review column | The column is a read-only list, not draggable; PR cards never enter the kanban flow (settled decision). | Reuse existing card/column components + one TanStack Query query |
+| `github.com/mark3labs/mcp-go` for **this milestone** | Three reasons. (1) **Not stable-tagged** — current is v0.56.0, still pre-v1, so the author reserves the right to break APIs between minor versions. Kamacu would be opting into churn. (2) **Its "batteries"** (CORS, OAuth Protected Resource Metadata, DNS rebinding protection, OpenTelemetry tracing, panic recovery, task-augmented tools, completion providers, per-session tools) are aimed at HTTP/SaaS deployments — a stdio bridge to localhost uses none of them. (3) **It's behind on the spec** — supports `2025-11-25` while the official SDK has a pre-release supporting `2026-07-28`. Its README is candid: "🚨 🏗️ MCP Go is under active development, as is the MCP specification itself." | `github.com/modelcontextprotocol/go-sdk` v1.6.1 |
+| Hand-rolling the MCP stdio wire protocol | Honest evaluation: stdio MCP is newline-delimited JSON-RPC 2.0 — *thin*. A tools-only server is ~300 LOC (initialize/initialized handshake, tools/list, tools/call, ping, notifications/cancelled). BUT: (a) the spec is mid-rewrite — `2026-07-28` removes `initialize`, adds `server/discover`, replaces notifications with a `subscriptions/listen` stream, introduces MRTR for elicitation/sampling/roots; (b) edge cases are easy to get wrong — JSON-RPC error codes (`-32602` Invalid params, `-32601` Method not found, `-32002` Resource not found), cancellation propagation via `notifications/cancelled` + `context.Context`, progress tokens, batched requests; (c) no conformance tests means bugs surface only against real clients; (d) the official SDK's transitive deps are all pure Go (no CGO, no system libs), so the "zero deps" benefit is marginal. Net: the SDK costs ~4 small transitive deps and saves ongoing spec-chase work. | The official SDK |
+| Any MCP SDK that pulls in CGO or a heavy framework | Confirmed: both viable candidates (official + mcp-go) are pure Go. The official SDK's deps (jsonschema-go, uritemplate, segmentio/encoding) are all pure Go. | The official SDK |
+| Exposing Kamacu as an HTTP/SSE MCP server for v1.11 | Out of scope per PROJECT.md ("MCP server for external AI editors" is a future milestone). Stdio is the right transport for agents spawned inside Kamacu — they're already subprocesses. Adding an HTTP listener gains nothing and adds the spec-mandated DNS-rebinding + Origin-header-check surface. | stdio MCP subcommand |
+| The `golang-jwt/jwt/v5` and `golang.org/x/oauth2` transitive deps *as code* | They appear in go.mod because the SDK's `auth` / `oauthex` sub-packages reference them. Kamacu doesn't use those sub-packages (auth is the existing envelope token). Do NOT import them; `go mod tidy` keeps them in go.mod but they are not compiled into the binary. | The existing `X-Kamacu-Token` envelope auth |
+| Mounting the MCP server inside the existing Kamacu binary on a goroutine | The MCP subcommand MUST be a separate process spawned by the agent CLI — the agent CLI is the MCP *client*, Kamacu's `kamacu mcp serve` is the MCP *server*. A stdio MCP server is fundamentally a process whose stdin/stdout the client owns. Embedding it in the long-lived Kamacu server would require an HTTP/SSE transport, which is the wrong choice for v1.11. | `kamacu mcp serve` as a dedicated subcommand of the existing binary |
+| Logging to stdout in the MCP subcommand | Stdio MCP servers MUST NOT write anything to stdout that isn't a valid MCP message — the spec is explicit. Any stray `fmt.Println` corrupts the JSON-RPC stream and breaks the agent connection. | `log/slog` to stderr (the existing project logger pattern) |
+
+---
 
 ## Stack Patterns by Variant
 
-**If the linked repo's PR head is a fork (`isCrossRepository: true`):**
-- No special handling. `git fetch origin refs/pull/<n>/head` resolves the fork's head commit via the base repo's server-side pull ref. (Verified across 7 real fork PRs.) Use `headRepositoryOwner.login` only for display ("from @forkowner").
+**If the agent engine is Claude Code (default):**
+- Write `.mcp.json` at the worktree root at task-spawn time with the shape above.
+- Use `KAMACU_HOOK_TOKEN` literal in the file (already secret per-process) OR `${KAMACU_HOOK_TOKEN}` if you want the agent CLI to expand its own env. Literal is simpler and matches the existing hook-token injection.
 
-**If `gh` is missing or unauthenticated:**
-- Degrade like the quota indicator: `LookPath` fails ⇒ hide GitHub UI; `gh auth status` non-zero ⇒ show a one-line "Connect GitHub via `gh auth login`" notice. Never block the board; the global toggle (default on) plus this runtime check are independent gates.
+**If the agent engine is opencode:**
+- Write `opencode.json` at the worktree root. Remember the three shape differences from Claude Code: top-level `mcp` not `mcpServers`, `type: "local"` not `"stdio"`, `command` as a single array, env under `environment` not `env`.
 
-**If a project has no linked GitHub repo:**
-- No Review column for that project. The column is driven entirely by the per-project `github_repo` config (new nullable column) AND the global `github_integration_enabled` setting.
+**If the agent engine is `custom`:**
+- Don't write any MCP config file by default. Custom agents may not speak MCP at all. Document the expected file shape per-CLI so users can opt in.
 
-**If the same PR is re-reviewed after a prior cleanup (branch kept):**
-- The `review/pr-<n>` branch still exists; re-attach a worktree to it (skip `-b`) or `--detach` to the fresh `headRefOid`. Refetch `refs/pull/<n>/head` first so you get any new commits (compare `headRefOid` to the stored one).
+**If the inherited `KAMACU_HOOK_TOKEN` is missing or expired:**
+- The MCP subcommand should start (so `/mcp list` from the agent shows it) but every tool call returns an MCP error result (`*mcp.CallToolResult` with `IsError: true` and a clear message pointing to restart). Do NOT crash-loop the subcommand — the agent CLI may give up after N restarts and the user loses the whole surface.
+
+**If a future milestone wants external-editor MCP (Claude Desktop / Cursor):**
+- Add a `kamacu mcp serve --transport http` mode using the same SDK's `StreamableHTTPHandler`. The handler registrations don't change — only the transport. This is exactly the stdio→HTTP upgrade path the SDK is designed for. Park as future work.
+
+---
 
 ## Version Compatibility
 
-| Component | Compatible With | Notes |
+| Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| `gh` 2.82.0 (host floor) | `gh pr list --search --json {…,statusCheckRollup,headRefOid,reviewDecision,headRepositoryOwner,isCrossRepository}` | All fields/flags **verified returning data** on 2.82.0. Field set is additive across releases — re-check `gh pr list --help` only if you adopt newer fields. |
-| `gh` 2.82.0 | `gh auth status --json hosts`, exit codes 0/1/4 | `--json hosts` present and working; exit-code contract per `gh help exit-codes`. |
-| `gh pr checkout` (not used) | — | Documented for completeness; intentionally avoided. |
-| `git worktree add -b <branch> <dir> <ref>` | any modern git (worktrees stable since git 2.5; `--porcelain` list parsing already in use) | The PR-checkout path is a parameter change to the existing worktree service, not a new git feature. |
-| `refs/pull/<n>/head` fetch | GitHub.com (and GHES) | Server-side ref, fork-agnostic; verified fetch returns the PR's `headRefOid`. |
-| New code (`internal/github`) | stdlib only (`os/exec`, `encoding/json`, `log/slog`) | No new go.mod entries; no `CGO`. |
-| Frontend | existing React 19 / TanStack Query 5 / shadcn / Tailwind 4 | No new npm deps. |
+| `github.com/modelcontextprotocol/go-sdk` v1.6.1 | **Go 1.25.0+** (Kamacu's `go 1.26` is fine) | Verified from the v1.6.1 `go.mod` raw file on GitHub. Go 1.26 is well within the supported window — Go's policy is the latest two major versions. |
+| `github.com/modelcontextprotocol/go-sdk` v1.6.1 | **MCP spec 2025-11-25** (current published) | Per the README's Version Compatibility table, v1.4.0+ supports 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05. |
+| `github.com/modelcontextprotocol/go-sdk` v1.7.0-pre.3 | MCP spec **2026-07-28** | Pre-release; not for v1.11 adoption. Tracks the in-progress spec rewrite. Useful to know the SDK is keeping up — when `2026-07-28` finalises and the SDK ships a stable v1.7.0, Kamacu can upgrade. |
+| `github.com/modelcontextprotocol/go-sdk` v1.6.1 | **Claude Code** (current, ~v2.1.x) | Claude Code negotiates protocol version during initialize; falls back gracefully. Verified indirectly via the SDK's own conformance test suite, which exercises the same handshake. |
+| `github.com/modelcontextprotocol/go-sdk` v1.6.1 | **opencode** (current) | Same handshake; opencode uses the same MCP spec. |
+| `github.com/modelcontextprotocol/go-sdk` v1.6.1 | Kamacu's existing `coder/websocket` v1.8.14, `creack/pty` v1.1.24, `modernc.org/sqlite` v1.52.0, `pressly/goose/v3` v3.27.1 | Zero overlap in transitive deps. The SDK brings only its own small set; `golang.org/x/sys` is shared (already present via pty/websocket/sys). No version conflicts anticipated. |
+| `mcp.AddTool` typed handlers | `encoding/json` reflection | Auto-derives JSON Schema from struct tags via `google/jsonschema-go`. Struct fields need `json:"name,omitempty"` and optionally `jsonschema:"description"` tags. |
+| Stdio transport | OS pipe semantics | Standard on Linux/macOS/Windows. The SDK handles non-blocking reads, partial frames, and graceful shutdown on stdin EOF. |
 
-## Integration points with existing code (for the roadmap author)
+---
 
-- **New leaf package** `internal/github` modeled on `internal/tmux` (CLI shell-out) + `internal/quota` (best-effort degrade): functions like `ListReviewRequested(ctx, repo) ([]PRSummary, error)`, `ViewPR(ctx, repo, n) (PRState, error)`, `AuthStatus(ctx) (AuthState, error)`, `Available() bool` (LookPath).
-- **Worktree service reuse:** add a "checkout existing ref into a worktree" variant alongside the current `task/<slug>-<id>` create path — same `git worktree add` machinery, different base ref + branch name (`review/pr-<n>`), preceded by the pull-ref `git fetch`. Cleanup uses the existing gated `git worktree remove`.
-- **DB (one goose migration):** `projects.github_repo` (nullable, `owner/repo`), `projects.description` (nullable); global setting `github_integration_enabled` (default `true`, served via the existing settings API); review-task rows tagged with `pr_number` + `pr_repo` + `pr_head_oid` so the merge/close poller knows what to check and can detect new commits.
-- **Polling:** reuse the Phase-7 auto-poll-paused-when-hidden pattern for the Review column (frontend TanStack Query) and the Phase-9 background-goroutine pattern (Done-TTL reaper) for server-side merge/close cleanup — both already exist.
-- **API surface:** ~2 new read endpoints (`GET /api/projects/{id}/pr-reviews`, optionally `GET /api/github/status`) + one action to open a PR as a review workspace (creates the worktree + a task-like view). No write endpoints (settled: no in-app GitHub writes).
+## Integration points with existing Kamacu code (for the roadmap author)
+
+- **New subcommand**: `kamacu mcp serve` — register in `cmd/kamacu/main.go` alongside the existing root command. Reads the `KAMACU_*` env vars, builds an `*http.Client` once, registers ~15 tools, calls `mcpSrv.Run(ctx, &mcp.StdioTransport{})`. Lives in a new `internal/mcp` package mirroring `internal/api` (REST handlers) and `internal/tmux` (CLI shell-out). Reuses the existing `internal/api/types.go` request/response structs where they exist (so the wire types stay in one place).
+- **New spawn hook in the v1.10 spawn engine**: at task spawn, *after* worktree creation but *before* the agent CLI starts, write the appropriate MCP config file (`.mcp.json` for Claude, `opencode.json` for opencode) into the worktree root. This is a new step in the existing `internal/spawn` flow, gated on the agent's engine. One small leaf package (`internal/mcpconfig`) owning the two writers.
+- **No schema migration**: all the MCP server needs is already in the DB. The MCP subcommand is a read-only-by-default view *of* Kamacu's API. The few state-changing tools (move task, create task, etc.) call the existing PATCH/POST endpoints; Kamacu's existing validation, worktree gating, and reaper logic apply unchanged.
+- **Session-terminal read access**: PROJECT.md says MCP exposes read + subscribe on terminals (no keystroke injection). This is the one genuinely new capability. Two new read endpoints on the existing Kamacu HTTP API (or extend the existing `/api/sessions/{id}` shape): `GET /api/sessions/{id}/snapshot` (current ring-buffer contents — the same bytes the WS replay sends on attach) and `GET /api/sessions/{id}/tail?since=N` (incremental). The MCP `read_terminal` tool calls the snapshot endpoint; the `subscribe_terminal` tool (if v1.11 ships it) can either poll tail or upgrade to a long-lived tool call streaming chunks via `mcp.ProgressNotification` — defer the streaming variant to a later phase if it's risky.
+- **Env-var reuse**: `KAMACU_HOOK_TOKEN`, `KAMACU_SESSION_ID`, `KAMACU_HOOK_BASE` are already injected at task spawn (v1.10). No new env vars. The MCP subcommand reads them once at startup.
+- **No frontend changes**: v1.11 is backend-only per the milestone brief. If the UI later wants to show MCP tool-call counts or errors per session, the existing `/api/agents/status` poll can be extended — out of scope for v1.11.
+
+---
+
+## Why the official SDK over mcp-go — the decision in one paragraph
+
+mcp-go has more GitHub stars (8.9k vs 4.8k) and a richer feature surface, and was the de-facto choice before May 2025 when the official SDK didn't exist. But for **a stdio bridge in a Go project that already ships as a single binary**, the official SDK is the right pick: (1) it's the canonical implementation under the `modelcontextprotocol` org, with conformance tests against the official suite; (2) it's v1.x stable-tagged while mcp-go is candidly pre-v1; (3) its API is more idiomatic Go (typed generic handlers with auto-derived JSON schemas vs mcp-go's runtime builder pattern); (4) it tracks the in-flux spec faster (pre-release already supports `2026-07-28`); (5) mcp-go's distinguishing features — CORS, OAuth Protected Resource Metadata, DNS rebinding protection, OTel, task tools, completion providers — are all aimed at HTTP/SaaS deployments and are dead weight in a localhost stdio bridge. The official SDK is the boring, correct choice.
+
+---
 
 ## Sources
 
-- Live execution on host `gh 2.82.0 (2025-10-15)` — `gh pr list --help`, `gh pr view --help`, `gh pr checkout --help`, `gh search prs --help`, `gh auth status --help`, `gh help exit-codes` (authoritative `--json` field lists + flags + exit-code contract) — **HIGH**
-- Live `gh pr list -R seqeralabs/fusion --search "review-requested:@me" --json …` and `gh pr list -R cli/cli …` against real repos (confirmed every recommended field returns data; confirmed `isCrossRepository` fork detection on 7 real fork PRs) — **HIGH**
-- Live `gh pr view 13642 -R cli/cli --json state,closed,closedAt,mergedAt,mergeCommit,headRefOid,…` (confirmed merge/close fields; confirmed no top-level `merged` field) — **HIGH**
-- Live end-to-end worktree proof: `git fetch origin refs/pull/13642/head:refs/kangent/pr-13642` + `git worktree add -b review/pr-13642 <dir> refs/kangent/pr-13642` against a real `cli/cli` clone — resulting worktree HEAD matched the PR's `headRefOid` exactly; `git worktree list --porcelain` clean — **HIGH**
-- Live `gh api rate_limit --jq '.resources.core, .resources.search'` + `gh api rate_limit -i` (core 5000/hr vs search 30/min; `X-RateLimit-*` headers) — **HIGH**
-- [cli.github.com/manual/gh_pr_list](https://cli.github.com/manual/gh_pr_list), [gh_pr_view](https://cli.github.com/manual/gh_pr_view), [gh_search_prs](https://cli.github.com/manual/gh_search_prs), [gh_auth_status](https://cli.github.com/manual/gh_auth_status) — official manual corroboration — **MEDIUM**
-- [cli/cli#8637](https://github.com/cli/cli/issues/8637) — `gh auth status --json` provenance — **MEDIUM**
+- [pkg.go.dev/github.com/modelcontextprotocol/go-sdk](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk) — v1.6.1 current stable, v1.7.0-pre.3 latest pre-release; license Apache-2.0/MIT; mcp package imported by 1,443 modules (verified 2026-07-21) — **HIGH**
+- [pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk@v1.6.1/mcp) — full API surface: `mcp.NewServer`, `mcp.AddTool` (generic), `mcp.StdioTransport`, `mcp.CallToolRequest/Result`, sessions, middleware, all transport types — **HIGH**
+- [raw go.mod for modelcontextprotocol/go-sdk v1.6.1](https://raw.githubusercontent.com/modelcontextprotocol/go-sdk/v1.6.1/go.mod) — `go 1.25.0`; transitive deps: jsonschema-go v0.4.3, uritemplate v3.0.2, segmentio/encoding v0.5.4, oauth2 v0.35.0, tools v0.42.0, golang-jwt/jwt/v5 v5.3.1 — **HIGH**
+- [raw go.mod for mark3labs/mcp-go v0.56.0](https://raw.githubusercontent.com/mark3labs/mcp-go/v0.56.0/go.mod) — `go 1.25.5`; transitive deps: jsonschema-go v0.4.2, uuid v1.6.0, santhosh-tekuri/jsonschema/v6, spf13/cast, testify, uritemplate v3.0.2 — **HIGH**
+- [github.com/modelcontextprotocol/go-sdk/releases](https://github.com/modelcontextprotocol/go-sdk/releases) — v1.6.1 (May 22 2026), v1.7.0-pre.1..pre.3 (Jun-Jul 2026) targeting `2026-07-28`; conformance tests added pre.2; OAuth session persistence pre.3 — **HIGH**
+- [github.com/mark3labs/mcp-go/releases](https://github.com/mark3labs/mcp-go/releases) — v0.56.0 (Jul 9 2026); v0.x lineage confirmed; supports spec 2025-11-25 only — **HIGH**
+- [raw examples/server/proxy/main.go from go-sdk v1.6.1](https://raw.githubusercontent.com/modelcontextprotocol/go-sdk/v1.6.1/examples/server/proxy/main.go) — the documented HTTP→HTTP MCP proxy pattern; structurally identical to Kamacu's stdio→HTTP bridge use case — **HIGH**
+- [modelcontextprotocol.io/specification/2025-06-18/basic/transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) — stdio = newline-delimited JSON-RPC over stdin/stdout (NOT Content-Length); server MAY write logs to stderr; Streamable HTTP is the alternative transport — **HIGH**
+- [code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp) — Claude Code `.mcp.json` shape, three scopes (local/project/user), `${VAR}` expansion, `CLAUDE_PROJECT_DIR`, reserved server names, `list_changed` support — **HIGH**
+- [opencode.ai/docs/mcp-servers](https://opencode.ai/docs/mcp-servers) — opencode `opencode.json` shape: `mcp` (not `mcpServers`), `type: "local"` (not `"stdio"`), `command` as array (not split), `environment` (not `env`); per-agent disable via `tools` glob — **HIGH**
+- [modelcontextprotocol.io/quickstart/server](https://modelcontextprotocol.io/quickstart/server) — the stdio "never log to stdout" rule is universal across all SDK quickstarts — **HIGH**
 
 ---
-*Stack research for: GitHub PR-review (`gh`-CLI) integration in a Go + React local single-binary app*
-*Researched: 2026-06-13*
+*Stack research for: MCP (Model Context Protocol) server capability in a Go-backend single-binary app — stdio bridge to an existing HTTP API*
+*Researched: 2026-07-21*
