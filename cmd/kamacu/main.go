@@ -11,6 +11,7 @@ import (
 func main() {
 	subcommands.Register(subcommands.HelpCommand(), "")
 	subcommands.Register(&serveCmd{}, "")
+	subcommands.Register(mcpCmd{}, "")
 
 	flag.Parse()
 	os.Exit(int(subcommands.Execute(context.Background())))
