@@ -77,7 +77,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 
 **Phase Numbering:** continues from v1.10's last phase (05). v1.11 = Phases 06–09.
 
-- [ ] **Phase 06: MCP Subcommand Foundation** — `kamacu mcp serve` stdio subcommand bridging to the Kamacu HTTP API, proven end-to-end through one exercised tool
+- [x] **Phase 06: MCP Subcommand Foundation** — `kamacu mcp serve` stdio subcommand bridging to the Kamacu HTTP API, proven end-to-end through one exercised tool (completed 2026-07-21)
 - [ ] **Phase 07: Tasks, Projects & Workspaces Tools** — full CRUD tool surface (13 tools) mirroring every action the SPA exposes
 - [ ] **Phase 08: Sessions & Terminal Read Access** — list/get sessions + snapshot + bounded live-tail (the milestone's risk center)
 - [ ] **Phase 09: PR Review Tools** — list pending/recently-reviewed + open_review, a thin layer over the v1.3 gh integration
@@ -96,7 +96,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
   3. A tool call routed through the bridge returns real Kamacu data using `KAMACU_HOOK_TOKEN` for auth — proving the bridge end-to-end via ONE read-only tool (e.g. `list_tasks` or `list_projects`). The chosen tool's production completion is credited in Phase 07; here it is the architecture proof.
   4. When `KAMACU_HOOK_BASE` is set, the subcommand connects to that URL; when unset, it defaults to `127.0.0.1:7333` and works without further configuration.
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans complete
 Plans:
 **Wave 1**
 
@@ -105,7 +105,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-02-mcp-serve-subcommand-PLAN.md — Build internal/mcp/ package (server.go + bridge.go), wire kamacu mcp serve via Pattern 2 nested Commander, register list_projects tool, ship SC2 malformed-tool unit test (D-08..D-12). Delivers SC1-SC4 + MCPPROC-01/02/03. Wave 2 (depends on 06-01).
+- [x] 06-02-mcp-serve-subcommand-PLAN.md — Build internal/mcp/ package (server.go + bridge.go), wire kamacu mcp serve via Pattern 2 nested Commander, register list_projects tool, ship SC2 malformed-tool unit test (D-08..D-12). Delivers SC1-SC4 + MCPPROC-01/02/03. Wave 2 (depends on 06-01).
 
 ### Phase 07: Tasks, Projects & Workspaces Tools
 
@@ -159,7 +159,7 @@ Plans:
 | 03. opencode engine spawn and activity-based status | v1.10 | 4/4 | Complete | 2026-07-07 |
 | 04. Gated status plugin unlocks waiting and idle | v1.10 | 2/2 | Complete | 2026-07-07 |
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
-| 06. MCP Subcommand Foundation | v1.11 | 2/3 | In Progress|  |
+| 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete   | 2026-07-21 |
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 0/TBD | Not started | — |
 | 08. Sessions & Terminal Read Access | v1.11 | 0/TBD | Not started | — |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
