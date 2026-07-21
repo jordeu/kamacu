@@ -88,13 +88,36 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated during roadmap creation) | | |
+| MCPPROC-01 (`kamacu mcp serve` stdio MCP subcommand via official Go SDK, bridging to Kamacu HTTP API) | Phase 06 | Pending |
+| MCPPROC-02 (authenticates to Kamacu HTTP API via `KAMACU_HOOK_TOKEN`) | Phase 06 | Pending |
+| MCPPROC-03 (locates Kamacu HTTP base URL via `KAMACU_HOOK_BASE`, default `127.0.0.1:7333`) | Phase 06 | Pending |
+| MCPTASK-01 (`list_tasks(project_id?)`) | Phase 07 | Pending |
+| MCPTASK-02 (`get_task(task_id)`) | Phase 07 | Pending |
+| MCPTASK-03 (`create_task(project_id, title, description?)` — worktree auto-created, agent NOT auto-started) | Phase 07 | Pending |
+| MCPTASK-04 (`update_task(task_id, title?, description?)` partial-PATCH) | Phase 07 | Pending |
+| MCPTASK-05 (`move_task(task_id, status)` via existing `/move`) | Phase 07 | Pending |
+| MCPTASK-06 (`delete_task(task_id)` — gated cleanup runs) | Phase 07 | Pending |
+| MCPSESS-01 (`list_sessions(project_id? or task_id?)` with status) | Phase 08 | Pending |
+| MCPSESS-02 (`get_session(session_id)` full detail) | Phase 08 | Pending |
+| MCPSESS-03 (`get_session_output(session_id, bytes?)` snapshot, read-only) | Phase 08 | Pending |
+| MCPSESS-04 (`subscribe_session_output(session_id, duration_seconds?)` bounded live tail; cancellation via `ctx.Done()` → `Session.Detach`; read-only) | Phase 08 | Pending |
+| MCPREV-01 (`list_pending_reviews(project_id?)` via v1.3 surface) | Phase 09 | Pending |
+| MCPREV-02 (`list_recently_reviewed(project_id?)` via v1.5 surface) | Phase 09 | Pending |
+| MCPREV-03 (`open_review(project_id, pr_number)` via v1.3 Phase 12 open-a-review) | Phase 09 | Pending |
+| MCPPROJ-01 (`list_projects(workspace_id?)`) | Phase 07 | Pending |
+| MCPPROJ-02 (`get_project(project_id)`) | Phase 07 | Pending |
+| MCPPROJ-03 (`create_project(name, repo_path_or_github_url, workspace_id?)` — folder or v1.4 managed-checkout) | Phase 07 | Pending |
+| MCPPROJ-04 (`update_project(project_id, …)` partial-PATCH) | Phase 07 | Pending |
+| MCPPROJ-05 (`delete_project(project_id)` — v1.4 gated delete runs) | Phase 07 | Pending |
+| MCPPROJ-06 (`list_workspaces` / `create_workspace` / `update_workspace` / `delete_workspace` via v1.9 surface) | Phase 07 | Pending |
+| MCPPROJ-07 (`move_project_to_workspace(project_id, workspace_id)` via v1.9 PATCH surface) | Phase 07 | Pending |
 
 **Coverage:**
-- v1.11 requirements: 21 total (MCPPROC×3 + MCPTASK×6 + MCPSESS×4 + MCPREV×3 + MCPPROJ×7)
-- Mapped to phases: 0 (roadmap will populate)
-- Unmapped: 21 ⚠️ (until roadmap is created)
+- v1.11 requirements: 23 total (MCPPROC×3 + MCPTASK×6 + MCPSESS×4 + MCPREV×3 + MCPPROJ×7) — _the prior "21" figure was an arithmetic miscount; per-category sums to 23_
+- Mapped to phases: 23/23 ✓
+- Unmapped: 0
+- Per-phase: Phase 06 = 3 (MCPPROC), Phase 07 = 13 (MCPTASK + MCPPROJ), Phase 08 = 4 (MCPSESS), Phase 09 = 3 (MCPREV)
 
 ---
 *Requirements defined: 2026-07-21*
-*Last updated: 2026-07-21 after initial v1.11 definition*
+*Last updated: 2026-07-21 — traceability populated during roadmap creation (Phases 06–09)*

@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-07-21T09:14:46.045Z"
 last_activity: 2026-07-21
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -15,15 +15,15 @@ progress:
 
 # Project State
 
-**Current focus:** Between milestones — v1.10 Configurable Agents shipped 2026-07-11. Next: `/gsd-new-milestone`.
+**Current focus:** v1.11 Kamacu MCP Server — roadmap defined (Phases 06–09). Next: `/gsd-plan-phase 06`.
 
-See: .planning/PROJECT.md (updated 2026-07-11)
+See: .planning/PROJECT.md (updated 2026-07-21)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent agent session you can open, leave, and reattach to from the browser.
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-07-11:
+Items acknowledged and deferred at milestone close on 2026-07-11 (carried over from v1.10 — none are v1.11 work):
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -34,11 +34,13 @@ Items acknowledged and deferred at milestone close on 2026-07-11:
 | quick_task | 260625-9db-the-bottom-status-bar-is-hidding-the-bot | unknown |
 | quick_task | 260626-hwd-add-an-opt-in-insecure-allow-remote-flag | unknown |
 
-Known verification overrides: 6 (all prior-milestone quick tasks, none v1.10)
+Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 06 of 09 (MCP Subcommand Foundation) — roadmap just defined, ready to plan
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-21 — Milestone v1.11 started
+Status: Ready to plan
+Last activity: 2026-07-21 — v1.11 roadmap created (4 phases, 23 requirements mapped)
+
+Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
