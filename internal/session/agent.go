@@ -20,7 +20,7 @@ const (
 // the manager mutex.
 type AgentConfig struct {
 	BaseURL   string // hook receiver origin, e.g. "http://127.0.0.1:7333"
-	Token     string // per-instance X-Kangent-Token value
+	Token     string // per-instance X-Kamacu-Token value
 	ClaudeBin string // "" -> exec.LookPath("claude") at spawn time
 }
 
@@ -60,7 +60,7 @@ func buildOverlayJSON(baseURL, token, kamacuSessionID string) string {
 	hook := overlayHook{
 		Type: "command",
 		Command: fmt.Sprintf(
-			"curl -s -m 3 -H 'X-Kangent-Token: %s' --data-binary @- %s/api/hooks/sessions/%s",
+			"curl -s -m 3 -H 'X-Kamacu-Token: %s' --data-binary @- %s/api/hooks/sessions/%s",
 			token, baseURL, kamacuSessionID,
 		),
 		Timeout: 5,

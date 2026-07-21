@@ -76,7 +76,7 @@ export const KamacuStatusPlugin = async ({ client }) => {
       await fetch(url, {
         method: 'POST',
         headers: {
-          'X-Kangent-Token': token,
+          'X-Kamacu-Token': token,
           'Content-Type': 'application/json',
         },
         body: payload,

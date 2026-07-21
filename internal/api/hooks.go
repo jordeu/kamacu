@@ -36,7 +36,7 @@ func (h *hookHandlers) receive(w http.ResponseWriter, r *http.Request) {
 	// Token first. An empty configured token rejects everything — the
 	// receiver must never run open (defense in depth; main always generates
 	// one). Constant-time compare keeps the gate timing-safe.
-	got := r.Header.Get("X-Kangent-Token")
+	got := r.Header.Get("X-Kamacu-Token")
 	if h.token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.token)) != 1 {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
