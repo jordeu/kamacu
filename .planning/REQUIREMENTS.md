@@ -42,8 +42,8 @@
 - [x] **MCPPROJ-03**: `create_project(name, repo_path_or_github_url, workspace_id?)` creates a project — folder path or `owner/name` triggers the existing v1.4 managed-checkout surface
 - [x] **MCPPROJ-04**: `update_project(project_id, name?, description?, github_repo?, icon_letters?, icon_color?)` partial-PATCH update
 - [x] **MCPPROJ-05**: `delete_project(project_id)` deletes a project — the existing v1.4 gated delete runs (folder projects byte-for-byte unchanged; managed projects all-or-nothing gated)
-- [ ] **MCPPROJ-06**: `list_workspaces` / `create_workspace(name)` / `update_workspace(workspace_id, name)` / `delete_workspace(workspace_id)` — workspace CRUD via the existing v1.9 surface (guarded delete keyed off `is_default` + non-empty `COUNT`)
-- [ ] **MCPPROJ-07**: `move_project_to_workspace(project_id, workspace_id)` transfers a project to another workspace via the existing v1.9 `PATCH /api/projects/{id}` surface
+- [x] **MCPPROJ-06**: `list_workspaces` / `create_workspace(name)` / `update_workspace(workspace_id, name)` / `delete_workspace(workspace_id)` — workspace CRUD via the existing v1.9 surface (guarded delete keyed off `is_default` + non-empty `COUNT`)
+- [x] **MCPPROJ-07**: `move_project_to_workspace(project_id, workspace_id)` transfers a project to another workspace via the existing v1.9 `PATCH /api/projects/{id}` surface
 
 ## v1.12+ Requirements (Deferred from v1.11)
 

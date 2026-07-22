@@ -78,7 +78,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 **Phase Numbering:** continues from v1.10's last phase (05). v1.11 = Phases 06–09.
 
 - [x] **Phase 06: MCP Subcommand Foundation** — `kamacu mcp serve` stdio subcommand bridging to the Kamacu HTTP API, proven end-to-end through one exercised tool (completed 2026-07-21)
-- [ ] **Phase 07: Tasks, Projects & Workspaces Tools** — full CRUD tool surface (13 tools) mirroring every action the SPA exposes
+- [x] **Phase 07: Tasks, Projects & Workspaces Tools** — full CRUD tool surface (13 tools) mirroring every action the SPA exposes (completed 2026-07-22)
 - [ ] **Phase 08: Sessions & Terminal Read Access** — list/get sessions + snapshot + bounded live-tail (the milestone's risk center)
 - [ ] **Phase 09: PR Review Tools** — list pending/recently-reviewed + open_review, a thin layer over the v1.3 gh integration
 
@@ -119,12 +119,12 @@ Plans:
   3. An agent can call the four workspace tools (`list_workspaces` / `create_workspace` / `update_workspace` / `delete_workspace`) and `move_project_to_workspace`, and the workspace switcher reflects the change — including the v1.9 guarded delete keyed off `is_default` + non-empty `COUNT`.
   4. Tool calls with invalid input (bad project_id, illegal workspace name, missing required fields) surface actionable MCP errors and produce no Kamacu state change — every existing validation gate applies unchanged through the bridge.
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans complete
 
 - [x] 07-01-endpoints-and-mcp-scaffold-PLAN.md
 - [x] 07-02-tasks-tools-PLAN.md
 - [x] 07-03-projects-tools-PLAN.md
-- [ ] 07-04-workspaces-tools-PLAN.md
+- [x] 07-04-workspaces-tools-PLAN.md
 
 ### Phase 08: Sessions & Terminal Read Access
 
@@ -165,6 +165,6 @@ Plans:
 | 04. Gated status plugin unlocks waiting and idle | v1.10 | 2/2 | Complete | 2026-07-07 |
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
 | 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete    | 2026-07-21 |
-| 07. Tasks, Projects & Workspaces Tools | v1.11 | 3/4 | In Progress|  |
+| 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete   | 2026-07-22 |
 | 08. Sessions & Terminal Read Access | v1.11 | 0/TBD | Not started | — |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
