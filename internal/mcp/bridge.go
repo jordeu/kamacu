@@ -66,33 +66,34 @@ func (b *bridge) do(ctx context.Context, method, path string, body io.Reader) (*
 	return b.client.Do(req)
 }
 
-// listProjects is the body of the list_projects tool handler. It calls
-// GET /api/projects unchanged (D-08 — the optional project_id arg is a
-// documented no-op today; Phase 07 will honor it) and returns the raw JSON
-// body as a single TextContent block (the agent's Discretion in CONTEXT.md —
-// raw passthrough keeps the bridge trivial and avoids forcing every Phase 07
-// tool to declare an output type).
+// call is the shared response-handling half every Phase 07 tool handler
+// delegates to (the per-resource files extract request args, build the path
+// and body, then call this). It encapsulates the Phase 06 listProjects shape:
+// b.do → defer Close → io.ReadAll(LimitReader) → transport-error wrap
+// ("kamacu bridge: %w") → non-200 wrap (D-05 — body passed as a raw string,
+// shape-agnostic per 07-RESEARCH Gap 2: the real Kamacu error shape is
+// {"error":"..."}, not {"status","message"}) → 200 TextContent passthrough.
 //
 // On transport error: returns a wrapped error (the SDK surfaces this as a
 // JSON-RPC error.code = -32603 response).
-// On non-200: returns a descriptive error (same JSON-RPC wrapping).
-// On 200: returns the body verbatim in a TextContent block.
-func (b *bridge) listProjects(ctx context.Context) (*mcp.CallToolResult, error) {
-	resp, err := b.do(ctx, http.MethodGet, "/api/projects", nil)
+// On non-200: returns a descriptive error with the raw body inlined.
+// On 200: returns the body verbatim in a single TextContent block.
+func (b *bridge) call(ctx context.Context, method, path string, body io.Reader) (*mcp.CallToolResult, error) {
+	resp, err := b.do(ctx, method, path, body)
 	if err != nil {
 		return nil, fmt.Errorf("kamacu bridge: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("kamacu GET /api/projects: read body: %w", err)
+		return nil, fmt.Errorf("kamacu %s %s: read body: %w", method, path, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("kamacu GET /api/projects: HTTP %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("kamacu %s %s: HTTP %d: %s", method, path, resp.StatusCode, string(respBody))
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			&mcp.TextContent{Text: string(body)},
+			&mcp.TextContent{Text: string(respBody)},
 		},
 	}, nil
 }

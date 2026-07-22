@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,14 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// newCallToolRequest constructs a *mcp.CallToolRequest with the given raw
+// JSON arguments (or nil for "no arguments"). The bridge handlers read
+// req.Params.Arguments as a json.RawMessage; passing nil mirrors the SDK's
+// zero value (no args key on the wire).
+func newCallToolRequest(args json.RawMessage) *mcpsdk.CallToolRequest {
+	return &mcpsdk.CallToolRequest{Params: &mcpsdk.CallToolParamsRaw{Arguments: args}}
+}
 
 // TestBridge_ListProjects_PassesThroughKamacuJSON stands up a Kamacu-shaped
 // HTTP test server returning a canned []Project JSON body, points a *bridge
@@ -35,7 +44,7 @@ func TestBridge_ListProjects_PassesThroughKamacuJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	b := &bridge{base: srv.URL, token: "test-token", client: &http.Client{Timeout: 10 * time.Second}}
-	res, err := b.listProjects(context.Background())
+	res, err := b.listProjects(context.Background(), newCallToolRequest(nil))
 	if err != nil {
 		t.Fatalf("listProjects: %v", err)
 	}
@@ -73,7 +82,7 @@ func TestBridge_ListProjects_KamacuReturnsNon200_ReturnsError(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
-	_, err := b.listProjects(context.Background())
+	_, err := b.listProjects(context.Background(), newCallToolRequest(nil))
 	if err == nil {
 		t.Fatal("listProjects: expected error for non-200, got nil")
 	}
@@ -88,12 +97,72 @@ func TestBridge_ListProjects_KamacuReturnsNon200_ReturnsError(t *testing.T) {
 // deterministic without depending on a specific Kamacu instance being up.
 func TestBridge_ListProjects_KamacuUnreachable_ReturnsError(t *testing.T) {
 	b := &bridge{base: "http://127.0.0.1:1", token: "t", client: &http.Client{Timeout: 2 * time.Second}}
-	_, err := b.listProjects(context.Background())
+	_, err := b.listProjects(context.Background(), newCallToolRequest(nil))
 	if err == nil {
 		t.Fatal("listProjects: expected transport error for unreachable Kamacu, got nil")
 	}
 	if !strings.Contains(err.Error(), "kamacu bridge:") {
 		t.Errorf("listProjects error message: want substring \"kamacu bridge:\", got %q", err.Error())
+	}
+}
+
+// TestBridge_ListProjects_WorkspaceIDAppendsQueryParam (D-02 / MCPPROJ-01):
+// when the caller supplies workspace_id in the CallToolRequest arguments, the
+// bridge appends ?workspace_id=N to GET /api/projects. The captured request
+// URL must have Path "/api/projects" and RawQuery "workspace_id=2".
+func TestBridge_ListProjects_WorkspaceIDAppendsQueryParam(t *testing.T) {
+	var (
+		gotPath string
+		gotRaw  string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotRaw = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"workspace_id":2}`))
+	if _, err := b.listProjects(context.Background(), req); err != nil {
+		t.Fatalf("listProjects with workspace_id=2: %v", err)
+	}
+	if gotPath != "/api/projects" {
+		t.Errorf("request URL.Path: want %q, got %q", "/api/projects", gotPath)
+	}
+	if gotRaw != "workspace_id=2" {
+		t.Errorf("request URL.RawQuery: want %q, got %q", "workspace_id=2", gotRaw)
+	}
+}
+
+// TestBridge_ListProjects_NoWorkspaceID_NoQueryParam (D-02 backward-compat):
+// when the caller supplies no arguments (or empty args), the bridge sends the
+// bare /api/projects path with NO query string — Phase 06 behavior preserved.
+func TestBridge_ListProjects_NoWorkspaceID_NoQueryParam(t *testing.T) {
+	var (
+		gotPath string
+		gotRaw  string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotRaw = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	if _, err := b.listProjects(context.Background(), newCallToolRequest(nil)); err != nil {
+		t.Fatalf("listProjects (no args): %v", err)
+	}
+	if gotPath != "/api/projects" {
+		t.Errorf("request URL.Path: want %q, got %q", "/api/projects", gotPath)
+	}
+	if gotRaw != "" {
+		t.Errorf("request URL.RawQuery: want empty (no args → no query), got %q", gotRaw)
 	}
 }
 

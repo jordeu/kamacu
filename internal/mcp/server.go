@@ -69,35 +69,19 @@ func (ServeCommand) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subc
 	return subcommands.ExitSuccess
 }
 
-// registerTools registers exactly ONE tool in Phase 06: list_projects (D-09
-// FINAL production code; Phase 07 inherits unchanged and ADDS the remaining
-// task/project/workspace tools on the same pattern). The low-level
-// Server.AddTool method is used with an explicit map[string]any schema —
-// NOT the typed generic AddTool helper from the SDK (06-RESEARCH.md
-// Anti-Patterns: the typed helper would force every Phase 07 tool to declare
-// a Go In struct mirroring its wire schema). The SDK v1.6.1 Tool.InputSchema
-// field is `any`; a plain map satisfies the type:"object" requirement
-// without jsonschema-go.
+// registerTools delegates to the per-resource registrars (D-07 split). Each
+// registrar (registerTaskTools / registerProjectTools / registerWorkspaceTools)
+// owns its s.AddTool calls for the tools in its resource; the bridge shared
+// helper (bridge.call) handles the response-shape half of every handler.
+//
+// The low-level Server.AddTool method is used with an explicit
+// map[string]any InputSchema — NOT the typed generic AddTool helper from the
+// SDK (06-RESEARCH.md Anti-Patterns). SDK v1.6.1's Tool.InputSchema field is
+// `any`; a plain map satisfies the type:"object" requirement without
+// jsonschema-go.
 func registerTools(s *mcp.Server, b *bridge) {
-	s.AddTool(
-		&mcp.Tool{
-			Name:        "list_projects",
-			Description: "List all Kamacu projects. Returns the raw JSON array from GET /api/projects. The optional project_id is currently a no-op (filtering arrives in Phase 07).",
-			// InputSchema MUST be a JSON Schema with type:"object" (Pitfall 2:
-			// AddTool panics otherwise). A plain map[string]any keeps the file
-			// readable without pulling in jsonschema-go's typed API.
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"project_id": map[string]any{
-						"type":        "integer",
-						"description": "Optional project id. Currently ignored — list_projects always returns all projects. Will be honored in Phase 07.",
-					},
-				},
-			},
-		},
-		func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return b.listProjects(ctx)
-		},
-	)
+	registerTaskTools(s, b)
+	registerProjectTools(s, b)
+	registerWorkspaceTools(s, b)
 }
+
