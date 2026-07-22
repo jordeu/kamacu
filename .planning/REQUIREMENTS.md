@@ -15,12 +15,12 @@
 
 ### Task Management (MCPTASK)
 
-- [ ] **MCPTASK-01**: `list_tasks(project_id?)` returns tasks, optionally scoped to a project
-- [ ] **MCPTASK-02**: `get_task(task_id)` returns full task detail (title, description, status, position, project)
-- [ ] **MCPTASK-03**: `create_task(project_id, title, description?)` creates a task — the existing surface auto-creates the worktree + branch; the agent is NOT auto-started (auto-start remains Out of Scope per PROJECT.md)
-- [ ] **MCPTASK-04**: `update_task(task_id, title?, description?)` partial-PATCH update
-- [ ] **MCPTASK-05**: `move_task(task_id, status)` moves a task between columns (To Do / In Progress / In Review / Done) via the existing `/move` surface
-- [ ] **MCPTASK-06**: `delete_task(task_id)` deletes a task (the existing gated cleanup runs)
+- [x] **MCPTASK-01**: `list_tasks(project_id?)` returns tasks, optionally scoped to a project
+- [x] **MCPTASK-02**: `get_task(task_id)` returns full task detail (title, description, status, position, project)
+- [x] **MCPTASK-03**: `create_task(project_id, title, description?)` creates a task — the existing surface auto-creates the worktree + branch; the agent is NOT auto-started (auto-start remains Out of Scope per PROJECT.md)
+- [x] **MCPTASK-04**: `update_task(task_id, title?, description?)` partial-PATCH update
+- [x] **MCPTASK-05**: `move_task(task_id, status)` moves a task between columns (To Do / In Progress / In Review / Done) via the existing `/move` surface
+- [x] **MCPTASK-06**: `delete_task(task_id)` deletes a task (the existing gated cleanup runs)
 
 ### Sessions & Terminal (MCPSESS)
 

@@ -119,10 +119,10 @@ Plans:
   3. An agent can call the four workspace tools (`list_workspaces` / `create_workspace` / `update_workspace` / `delete_workspace`) and `move_project_to_workspace`, and the workspace switcher reflects the change — including the v1.9 guarded delete keyed off `is_default` + non-empty `COUNT`.
   4. Tool calls with invalid input (bad project_id, illegal workspace name, missing required fields) surface actionable MCP errors and produce no Kamacu state change — every existing validation gate applies unchanged through the bridge.
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 - [x] 07-01-endpoints-and-mcp-scaffold-PLAN.md
-- [ ] 07-02-tasks-tools-PLAN.md
+- [x] 07-02-tasks-tools-PLAN.md
 - [ ] 07-03-projects-tools-PLAN.md
 - [ ] 07-04-workspaces-tools-PLAN.md
 
@@ -165,6 +165,6 @@ Plans:
 | 04. Gated status plugin unlocks waiting and idle | v1.10 | 2/2 | Complete | 2026-07-07 |
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
 | 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete    | 2026-07-21 |
-| 07. Tasks, Projects & Workspaces Tools | v1.11 | 1/4 | In Progress|  |
+| 07. Tasks, Projects & Workspaces Tools | v1.11 | 2/4 | In Progress|  |
 | 08. Sessions & Terminal Read Access | v1.11 | 0/TBD | Not started | — |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
