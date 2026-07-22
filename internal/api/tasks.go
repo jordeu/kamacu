@@ -179,6 +179,40 @@ func defaultBranchName(ctx context.Context, wt *worktree.Service, repo string) (
 	return wt.DefaultBranch(ctx, repo)
 }
 
+// list handles GET /api/tasks — the UNSCOPED task list. It is the bridge
+// target for list_tasks when project_id is omitted (D-01, MCPPROC-07 /
+// MCPTASK-01). It mirrors listByProject's SELECT with two changes:
+//   - the WHERE project_id = ? clause is dropped (no path id); and
+//   - the project-existence check is dropped (no project to look up).
+//
+// Everything else is verbatim: the source = 'manual' filter stays (PR reviews
+// keep off the board — GHREV-04), and the ORDER BY status, position ASC
+// ordering stays (board order is global across projects).
+func (h *taskHandlers) list(w http.ResponseWriter, r *http.Request) {
+	// GHREV-04: the unscoped list is MANUAL tasks only — PR reviews
+	// (source='github_pr') own a worktree/agent/diff but never render as cards.
+	rows, err := h.db.Query(`SELECT ` + taskColumns + ` FROM tasks WHERE source = 'manual' ORDER BY status, position ASC`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	tasks := []Task{}
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		tasks = append(tasks, t)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, tasks)
+}
+
 // listByProject handles GET /api/projects/{id}/tasks — the board fetch.
 func (h *taskHandlers) listByProject(w http.ResponseWriter, r *http.Request) {
 	pid, ok := pathID(w, r)

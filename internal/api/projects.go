@@ -123,9 +123,26 @@ func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	return p, err
 }
 
-// list handles GET /api/projects.
+// list handles GET /api/projects. When ?workspace_id=N is supplied AND parses
+// as int, the SELECT is scoped to that workspace (D-02 / MCPPROJ-01); when the
+// query param is empty, unparseable, or absent, ALL projects are returned
+// (current behavior — backward-compatible; the SPA and Phase 06 callers that
+// omit the param are byte-for-byte unchanged). Per the Kamacu convention an
+// unparseable value is silently ignored (not a 400).
 func (h *projectHandlers) list(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(`SELECT ` + projectColumns + ` FROM projects ORDER BY name COLLATE NOCASE`)
+	wsIDStr := r.URL.Query().Get("workspace_id")
+	var rows *sql.Rows
+	var err error
+	if wsIDStr != "" {
+		if wsID, parseErr := strconv.Atoi(wsIDStr); parseErr == nil {
+			rows, err = h.db.Query(`SELECT `+projectColumns+` FROM projects WHERE workspace_id = ? ORDER BY name COLLATE NOCASE`, wsID)
+		} else {
+			// Silently ignore an unparseable value (Kamacu API convention).
+			rows, err = h.db.Query(`SELECT ` + projectColumns + ` FROM projects ORDER BY name COLLATE NOCASE`)
+		}
+	} else {
+		rows, err = h.db.Query(`SELECT ` + projectColumns + ` FROM projects ORDER BY name COLLATE NOCASE`)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -145,6 +162,29 @@ func (h *projectHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, projects)
+}
+
+// get handles GET /api/projects/{id} — the single-project fetch (Gap 1, the
+// third Kamacu endpoint addition Phase 07 ships for MCPPROJ-02). Mirrors
+// taskHandlers.get (tasks.go:275-290): pathID parse → SELECT projectColumns →
+// 404 on sql.ErrNoRows → writeJSON on hit. Go 1.22 ServeMux longest-pattern-
+// wins means /api/projects/{id}/tasks and /api/projects/{id}/github-origin
+// still match their more specific paths — no conflict (07-RESEARCH Pitfall 5).
+func (h *projectHandlers) get(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	p, err := scanProject(h.db.QueryRow(`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
 }
 
 // create handles POST /api/projects. Two creation paths share this endpoint:
