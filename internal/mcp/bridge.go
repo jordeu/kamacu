@@ -70,14 +70,21 @@ func (b *bridge) do(ctx context.Context, method, path string, body io.Reader) (*
 // delegates to (the per-resource files extract request args, build the path
 // and body, then call this). It encapsulates the Phase 06 listProjects shape:
 // b.do → defer Close → io.ReadAll(LimitReader) → transport-error wrap
-// ("kamacu bridge: %w") → non-200 wrap (D-05 — body passed as a raw string,
+// ("kamacu bridge: %w") → non-2xx wrap (D-05 — body passed as a raw string,
 // shape-agnostic per 07-RESEARCH Gap 2: the real Kamacu error shape is
-// {"error":"..."}, not {"status","message"}) → 200 TextContent passthrough.
+// {"error":"..."}, not {"status","message"}) → 2xx TextContent passthrough.
 //
 // On transport error: returns a wrapped error (the SDK surfaces this as a
 // JSON-RPC error.code = -32603 response).
-// On non-200: returns a descriptive error with the raw body inlined.
-// On 200: returns the body verbatim in a single TextContent block.
+// On non-2xx: returns a descriptive error with the raw body inlined.
+// On 2xx: returns the body verbatim in a single TextContent block. The full
+// 2xx range is accepted so the bridge works across Kamacu's heterogeneous
+// success codes: GET handlers return 200, POST create returns 201 (Created),
+// DELETE returns 204 (No Content). Plan 01 shipped this helper accepting only
+// 200 because list_projects (GET) was the only caller; Plan 02's create_task
+// and delete_task exposed the gap, fixed here (Rule 1 — auto-fix blocking
+// bug; otherwise every successful create/delete would surface as an error to
+// the agent).
 func (b *bridge) call(ctx context.Context, method, path string, body io.Reader) (*mcp.CallToolResult, error) {
 	resp, err := b.do(ctx, method, path, body)
 	if err != nil {
@@ -88,7 +95,7 @@ func (b *bridge) call(ctx context.Context, method, path string, body io.Reader) 
 	if err != nil {
 		return nil, fmt.Errorf("kamacu %s %s: read body: %w", method, path, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("kamacu %s %s: HTTP %d: %s", method, path, resp.StatusCode, string(respBody))
 	}
 	return &mcp.CallToolResult{
