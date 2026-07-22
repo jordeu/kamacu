@@ -37,7 +37,7 @@
 
 ### Projects & Workspaces (MCPPROJ)
 
-- [ ] **MCPPROJ-01**: `list_projects(workspace_id?)` returns projects, optionally scoped to a workspace
+- [x] **MCPPROJ-01**: `list_projects(workspace_id?)` returns projects, optionally scoped to a workspace
 - [ ] **MCPPROJ-02**: `get_project(project_id)` returns full project detail (name, description, repo, workspace, agent, icon)
 - [ ] **MCPPROJ-03**: `create_project(name, repo_path_or_github_url, workspace_id?)` creates a project — folder path or `owner/name` triggers the existing v1.4 managed-checkout surface
 - [ ] **MCPPROJ-04**: `update_project(project_id, name?, description?, github_repo?, icon_letters?, icon_color?)` partial-PATCH update

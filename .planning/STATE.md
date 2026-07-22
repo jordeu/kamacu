@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.11
 milestone_name: Kamacu MCP Server
 current_phase: 07
-current_phase_name: Tasks, Projects & Workspaces Tools
+current_phase_name: tasks-projects-workspaces-tools
 status: executing
 stopped_at: Phase 07 context gathered
-last_updated: "2026-07-22T05:08:53.063Z"
-last_activity: 2026-07-21
-last_activity_desc: Phase 06 complete, transitioned to Phase 07
+last_updated: "2026-07-22T05:54:12.398Z"
+last_activity: 2026-07-22
+last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 7
+  completed_plans: 4
   percent: 25
 ---
 
 # Project State
 
-**Current focus:** Phase 06 — mcp-subcommand-foundation
+**Current focus:** Phase 07 — tasks-projects-workspaces-tools
 
 See: .planning/PROJECT.md (updated 2026-07-21)
 
@@ -42,16 +42,16 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
 
 ## Current Position
 
-Phase: 07 — Tasks, Projects & Workspaces Tools
-Plan: Not started
+Phase: 07 (tasks-projects-workspaces-tools) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-07-21 — Phase 06 complete, transitioned to Phase 07
+Last activity: 2026-07-22 — Phase 07 execution started
 
 Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 
 ## Session
 
-**Last session:** 2026-07-22T03:51:53.824Z
+**Last session:** 2026-07-22T05:53:42.708Z
 **Stopped at:** Phase 07 context gathered
 **Resume file:** .planning/phases/07-tasks-projects-workspaces-tools/07-CONTEXT.md
 
@@ -62,3 +62,9 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 | Phase 06 P01 | 12 min | 2 tasks | 7 files |
 | Phase 06 P03 | 8 min | 2 tasks | 7 files |
 | Phase 06 P02 | 22 min | 2 tasks | 8 files |
+| Phase Phase 07 P01 | 14 min | 2 tasks | 11 files |
+
+## Decisions
+
+- [Phase ?]: Phase 07 / Plan 01: Extracted bridge.call as the shared response-handling helper (chosen YES over inline — halves per-tool line count for the 13 Phase 07 tools; structurally enforces the every-tool-is-the-same-shape invariant)
+- [Phase ?]: Phase 07 / Plan 01: list_projects InputSchema declared workspace_id (integer, optional) as the ONLY property; stale project_id no-op arg REMOVED per 07-RESEARCH Pitfall 6
