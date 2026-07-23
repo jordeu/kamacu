@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,11 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxCli
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.delete)
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.rename)
+	// Phase 08 read-only endpoints (MCPSESS-01/02/03 server-side): the bridge
+	// subcommand reaches the in-memory engine only through these. They consume
+	// ONLY session.Info/Snapshot (D-14) — never the PTY-write primitive.
+	mux.HandleFunc("GET /api/sessions/{id}", s.getSession)
+	mux.HandleFunc("GET /api/sessions/{id}/output", s.getSessionOutput)
 }
 
 type sessionHandlers struct {
@@ -46,11 +52,52 @@ type sessionHandlers struct {
 
 // list handles GET /api/sessions — newest first, JSON [] when empty.
 // ?task_id=N filters to that task's sessions (running AND exited — the
-// exited-ghost handling is client-side per D-28).
+// exited-ghost handling is client-side per D-28). ?project_id=N (Phase 08,
+// MCPSESS-01) filters to sessions whose task belongs to that project. The two
+// filters are mutually exclusive; project_id never triggers the tmux reconcile
+// pass (dev lists have no orphaned rows). Every entry now also carries
+// taskTitle/projectName/agentName via the D-10 JOIN (empty for dev sessions).
 func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 	var infos []session.Info
 	if q := r.URL.Query().Get("task_id"); q == "" {
-		infos = h.mgr.List()
+		// Phase 08 project_id filter (MCPSESS-01): scope to sessions whose
+		// task belongs to the project. One query builds the task-ID set, then
+		// an in-memory filter narrows mgr.List() (D-11: never N round-trips).
+		if pidQ := r.URL.Query().Get("project_id"); pidQ != "" {
+			pid, err := strconv.ParseInt(pidQ, 10, 64)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid project_id")
+				return
+			}
+			taskIDs := make(map[int64]struct{})
+			rows, err := h.db.Query(`SELECT id FROM tasks WHERE project_id = ?`, pid)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			for rows.Next() {
+				var tid int64
+				if err := rows.Scan(&tid); err != nil {
+					rows.Close()
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				taskIDs[tid] = struct{}{}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			rows.Close()
+			for _, info := range h.mgr.List() {
+				if _, ok := taskIDs[info.TaskID]; ok {
+					infos = append(infos, info)
+				}
+			}
+		} else {
+			infos = h.mgr.List()
+		}
 	} else {
 		id, err := strconv.ParseInt(q, 10, 64)
 		if err != nil {
@@ -69,7 +116,16 @@ func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 	if infos == nil {
 		infos = []session.Info{}
 	}
-	writeJSON(w, http.StatusOK, infos)
+	// Attach the D-10 task->project->agent JOIN (taskTitle/projectName/
+	// agentName) and serialize as sessionDetail. Dev sessions (TaskID==0)
+	// keep empty JOIN fields (omitted on the wire via omitempty).
+	ctxByTask := h.joinSessionContext(infos)
+	out := make([]sessionDetail, len(infos))
+	for i, info := range infos {
+		ctx := ctxByTask[info.TaskID]
+		out[i] = sessionDetail{Info: info, TaskTitle: ctx.taskTitle, ProjectName: ctx.projectName, AgentName: ctx.agentName}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // reconcileTmux appends orphaned (restored) tmux survivor entries to infos for
@@ -701,4 +757,177 @@ func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, taskID int64,
 			}
 		}
 	}
+}
+
+// --- Phase 08 read-only endpoints (MCPSESS-01/02/03 server-side) -------------
+//
+// These handlers back the MCP bridge's session tools. They consume ONLY
+// session.Info/Snapshot — never the PTY-write primitive (D-14). The bridge
+// (separate process) crosses the loopback boundary to read session state + the
+// ring snapshot here; the type-level read-only contract is proven by the
+// scoped grep gate (zero references to the write primitive below).
+
+// defaultOutputBytes is the default byte count returned by get_session_output
+// when ?bytes is absent or empty (D-05). 4 KiB is enough for an MCP agent to
+// read the recent tail without paying the full 512 KiB cost on every poll.
+const defaultOutputBytes = 4096
+
+// maxOutputBytes caps get_session_output's ?bytes value (D-06 / Pitfall 8 /
+// T-08-02): the ring is 1 MiB, but the bridge's maxBodyBytes ceiling is 1 MiB
+// and base64 inflates by ~4/3, so a 512 KiB slice yields a ~683 KiB envelope
+// that fits comfortably under the cap.
+const maxOutputBytes = 512 * 1024
+
+// sessionDetail is the wire shape for the read endpoints: it embeds
+// session.Info (so every existing JSON tag flows through unchanged) and adds
+// the D-10 task->project->agent JOIN fields taskTitle/projectName/agentName.
+// Dev sessions (TaskID==0) keep empty JOIN fields (omitted on the wire via
+// omitempty).
+type sessionDetail struct {
+	session.Info
+	TaskTitle   string `json:"taskTitle,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
+	AgentName   string `json:"agentName,omitempty"`
+}
+
+// sessionOutputEnvelope is the D-08 snapshot shape returned by
+// get_session_output: base64-encoded last-N ring bytes plus a clamped flag.
+type sessionOutputEnvelope struct {
+	Encoding string `json:"encoding"` // always "base64" — PTY output is arbitrary bytes; text frames would corrupt split UTF-8
+	Output   string `json:"output"`
+	Bytes    int    `json:"bytes"`    // the number of raw PTY bytes encoded (≤ requested)
+	Clamped  bool   `json:"clamped"`  // true when the requested bytes value exceeded maxOutputBytes
+}
+
+// sessionContext bundles the per-task DB columns attached to a session.Info
+// for the read endpoints' wire shape (D-10): the task's title, the project's
+// name, and the agent's name. Empty when the task row is missing from the DB
+// (a session outlived its task row) — mirrors agents.go's `continue` posture.
+type sessionContext struct {
+	taskTitle   string
+	projectName string
+	agentName   string
+}
+
+// joinSessionContext loads taskTitle/projectName/agentName for each task ID
+// present in infos in ONE query (D-11: never N round-trips per session). The
+// shape mirrors the canonical tasks->projects->agents JOIN at agents.go:99.
+// A query failure degrades to empty fields (the read path stays usable);
+// entries whose taskID is missing from the DB (deleted under a still-tracked
+// session) also get zero values. Returns a map keyed by task ID. Dev sessions
+// (TaskID==0) are skipped and never reach the DB.
+func (h *sessionHandlers) joinSessionContext(infos []session.Info) map[int64]sessionContext {
+	out := make(map[int64]sessionContext, len(infos))
+	ids := make([]any, 0, len(infos))
+	for _, info := range infos {
+		if info.TaskID <= 0 {
+			continue
+		}
+		if _, seen := out[info.TaskID]; seen {
+			continue
+		}
+		out[info.TaskID] = sessionContext{}
+		ids = append(ids, info.TaskID)
+	}
+	if len(ids) == 0 {
+		return out
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	rows, err := h.db.Query(
+		`SELECT t.id, t.title, p.name, a.name
+		 FROM tasks t
+		 JOIN projects p ON p.id = t.project_id
+		 JOIN agents a ON a.id = p.agent_id
+		 WHERE t.id IN (`+placeholders+`)`, ids...)
+	if err != nil {
+		slog.Warn("joinSessionContext: query", "error", err)
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			tid      int64
+			ctx      sessionContext
+			projName sql.NullString
+			agName   sql.NullString
+		)
+		if err := rows.Scan(&tid, &ctx.taskTitle, &projName, &agName); err != nil {
+			slog.Warn("joinSessionContext: scan", "error", err)
+			return out
+		}
+		ctx.projectName = projName.String
+		ctx.agentName = agName.String
+		out[tid] = ctx
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("joinSessionContext: rows", "error", err)
+	}
+	return out
+}
+
+// getSession handles GET /api/sessions/{id} (MCPSESS-02 server-side). Returns
+// session.Info plus the D-10 JOIN fields for a live OR exited in-memory
+// session (D-12: Snapshot/Info survive exit). Unknown ids return 404.
+func (h *sessionHandlers) getSession(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.mgr.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	info := sess.Info()
+	ctxByTask := h.joinSessionContext([]session.Info{info})
+	ctx := ctxByTask[info.TaskID]
+	writeJSON(w, http.StatusOK, sessionDetail{
+		Info:        info,
+		TaskTitle:   ctx.taskTitle,
+		ProjectName: ctx.projectName,
+		AgentName:   ctx.agentName,
+	})
+}
+
+// getSessionOutput handles GET /api/sessions/{id}/output?bytes=N (MCPSESS-03
+// server-side). Returns a D-08 JSON envelope with the LAST N ring bytes
+// base64-encoded. bytes defaults to defaultOutputBytes and is clamped to
+// [1, maxOutputBytes]; clamped=true when the requested value exceeded the cap
+// (T-08-02). Unknown ids return 404.
+func (h *sessionHandlers) getSessionOutput(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.mgr.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	// Parse bytes: default when absent/empty, clamp to [1, maxOutputBytes].
+	// An unparseable value is a 400 — same posture as the list filter.
+	want := defaultOutputBytes
+	clamped := false
+	if raw := r.URL.Query().Get("bytes"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "invalid bytes")
+			return
+		}
+		if parsed > maxOutputBytes {
+			clamped = true
+			parsed = maxOutputBytes
+		}
+		if parsed == 0 {
+			parsed = 1 // clamp the floor at 1 — a 0-byte slice is never useful
+		}
+		want = parsed
+	}
+	// Snapshot is read-only on the existing 1 MiB ring — no new long-lived
+	// state. The last-N slice is the tail; base64 handles arbitrary bytes
+	// safely (a text frame would corrupt split multi-byte PTY sequences).
+	snap := sess.Snapshot()
+	start := len(snap) - want
+	if start < 0 {
+		start = 0
+	}
+	lastN := snap[start:]
+	writeJSON(w, http.StatusOK, sessionOutputEnvelope{
+		Encoding: "base64",
+		Output:   base64.StdEncoding.EncodeToString(lastN),
+		Bytes:    len(lastN),
+		Clamped:  clamped,
+	})
 }

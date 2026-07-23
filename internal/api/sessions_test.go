@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1442,5 +1443,365 @@ func TestReconcileNeverShowsBashQuestion(t *testing.T) {
 	}
 	if (*found)["label"] == "Bash ?" {
 		t.Errorf("reconciled label surfaced the forbidden sentinel: %q", (*found)["label"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 08 read-only endpoints (MCPSESS-01/02/03 server-side): get_session,
+// get_session_output, list ?project_id filter, and the D-10 JOIN wire shape.
+// ---------------------------------------------------------------------------
+
+// getJSON issues a GET and returns the raw body bytes + status (needed for the
+// output envelope whose base64 payload is awkward to assert via doJSON).
+func getJSON(t *testing.T, url string) (int, []byte) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp.StatusCode, raw
+}
+
+// waitForOutput polls the session's snapshot until want appears (≤5s).
+func waitForOutput(t *testing.T, sess *session.Session, want []byte) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if bytes.Contains(sess.Snapshot(), want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("marker %q never appeared in snapshot:\n%s", want, sess.Snapshot())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestGetSession_Happy is MCPSESS-02 server-side: GET /api/sessions/{id} for a
+// live task-scoped bash session returns 200 with id, status, and the D-10 JOIN
+// fields taskTitle/projectName/agentName.
+func TestGetSession_Happy(t *testing.T) {
+	srv, mgr := newTaskSessionServer(t)
+	id, _ := worktreeTask(t, srv, "Read My Status")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid, _ := body["id"].(string)
+	if sid == "" {
+		t.Fatalf("no id in create response: %v", body)
+	}
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// GET /api/sessions/{id} returns the live snapshot + JOIN fields.
+	gstatus, gbody := doJSON(t, "GET", srv.URL+"/api/sessions/"+sid, nil)
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session: status = %d, want 200; body=%v", gstatus, gbody)
+	}
+	if gbody["id"] != sid {
+		t.Errorf("get_session id = %v, want %q", gbody["id"], sid)
+	}
+	if gbody["status"] != "running" {
+		t.Errorf("get_session status = %v, want %q", gbody["status"], "running")
+	}
+	if gbody["taskId"] != float64(id) {
+		t.Errorf("get_session taskId = %v, want %d", gbody["taskId"], id)
+	}
+	// D-10 JOIN fields: title matches the task; projectName matches the project
+	// repo dir basename; agentName is the default Claude Code seed (migration 00013).
+	if gbody["taskTitle"] != "Read My Status" {
+		t.Errorf("get_session taskTitle = %v, want %q", gbody["taskTitle"], "Read My Status")
+	}
+	if gbody["projectName"] == "" {
+		t.Errorf("get_session projectName empty for task-scoped session: %v", gbody)
+	}
+	if gbody["agentName"] == "" {
+		t.Errorf("get_session agentName empty for task-scoped session: %v", gbody)
+	}
+}
+
+// TestGetSession_UnknownID_404 is D-12 / D-13: an unknown/gone id returns 404
+// with the {"error"} contract — never a 200 with empty fields, never a 500.
+func TestGetSession_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "GET", srv.URL+"/api/sessions/"+uuid.NewString(), nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+// TestGetSession_ExitedStillWorks is D-12: an EXITED in-memory session still
+// returns 200 with its final Info (Snapshot/Info survive exit). The handler
+// does not race the exit path.
+func TestGetSession_ExitedStillWorks(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	exitSession(t, sess)
+
+	gstatus, gbody := doJSON(t, "GET", srv.URL+"/api/sessions/"+sid, nil)
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session exited: status = %d, want 200; body=%v", gstatus, gbody)
+	}
+	if gbody["status"] != "exited" {
+		t.Errorf("get_session exited status = %v, want %q", gbody["status"], "exited")
+	}
+	if gbody["id"] != sid {
+		t.Errorf("get_session exited id = %v, want %q", gbody["id"], sid)
+	}
+}
+
+// TestGetSessionOutput_Happy is MCPSESS-03 server-side: the default bytes
+// (4096) returns a base64 envelope with bytes <= requested and a tail that
+// matches the live snapshot.
+func TestGetSessionOutput_Happy(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// Drive real output: echo a marker, wait for it to land in the ring.
+	const marker = "kamacu-output-marker-12345"
+	if err := sess.WriteInput([]byte("echo " + marker + "\n")); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	waitForOutput(t, sess, []byte(marker))
+
+	// Default bytes (no query) and an explicit small bytes both work.
+	for _, q := range []string{"", "?bytes=1024"} {
+		gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output"+q)
+		if gstatus != http.StatusOK {
+			t.Fatalf("get_session_output%s: status = %d, want 200; body=%s", q, gstatus, raw)
+		}
+		var env struct {
+			Encoding string `json:"encoding"`
+			Output   string `json:"output"`
+			Bytes    int    `json:"bytes"`
+			Clamped  bool   `json:"clamped"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			t.Fatalf("decode envelope: %v\n%s", err, raw)
+		}
+		if env.Encoding != "base64" {
+			t.Errorf("encoding = %q, want %q", env.Encoding, "base64")
+		}
+		wantMax := 1024
+		if q == "" {
+			wantMax = 4096
+		}
+		if env.Bytes <= 0 {
+			t.Errorf("bytes = %d, want > 0", env.Bytes)
+		}
+		if env.Bytes > wantMax {
+			t.Errorf("bytes = %d, want <= %d", env.Bytes, wantMax)
+		}
+		if env.Clamped {
+			t.Errorf("clamped = true, want false for a request under the cap")
+		}
+		// Decoded payload is the ring tail → must contain the marker.
+		decoded, err := base64.StdEncoding.DecodeString(env.Output)
+		if err != nil {
+			t.Fatalf("decode base64 output: %v", err)
+		}
+		if !bytes.Contains(decoded, []byte(marker)) {
+			t.Errorf("decoded output missing marker %q:\n%s", marker, decoded)
+		}
+	}
+}
+
+// TestGetSessionOutput_Clamp is D-06 / T-08-02: bytes=999999 clamps to
+// maxOutputBytes (512*1024) and sets clamped=true; the returned bytes never
+// exceed the cap.
+func TestGetSessionOutput_Clamp(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+
+	gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output?bytes=999999")
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session_output clamp: status = %d, want 200; body=%s", gstatus, raw)
+	}
+	var env struct {
+		Bytes   int  `json:"bytes"`
+		Clamped bool `json:"clamped"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, raw)
+	}
+	if !env.Clamped {
+		t.Errorf("clamped = false, want true (bytes=999999 must clamp)")
+	}
+	if env.Bytes > 524288 {
+		t.Errorf("bytes = %d, want <= 524288 (maxOutputBytes)", env.Bytes)
+	}
+}
+
+// TestGetSessionOutput_UnknownID_404 mirrors the get_session 404 contract.
+func TestGetSessionOutput_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "GET", srv.URL+"/api/sessions/"+uuid.NewString()+"/output", nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+// TestGetSessionOutput_BadBytes_400: a non-numeric bytes value is an honest 400.
+func TestGetSessionOutput_BadBytes_400(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+
+	status, body = doJSON(t, "GET", srv.URL+"/api/sessions/"+sid+"/output?bytes=abc", nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("bad bytes: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != "invalid bytes" {
+		t.Errorf("error = %q, want %q", body["error"], "invalid bytes")
+	}
+}
+
+// TestListSessions_ProjectID is MCPSESS-01 server-side: ?project_id=N returns
+// only sessions whose task belongs to that project. A project with no tasks
+// returns JSON [] (never null); a project with one task and a task-scoped
+// session returns exactly that one entry; a dev session is never included
+// (TaskID==0 can't match any project's task set).
+func TestListSessions_ProjectID(t *testing.T) {
+	srv, _ := newTaskSessionServer(t)
+	// Create the project + a provisioned task on it so we can filter by project
+	// id (worktreeTask only returns taskID + worktreePath — we need the project).
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	tid := taskID(t, createTask(t, srv, pid, "P1 Task"))
+
+	// Empty project (no tasks, no sessions) → JSON [].
+	pid2 := createProject(t, srv, gitRepo(t))
+	status, raw := getJSON(t, fmt.Sprintf("%s/api/sessions?project_id=%d", srv.URL, pid2))
+	if status != http.StatusOK {
+		t.Fatalf("empty project: status = %d, want 200; body=%s", status, raw)
+	}
+	if got := strings.TrimSpace(string(raw)); got != "[]" {
+		t.Errorf("empty project list body = %q, want %q", got, "[]")
+	}
+
+	// Invalid project_id → 400 (same posture as the existing task_id filter).
+	status, body := doJSON(t, "GET", srv.URL+"/api/sessions?project_id=abc", nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("bad project_id: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != "invalid project_id" {
+		t.Errorf("error = %q, want %q", body["error"], "invalid project_id")
+	}
+
+	// A task-scoped session is included; a dev session is not.
+	taskStatus, taskBody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": tid})
+	if taskStatus != http.StatusCreated {
+		t.Fatalf("task spawn: status = %d; body=%v", taskStatus, taskBody)
+	}
+	taskSid, _ := taskBody["id"].(string)
+	devStatus, _ := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if devStatus != http.StatusCreated {
+		t.Fatalf("dev spawn: status = %d", devStatus)
+	}
+
+	status, list := doJSONList(t, fmt.Sprintf("%s/api/sessions?project_id=%d", srv.URL, pid))
+	if status != http.StatusOK {
+		t.Fatalf("project list: status = %d, want 200", status)
+	}
+	if len(list) != 1 {
+		t.Fatalf("project list len = %d, want 1 (only the task session): %v", len(list), list)
+	}
+	if list[0]["id"] != taskSid {
+		t.Errorf("project list entry id = %v, want %q", list[0]["id"], taskSid)
+	}
+}
+
+// TestListSessions_JoinFields is D-10 regression: the unfiltered list response
+// entries include taskTitle/projectName/agentName for task-scoped sessions and
+// omit them (omitempty) for dev sessions.
+func TestListSessions_JoinFields(t *testing.T) {
+	srv, _ := newTaskSessionServer(t)
+	tid, _ := worktreeTask(t, srv, "Join Me")
+
+	// One task session + one dev session.
+	taskStatus, taskBody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": tid})
+	if taskStatus != http.StatusCreated {
+		t.Fatalf("task spawn: status = %d; body=%v", taskStatus, taskBody)
+	}
+	devStatus, devBody := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if devStatus != http.StatusCreated {
+		t.Fatalf("dev spawn: status = %d; body=%v", devStatus, devBody)
+	}
+
+	status, list := doJSONList(t, srv.URL+"/api/sessions")
+	if status != http.StatusOK {
+		t.Fatalf("list: status = %d, want 200", status)
+	}
+	var taskEntry, devEntry map[string]any
+	for _, e := range list {
+		switch e["id"] {
+		case taskBody["id"]:
+			taskEntry = e
+		case devBody["id"]:
+			devEntry = e
+		}
+	}
+	if taskEntry == nil {
+		t.Fatalf("task session %q missing from list: %v", taskBody["id"], list)
+	}
+	if devEntry == nil {
+		t.Fatalf("dev session %q missing from list: %v", devBody["id"], list)
+	}
+	if taskEntry["taskTitle"] != "Join Me" {
+		t.Errorf("task entry taskTitle = %v, want %q", taskEntry["taskTitle"], "Join Me")
+	}
+	if taskEntry["projectName"] == "" {
+		t.Errorf("task entry projectName empty: %v", taskEntry)
+	}
+	if taskEntry["agentName"] == "" {
+		t.Errorf("task entry agentName empty: %v", taskEntry)
+	}
+	if _, present := devEntry["taskTitle"]; present {
+		t.Errorf("dev entry should omit taskTitle (omitempty), got %v", devEntry["taskTitle"])
 	}
 }
