@@ -176,5 +176,5 @@ Plans:
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
 | 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete    | 2026-07-21 |
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
-| 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete   | 2026-07-23 |
+| 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
