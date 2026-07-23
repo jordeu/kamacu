@@ -24,10 +24,10 @@
 
 ### Sessions & Terminal (MCPSESS)
 
-- [ ] **MCPSESS-01**: `list_sessions(project_id? or task_id?)` returns sessions with status (working / waiting / idle / exited / running)
-- [ ] **MCPSESS-02**: `get_session(session_id)` returns full session detail (status, task, project, agent, started_at)
-- [ ] **MCPSESS-03**: `get_session_output(session_id, bytes?)` returns a snapshot of the session's PTY ring buffer (last N bytes, default 4 KB) — read-only
-- [ ] **MCPSESS-04**: `subscribe_session_output(session_id, duration_seconds?)` tails live PTY output for a bounded duration (default 30s, cap 300s); cancellation propagates via `ctx.Done()` → `Session.Detach`; no PTY keystroke injection (read-only)
+- [x] **MCPSESS-01**: `list_sessions(project_id? or task_id?)` returns sessions with status (working / waiting / idle / exited / running)
+- [x] **MCPSESS-02**: `get_session(session_id)` returns full session detail (status, task, project, agent, started_at)
+- [x] **MCPSESS-03**: `get_session_output(session_id, bytes?)` returns a snapshot of the session's PTY ring buffer (last N bytes, default 4 KB) — read-only
+- [x] **MCPSESS-04**: `subscribe_session_output(session_id, duration_seconds?)` tails live PTY output for a bounded duration (default 30s, cap 300s); cancellation propagates via `ctx.Done()` → `Session.Detach`; no PTY keystroke injection (read-only)
 
 ### PR Review (MCPREV)
 

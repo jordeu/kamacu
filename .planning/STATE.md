@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.11
 milestone_name: Kamacu MCP Server
 current_phase: 08
-current_phase_name: Sessions & Terminal Read Access
+current_phase_name: sessions-terminal-read-access
 status: executing
 stopped_at: Phase 08 context gathered
-last_updated: "2026-07-23T05:30:21.939Z"
-last_activity: 2026-07-22
-last_activity_desc: Phase 07 complete, transitioned to Phase 08
+last_updated: "2026-07-23T06:03:30.863Z"
+last_activity: 2026-07-23
+last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 10
+  completed_plans: 8
   percent: 50
 ---
 
 # Project State
 
-**Current focus:** Phase 07 — tasks-projects-workspaces-tools
+**Current focus:** Phase 08 — sessions-terminal-read-access
 
 See: .planning/PROJECT.md (updated 2026-07-21)
 
@@ -42,16 +42,16 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
 
 ## Current Position
 
-Phase: 08 — Sessions & Terminal Read Access
-Plan: Not started
+Phase: 08 (sessions-terminal-read-access) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-07-22 — Phase 07 complete, transitioned to Phase 08
+Last activity: 2026-07-23 — Phase 08 execution started
 
 Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 
 ## Session
 
-**Last session:** 2026-07-23T04:21:50.437Z
+**Last session:** 2026-07-23T06:03:12.341Z
 **Stopped at:** Phase 08 context gathered
 **Resume file:** .planning/phases/08-sessions-terminal-read-access/08-CONTEXT.md
 
@@ -66,6 +66,7 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 | Phase 07 P02 | 7 min | 2 tasks | 3 files |
 | Phase Phase 07 P03 | 7 min | 2 tasks tasks | 2 files files |
 | Phase 07 P04 | 7min | 2 tasks | 2 files |
+| Phase 08 P01 | 21 min | 2 tasks | 2 files |
 
 ## Decisions
 
@@ -78,3 +79,6 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 - [Phase ?]: Phase 07 / Plan 03: update_project args struct has NO WorkspaceID and NO AgentID fields (D-03 / 07-RESEARCH Pitfall 3) - workspace transfer has its own tool in a later plan; agent reassignment is Out of Scope (MCPMORE-01). Double-lock ensures excluded fields never reach Kamacu
 - [Phase 07]: Phase 07 / Plan 04: registerWorkspaceTools owns move_project_to_workspace even though the handler PATCHes /api/projects/{id} (NOT a /api/workspaces route). D-07 per-resource ownership tracks the resource being acted on (transferring a project INTO a workspace), not the route being called. The InputSchema exposes {project_id, workspace_id}; the body contains ONLY workspace_id (D-03 excludes workspace_id from update_project specifically because this tool owns the transfer). — Cross-route resource ownership — the D-07 split tracks the resource being acted on. move_project_to_workspace is conceptually a workspace-management action even though it touches the project route.
 - [Phase 07]: Phase 07 / Plan 04: update_workspace uses *string pointer for the lone Name field (D-03 single-field rename). InputSchema declares name as optional (only workspace_id is required). When name is omitted the body is {} and Kamacu returns 400 "nothing to update" verbatim; when supplied (incl. explicit "") the rename triggers. The bridge performs NO validation — Kamacu's empty-trim/dup/default-renamable gates apply unchanged. — D-03 single-field rename pattern — pointer field distinguishes omitted (nil) from supplied (incl. ""), matching Kamacu's PATCH *string decode.
+- [Phase ?]: [Phase 08 / Plan 01]: sessionDetail embeds session.Info so every existing JSON tag flows through unchanged; taskTitle/projectName/agentName ride as additional top-level fields (omitempty for dev sessions) — D-10 JOIN wired into list + get_session
+- [Phase ?]: [Phase 08 / Plan 01]: subscribe drains the Attach replay (D-02) when include_history is absent — one <-q read atomically removes the replay; streams application/octet-stream (not text); duration clamped to [1s, 300s] server-side (T-08-03); defer Detach on every return path (SC3)
+- [Phase ?]: [Phase 08 / Plan 01]: Type-level read-only contract (D-14) enforced — handlers consume ONLY Info/Snapshot/Attach/Detach/Done; scoped grep gate proves zero references to the PTY-write primitive and zero references to WS FrameData
