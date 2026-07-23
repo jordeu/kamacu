@@ -1,11 +1,16 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -353,3 +358,455 @@ func TestWithRecover_PassesThroughHandlerError(t *testing.T) {
 type HTTP404Sentinel struct{}
 
 func (HTTP404Sentinel) Error() string { return "kamacu get /api/sessions/x: HTTP 404: not found" }
+
+// ============================================================================
+// subscribe_session_output (MCPSESS-04) — the SC3 streaming panic surface.
+// Tests below cover the happy path, duration clamp, non-2xx error wrap,
+// truncation cap, the central SC3 cancellation gate (in-memory SDK transport
+// + fake streaming httptest.Server), the SC3 goroutine-leak gate across N
+// cycles, and the D-01 strict-edge cancel-before-attach.
+// ============================================================================
+
+// subscribeEnvelope is the test-side mirror of internal subscribeEnvelope.
+// It is re-declared here only for documentation; the production struct is
+// unexported and these tests decode into a local anonymous struct instead.
+// (This comment exists so a reader doesn't go looking for it.)
+
+// decodeSubscribeEnvelope pulls the D-08 envelope JSON out of a CallToolResult's
+// first TextContent block. Fatals on shape mismatch so each test can proceed
+// with field assertions.
+func decodeSubscribeEnvelope(t *testing.T, res *mcpsdk.CallToolResult) map[string]any {
+	t.Helper()
+	if res == nil {
+		t.Fatal("decodeSubscribeEnvelope: nil result")
+	}
+	if len(res.Content) == 0 {
+		t.Fatal("decodeSubscribeEnvelope: empty Content")
+	}
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("decodeSubscribeEnvelope: Content[0]: want *TextContent, got %T", res.Content[0])
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &env); err != nil {
+		t.Fatalf("decodeSubscribeEnvelope: unmarshal %v\nraw=%q", err, tc.Text)
+	}
+	return env
+}
+
+// TestBridge_Subscribe_Happy_ReturnsEnvelope (MCPSESS-04): a short duration
+// subscribe returns a D-08 envelope carrying the streamed bytes. The fake
+// server writes "hello" then closes the stream; the follow-up GET reports
+// status running. Asserts encoding/base64 shape, output decodes back to
+// "hello", exited=false, truncated=false.
+func TestBridge_Subscribe_Happy_ReturnsEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/sessions/xyz/subscribe":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("hello"))
+		case "/api/sessions/xyz":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"xyz","duration_seconds":1}`))
+	res, err := b.subscribeSessionOutput(context.Background(), req)
+	if err != nil {
+		t.Fatalf("subscribeSessionOutput: %v", err)
+	}
+	env := decodeSubscribeEnvelope(t, res)
+	if got := env["encoding"]; got != "base64" {
+		t.Errorf("encoding: want %q, got %v", "base64", got)
+	}
+	outputStr, _ := env["output"].(string)
+	decoded, derr := base64.StdEncoding.DecodeString(outputStr)
+	if derr != nil {
+		t.Fatalf("base64 decode output: %v (raw=%q)", derr, outputStr)
+	}
+	if !bytes.Contains(decoded, []byte("hello")) {
+		t.Errorf("decoded output: want substring %q, got %q", "hello", string(decoded))
+	}
+	if got := env["truncated"]; got != false {
+		t.Errorf("truncated: want false, got %v", got)
+	}
+	if got := env["exited"]; got != false {
+		t.Errorf("exited: want false, got %v", got)
+	}
+}
+
+// TestBridge_Subscribe_DurationClamp_QueryReflects300 (T-08-15): a
+// duration_seconds of 999 is clamped to 300 before the request is built —
+// the recorded subscribe query string is duration_seconds=300.
+func TestBridge_Subscribe_DurationClamp_QueryReflects300(t *testing.T) {
+	var recordedQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/sessions/xyz/subscribe" {
+			recordedQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"xyz","duration_seconds":999}`))
+	if _, err := b.subscribeSessionOutput(context.Background(), req); err != nil {
+		t.Fatalf("subscribeSessionOutput: %v", err)
+	}
+	wantQuery := "duration_seconds=300&include_history=false"
+	if recordedQuery != wantQuery {
+		t.Errorf("subscribe query: want %q, got %q", wantQuery, recordedQuery)
+	}
+}
+
+// TestBridge_Subscribe_Non200_ReturnsWrappedError (D-05 error wrap): a
+// non-200 streaming response surfaces the Phase 07 D-05 wrap containing
+// "HTTP 500".
+func TestBridge_Subscribe_Non200_ReturnsWrappedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"boom"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"xyz","duration_seconds":1}`))
+	_, err := b.subscribeSessionOutput(context.Background(), req)
+	if err == nil {
+		t.Fatal("subscribeSessionOutput: expected error for HTTP 500, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 500") {
+		t.Errorf("error message: want substring %q, got %q", "HTTP 500", err.Error())
+	}
+}
+
+// TestBridge_Subscribe_TruncationCap (D-04 / T-08-11): the fake server streams
+// 1.5 MiB of 'x' then closes — exceeding subscribeTailCap (1 MiB). Asserts
+// truncated==true AND bytes <= subscribeTailCap (the buffer kept the most
+// recent 1 MiB, dropping the older half from the front).
+func TestBridge_Subscribe_TruncationCap(t *testing.T) {
+	// 1.5 MiB of 'x' — comfortably above the 1 MiB cap.
+	oversized := bytes.Repeat([]byte("x"), subscribeTailCap+(1<<19))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/sessions/big/subscribe":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(oversized)
+		case "/api/sessions/big":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"big","duration_seconds":1}`))
+	res, err := b.subscribeSessionOutput(context.Background(), req)
+	if err != nil {
+		t.Fatalf("subscribeSessionOutput: %v", err)
+	}
+	env := decodeSubscribeEnvelope(t, res)
+	if got := env["truncated"]; got != true {
+		t.Errorf("truncated: want true (stream exceeded 1 MiB cap), got %v", got)
+	}
+	bytesN, _ := env["bytes"].(float64)
+	if int(bytesN) > subscribeTailCap {
+		t.Errorf("bytes: want <= %d (cap held), got %v", subscribeTailCap, bytesN)
+	}
+	if int(bytesN) != subscribeTailCap {
+		t.Errorf("bytes: want exactly %d (trim-front keeps the most recent cap), got %v", subscribeTailCap, bytesN)
+	}
+}
+
+// TestSubscribe_CancelledViaContext_ReturnsPartialAndDetaches is the central
+// SC3 regression gate. It uses mcp.NewInMemoryTransports to drive the SDK
+// end-to-end: client.CallTool(ctx, ...) → SDK sends notifications/cancelled
+// on cancel → handler ctx cancelled → in-flight resp.Body.Read returns →
+// handler returns the partial buffer.
+//
+// SDK cancellation surface (verified against go-sdk@v1.6.1's own
+// Example_cancellation at mcp_example_test.go:108-164): when the CLIENT's
+// ctx is cancelled, CallTool returns (nil, context.Canceled) — the client
+// observes the cancellation as an error. The HANDLER on the server side
+// still runs to completion and returns its partial result, but the client
+// SDK does not surface it. SC3 ("returns the partial stream collected so
+// far" — D-01) is a contract on the *handler's* return value, not on what
+// CallTool surfaces to the client. So this test wraps
+// b.subscribeSessionOutput in a recorder to observe the handler's actual
+// return — proving the handler returned a partial result with no panic and
+// no hang (the load-bearing SC3 assertion).
+//
+// The fake streaming httptest.Server writes one chunk ("partial") then blocks
+// on r.Context().Done() so it holds the conn until the bridge closes the
+// request body. It records that Done fired (proving the cancel propagated
+// all the way to the Kamacu-side r.Context() — the MCP half of SC3; Plan 01's
+// TestSubscribe_ClientCancel_DetachesPromptly is the Kamacu half).
+//
+// Asserts:
+//   - The handler returns within a generous bound (no hang — T-08-12).
+//   - The handler returns a non-nil result with nil err (partial buffer is
+//     the SC3 result, not a transport error, not a panic-via-withRecover).
+//     Or an emptySubscribeEnvelope if cancel beat the first Read — both are
+//     valid SC3 results.
+//   - The fake server's request-context Done fired within a bound (proves
+//     the bridge closed the HTTP body on ctx cancel — the loopback
+//     propagation that triggers Session.Detach in Plan 01).
+func TestSubscribe_CancelledViaContext_ReturnsPartialAndDetaches(t *testing.T) {
+	// Fake Kamacu streaming server: writes one chunk then blocks until the
+	// client disconnects (r.Context().Done()).
+	serverCtxDone := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/sessions/xyz/subscribe":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("partial"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			// Hold the conn until the client disconnects. r.Context().Done()
+			// fires when the bridge closes the request body.
+			<-r.Context().Done()
+			serverCtxDone <- struct{}{}
+		case "/api/sessions/xyz":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	t1, t2 := mcpsdk.NewInMemoryTransports()
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	mcpSrv := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "kamacu-test", Version: "test"}, nil)
+
+	// Wrap b.subscribeSessionOutput in a recorder so we can observe the
+	// handler's actual return value. The client-side CallTool will return
+	// (nil, context.Canceled) per the SDK's documented cancellation surface
+	// — SC3 is about the handler, not the client. The recorder captures
+	// what the handler returned so we can assert "partial result, no error,
+	// no panic".
+	type handlerReturn struct {
+		res *mcpsdk.CallToolResult
+		err error
+	}
+	handlerReturnCh := make(chan handlerReturn, 1)
+	mcpSrv.AddTool(
+		&mcpsdk.Tool{
+			Name:        "subscribe_session_output",
+			Description: "test wrapper",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			res, err := b.subscribeSessionOutput(ctx, req)
+			handlerReturnCh <- handlerReturn{res, err}
+			return res, err
+		},
+	)
+	serverSession, err := mcpSrv.Connect(ctx, t1, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "kamacu-test-client", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, t2, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	callCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		// CallTool's ctx-cancel return is the SDK's documented behavior
+		// (Example_cancellation). We do not assert on its return — the
+		// load-bearing assertion is the handler-side channel below.
+		_, _ = clientSession.CallTool(callCtx, &mcpsdk.CallToolParams{
+			Name:      "subscribe_session_output",
+			Arguments: map[string]any{"session_id": "xyz", "duration_seconds": 60},
+		})
+	}()
+
+	// Give the stream time to attach + write "partial", then cancel (mimics
+	// the agent CLI sending notifications/cancelled).
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	// SC3 handler-side: the handler must return within a generous bound (no
+	// hang — T-08-12). It must return a non-nil partial result with nil err
+	// (the partial buffer is the result; not a transport error, not a panic-
+	// via-withRecover which would surface as non-nil err).
+	select {
+	case r := <-handlerReturnCh:
+		if r.err != nil {
+			t.Fatalf("handler returned err=%v — want nil (partial result, not a transport error; not a panic)", r.err)
+		}
+		if r.res == nil {
+			t.Fatal("handler returned nil result — want non-nil partial envelope")
+		}
+		// The envelope is either the partial buffer (output contains
+		// "partial") OR emptySubscribeEnvelope (cancel beat the first Read).
+		// Both are valid SC3 results. Decode and log which one we got.
+		env := decodeSubscribeEnvelope(t, r.res)
+		if got := env["encoding"]; got != "base64" {
+			t.Errorf("envelope.encoding: want %q, got %v", "base64", got)
+		}
+		if outputStr, _ := env["output"].(string); outputStr != "" {
+			decoded, _ := base64.StdEncoding.DecodeString(outputStr)
+			t.Logf("handler returned partial envelope: %d bytes (decoded=%q)", int(env["bytes"].(float64)), string(decoded))
+		} else {
+			t.Logf("handler returned empty envelope (cancel arrived before first Read — still valid SC3)")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("handler did not return within 10s of cancel — handler hung (SC3 detach leak / T-08-12)")
+	}
+
+	// SC3 detach-proof: the fake server's r.Context().Done() must have fired
+	// (the bridge closed the HTTP body when its ctx was cancelled — this is
+	// the loopback propagation that triggers Session.Detach in Plan 01).
+	select {
+	case <-serverCtxDone:
+		// pass — detach propagation confirmed
+	case <-time.After(2 * time.Second):
+		t.Fatal("fake server r.Context().Done() did not fire within 2s — bridge did not close the stream on ctx cancel (SC3 violation)")
+	}
+}
+
+// TestSubscribe_GoroutineStabilityAcrossCycles is the SC3 leak gate. It runs
+// N=5 subscribe/cancel cycles against a blocking fake streaming server and
+// asserts runtime.NumGoroutine() does not grow proportional to N. Each cycle:
+// fresh cancellable ctx, call b.subscribeSessionOutput in a goroutine, cancel
+// after a short sleep, wait for return. A leak (e.g., a reader goroutine that
+// survives ctx cancel) would surface as delta >= N. A small delta (+2) is
+// allowed for GC/timer goroutines.
+func TestSubscribe_GoroutineStabilityAcrossCycles(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Streaming handler: write one byte then block on r.Context().Done()
+		// (client disconnect). The follow-up GET returns running.
+		if r.URL.Path == "/api/sessions/xyz/subscribe" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("x"))
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"running"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	// Force a GC baseline so the count reflects live goroutines, not garbage.
+	runtime.GC()
+	baseline := runtime.NumGoroutine()
+	t.Logf("baseline NumGoroutine = %d", baseline)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	const N = 5
+	for i := 0; i < N; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		var (
+			res *mcpsdk.CallToolResult
+			err error
+			wg  sync.WaitGroup
+		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := newCallToolRequest(json.RawMessage(`{"session_id":"xyz","duration_seconds":60}`))
+			res, err = b.subscribeSessionOutput(ctx, req)
+		}()
+		// Let the stream attach, then cancel.
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		wg.Wait()
+		_ = res // not asserted — the contract is "returns promptly", not "returns a specific shape"
+		_ = err
+	}
+
+	// Settle: allow any GC/timer goroutines to retire.
+	time.Sleep(200 * time.Millisecond)
+	runtime.GC()
+	after := runtime.NumGoroutine()
+	delta := after - baseline
+	t.Logf("after %d cycles: NumGoroutine = %d (delta %d)", N, after, delta)
+	if delta >= N {
+		t.Errorf("goroutine leak: delta=%d (after=%d, baseline=%d, N=%d) — expected no growth proportional to N", delta, after, baseline, N)
+	}
+}
+
+// TestSubscribe_CancelBeforeAttach_ReturnsEmptyEnvelopeNotError is the D-01
+// strict-edge: when the handler ctx is cancelled BEFORE
+// subscribeSessionOutput is called (subscribeClient.Do returns
+// context.Canceled immediately — the stream never attached), the handler
+// returns (emptySubscribeEnvelope, nil) — a valid zero-byte D-08 envelope,
+// NOT a transport error. D-01's "returns ONE CallToolResult" holds even when
+// zero bytes were streamed.
+//
+// The fake server is unreachable in practice (the request never succeeds
+// because the ctx is already cancelled); we still stand it up so the test
+// does not depend on connection-refused vs context-cancelled ordering.
+func TestSubscribe_CancelBeforeAttach_ReturnsEmptyEnvelopeNotError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Unreachable in practice — the request ctx is already cancelled.
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel BEFORE calling subscribeSessionOutput
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"xyz","duration_seconds":1}`))
+	res, err := b.subscribeSessionOutput(ctx, req)
+
+	// D-01 strict-edge: NOT a transport error.
+	if err != nil {
+		t.Fatalf("subscribeSessionOutput on pre-cancelled ctx: want nil err, got %v", err)
+	}
+	if res == nil {
+		t.Fatal("subscribeSessionOutput on pre-cancelled ctx: want non-nil empty envelope, got nil")
+	}
+	env := decodeSubscribeEnvelope(t, res)
+	if got := env["encoding"]; got != "base64" {
+		t.Errorf("envelope.encoding: want %q, got %v", "base64", got)
+	}
+	if got := env["output"]; got != "" {
+		t.Errorf("envelope.output: want empty (zero bytes streamed), got %v", got)
+	}
+	if got := env["bytes"]; got != float64(0) {
+		t.Errorf("envelope.bytes: want 0, got %v", got)
+	}
+	if got := env["truncated"]; got != false {
+		t.Errorf("envelope.truncated: want false, got %v", got)
+	}
+	if got := env["exited"]; got != false {
+		t.Errorf("envelope.exited: want false, got %v", got)
+	}
+}
+
+// Compile-time guard: the errors package must be referenced by the test file
+// so go vet / unused-import checks pass even when only some of the seven
+// tests reference it directly. (TestBridge_Subscribe_Non200_ReturnsWrappedError
+// uses strings.Contains — kept separate.)
+var _ = errors.Is
