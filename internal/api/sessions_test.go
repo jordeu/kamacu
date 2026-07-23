@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1803,5 +1804,308 @@ func TestListSessions_JoinFields(t *testing.T) {
 	}
 	if _, present := devEntry["taskTitle"]; present {
 		t.Errorf("dev entry should omit taskTitle (omitempty), got %v", devEntry["taskTitle"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 08 subscribe endpoint (MCPSESS-04 server-side): raw PTY octets as
+// application/octet-stream, duration-capped, drain-on-attach (D-02), and
+// Detach-on-every-return-path (SC3 Kamacu half — T-08-05).
+// ---------------------------------------------------------------------------
+
+// TestSubscribe_Happy_ReturnsOctets is MCPSESS-04: subscribe streams real PTY
+// output as application/octet-stream (not JSON, not WS), include_history=1
+// delivers the ring replay, and the session stays operable after the request
+// ends (a second get_session returns 200).
+func TestSubscribe_Happy_ReturnsOctets(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// Drive real output so the subscribe stream has something to deliver.
+	const marker = "kamacu-subscribe-marker"
+	if err := sess.WriteInput([]byte("echo " + marker + "\n")); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	waitForOutput(t, sess, []byte(marker))
+
+	// Subscribe with include_history=1 for a short duration.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=1&include_history=1", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("subscribe: status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/octet-stream")
+	}
+ streamed, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if len(streamed) == 0 {
+		t.Errorf("subscribe body empty — expected at least the ring replay")
+	}
+	if !bytes.Contains(streamed, []byte(marker)) {
+		t.Errorf("subscribe body missing marker %q:\n%s", marker, streamed)
+	}
+
+	// Session is still operable: a follow-up get_session returns 200.
+	gstatus, gbody := doJSON(t, "GET", srv.URL+"/api/sessions/"+sid, nil)
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session after subscribe: status = %d, want 200; body=%v", gstatus, gbody)
+	}
+	if gbody["status"] != "running" {
+		t.Errorf("status after subscribe = %v, want %q", gbody["status"], "running")
+	}
+}
+
+// TestSubscribe_UnknownID_404 is D-13: a subscribe against an unknown id
+// returns 404 BEFORE writing any stream body — the bridge reads status + body.
+func TestSubscribe_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+uuid.NewString()+"/subscribe?duration_seconds=1", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404", resp.StatusCode)
+	}
+	// Body must be the JSON error envelope, NOT a stream of octets.
+	raw, _ := io.ReadAll(resp.Body)
+	var errBody map[string]any
+	if err := json.Unmarshal(raw, &errBody); err != nil {
+		t.Fatalf("decode error body: %v\n%s", err, raw)
+	}
+	if errBody["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", errBody["error"], "session not found")
+	}
+}
+
+// TestSubscribe_ClientCancel_DetachesPromptly is SC3 (T-08-05): cancelling the
+// request context makes the handler return promptly (no hang), the attach is
+// cleaned up (a second subscribe on the same session works), and goroutine
+// count does not grow across the cycle (no leak). The production target is
+// <100ms; the test asserts promptness + no-hang, not the exact latency.
+func TestSubscribe_ClientCancel_DetachesPromptly(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=60&include_history=1", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	// Baseline goroutine count (after the bash PTY + read goroutines settle).
+	runtime.Gosched()
+	time.Sleep(50 * time.Millisecond)
+	baseline := runtime.NumGoroutine()
+
+	returned := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			returned <- err
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		returned <- nil
+	}()
+
+	// Give the handler a beat to attach + start streaming.
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("subscribe returned error after cancel: %v", err)
+		}
+		elapsed := time.Since(start)
+		// Assert promptness (no hang). The production target is <100ms; allow
+		// generous slack for CI scheduling — the test proves no-hang, not exact latency.
+		if elapsed > 5*time.Second {
+			t.Errorf("subscribe took %v to return after request cancel — expected prompt", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("subscribe did not return within 10s of cancel — handler hung (SC3 detach leak)")
+	}
+
+	// No goroutine leak: the request-scoped handler goroutine has exited.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		now := runtime.NumGoroutine()
+		if now <= baseline+1 { // allow 1 slack for transient ticker/timer goroutines
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("goroutine leak: baseline=%d, now=%d (expected ≤%d)", baseline, now, baseline+1)
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// The attach was cleaned up: a SECOND subscribe on the same session works
+	// cleanly (no queue collision; the first connID is gone from the conns map).
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	req2, err := http.NewRequestWithContext(ctx2, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=1&include_history=1", nil)
+	if err != nil {
+		t.Fatalf("new second request: %v", err)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("second subscribe: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("second subscribe: status = %d, want 200 (attach not cleaned up)", resp2.StatusCode)
+	}
+}
+
+// TestSubscribe_DurationCap is T-08-03: duration_seconds clamps to
+// maxSubscribeDuration (300s). The test uses duration_seconds=1 to prove the
+// handler returns near the requested duration (not hanging), and trusts the
+// clamp logic for the cap (asserted by reading the constant, not by waiting
+// 300s in CI).
+func TestSubscribe_DurationCap(t *testing.T) {
+	// Sanity: the constant the handler clamps to.
+	if maxSubscribeDuration != 300*time.Second {
+		t.Fatalf("maxSubscribeDuration = %v, want 300s", maxSubscribeDuration)
+	}
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// duration_seconds=1 → returns near 1s (proves the timer backstop works).
+	start := time.Now()
+	resp, err := http.Get(srv.URL + "/api/sessions/" + sid + "/subscribe?duration_seconds=1&include_history=1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	elapsed := time.Since(start)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("subscribe: status = %d, want 200", resp.StatusCode)
+	}
+	// Should return near 1s; allow generous slack. The point is it returns at
+	// all (no hang), proving the timer backstop terminates the stream.
+	if elapsed > 5*time.Second {
+		t.Errorf("duration_seconds=1 took %v to return — expected near 1s", elapsed)
+	}
+}
+
+// TestSubscribe_DrainsReplayByDefault is D-02: with no include_history, the
+// ring replay is drained before live streaming. The body should NOT contain
+// pre-attach output (the marker written before subscribe started) — only
+// post-attach output (the marker written after).
+func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// Write BEFORE subscribing — this lands in the ring (the replay that
+	// include_history absent should drain).
+	const preMarker = "PRE-ATTACH-MARKER"
+	if err := sess.WriteInput([]byte("echo " + preMarker + "\n")); err != nil {
+		t.Fatalf("write pre: %v", err)
+	}
+	waitForOutput(t, sess, []byte(preMarker))
+
+	// Subscribe with duration=2s, NO include_history (the default).
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Write a NEW marker AFTER subscribe attached — this is live output that
+	// MUST appear (the handler streams it after draining the replay).
+	time.Sleep(100 * time.Millisecond) // let Attach register
+	const postMarker = "POST-ATTACH-MARKER"
+	if err := sess.WriteInput([]byte("echo " + postMarker + "\n")); err != nil {
+		t.Fatalf("write post: %v", err)
+	}
+
+	streamed, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	// D-02: the pre-attach marker should NOT appear (replay drained).
+	if bytes.Contains(streamed, []byte(preMarker)) {
+		t.Errorf("D-02 violation: pre-attach marker appeared in live-only stream:\n%s", streamed)
+	}
+	// The post-attach marker MUST appear (live output is delivered).
+	if !bytes.Contains(streamed, []byte(postMarker)) {
+		t.Errorf("post-attach marker missing from live stream:\n%s", streamed)
 	}
 }

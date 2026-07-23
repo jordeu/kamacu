@@ -41,6 +41,10 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxCli
 	// ONLY session.Info/Snapshot (D-14) — never the PTY-write primitive.
 	mux.HandleFunc("GET /api/sessions/{id}", s.getSession)
 	mux.HandleFunc("GET /api/sessions/{id}/output", s.getSessionOutput)
+	// MCPSESS-04 server-side: subscribe is plain HTTP chunked octet-stream —
+	// never the WS frame protocol (D-14). The handler is the per-request reader;
+	// no goroutine launched here outlives the request.
+	mux.HandleFunc("GET /api/sessions/{id}/subscribe", s.subscribeSessionOutput)
 }
 
 type sessionHandlers struct {
@@ -930,4 +934,128 @@ func (h *sessionHandlers) getSessionOutput(w http.ResponseWriter, r *http.Reques
 		Bytes:    len(lastN),
 		Clamped:  clamped,
 	})
+}
+
+// defaultSubscribeDuration is the default bound on a subscribe stream when
+// ?duration_seconds is absent (MCPSESS-04). 30s matches the agent's typical
+// poll cadence without holding a request open indefinitely.
+const defaultSubscribeDuration = 30 * time.Second
+
+// maxSubscribeDuration caps the subscribe stream duration (MCPSESS-04 /
+// T-08-03): a misbehaving bridge can never pin a goroutine on this handler
+// past 5 minutes; the SDK ctx cancel is the real backstop on the bridge side.
+const maxSubscribeDuration = 300 * time.Second
+
+// subscribeSessionOutput handles GET /api/sessions/{id}/subscribe
+// (MCPSESS-04 server-side). It streams raw PTY octets as
+// application/octet-stream for a bounded duration (default 30s, cap 300s),
+// drains the ring replay when include_history is absent (D-02), and Detaches
+// on EVERY return path (SC3) — including client disconnect.
+//
+// Read-only contract (D-14): the handler consumes ONLY session.Attach/Detach/
+// Done — never the PTY-write primitive, never the WS frame protocol. It is
+// plain HTTP chunked output. The handler is the per-request reader; no
+// goroutine launched here outlives the request (milestone rule: no new
+// long-lived/background goroutines inside Kamacu).
+//
+// Mirrors internal/ws/handler.go's attach->stream->detach loop MINUS the
+// readLoop (this is the read-only half: no WS PTY-input frame, no PTY-write
+// call, no Resize — the bridge is read-only).
+func (h *sessionHandlers) subscribeSessionOutput(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.mgr.Get(r.PathValue("id"))
+	if !ok {
+		// 404 BEFORE writing any stream bytes — the bridge reads status + body.
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	// Parse duration_seconds: default when absent; clamp to [1s, maxSubscribeDuration].
+	// A parse error or a negative value is a 400 — same posture as the other readers.
+	duration := defaultSubscribeDuration
+	if raw := r.URL.Query().Get("duration_seconds"); raw != "" {
+		seconds, err := strconv.Atoi(raw)
+		if err != nil || seconds < 0 {
+			writeError(w, http.StatusBadRequest, "invalid duration_seconds")
+			return
+		}
+		if seconds < 1 {
+			seconds = 1
+		}
+		d := time.Duration(seconds) * time.Second
+		if d > maxSubscribeDuration {
+			d = maxSubscribeDuration
+		}
+		duration = d
+	}
+
+	// include_history defaults false (D-02: live-only unless explicitly opted in).
+	includeHistory := false
+	if raw := r.URL.Query().Get("include_history"); raw != "" {
+		switch strings.ToLower(raw) {
+		case "1", "true", "yes":
+			includeHistory = true
+		}
+	}
+
+	// Headers FIRST: set the content type before WriteHeader. The body is raw
+	// PTY octets (application/octet-stream) — never a WS frame, never JSON.
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+
+	// http.Flusher may be nil on some ResponseWriter wrappers; guard every Flush.
+	flusher, _ := w.(http.Flusher)
+	if flusher != nil {
+		flusher.Flush() // push the 200 + headers immediately
+	}
+
+	connID := uuid.NewString()
+	q := sess.Attach(connID)
+	// SC3: defer Detach runs on EVERY return path — client disconnect, duration
+	// cap, queue close, or a panic recovery. Detach NEVER touches the PTY
+	// (session.go:356) — it only removes the conn from the fan-out map.
+	defer sess.Detach(connID)
+
+	if !includeHistory {
+		// D-02: drain the ring-replay first message under the same lock that
+		// registered the queue (session.go:346) so only post-attach output
+		// streams. Guard with r.Context().Done() so a client that disconnected
+		// during replay-drain still returns promptly (defer Detach handles cleanup).
+		select {
+		case _, ok := <-q:
+			if !ok {
+				return // session exited before any replay — queue already closed
+			}
+		case <-r.Context().Done():
+			return
+		}
+	}
+
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	for {
+		select {
+		case chunk, ok := <-q:
+			if !ok {
+				// Queue closed = session exited (markExited session.go:192-194);
+				// buffered output was already delivered before close.
+				return
+			}
+			if _, err := w.Write(chunk); err != nil {
+				// Client went away mid-write — defer Detach cleans up.
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		case <-timer.C:
+			// Duration cap backstop (D-11 / T-08-03) — the SDK ctx cancel on
+			// the bridge side is the real backstop, but the server enforces its
+			// own bound regardless of bridge behavior.
+			return
+		case <-r.Context().Done():
+			// Client/bridge closed the request — the cancellation path that
+			// makes SC3 testable (defer Detach runs on this return).
+			return
+		}
+	}
 }
