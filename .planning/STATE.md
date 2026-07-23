@@ -5,15 +5,15 @@ milestone_name: Kamacu MCP Server
 current_phase: 08
 current_phase_name: sessions-terminal-read-access
 status: executing
-stopped_at: Phase 08 context gathered
-last_updated: "2026-07-23T06:03:30.863Z"
+stopped_at: Completed 08-02-mcp-session-tools-PLAN.md
+last_updated: "2026-07-23T06:24:57.200Z"
 last_activity: 2026-07-23
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
   percent: 50
 ---
 
@@ -43,7 +43,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
 ## Current Position
 
 Phase: 08 (sessions-terminal-read-access) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-07-23 — Phase 08 execution started
 
@@ -51,9 +51,9 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 
 ## Session
 
-**Last session:** 2026-07-23T06:03:12.341Z
-**Stopped at:** Phase 08 context gathered
-**Resume file:** .planning/phases/08-sessions-terminal-read-access/08-CONTEXT.md
+**Last session:** 2026-07-23T06:24:57.187Z
+**Stopped at:** Completed 08-02-mcp-session-tools-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 | Phase Phase 07 P03 | 7 min | 2 tasks tasks | 2 files files |
 | Phase 07 P04 | 7min | 2 tasks | 2 files |
 | Phase 08 P01 | 21 min | 2 tasks | 2 files |
+| Phase 08 P02 | 10 min | 2 tasks | 3 files |
 
 ## Decisions
 
@@ -82,3 +83,6 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 - [Phase ?]: [Phase 08 / Plan 01]: sessionDetail embeds session.Info so every existing JSON tag flows through unchanged; taskTitle/projectName/agentName ride as additional top-level fields (omitempty for dev sessions) — D-10 JOIN wired into list + get_session
 - [Phase ?]: [Phase 08 / Plan 01]: subscribe drains the Attach replay (D-02) when include_history is absent — one <-q read atomically removes the replay; streams application/octet-stream (not text); duration clamped to [1s, 300s] server-side (T-08-03); defer Detach on every return path (SC3)
 - [Phase ?]: [Phase 08 / Plan 01]: Type-level read-only contract (D-14) enforced — handlers consume ONLY Info/Snapshot/Attach/Detach/Done; scoped grep gate proves zero references to the PTY-write primitive and zero references to WS FrameData
+- [Phase ?]: [Phase 08 / Plan 02]: withRecover(name, h) wraps every session tool handler closure so a panic becomes a returned non-nil error rather than unwinding through the SDK's tools/call dispatch (server.go:753 has no recover — Phase 06 Open Q1 / Pitfall 2 closed). Named returns (result, err) are REQUIRED so the deferred recover can overwrite them. — Top-level helper (not a method) so Plan 03 subscribe_session_output reuses it unchanged
+- [Phase ?]: [Phase 08 / Plan 02]: listSessions D-13 orphan filter degrades to passthrough on ANY shape surprise (not a JSON array, orphaned not bool, marshal failure) — never errors. The orphan filter is best-effort shape cleanup; a malformed Kamacu body still reaches the agent verbatim rather than breaking the tool. — Preserves Kamacu's SPA behavior intact while guaranteeing the MCP contract (every listed id is operable)
+- [Phase ?]: [Phase 08 / Plan 02]: Type-level read-only contract (D-14) enforced — internal/mcp/sessions.go imports ONLY stdlib + SDK; performs only HTTP GETs; scoped grep gate (grep -c 'internal/session' sessions.go == 0) is green; no PTY-write primitive and no WS FrameData type are in scope. — The bridge speaks HTTP only; the session engine package never appears in the import graph
