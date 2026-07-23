@@ -70,9 +70,11 @@ func (ServeCommand) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subc
 }
 
 // registerTools delegates to the per-resource registrars (D-07 split). Each
-// registrar (registerTaskTools / registerProjectTools / registerWorkspaceTools)
-// owns its s.AddTool calls for the tools in its resource; the bridge shared
-// helper (bridge.call) handles the response-shape half of every handler.
+// registrar (registerTaskTools / registerProjectTools / registerWorkspaceTools
+// / registerSessionTools / registerReviewTools) owns its s.AddTool calls for
+// the tools in its resource; the bridge shared helper (bridge.call) handles
+// the response-shape half of every handler (the list-review tools diverge for
+// the state-field model — see reviews.go).
 //
 // The low-level Server.AddTool method is used with an explicit
 // map[string]any InputSchema — NOT the typed generic AddTool helper from the
@@ -84,5 +86,6 @@ func registerTools(s *mcp.Server, b *bridge) {
 	registerProjectTools(s, b)
 	registerWorkspaceTools(s, b)
 	registerSessionTools(s, b)
+	registerReviewTools(s, b) // NEW — Phase 09 (list_pending_reviews / list_recently_reviewed / open_review)
 }
 
