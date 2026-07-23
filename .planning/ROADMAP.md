@@ -138,7 +138,17 @@ Plans:
   3. An agent can call `subscribe_session_output(session_id, duration_seconds?)` to tail live PTY output for a bounded duration (default 30s, hard cap 300s); on cancellation (the agent CLI sends `notifications/cancelled`) the tool returns the partial stream collected so far and detaches from the session within 100ms; goroutine count is stable across N subscribe/cancel cycles (no leak).
   4. No tool in this phase exposes any capability to send keystrokes / PTY input — the read-only contract is enforced at the type level (a wrapper with no public Write method), and no `FrameData` PTY-input frame is ever sent.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+**Wave 1** *(parallel — zero file overlap)*
+
+- [ ] 08-01-kamacu-session-endpoints-PLAN.md — Read-only Kamacu HTTP endpoints backing all four tools: list ?project_id JOIN + D-10 task/project/agent context, GET /api/sessions/{id}, GET /api/sessions/{id}/output (base64 D-08 snapshot, ~512 KiB clamp), GET /api/sessions/{id}/subscribe (plain-HTTP chunked bounded stream, attach/detach/drain-replay/duration-cap). Delivers MCPSESS-01/02/03/04 server-side + the Kamacu half of SC3. Wave 1.
+- [ ] 08-02-mcp-session-tools-PLAN.md — internal/mcp/sessions.go with registerSessionTools + the three non-streaming bridge tools (list_sessions/get_session/get_session_output via bridge.call, D-13 orphan-row filter) + the withRecover panic wrapper (Phase 06 Open Q1) + registerSessionTools wiring in server.go + per-tool tests. Delivers MCPSESS-01/02/03 at the MCP layer. Wave 1 (parallel with 08-01).
+
+**Wave 2** *(blocked on 08-02 — same files)*
+
+- [ ] 08-03-mcp-subscribe-streaming-PLAN.md — subscribe_session_output: dedicated no-timeout streaming *http.Client (NOT b.client/bridge.call), incremental accumulate with 1 MiB most-recent cap (D-04), ctx.Done partial-return (D-01/SC3), follow-up GET for the exit marker (D-03), D-08 envelope assembly; + SC3 cancellation/leak test (mcp.NewInMemoryTransports) + goroutine-stability-across-N-cycles. Delivers MCPSESS-04 + proves SC3. Wave 2 (depends on 08-02).
 
 ### Phase 09: PR Review Tools
 
@@ -165,6 +175,6 @@ Plans:
 | 04. Gated status plugin unlocks waiting and idle | v1.10 | 2/2 | Complete | 2026-07-07 |
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
 | 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete    | 2026-07-21 |
-| 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete   | 2026-07-22 |
-| 08. Sessions & Terminal Read Access | v1.11 | 0/TBD | Not started | — |
+| 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
+| 08. Sessions & Terminal Read Access | v1.11 | 0/3 | Not started | — |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
