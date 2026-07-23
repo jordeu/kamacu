@@ -2,14 +2,45 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// subscribeTailCap is D-04's 1 MiB hard cap on the accumulated subscribe
+// buffer. When the live tail exceeds this size, the handler drops from the
+// FRONT and keeps the MOST RECENT subscribeTailCap bytes (what the agent most
+// needs — what just happened) and sets truncated:true in the D-08 envelope.
+// T-08-11 mitigation.
+const subscribeTailCap = 1 << 20
+
+// defaultSubscribeSeconds and maxSubscribeSeconds mirror the Kamacu-side
+// caps (Plan 01 defaultSubscribeDuration/maxSubscribeDuration). The bridge
+// clamps BEFORE building the request so a misbehaving agent CLI cannot drive
+// the wire past 300s (T-08-15) — Kamacu enforces its own bound server-side,
+// but the bridge-level clamp is the first line of defense.
+const (
+	defaultSubscribeSeconds = 30
+	maxSubscribeSeconds     = 300
+)
+
+// subscribeClient is the DEDICATED streaming HTTP client for subscribe.
+// D-11 / Pitfall 1: the bridge's b.client (bridge.go:53) pins a 10s Timeout
+// for Phase 06's fail-fast posture on the non-streaming tools; using it for
+// subscribe would silently kill every >10s tail. This client has NO Timeout
+// — the SDK handler ctx (cancelled on notifications/cancelled, verified at
+// go-sdk@v1.6.1/mcp/transport.go:205-218) is the cancellation mechanism.
+// Request-scoped: each subscribe call builds its request with
+// http.NewRequestWithContext carrying the handler ctx, so a Read on a
+// cancelled request returns promptly with a context-cancellation error.
+var subscribeClient = &http.Client{}
 
 // withRecover wraps a session tool handler so a panic in the handler body is
 // converted to a returned error instead of unwinding through the SDK's
@@ -54,8 +85,8 @@ func withRecover(name string, h mcp.ToolHandler) mcp.ToolHandler {
 //
 // Read-only isolation (D-14): this file imports ONLY stdlib + the SDK. It
 // does NOT import the in-repo session engine package that owns PTY lifetimes
-// — the bridge speaks HTTP only; no PTY-write primitive and no WS FrameData
-// type are in scope anywhere here. The acceptance-criteria grep
+// — the bridge speaks HTTP only; no PTY-write primitive and no WS PTY-input
+// frame type are in scope anywhere here. The acceptance-criteria grep
 // (sessions.go mentions zero references to the session engine package) is
 // the type-level proof.
 func registerSessionTools(s *mcp.Server, b *bridge) {
@@ -128,6 +159,255 @@ func registerSessionTools(s *mcp.Server, b *bridge) {
 			return b.getSessionOutput(ctx, req)
 		}),
 	)
+
+	// 4. subscribe_session_output (MCPSESS-04) — the streaming tool.
+	s.AddTool(
+		&mcp.Tool{
+			Name:        "subscribe_session_output",
+			Description: "Tail live PTY output for a session for a bounded duration (default 30s, cap 300s). Read-only — collect-and-return; cancels cleanly on notifications/cancelled, returning whatever was collected so far as a partial result. Returns ONE CallToolResult whose TextContent is a JSON envelope {encoding:\"base64\", output:<b64>, bytes:N, truncated:bool, exited:bool, exitCode?:int, stopRequested?:bool}. The buffer is capped at ~1 MiB keeping the MOST RECENT bytes (truncated:true when the cap was hit). include_history defaults false (live-only); pass true to include the ring replay as the first bytes.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "The session id to tail.",
+					},
+					"duration_seconds": map[string]any{
+						"type":        "integer",
+						"description": "Optional: how long to tail, in seconds. Default 30; clamped to [1, 300].",
+					},
+					"include_history": map[string]any{
+						"type":        "boolean",
+						"description": "Optional: include the ring replay as the first bytes (default false = live-only).",
+					},
+				},
+				"required": []string{"session_id"},
+			},
+		},
+		withRecover("subscribe_session_output", func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return b.subscribeSessionOutput(ctx, req)
+		}),
+	)
+}
+
+// emptySubscribeEnvelope is the D-01 strict-edge return: when the handler ctx
+// is cancelled BEFORE subscribeClient.Do succeeds (cancel-before-attach),
+// there is no partial buffer to return — but D-01's "returns ONE
+// CallToolResult" still holds. The contract returns a valid zero-byte D-08
+// envelope (NOT a transport error) so the agent CLI sees a clean result.
+// The SDK surfaces this as a JSON-RPC success carrying the envelope text;
+// SC3's "returns the partial stream collected so far" is satisfied because
+// zero bytes were streamed before cancel.
+func emptySubscribeEnvelope() *mcp.CallToolResult {
+	body, err := json.Marshal(subscribeEnvelope{
+		Encoding:  "base64",
+		Output:    "",
+		Bytes:     0,
+		Truncated: false,
+		Exited:    false,
+	})
+	if err != nil {
+		// json.Marshal of a fixed struct with no pointers cannot fail in
+		// practice; degrade to a static literal so this NEVER returns nil.
+		body = []byte(`{"encoding":"base64","output":"","bytes":0,"truncated":false,"exited":false}`)
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: string(body)},
+		},
+	}
+}
+
+// subscribeEnvelope is the D-08 wire shape returned by subscribe_session_output
+// as TextContent. The base64 of the accumulated PTY bytes plus metadata the
+// agent can reason about (was it truncated? did the session exit mid-tail?).
+// ExitCode is *int so it is omitted entirely (omitempty) when the session
+// did not exit; a present ExitCode:0 is meaningful (clean exit).
+type subscribeEnvelope struct {
+	Encoding      string `json:"encoding"`            // always "base64"
+	Output        string `json:"output"`              // base64 of the accumulated bytes
+	Bytes         int    `json:"bytes"`               // raw byte count of the tail
+	Truncated     bool   `json:"truncated"`           // D-04: tail cap (1 MiB) was hit
+	Exited        bool   `json:"exited"`              // D-03: session exited mid-tail
+	ExitCode      *int   `json:"exitCode,omitempty"`  // D-03: present iff exited
+	StopRequested bool   `json:"stopRequested,omitempty"` // D-03: present iff server-requested stop
+}
+
+// subscribeSessionOutput is the body of the subscribe_session_output tool
+// handler (MCPSESS-04). It diverges from the Phase 06/07 bridge pattern:
+//
+//   - It does NOT call b.call (which buffers the full body via
+//     io.ReadAll(LimitReader(maxBodyBytes)) — bridge.go:94). Subscribe streams
+//     up to 300s of live PTY output; a body-buffering helper defeats the
+//     point and caps the tail before it can grow naturally.
+//   - It does NOT use b.client (the bridge's *http.Client with a 10s Timeout
+//     at bridge.go:53). A 30s+ tail would time out at 10s every time
+//     (Pitfall 1). It uses the package-level subscribeClient (no Timeout)
+//     instead — the SDK handler ctx is the cancellation mechanism.
+//
+// Flow (D-01 collect-and-return + D-03 exit marker + D-04 cap):
+//  1. Parse + validate session_id; clamp duration_seconds to [1, 300].
+//  2. Build the streaming GET with the handler ctx (NewRequestWithContext)
+//     so a ctx cancel propagates to a closed connection (SC3).
+//  3. Cancel-before-attach guard (D-01 strict-edge): if subscribeClient.Do
+//     returns a context.Cancellation error BEFORE the stream attached,
+//     return (emptySubscribeEnvelope, nil) — a clean result, not a transport
+//     error.
+//  4. Accumulate raw octets in 8 KiB chunks; trim-front on overflow so the
+//     buffer holds the MOST RECENT subscribeTailCap bytes (D-04). resp.Body.Read
+//     returns io.EOF on stream close AND a context-cancellation error on
+//     ctx cancel — both break the loop and fall through to envelope assembly.
+//     No separate select needed: the request carries the ctx, so Read
+//     unblocks on cancel just as on EOF.
+//  5. Follow-up GET /api/sessions/{id} for the exit marker (08-RESEARCH Open
+//     Q2 option b). Uses b.do (the 10s client — fine for a quick info GET);
+//     a 404 or transport error leaves exited=false (the session's final
+//     state is unknown; the partial stream is still the load-bearing result
+//     per SC3). Never let a follow-up failure turn the subscribe into an error.
+//  6. Assemble the D-08 envelope: base64 the accumulated buffer, marshal the
+//     envelope, return (*CallToolResult, nil).
+//
+// Read-only contract (D-14): this method issues ONLY HTTP GETs (the streaming
+// subscribe + the follow-up info). It does NOT spawn a goroutine — the
+// handler body is the reader (request-scoped; dies with the tool call).
+func (b *bridge) subscribeSessionOutput(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args struct {
+		SessionID       string `json:"session_id"`
+		DurationSeconds *int   `json:"duration_seconds"`
+		IncludeHistory  *bool  `json:"include_history"`
+	}
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("subscribe_session_output: invalid arguments: %w", err)
+		}
+	}
+	if args.SessionID == "" {
+		return nil, errors.New("subscribe_session_output: session_id is required")
+	}
+	// Clamp duration: default 30s; floor 1s; ceiling maxSubscribeSeconds (300).
+	effective := defaultSubscribeSeconds
+	if args.DurationSeconds != nil {
+		effective = *args.DurationSeconds
+	}
+	if effective < 1 {
+		effective = 1
+	}
+	if effective > maxSubscribeSeconds {
+		effective = maxSubscribeSeconds
+	}
+	includeHistory := args.IncludeHistory != nil && *args.IncludeHistory
+
+	// Build the streaming GET. The request carries the handler ctx — when the
+	// SDK cancels it (notifications/cancelled), the in-flight Do and any
+	// subsequent Read return promptly with a context-cancellation error.
+	// This is the SC3 cancellation primitive (D-01/D-03).
+	httpReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		b.base+"/api/sessions/"+url.PathEscape(args.SessionID)+fmt.Sprintf("/subscribe?duration_seconds=%d&include_history=%v", effective, includeHistory),
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("kamacu subscribe: build request: %w", err)
+	}
+	httpReq.Header.Set("X-Kamacu-Token", b.token)
+
+	resp, err := subscribeClient.Do(httpReq)
+	if err != nil {
+		// Cancel-before-attach guard (D-01 strict-edge): if the handler ctx
+		// was cancelled before/during subscribeClient.Do succeeded (the stream
+		// never attached; there is no partial buffer to return), return an
+		// empty D-08 envelope as a normal result — NOT a transport error.
+		// D-01's "returns ONE CallToolResult" holds even when zero bytes were
+		// streamed. Only a non-cancellation Do error is a real transport error.
+		if errors.Is(err, context.Canceled) {
+			return emptySubscribeEnvelope(), nil
+		}
+		return nil, fmt.Errorf("kamacu subscribe: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096)) // bounded error body
+		return nil, fmt.Errorf("kamacu GET /api/sessions/%s/subscribe: HTTP %d: %s", args.SessionID, resp.StatusCode, string(body))
+	}
+
+	// D-04 cap: accumulate in fixed-size 8 KiB chunks; trim-front on overflow
+	// so the buffer holds the MOST RECENT subscribeTailCap bytes. Incremental
+	// trim bounds memory tightly; the trim cost is amortized across reads.
+	// (08-RESEARCH Open Q3 recommendation — fixed-size chunks with trim-front.)
+	buf := make([]byte, 0, subscribeTailCap)
+	truncated := false
+	chunk := make([]byte, 8192)
+	for {
+		n, readErr := resp.Body.Read(chunk)
+		if n > 0 {
+			buf = append(buf, chunk[:n]...)
+			if len(buf) > subscribeTailCap {
+				buf = buf[len(buf)-subscribeTailCap:]
+				truncated = true
+			}
+		}
+		if readErr != nil {
+			// io.EOF (stream closed by Kamacu — duration/exit/disconnect)
+			// AND context.Canceled (the handler ctx was cancelled — the SDK
+			// sent notifications/cancelled) both break the loop here. The
+			// partial buffer accumulated so far is the SC3 result.
+			break
+		}
+	}
+
+	// Exit marker via a follow-up GET (08-RESEARCH Open Q2 option b). Option
+	// (b) avoids introducing sentinel-byte or length-prefix framing into the
+	// raw application/octet-stream (which would complicate the D-08 envelope
+	// contract and risk mis-splitting PTY bytes that happen to match a
+	// sentinel). The extra loopback GET is acceptable for v1.11 single-user
+	// localhost.
+	exited := false
+	var exitCode *int
+	stopRequested := false
+	if info, infoErr := b.do(ctx, http.MethodGet, "/api/sessions/"+url.PathEscape(args.SessionID), nil); infoErr == nil {
+		defer info.Body.Close()
+		if info.StatusCode == http.StatusOK {
+			infoBody, _ := io.ReadAll(io.LimitReader(info.Body, 4096))
+			var infoStruct struct {
+				Status        string `json:"status"`
+				ExitCode      *int   `json:"exitCode"`
+				StopRequested bool   `json:"stopRequested"`
+			}
+			if json.Unmarshal(infoBody, &infoStruct) == nil {
+				exited = infoStruct.Status == "exited"
+				exitCode = infoStruct.ExitCode
+				stopRequested = infoStruct.StopRequested
+			}
+		}
+	}
+	// A follow-up failure (404 — session reaped mid-subscribe, or transport
+	// error) leaves exited=false. The session's final state is unknown; the
+	// envelope still carries the accumulated bytes + truncated flag. Never
+	// let a follow-up failure turn the subscribe into an error — the partial
+	// stream is the load-bearing result (SC3).
+
+	// Assemble the D-08 subscribe envelope.
+	envelope := subscribeEnvelope{
+		Encoding:      "base64",
+		Output:        base64.StdEncoding.EncodeToString(buf),
+		Bytes:         len(buf),
+		Truncated:     truncated,
+		Exited:        exited,
+		ExitCode:      exitCode,
+		StopRequested: stopRequested,
+	}
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		// Marshal of a fixed struct should never fail; surface as an error so
+		// the agent CLI sees something rather than a silent nil.
+		return nil, fmt.Errorf("kamacu subscribe: marshal envelope: %w", err)
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: string(body)},
+		},
+	}, nil
 }
 
 // listSessions is the body of the list_sessions tool handler (MCPSESS-01). It
