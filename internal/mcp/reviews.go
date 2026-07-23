@@ -3,7 +3,7 @@
 // reviews.go owns the three PR-review MCP tools (Phase 09 D-07 per-resource
 // split): list_pending_reviews, list_recently_reviewed, open_review. These are
 // the LAST tools of the v1.11 milestone — pure translation over Kamacu's
-// existing v1.3/v1.5 internal/github HTTP surface. ZERO new endpoints, ZERO
+// existing v1.3/v1.5 GitHub-integration HTTP surface. ZERO new endpoints, ZERO
 // new gh calls, ZERO new gates, ZERO new DB/migration/frontend changes.
 //
 // Why this file is a sibling of workspaces.go (not a method on bridge.go):
@@ -29,10 +29,10 @@
 //     surface. The {task, pr} envelope is passed through verbatim.
 //
 // Clean-import streak (Pitfall 5): this file imports ONLY stdlib + the MCP
-// SDK. It does NOT import kamacu/internal/github, kamacu/internal/api, or
-// kamacu/internal/store — the state-field decode uses a LOCAL anonymous
-// struct (not github.Result) so the milestone's internal/mcp decoupling from
-// the domain packages is preserved at the type level.
+// SDK. It does NOT import any in-repo domain package (the github integration,
+// api, or store packages) — the state-field decode uses a LOCAL anonymous
+// struct (not the domain Result type) so internal/mcp stays type-decoupled
+// from the domain packages.
 package mcp
 
 import (
@@ -77,8 +77,8 @@ import (
 // standard validation error BEFORE any HTTP call.
 //
 // Freshness (D-06): NO tool exposes a refresh/force-fetch parameter. Freshness
-// rides the existing per-repo 60s success TTL + 10s attempt floor in
-// internal/github.Service (unchanged).
+// rides the existing per-repo 60s success TTL + 10s attempt floor in the
+// github Service (unchanged).
 //
 // The low-level Server.AddTool is used with an explicit map[string]any
 // InputSchema — NOT the typed generic mcp.AddTool[In, Out] helper (Phase 06
@@ -169,7 +169,7 @@ func registerReviewTools(s *mcp.Server, b *bridge) {
 //
 // This is the ONLY handler in the milestone that diverges from bridge.call to
 // inspect a JSON body field — modeled on subscribeSessionOutput's scoped
-// divergence (sessions.go). The GET endpoint (internal/api/pullrequests.go:40-81)
+// divergence (sessions.go). The GET endpoint (the api package's pullrequests.go:40-81)
 // ALWAYS writes HTTP 200 and carries degradation in the `state` field of
 // github.Result; bridge.call would treat that 200 as unconditional success and
 // lose the degrade signal (state:"disabled" / "no_gh" / "auth_required" /
@@ -186,8 +186,8 @@ func registerReviewTools(s *mcp.Server, b *bridge) {
 //     the agent can self-correct; IsError is the actionable signal.
 //
 // Pitfall 1 (stale-cache edge, load-bearing): IsError is set PURELY on
-// state != "ok" — NEVER gated on prs/reviewed array nullness. internal/github
-// service.go resultLocked() sets PRs/Reviewed from cache INDEPENDENTLY of
+// state != "ok" — NEVER gated on prs/reviewed array nullness. The github
+// Service's resultLocked() sets PRs/Reviewed from cache INDEPENDENTLY of
 // state, so a transient no_gh/auth_required/error AFTER a prior success
 // returns NON-NULL arrays + stale:true. A `if prs == nil { IsError=true }`
 // predicate would let that degrade slip through as IsError=false. The
@@ -226,8 +226,9 @@ func (b *bridge) listReviews(ctx context.Context, projectID int64, queue string)
 		return nil, fmt.Errorf("kamacu GET %s: HTTP %d: %s", path, resp.StatusCode, string(body))
 	}
 	// === NOVEL STEP (D-01/D-02/D-03): decode the top-level state field and
-	// branch on it. github.Result decoded into a LOCAL struct (Pitfall 5 — NOT
-	// github.Result, so internal/mcp stays decoupled from internal/github). ===
+	// branch on it. The domain Result type is decoded into a LOCAL anonymous
+	// struct (Pitfall 5 — NOT the github package's Result, so internal/mcp
+	// stays decoupled from the domain package). ===
 	var res struct {
 		State    string          `json:"state"`              // "ok"|"disabled"|"no_gh"|"auth_required"|"error"
 		Stale    bool            `json:"stale"`              // true iff a prior-success cache is being served under a transient error
