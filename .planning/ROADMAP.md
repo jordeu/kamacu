@@ -161,7 +161,12 @@ Plans:
   2. An agent can call `open_review(project_id, pr_number)` to open a PR as a review workspace — reusing the existing v1.3 Phase 12 find-or-create `source='github_pr'` task path with worktree on the PR's real head branch — and the review opens identically to clicking the PR card in the browser (open-or-reattach, no duplicates, board-leak guard intact).
   3. When GitHub integration is off, the project has no linked repo, or `gh` is absent, the review tools degrade gracefully — returning an actionable MCP error and never bypassing the v1.3 two-gate ladder (toggle → link).
 
-**Plans**: TBD
+**Plans**: 1/1 plan complete
+
+Plans:
+**Wave 1**
+
+- [ ] 09-01-PR-REVIEW-TOOLS-PLAN.md — Create internal/mcp/reviews.go (3 tools: list_pending_reviews, list_recently_reviewed via shared state-inspecting listReviews helper; open_review via bridge.call verbatim) + reviews_test.go (happy + error per tool, incl. state→IsError branch + 409 wrap) + one-line registerReviewTools wiring in server.go. Delivers MCPREV-01/02/03. Wave 1.
 
 ## Progress
 
@@ -177,4 +182,4 @@ Plans:
 | 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete    | 2026-07-21 |
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
-| 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |
+| 09. PR Review Tools | v1.11 | 0/1 | Not started | — |
