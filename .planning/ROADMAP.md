@@ -79,7 +79,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 
 - [x] **Phase 06: MCP Subcommand Foundation** — `kamacu mcp serve` stdio subcommand bridging to the Kamacu HTTP API, proven end-to-end through one exercised tool (completed 2026-07-21)
 - [x] **Phase 07: Tasks, Projects & Workspaces Tools** — full CRUD tool surface (13 tools) mirroring every action the SPA exposes (completed 2026-07-22)
-- [ ] **Phase 08: Sessions & Terminal Read Access** — list/get sessions + snapshot + bounded live-tail (the milestone's risk center)
+- [x] **Phase 08: Sessions & Terminal Read Access** — list/get sessions + snapshot + bounded live-tail (the milestone's risk center) (completed 2026-07-23)
 - [ ] **Phase 09: PR Review Tools** — list pending/recently-reviewed + open_review, a thin layer over the v1.3 gh integration
 
 ## Phase Details
@@ -138,7 +138,7 @@ Plans:
   3. An agent can call `subscribe_session_output(session_id, duration_seconds?)` to tail live PTY output for a bounded duration (default 30s, hard cap 300s); on cancellation (the agent CLI sends `notifications/cancelled`) the tool returns the partial stream collected so far and detaches from the session within 100ms; goroutine count is stable across N subscribe/cancel cycles (no leak).
   4. No tool in this phase exposes any capability to send keystrokes / PTY input — the read-only contract is enforced at the type level (a wrapper with no public Write method), and no `FrameData` PTY-input frame is ever sent.
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans complete
 
 Plans:
 **Wave 1** *(parallel — zero file overlap)*
@@ -148,7 +148,7 @@ Plans:
 
 **Wave 2** *(blocked on 08-02 — same files)*
 
-- [ ] 08-03-mcp-subscribe-streaming-PLAN.md — subscribe_session_output: dedicated no-timeout streaming *http.Client (NOT b.client/bridge.call), incremental accumulate with 1 MiB most-recent cap (D-04), ctx.Done partial-return (D-01/SC3), follow-up GET for the exit marker (D-03), D-08 envelope assembly; + SC3 cancellation/leak test (mcp.NewInMemoryTransports) + goroutine-stability-across-N-cycles. Delivers MCPSESS-04 + proves SC3. Wave 2 (depends on 08-02).
+- [x] 08-03-mcp-subscribe-streaming-PLAN.md — subscribe_session_output: dedicated no-timeout streaming *http.Client (NOT b.client/bridge.call), incremental accumulate with 1 MiB most-recent cap (D-04), ctx.Done partial-return (D-01/SC3), follow-up GET for the exit marker (D-03), D-08 envelope assembly; + SC3 cancellation/leak test (mcp.NewInMemoryTransports) + goroutine-stability-across-N-cycles. Delivers MCPSESS-04 + proves SC3. Wave 2 (depends on 08-02).
 
 ### Phase 09: PR Review Tools
 
@@ -176,5 +176,5 @@ Plans:
 | 05. Session resume and argv regression hardening | v1.10 | 3/3 | Complete | 2026-07-08 |
 | 06. MCP Subcommand Foundation | v1.11 | 3/3 | Complete    | 2026-07-21 |
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
-| 08. Sessions & Terminal Read Access | v1.11 | 2/3 | In Progress|  |
+| 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete   | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 0/TBD | Not started | — |

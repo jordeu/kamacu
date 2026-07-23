@@ -4,17 +4,17 @@ milestone: v1.11
 milestone_name: Kamacu MCP Server
 current_phase: 08
 current_phase_name: sessions-terminal-read-access
-status: executing
-stopped_at: Completed 08-02-mcp-session-tools-PLAN.md
-last_updated: "2026-07-23T06:24:57.200Z"
+status: verifying
+stopped_at: Completed 08-03-mcp-subscribe-streaming-PLAN.md
+last_updated: "2026-07-23T09:07:48.541Z"
 last_activity: 2026-07-23
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 10
-  completed_plans: 9
-  percent: 50
+  completed_plans: 10
+  percent: 75
 ---
 
 # Project State
@@ -44,15 +44,15 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
 
 Phase: 08 (sessions-terminal-read-access) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-23 — Phase 08 execution started
 
 Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 
 ## Session
 
-**Last session:** 2026-07-23T06:24:57.187Z
-**Stopped at:** Completed 08-02-mcp-session-tools-PLAN.md
+**Last session:** 2026-07-23T09:07:48.524Z
+**Stopped at:** Completed 08-03-mcp-subscribe-streaming-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -68,6 +68,7 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 | Phase 07 P04 | 7min | 2 tasks | 2 files |
 | Phase 08 P01 | 21 min | 2 tasks | 2 files |
 | Phase 08 P02 | 10 min | 2 tasks | 3 files |
+| Phase 08 P03 | 25min | 2 tasks | 2 files |
 
 ## Decisions
 
@@ -86,3 +87,7 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 - [Phase ?]: [Phase 08 / Plan 02]: withRecover(name, h) wraps every session tool handler closure so a panic becomes a returned non-nil error rather than unwinding through the SDK's tools/call dispatch (server.go:753 has no recover — Phase 06 Open Q1 / Pitfall 2 closed). Named returns (result, err) are REQUIRED so the deferred recover can overwrite them. — Top-level helper (not a method) so Plan 03 subscribe_session_output reuses it unchanged
 - [Phase ?]: [Phase 08 / Plan 02]: listSessions D-13 orphan filter degrades to passthrough on ANY shape surprise (not a JSON array, orphaned not bool, marshal failure) — never errors. The orphan filter is best-effort shape cleanup; a malformed Kamacu body still reaches the agent verbatim rather than breaking the tool. — Preserves Kamacu's SPA behavior intact while guaranteeing the MCP contract (every listed id is operable)
 - [Phase ?]: [Phase 08 / Plan 02]: Type-level read-only contract (D-14) enforced — internal/mcp/sessions.go imports ONLY stdlib + SDK; performs only HTTP GETs; scoped grep gate (grep -c 'internal/session' sessions.go == 0) is green; no PTY-write primitive and no WS FrameData type are in scope. — The bridge speaks HTTP only; the session engine package never appears in the import graph
+- [Phase ?]: [Phase 08 / Plan 03]: subscribeClient is a package-level *http.Client{} with NO Timeout — the SDK handler ctx is the cancellation mechanism (D-11 / Pitfall 1). Reusing b.client (10s timeout at bridge.go:53) would silently kill every >10s tail. Subscribe diverges from the Phase 06/07 bridge pattern for the first time.
+- [Phase ?]: [Phase 08 / Plan 03]: Exit marker via follow-up GET (08-RESEARCH Open Q2 option b) over a trailing JSON line on the stream (option a). Option (b) avoids sentinel-byte/length-prefix framing of the raw application/octet-stream (which would complicate the D-08 envelope contract), reuses the existing Plan 01 GET /api/sessions/{id}, and costs one extra loopback GET per subscribe — acceptable for v1.11 single-user localhost.
+- [Phase ?]: [Phase 08 / Plan 03]: D-01 cancel-before-attach returns emptySubscribeEnvelope + nil (NOT a transport error). D-01's 'returns ONE CallToolResult' holds even when zero bytes were streamed because the ctx was cancelled before subscribeClient.Do succeeded. The envelope is a valid zero-byte D-08 result.
+- [Phase ?]: [Phase 08 / Plan 03]: SC3 contract is on the HANDLER's return value, not what CallTool surfaces to the client. go-sdk@v1.6.1's own Example_cancellation shows CallTool returns (nil, context.Canceled) to the client when the client's ctx is cancelled — the handler still runs to completion and returns its partial result internally. TestSubscribe_CancelledViaContext wraps subscribeSessionOutput in a recorder to observe the handler's actual return — the load-bearing SC3 assertion.
