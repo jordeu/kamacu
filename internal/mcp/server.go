@@ -83,5 +83,6 @@ func registerTools(s *mcp.Server, b *bridge) {
 	registerTaskTools(s, b)
 	registerProjectTools(s, b)
 	registerWorkspaceTools(s, b)
+	registerSessionTools(s, b)
 }
 
