@@ -498,32 +498,39 @@ func (s *Session) WriteInput(p []byte) error {
 
 **If this table is empty:** N/A — 7 assumptions, all low-risk and reversible. None block planning.
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All five questions below are substantively resolved by the Phase 08 plans. Each carries an explicit `RESOLVED:` marker noting which plan adopts its recommendation (and any deliberate divergence). Dimension 11 (research resolution) treats these as accepted-as-resolved.
 
 1. **Does the bridge need to handle the partial-final-chunk case for base64?**
    - What we know: The Kamacu streaming endpoint writes raw PTY bytes in chunks; the bridge accumulates and base64-encodes the WHOLE accumulated buffer at the end (D-08).
    - What's unclear: None, really — base64 of the accumulated `[]byte` is a single operation. The only question is whether to base64-encode incrementally (no benefit) or once at the end (simpler).
    - Recommendation: Once at the end. The accumulated buffer is bounded by D-04's 1 MiB cap.
+   - RESOLVED: Adopted by Plan 08-03 Task 1 — base64 is applied once at the end via `base64.StdEncoding.EncodeToString(buf)` on the accumulated buffer (D-04's 1 MiB cap bounds the input).
 
 2. **Should the Kamacu streaming endpoint write the exit-trailer as a separate chunk, or close the response with the trailer inline?**
    - What we know: The HTTP chunked response is `application/octet-stream` raw bytes. The exit metadata (D-03's `exited/exitCode/stopRequested`) needs to reach the bridge somehow.
    - What's unclear: Two options — (a) Kamacu writes a trailing JSON line after the last byte chunk, and the bridge parses it out; (b) the bridge infers exit by the HTTP response closing and re-fetches `GET /api/sessions/{id}` for the final `Info().ExitCode`.
    - Recommendation: Option (a) — write a trailing JSON line (delimited by a sentinel byte or a length prefix). Avoids a second round-trip. The agent finalizes the exact framing. `[ASSUMED]`
+   - RESOLVED: Resolved by Plan 08-03 Task 1 — **option (b) follow-up GET adopted over option (a)**. The plan deliberately diverges from the research recommendation: option (b) avoids introducing sentinel/length-prefix framing into the raw octet-stream (which would complicate the D-08 envelope contract), and reuses the existing `GET /api/sessions/{id}` endpoint delivered by Plan 08-01 (no new Kamacu-side trailer logic). The extra round-trip is one loopback GET; acceptable for v1.11 single-user localhost.
 
 3. **Should subscribe's bridge handler use `io.ReadAll` or read incrementally?**
    - What we know: `bridge.call` uses `io.ReadAll(io.LimitReader(...))` (`bridge.go:94`) — buffers the full body. Subscribe needs incremental reads with the D-04 cap applied incrementally.
    - What's unclear: Whether to read fixed-size chunks (8 KiB) and trim-front on each read, or to read into a growing buffer and trim once at EOF.
    - Recommendation: Fixed-size chunks (8 KiB) with trim-front when `len(buf) > tailCap`. Bounds memory tightly; the trim cost is amortized.
+   - RESOLVED: Adopted verbatim by Plan 08-03 Task 1 — fixed-size 8 KiB chunks (`chunk := make([]byte, 8192)`) with trim-front on overflow (`buf = buf[len(buf)-subscribeTailCap:]`).
 
 4. **Should the SC3 cancellation/leak test use a real `httptest.Server` or a fake in-memory transport?**
    - What we know: The SDK provides `mcp.NewInMemoryTransports()` (`transport.go:147`) for end-to-end tool testing without stdio. The bridge's HTTP client needs a real `httptest.Server` to exercise the streaming path.
    - What's unclear: Whether the test should be (a) end-to-end (in-memory MCP transport + httptest streaming server + bridge handler) or (b) two-layer (bridge handler test + separate SDK-level cancellation test).
    - Recommendation: Both. The bridge handler test (httptest + bridge.subscribeSessionOutput) proves the HTTP-streaming cancellation. A second test using `NewInMemoryTransports` proves the SDK-level ctx propagation through to a handler (the shape of `Example_cancellation`). Together they cover SC3. `[VERIFIED: go-sdk@v1.6.1/mcp/mcp_example_test.go:108-164]`
+   - RESOLVED: Adopted by Plan 08-03 Task 2 — both layers are present. Bridge-level tests (TestBridge_Subscribe_*) use httptest + `&bridge{base,token,client}`; the SC3 gate (TestSubscribe_CancelledViaContext_ReturnsPartialAndDetaches) and the leak gate (TestSubscribe_GoroutineStabilityAcrossCycles) use `mcp.NewInMemoryTransports` for SDK-level ctx propagation.
 
 5. **The `cmd/kamacu/serve.go` route wiring — is anything beyond `SessionRoutes` needed?**
    - What we know: `serve.go:261` already calls `api.SessionRoutes(mux, mgr, db, tmuxClient)`. The new `/api/sessions/{id}`, `/api/sessions/{id}/output`, `/api/sessions/{id}/subscribe` routes register INSIDE `SessionRoutes` (they all join the existing `sessionHandlers` struct that already holds `mgr + db`).
    - What's unclear: Nothing — confirmed by reading `internal/api/sessions.go:31-38`. `serve.go` is NOT modified.
    - Recommendation: None needed; this is a closed question. `[VERIFIED: internal/api/sessions.go:31-38, cmd/kamacu/serve.go:261]`
+   - RESOLVED: Closed question, confirmed by Plan 08-01 — all three new routes register inside `SessionRoutes` (sessions.go:31-38); `cmd/kamacu/serve.go` is not modified.
 
 ## Environment Availability
 
