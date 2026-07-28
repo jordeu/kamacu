@@ -2109,3 +2109,126 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 		t.Errorf("post-attach marker missing from live stream:\n%s", streamed)
 	}
 }
+
+// TestInput_Happy_WritesAndAppendsNewline is the POST /api/sessions/{id}/input
+// happy path: a known live session id + {"message":"echo qsf-input-marker"}
+// returns 200 {"bytes_written":N} where N == len(message)+1 (the appended
+// newline), AND the marker actually reaches the PTY — verified by polling the
+// output endpoint. Proves WriteInput was called, not just that 200 returned.
+func TestInput_Happy_WritesAndAppendsNewline(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	const marker = "qsf-input-marker"
+	istatus, ibody := doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/input", map[string]any{"message": "echo " + marker})
+	if istatus != http.StatusOK {
+		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
+	}
+	wantBytes := len("echo "+marker) + 1
+	if ibody["bytes_written"] != float64(wantBytes) {
+		t.Errorf("bytes_written = %v, want %d", ibody["bytes_written"], wantBytes)
+	}
+
+	// Round-trip: the marker must appear in the PTY output (PTY echoes the
+	// typed line AND echo prints it again, so Contains is sufficient).
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output")
+		if gstatus != http.StatusOK {
+			t.Fatalf("output: status = %d, want 200; body=%s", gstatus, raw)
+		}
+		var env struct {
+			Encoding string `json:"encoding"`
+			Output   string `json:"output"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			t.Fatalf("decode envelope: %v\n%s", err, raw)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(env.Output)
+		if err != nil {
+			t.Fatalf("decode base64: %v", err)
+		}
+		if bytes.Contains(decoded, []byte(marker)) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("marker %q never appeared in output:\n%s", marker, decoded)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestInput_UnknownID_404 mirrors getSession/stop: an unknown id returns 404
+// {"error":"session not found"} — never a 500, never a 200 with empty fields.
+func TestInput_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions/"+uuid.NewString()+"/input", map[string]any{"message": "hi"})
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+// TestInput_NewlineAlreadyPresent_NoDoubleAppend: a message already ending in
+// "\n" is passed through with NO appended second newline — bytes_written == 3
+// for {"message":"hi\n"}.
+func TestInput_NewlineAlreadyPresent_NoDoubleAppend(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	istatus, ibody := doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/input", map[string]any{"message": "hi\n"})
+	if istatus != http.StatusOK {
+		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
+	}
+	if ibody["bytes_written"] != float64(3) {
+		t.Errorf("bytes_written = %v, want 3 (len(\"hi\\n\"), no double newline)", ibody["bytes_written"])
+	}
+}
+
+// TestInput_EmptyMessage_WritesBareNewline: an empty message becomes just
+// "\n" — a bare Enter, a legitimate default-prompt answer. bytes_written == 1.
+func TestInput_EmptyMessage_WritesBareNewline(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	istatus, ibody := doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/input", map[string]any{"message": ""})
+	if istatus != http.StatusOK {
+		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
+	}
+	if ibody["bytes_written"] != float64(1) {
+		t.Errorf("bytes_written = %v, want 1 (bare \"\\n\")", ibody["bytes_written"])
+	}
+}
