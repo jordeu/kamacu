@@ -2112,13 +2112,14 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 
 // TestInput_Happy_WritesAndAppendsCR is the POST /api/sessions/{id}/input
 // happy path: a known live session id + {"message":"echo qsf-input-marker"}
-// returns 200 {"bytes_written":N} where N == len(message)+1 (the appended CR
-// terminator), AND the marker actually reaches the PTY — verified by polling
-// the output endpoint. Proves WriteInput was called, not just that 200
-// returned. (See TestNormalizeInputTerminator for the byte-exact terminator
-// assertion — bash's cooked-mode line discipline makes \r and \n
-// indistinguishable in this round-trip, so the count is the load-bearing
-// claim here, not the terminator byte.)
+// returns 200 {"bytes_written":N} where N == len(message)+1 (the standalone
+// "\r" submit key, written as a SEPARATE WriteInput call after the body),
+// AND the marker actually reaches the PTY — verified by polling the output
+// endpoint. Proves WriteInput was called, not just that 200 returned. (See
+// TestSplitInputForWrite for the byte-exact two-write assertion — bash's
+// cooked-mode line discipline makes \r and \n indistinguishable in this
+// round-trip, so the count is the load-bearing claim here, not the
+// terminator byte nor the write split.)
 func TestInput_Happy_WritesAndAppendsCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
@@ -2187,8 +2188,9 @@ func TestInput_UnknownID_404(t *testing.T) {
 }
 
 // TestInput_TrailingLF_TranslatedToCR: a message already ending in "\n" has
-// its LF terminator translated to CR (not passed through, not doubled) —
-// bytes_written == 3 for {"message":"hi\n"} since "hi\n" -> "hi\r".
+// its LF terminator stripped and a standalone "\r" submit key written after
+// the body — bytes_written == 3 for {"message":"hi\n"} (body "hi" = 2 bytes,
+// submit "\r" = 1 byte, two separate WriteInput calls).
 func TestInput_TrailingLF_TranslatedToCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
@@ -2212,7 +2214,8 @@ func TestInput_TrailingLF_TranslatedToCR(t *testing.T) {
 	}
 }
 
-// TestInput_EmptyMessage_WritesBareCR: an empty message becomes just "\r" —
+// TestInput_EmptyMessage_WritesBareCR: an empty message still performs BOTH
+// writes — a 0-byte body WriteInput, then a 1-byte "\r" submit WriteInput —
 // a bare Enter, a legitimate default-prompt answer. bytes_written == 1.
 func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
@@ -2237,40 +2240,62 @@ func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 	}
 }
 
-// TestNormalizeInputTerminator is the byte-exact regression guard for the
-// POST /api/sessions/{id}/input CR-terminator contract. The input handler
-// passes req.Message through normalizeInputTerminator and writes the result
-// verbatim to WriteInput, so this function's return value IS the byte stream
-// that reaches the PTY. Raw-mode TUIs (Claude Code, opencode) read \r as the
-// Enter key; a \n does not submit the prompt — so the LAST byte written must
-// be \r (0x0d) regardless of which terminator shape the request supplied.
+// TestSplitInputForWrite is the byte-exact regression guard for the
+// POST /api/sessions/{id}/input TWO-WRITE contract. The input handler calls
+// splitInputForWrite to obtain an ORDERED pair of WriteInput payloads — body
+// first (any request-supplied terminator stripped), then a single "\r" submit
+// key — and writes them as two separate sess.WriteInput calls. A single
+// combined (body + "\r") write trips paste-detection in raw-mode TUIs
+// (Claude Code via Ink), which treats the embedded CR as paste content rather
+// than the Enter key: the prompt text lands but never submits. Splitting the
+// write mirrors how human typing reaches the PTY (text in one stdin chunk,
+// Enter in the next).
 //
-// The HTTP round-trip tests above cannot distinguish \r from \n (bash's
-// cooked-mode line discipline translates both identically on input), so this
-// pure-function assertion is the load-bearing guard: it fails loudly if the
-// terminator ever reverts to \n.
-func TestNormalizeInputTerminator(t *testing.T) {
+// This pure-function assertion is the load-bearing guard: it fails loudly if
+// the write shape ever reverts to one combined call, or if the submit key
+// reverts to "\n". The HTTP round-trip tests above cannot distinguish the
+// two-write shape (nor "\r" from "\n" — bash's cooked-mode line discipline
+// translates both identically on input), so this function's return values
+// ARE the byte stream that reaches the PTY, in order.
+//
+// The multi-byte UTF-8 case is the regression guard for the original failing
+// symptom: a single combined write of a multi-byte body + "\r" was flagged as
+// a paste and never submitted.
+func TestSplitInputForWrite(t *testing.T) {
 	cases := []struct {
-		name string
-		in   string
-		want string
+		name       string
+		in         string
+		wantBody   string
+		wantSubmit string
 	}{
-		{"no terminator", "hello", "hello\r"},
-		{"trailing LF", "hello\n", "hello\r"},
-		{"trailing CR", "hello\r", "hello\r"},
-		{"trailing CRLF", "hello\r\n", "hello\r"},
-		{"empty message", "", "\r"},
-		{"internal LFs preserved", "line one\nline two", "line one\nline two\r"},
-		{"internal LFs preserved with trailing LF", "line one\nline two\n", "line one\nline two\r"},
+		{"no terminator", "hello", "hello", "\r"},
+		{"trailing LF", "hello\n", "hello", "\r"},
+		{"trailing CR", "hello\r", "hello", "\r"},
+		{"trailing CRLF", "hello\r\n", "hello", "\r"},
+		{"empty message", "", "", "\r"},
+		{"multi-byte UTF-8", "ping — test", "ping — test", "\r"},
+		{"internal LFs preserved", "line one\nline two", "line one\nline two", "\r"},
+		{"internal LFs preserved with trailing LF", "line one\nline two\n", "line one\nline two", "\r"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeInputTerminator(tc.in)
-			if got != tc.want {
-				t.Fatalf("normalizeInputTerminator(%q) = %q, want %q", tc.in, got, tc.want)
+			gotBody, gotSubmit := splitInputForWrite(tc.in)
+			if gotBody != tc.wantBody {
+				t.Errorf("splitInputForWrite(%q) body = %q, want %q", tc.in, gotBody, tc.wantBody)
 			}
-			if got[len(got)-1] != '\r' {
-				t.Errorf("last byte = %#x, want 0x0d (\\r); got=%q", got[len(got)-1], got)
+			if gotSubmit != tc.wantSubmit {
+				t.Errorf("splitInputForWrite(%q) submit = %q, want %q", tc.in, gotSubmit, tc.wantSubmit)
+			}
+			// The submit key is ALWAYS exactly one byte, 0x0d — never empty,
+			// never "\n", never doubled. This is the byte-exact guard against
+			// either half of the two-write contract regressing.
+			if len(gotSubmit) != 1 || gotSubmit[0] != '\r' {
+				t.Errorf("submit key = %q (%d bytes), want exactly \"\\r\" (0x0d, 1 byte)", gotSubmit, len(gotSubmit))
+			}
+			// The body must never carry a trailing terminator: that would
+			// re-introduce the combined-write shape the split defeats.
+			if len(gotBody) > 0 && (gotBody[len(gotBody)-1] == '\n' || gotBody[len(gotBody)-1] == '\r') {
+				t.Errorf("body %q ends with a terminator byte; splitInputForWrite must strip it", gotBody)
 			}
 		})
 	}
