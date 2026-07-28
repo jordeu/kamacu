@@ -7,7 +7,7 @@ status: executing
 stopped_at: Phase 09 context gathered
 last_updated: "2026-07-28T10:53:28.755Z"
 last_activity: 2026-07-28
-last_activity_desc: Completed quick task 260728-q5k (MCP start_task_agent)
+last_activity_desc: Completed quick task 260728-qsf (MCP send_session_message)
 progress:
   total_phases: 4
   completed_phases: 4
@@ -45,7 +45,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
 Phase: 09
 Plan: Not started
 Status: Executing Phase 09
-Last activity: 2026-07-28 - Completed quick task 260728-q5k: Add MCP tool to start an agent session for a task
+Last activity: 2026-07-28 - Completed quick task 260728-qsf (MCP send_session_message)
 
 Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260728-q5k | Add MCP tool to start an agent session for a task (MCP-only — reverses no-auto-start for the agent delegate surface; browser Start button unchanged). Bridges to POST /api/sessions {kind:agent, task_id:N, resume?:bool}. | 2026-07-28 | cf64c5a | [260728-q5k-add-mcp-tool-to-start-an-agent-session-f](./quick/260728-q5k-add-mcp-tool-to-start-an-agent-session-f/) |
+| 260728-qsf | Add MCP tool send_session_message(session_id, message) — reverses v1.11 D-14 read-only-terminal contract for the agent delegate surface (browser WS stays the authoritative interactive surface). Adds a NEW Kamacu endpoint POST /api/sessions/{id}/input calling session.Session.WriteInput, then a thin MCP bridge tool in internal/mcp/sessions.go. | 2026-07-28 | 264170e | [260728-qsf-add-mcp-tool-send-session-message-sessio](./quick/260728-qsf-add-mcp-tool-send-session-message-sessio/) |
 
 ## Session
 
