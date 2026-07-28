@@ -517,9 +517,8 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 // through this HTTP endpoint, NOT through the WS frame protocol. The browser
 // WS interactive surface is unchanged.
 //
-// Newline normalization is the ONLY "smart" behavior: a trailing '\n' is
-// appended when the message does not already end in one, so a prompt
-// actually fires rather than sitting in the input buffer. No quoting,
+// CR-terminator normalization is the ONLY "smart" behavior: see
+// normalizeInputTerminator for the raw-mode-TUI rationale. No quoting,
 // escaping, or content sanitization — verbatim passthrough.
 func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.mgr.Get(r.PathValue("id"))
@@ -534,15 +533,26 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	msg := req.Message
-	if !strings.HasSuffix(msg, "\n") {
-		msg += "\n"
-	}
+	msg := normalizeInputTerminator(req.Message)
 	if err := sess.WriteInput([]byte(msg)); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"bytes_written": len(msg)})
+}
+
+// normalizeInputTerminator collapses any request-supplied trailing line ending
+// (none, "\n", "\r", or "\r\n") to a single trailing "\r". Raw-mode TUIs
+// (Claude Code via Ink, opencode, anything readline/bubbletea-based) read "\r"
+// (carriage return, 0x0d) as the Enter key; a "\n" is a literal line feed that
+// does not submit the prompt, so the text arrives but the agent never acts on
+// it. xterm.js sends "\r" on Enter — the browser WS path already matches; this
+// normalizes the MCP HTTP bridge to the same contract. Internal "\n"s in a
+// multi-line body are preserved verbatim — only the terminator is touched.
+func normalizeInputTerminator(msg string) string {
+	msg = strings.TrimSuffix(msg, "\n")
+	msg = strings.TrimSuffix(msg, "\r")
+	return msg + "\r"
 }
 
 // maxLabelRunes bounds a stored+rendered session label (T-24-01): an unbounded
