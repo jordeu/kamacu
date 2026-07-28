@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -186,6 +187,35 @@ func registerSessionTools(s *mcp.Server, b *bridge) {
 		},
 		withRecover("subscribe_session_output", func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return b.subscribeSessionOutput(ctx, req)
+		}),
+	)
+
+	// 5. start_task_agent (MCPSESS-05) — the MCP-only reversal of the "no
+	// auto-start" rule. The agent (the user's delegate) can spawn or resume
+	// the agent session for a task. The browser's explicit Start button is
+	// unchanged; task creation does NOT auto-spawn. The agent IS the user's
+	// delegate at the same trust level as delete_task / open_review.
+	s.AddTool(
+		&mcp.Tool{
+			Name:        "start_task_agent",
+			Description: "Start the agent session for a task (spawns or resumes the task's Claude Code / opencode agent in its worktree). Bridges POST /api/sessions with {\"kind\":\"agent\",\"task_id\":N,\"resume\":bool} and returns Kamacu's 201 session-row JSON verbatim. Kamacu enforces one running agent per task — a second call surfaces 409 \"agent session already running\". resume:true resumes the task's stored agent session id; false/omitted = fresh spawn. The agent is the user's delegate — same trust level as delete_task and open_review.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"task_id": map[string]any{
+						"type":        "integer",
+						"description": "The task id whose agent session to start. Required — agents run in the task's worktree.",
+					},
+					"resume": map[string]any{
+						"type":        "boolean",
+						"description": "Optional: resume the task's stored agent session (default false = fresh spawn).",
+					},
+				},
+				"required": []string{"task_id"},
+			},
+		},
+		withRecover("start_task_agent", func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return b.startTaskAgent(ctx, req)
 		}),
 	)
 }
@@ -535,4 +565,40 @@ func (b *bridge) getSessionOutput(ctx context.Context, req *mcp.CallToolRequest)
 		path += "?bytes=" + strconv.Itoa(*args.Bytes)
 	}
 	return b.call(ctx, http.MethodGet, path, nil)
+}
+
+// startTaskAgent is the body of the start_task_agent tool handler. It POSTs
+// {"kind":"agent","task_id":N,"resume":bool} to /api/sessions and returns the
+// 201 session-row JSON verbatim via bridge.call (D-05 passthrough). This is
+// the MCP-only reversal of the "no auto-start" rule: the agent (the user's
+// delegate) can now spawn the agent session for a task. The browser's Start
+// button is unchanged.
+//
+// The bridge performs NO validation. Kamacu's (*sessionHandler).create
+// (internal/api/sessions.go:222) enforces server-side: task existence (404),
+// the one-running-agent-per-task dedup (409 "agent session already running"),
+// worktree presence (409 "task has no worktree"), and resume-presence (409
+// "no session to resume"). Each surfaces as a D-05 wrapped error — the bridge
+// adds NONE of that logic.
+//
+// resume is always sent (bool, default false) — mirrors moveTask always
+// sending after_id. The handler decodes resume with a false zero value, so
+// omitting it would be equivalent; sending it keeps the body self-describing.
+func (b *bridge) startTaskAgent(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args struct {
+		TaskID int64 `json:"task_id"`
+		Resume bool  `json:"resume"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return nil, fmt.Errorf("start_task_agent: invalid arguments: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"kind":    "agent",
+		"task_id": args.TaskID,
+		"resume":  args.Resume,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("start_task_agent: marshal body: %w", err)
+	}
+	return b.call(ctx, http.MethodPost, "/api/sessions", bytes.NewReader(body))
 }
