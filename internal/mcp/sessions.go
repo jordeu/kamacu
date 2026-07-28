@@ -218,6 +218,40 @@ func registerSessionTools(s *mcp.Server, b *bridge) {
 			return b.startTaskAgent(ctx, req)
 		}),
 	)
+
+	// 6. send_session_message (MCPSESS-06) — the MCP-only reversal of D-14's
+	// read-only-terminal contract. The agent (the user's delegate) can now
+	// write a prompt/message to ANOTHER session's PTY stdin via
+	// POST /api/sessions/{id}/input. The browser WS interactive surface is
+	// unchanged; this is an agent-delegate affordance at the same trust
+	// level as start_task_agent, delete_task, and delete_project.
+	//
+	// D-14 import gate holds: this file still does NOT import
+	// internal/session — the relaxed write prohibition lands server-side in
+	// the endpoint that internally calls WriteInput, reached over HTTP only.
+	s.AddTool(
+		&mcp.Tool{
+			Name:        "send_session_message",
+			Description: "Send a message/prompt to a session by writing bytes to the session's PTY stdin. Bridges POST /api/sessions/{id}/input with {\"message\":\"<string>\"} and returns Kamacu's 200 {\"bytes_written\":N} verbatim. Kamacu appends a trailing newline if absent so the prompt fires. The browser WebSocket stays the authoritative interactive surface — this is an agent-delegate affordance at the same trust level as start_task_agent and delete_task. No content sanitization (verbatim passthrough); no bulk send (one session, one message per call — loop to send more).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "The session id to send the message to.",
+					},
+					"message": map[string]any{
+						"type":        "string",
+						"description": "The message/prompt to write to the session's PTY. A trailing newline is appended server-side if absent so the prompt fires.",
+					},
+				},
+				"required": []string{"session_id", "message"},
+			},
+		},
+		withRecover("send_session_message", func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return b.sendSessionMessage(ctx, req)
+		}),
+	)
 }
 
 // emptySubscribeEnvelope is the D-01 strict-edge return: when the handler ctx
@@ -601,4 +635,35 @@ func (b *bridge) startTaskAgent(ctx context.Context, req *mcp.CallToolRequest) (
 		return nil, fmt.Errorf("start_task_agent: marshal body: %w", err)
 	}
 	return b.call(ctx, http.MethodPost, "/api/sessions", bytes.NewReader(body))
+}
+
+// sendSessionMessage is the body of the send_session_message tool handler. It
+// POSTs {"message":"<string>"} to /api/sessions/{id}/input and returns
+// Kamacu's 200 {"bytes_written":N} verbatim via bridge.call (D-05 passthrough).
+// This is the MCP-only reversal of D-14's read-only-terminal contract: the
+// agent (the user's delegate) can now write to a session's PTY stdin. The
+// browser WS interactive surface is unchanged.
+//
+// The bridge performs NO validation and NO content sanitization. Kamacu's
+// (*sessionHandler).input enforces server-side (404 unknown, 409 exited,
+// newline append) — each surfaces as a D-05 wrapped error.
+//
+// D-14 import gate holds: this file still does NOT import internal/session.
+// The write prohibition is relaxed ONLY via the HTTP bridge path landing on
+// the endpoint that internally calls WriteInput. The bridge has ZERO direct
+// WriteInput/FrameData refs.
+func (b *bridge) sendSessionMessage(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args struct {
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return nil, fmt.Errorf("send_session_message: invalid arguments: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{"message": args.Message})
+	if err != nil {
+		return nil, fmt.Errorf("send_session_message: marshal body: %w", err)
+	}
+	escaped := url.PathEscape(args.SessionID)
+	return b.call(ctx, http.MethodPost, "/api/sessions/"+escaped+"/input", bytes.NewReader(body))
 }
