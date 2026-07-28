@@ -31,9 +31,9 @@
 
 ### PR Review (MCPREV)
 
-- [ ] **MCPREV-01**: `list_pending_reviews(project_id?)` lists PRs awaiting the user's review (`user-review-requested:@me draft:false` via existing v1.3 surface)
-- [ ] **MCPREV-02**: `list_recently_reviewed(project_id?)` lists open PRs the user has already reviewed (`reviewed-by:@me draft:false` via existing v1.5 surface)
-- [ ] **MCPREV-03**: `open_review(project_id, pr_number)` opens a PR as a review workspace (reuses v1.3 Phase 12 open-a-review — find-or-create `source='github_pr'` task)
+- [x] **MCPREV-01**: `list_pending_reviews(project_id?)` lists PRs awaiting the user's review (`user-review-requested:@me draft:false` via existing v1.3 surface)
+- [x] **MCPREV-02**: `list_recently_reviewed(project_id?)` lists open PRs the user has already reviewed (`reviewed-by:@me draft:false` via existing v1.5 surface)
+- [x] **MCPREV-03**: `open_review(project_id, pr_number)` opens a PR as a review workspace (reuses v1.3 Phase 12 open-a-review — find-or-create `source='github_pr'` task)
 
 ### Projects & Workspaces (MCPPROJ)
 
