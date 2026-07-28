@@ -2110,12 +2110,16 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 	}
 }
 
-// TestInput_Happy_WritesAndAppendsNewline is the POST /api/sessions/{id}/input
+// TestInput_Happy_WritesAndAppendsCR is the POST /api/sessions/{id}/input
 // happy path: a known live session id + {"message":"echo qsf-input-marker"}
-// returns 200 {"bytes_written":N} where N == len(message)+1 (the appended
-// newline), AND the marker actually reaches the PTY — verified by polling the
-// output endpoint. Proves WriteInput was called, not just that 200 returned.
-func TestInput_Happy_WritesAndAppendsNewline(t *testing.T) {
+// returns 200 {"bytes_written":N} where N == len(message)+1 (the appended CR
+// terminator), AND the marker actually reaches the PTY — verified by polling
+// the output endpoint. Proves WriteInput was called, not just that 200
+// returned. (See TestNormalizeInputTerminator for the byte-exact terminator
+// assertion — bash's cooked-mode line discipline makes \r and \n
+// indistinguishable in this round-trip, so the count is the load-bearing
+// claim here, not the terminator byte.)
+func TestInput_Happy_WritesAndAppendsCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
 	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
@@ -2182,10 +2186,10 @@ func TestInput_UnknownID_404(t *testing.T) {
 	}
 }
 
-// TestInput_NewlineAlreadyPresent_NoDoubleAppend: a message already ending in
-// "\n" is passed through with NO appended second newline — bytes_written == 3
-// for {"message":"hi\n"}.
-func TestInput_NewlineAlreadyPresent_NoDoubleAppend(t *testing.T) {
+// TestInput_TrailingLF_TranslatedToCR: a message already ending in "\n" has
+// its LF terminator translated to CR (not passed through, not doubled) —
+// bytes_written == 3 for {"message":"hi\n"} since "hi\n" -> "hi\r".
+func TestInput_TrailingLF_TranslatedToCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
 	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
@@ -2204,13 +2208,13 @@ func TestInput_NewlineAlreadyPresent_NoDoubleAppend(t *testing.T) {
 		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
 	}
 	if ibody["bytes_written"] != float64(3) {
-		t.Errorf("bytes_written = %v, want 3 (len(\"hi\\n\"), no double newline)", ibody["bytes_written"])
+		t.Errorf("bytes_written = %v, want 3 (\"hi\\n\" -> \"hi\\r\")", ibody["bytes_written"])
 	}
 }
 
-// TestInput_EmptyMessage_WritesBareNewline: an empty message becomes just
-// "\n" — a bare Enter, a legitimate default-prompt answer. bytes_written == 1.
-func TestInput_EmptyMessage_WritesBareNewline(t *testing.T) {
+// TestInput_EmptyMessage_WritesBareCR: an empty message becomes just "\r" —
+// a bare Enter, a legitimate default-prompt answer. bytes_written == 1.
+func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
 	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
@@ -2229,6 +2233,45 @@ func TestInput_EmptyMessage_WritesBareNewline(t *testing.T) {
 		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
 	}
 	if ibody["bytes_written"] != float64(1) {
-		t.Errorf("bytes_written = %v, want 1 (bare \"\\n\")", ibody["bytes_written"])
+		t.Errorf("bytes_written = %v, want 1 (bare \"\\r\")", ibody["bytes_written"])
+	}
+}
+
+// TestNormalizeInputTerminator is the byte-exact regression guard for the
+// POST /api/sessions/{id}/input CR-terminator contract. The input handler
+// passes req.Message through normalizeInputTerminator and writes the result
+// verbatim to WriteInput, so this function's return value IS the byte stream
+// that reaches the PTY. Raw-mode TUIs (Claude Code, opencode) read \r as the
+// Enter key; a \n does not submit the prompt — so the LAST byte written must
+// be \r (0x0d) regardless of which terminator shape the request supplied.
+//
+// The HTTP round-trip tests above cannot distinguish \r from \n (bash's
+// cooked-mode line discipline translates both identically on input), so this
+// pure-function assertion is the load-bearing guard: it fails loudly if the
+// terminator ever reverts to \n.
+func TestNormalizeInputTerminator(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no terminator", "hello", "hello\r"},
+		{"trailing LF", "hello\n", "hello\r"},
+		{"trailing CR", "hello\r", "hello\r"},
+		{"trailing CRLF", "hello\r\n", "hello\r"},
+		{"empty message", "", "\r"},
+		{"internal LFs preserved", "line one\nline two", "line one\nline two\r"},
+		{"internal LFs preserved with trailing LF", "line one\nline two\n", "line one\nline two\r"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeInputTerminator(tc.in)
+			if got != tc.want {
+				t.Fatalf("normalizeInputTerminator(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if got[len(got)-1] != '\r' {
+				t.Errorf("last byte = %#x, want 0x0d (\\r); got=%q", got[len(got)-1], got)
+			}
+		})
 	}
 }
