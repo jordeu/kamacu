@@ -36,6 +36,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -160,6 +161,51 @@ func registerReviewTools(s *mcp.Server, b *bridge) {
 			return b.openReview(ctx, req)
 		},
 	)
+
+	// 4. post_pr_review (MCPREV-04) — POST /api/projects/{id}/pull-requests/{n}/
+	// reviews (PLURAL — distinct from the singular /review open-workspace route
+	// above). The v1.3 no-GitHub-writes REVERSAL landing for the agent delegate
+	// surface: the browser offers no review-posting UI; this tool is the only
+	// in-Kamacu write path for reviews (the terminal gh pr review path coexists
+	// unchanged). One-way-door action — the Description tells the agent to ask
+	// the user for approval BEFORE calling.
+	s.AddTool(
+		&mcp.Tool{
+			Name:        "post_pr_review",
+			Description: "Post a PR review (approve / request_changes / comment, optionally with inline line comments) to GitHub. Bridges POST /api/projects/{id}/pull-requests/{pr_number}/reviews (plural) and returns the raw gh JSON response verbatim. This is a one-way-door action: once posted, the PR author is notified and CI status may flip. Ask the user for approval BEFORE calling this tool. Runs Kamacu's two-gate ladder (settings toggle → project link) server-side; 409 on gate-blocked, 502 on gh failure, 400 on an unknown verdict or malformed body. The browser offers no review-posting UI — this tool is the agent-delegate write surface only (the v1.3 no-GitHub-writes reversal, scoped to the MCP delegate).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"project_id": map[string]any{
+						"type":        "integer",
+						"description": "The project id. Required — PRs are per-repo and the endpoint is per-project.",
+					},
+					"pr_number": map[string]any{
+						"type":        "integer",
+						"description": "The PR number.",
+					},
+					"verdict": map[string]any{
+						"type":        "string",
+						"enum":        []string{"approve", "request_changes", "comment"},
+						"description": "The review verdict. approve = APPROVE (GitHub); request_changes = REQUEST_CHANGES; comment = COMMENT (no explicit approval — use for inline comments without approving).",
+					},
+					"body": map[string]any{
+						"type":        "string",
+						"description": "The overall review body (optional).",
+					},
+					"inline_comments": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "line": map[string]any{"type": "integer"}, "body": map[string]any{"type": "string"}}},
+						"description": "Optional inline line comments. approve with non-empty inline_comments is legal (approve-with-minor-nits).",
+					},
+				},
+				"required": []string{"project_id", "pr_number", "verdict"}, // D-04: ALL three required
+			},
+		},
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return b.postPRReview(ctx, req)
+		},
+	)
 }
 
 // listReviews is the shared state-inspecting helper that contains ALL of the
@@ -230,10 +276,10 @@ func (b *bridge) listReviews(ctx context.Context, projectID int64, queue string)
 	// struct (Pitfall 5 — NOT the github package's Result, so internal/mcp
 	// stays decoupled from the domain package). ===
 	var res struct {
-		State    string          `json:"state"`              // "ok"|"disabled"|"no_gh"|"auth_required"|"error"
-		Stale    bool            `json:"stale"`              // true iff a prior-success cache is being served under a transient error
-		PRs      json.RawMessage `json:"prs"`                // awaiting-review queue; null/absent when no data
-		Reviewed json.RawMessage `json:"reviewed"`           // reviewed-by:@me queue; null/absent when no data
+		State    string          `json:"state"`    // "ok"|"disabled"|"no_gh"|"auth_required"|"error"
+		Stale    bool            `json:"stale"`    // true iff a prior-success cache is being served under a transient error
+		PRs      json.RawMessage `json:"prs"`      // awaiting-review queue; null/absent when no data
+		Reviewed json.RawMessage `json:"reviewed"` // reviewed-by:@me queue; null/absent when no data
 	}
 	if err := json.Unmarshal(body, &res); err != nil {
 		// Shape surprise (Kamacu returned a non-Result body under a 200 — e.g.
@@ -320,6 +366,7 @@ func (b *bridge) listRecentlyReviewed(ctx context.Context, req *mcp.CallToolRequ
 //     pullrequests.go:166/:175/:183).
 //   - 502 on gh/worktree failure (pullrequests.go:207/:246-258).
 //   - 400 on a malformed PR number (pullrequests.go:155).
+//
 // Each surfaces as a non-nil error wrapping
 // `kamacu POST /api/projects/{id}/pull-requests/{n}/review: HTTP NNN: <body>`,
 // which the SDK turns into a JSON-RPC -32603. The bridge adds NO gate logic of
@@ -335,4 +382,63 @@ func (b *bridge) openReview(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	}
 	path := fmt.Sprintf("/api/projects/%d/pull-requests/%d/review", args.ProjectID, args.PRNumber)
 	return b.call(ctx, http.MethodPost, path, nil) // D-05: verbatim bridge.call — {task,pr} passthrough; 409/502/400 → wrap
+}
+
+// postPRReview is the body of the post_pr_review tool handler (MCPREV-04). It
+// POSTs to /api/projects/{id}/pull-requests/{n}/reviews (PLURAL — distinct from
+// the singular /review open-workspace route above) and returns the raw gh JSON
+// response verbatim via bridge.call (D-05).
+//
+// The verdict taxonomy + validation live server-side (internal/github.PostReview
+// owns the approve/request_changes/comment → APPROVE/REQUEST_CHANGES/COMMENT
+// map, in exactly one place). The bridge performs NO validation, NO content
+// sanitization, NO verdict mapping, NO dry-run, NO publish-checkpoint prompt.
+// It is verbatim passthrough — matching every other tool in this file. NOT
+// wrapped in withRecover (reviews.go convention — Phase 09 SUMMARY: reviews.go
+// did NOT adopt withRecover; sessions.go did).
+//
+// Body marshaling: verdict is ALWAYS sent (required); body/inline_comments are
+// included ONLY when non-empty (conditional map keys), so omitted optional
+// fields never reach Kamacu (matches the API layer's own omitempty at
+// pullrequests.go).
+//
+// Degrade surface (D-05): Kamacu's POST handler returns real HTTP error codes
+// that bridge.call wraps faithfully:
+//   - 409 gate-blocked (GitHub integration off OR project not linked).
+//   - 400 on an unknown verdict or malformed JSON body.
+//   - 502 on gh failure.
+//
+// Each surfaces as a non-nil error wrapping
+// `kamacu POST /api/projects/{id}/pull-requests/{n}/reviews: HTTP NNN: <body>`.
+func (b *bridge) postPRReview(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args struct {
+		ProjectID      int64  `json:"project_id"`
+		PRNumber       int64  `json:"pr_number"`
+		Verdict        string `json:"verdict"`
+		Body           string `json:"body"`
+		InlineComments []struct {
+			Path string `json:"path"`
+			Line int    `json:"line"`
+			Body string `json:"body"`
+		} `json:"inline_comments"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return nil, fmt.Errorf("post_pr_review: invalid arguments: %w", err)
+	}
+	// Marshal the body — conditionally include body/inline_comments so omitted
+	// optional fields never reach Kamacu (matches the API layer's own omitempty).
+	// Verdict is always sent (required).
+	payload := map[string]any{"verdict": args.Verdict}
+	if args.Body != "" {
+		payload["body"] = args.Body
+	}
+	if len(args.InlineComments) > 0 {
+		payload["inline_comments"] = args.InlineComments
+	}
+	jb, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("post_pr_review: marshal body: %w", err)
+	}
+	path := fmt.Sprintf("/api/projects/%d/pull-requests/%d/reviews", args.ProjectID, args.PRNumber)
+	return b.call(ctx, http.MethodPost, path, bytes.NewReader(jb)) // 201→passthrough; 409/502/400→D-05 wrap
 }
