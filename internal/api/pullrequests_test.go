@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -729,4 +730,165 @@ func itoa(n int64) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// --- POST .../pull-requests/{n}/reviews (PLURAL — post a review) ---
+
+// stubPostReview swaps the handler's postReview seam to fn and restores it after
+// the test. Mirrors stubViewPR.
+func stubPostReview(t *testing.T, fn func(ctx context.Context, repo string, prNumber int, verdict, body string, comments []github.InlineComment) ([]byte, error)) {
+	t.Helper()
+	prev := postReview
+	postReview = fn
+	t.Cleanup(func() { postReview = prev })
+}
+
+// prPostBody drives a POST with a JSON body through the mux and returns the
+// recorder. (prPost sends a nil body — the reviews route needs a body.)
+func prPostBody(t *testing.T, mux *http.ServeMux, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+	return rec
+}
+
+// TestPostReview_Happy_201WithGhResponse: linked + on project + a valid body →
+// 201 with the gh JSON response verbatim, and the stub saw repo == github_repo,
+// prNumber == 5, verdict == "approve", and the inline comment mapped through.
+func TestPostReview_Happy_201WithGhResponse(t *testing.T) {
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/post-review-ok", "owner/name")
+	mux := newPRReviewEnv(t, db, t.TempDir())
+
+	canned := []byte(`{"id":99,"state":"APPROVED"}`)
+	var gotRepo string
+	var gotPR int
+	var gotVerdict, gotBody string
+	var gotComments []github.InlineComment
+	stubPostReview(t, func(_ context.Context, repo string, prNumber int, verdict, body string, comments []github.InlineComment) ([]byte, error) {
+		gotRepo, gotPR, gotVerdict, gotBody, gotComments = repo, prNumber, verdict, body, comments
+		return canned, nil
+	})
+
+	body := `{"verdict":"approve","body":"LGTM","inline_comments":[{"path":"a.go","line":1,"body":"x"}]}`
+	rec := prPostBody(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/5/reviews", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s), want 201", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != string(canned) {
+		t.Fatalf("body = %q, want canned %q verbatim", rec.Body.String(), canned)
+	}
+	if gotRepo != "owner/name" {
+		t.Errorf("stub repo = %q, want owner/name", gotRepo)
+	}
+	if gotPR != 5 {
+		t.Errorf("stub prNumber = %d, want 5", gotPR)
+	}
+	if gotVerdict != "approve" {
+		t.Errorf("stub verdict = %q, want approve", gotVerdict)
+	}
+	if gotBody != "LGTM" {
+		t.Errorf("stub body = %q, want LGTM", gotBody)
+	}
+	if len(gotComments) != 1 || gotComments[0].Path != "a.go" || gotComments[0].Line != 1 || gotComments[0].Body != "x" {
+		t.Errorf("stub comments = %+v, want [{a.go 1 x}]", gotComments)
+	}
+}
+
+// TestPostReview_ToggleOff_409: integration off → 409 BEFORE any gh spawn; the
+// postReview seam is never reached.
+func TestPostReview_ToggleOff_409(t *testing.T) {
+	db := newPRTestDB(t)
+	if err := settings.Set(db, settings.KeyGithubIntegration, "off"); err != nil {
+		t.Fatalf("set toggle off: %v", err)
+	}
+	id := insertProject(t, db, "p", "/tmp/post-review-off", "owner/name")
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	stubPostReview(t, func(context.Context, string, int, string, string, []github.InlineComment) ([]byte, error) {
+		t.Fatal("postReview called despite toggle off")
+		return nil, nil
+	})
+
+	rec := prPostBody(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/5/reviews", `{"verdict":"approve"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for toggle off", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "GitHub integration is off") {
+		t.Fatalf("body = %q, want it to contain 'GitHub integration is off'", rec.Body.String())
+	}
+}
+
+// TestPostReview_Unlinked_409: NULL github_repo → 409 BEFORE any gh spawn.
+func TestPostReview_Unlinked_409(t *testing.T) {
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/post-review-unlinked", "") // NULL github_repo
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	stubPostReview(t, func(context.Context, string, int, string, string, []github.InlineComment) ([]byte, error) {
+		t.Fatal("postReview called despite unlinked project")
+		return nil, nil
+	})
+
+	rec := prPostBody(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/5/reviews", `{"verdict":"approve"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for unlinked project", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "project is not linked to a GitHub repo") {
+		t.Fatalf("body = %q, want it to contain the unlinked message", rec.Body.String())
+	}
+}
+
+// TestPostReview_UnknownProject_409: unknown project id → 409.
+func TestPostReview_UnknownProject_409(t *testing.T) {
+	db := newPRTestDB(t)
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	stubPostReview(t, func(context.Context, string, int, string, string, []github.InlineComment) ([]byte, error) {
+		t.Fatal("postReview called for an unknown project")
+		return nil, nil
+	})
+
+	rec := prPostBody(t, mux, "/api/projects/9999/pull-requests/5/reviews", `{"verdict":"approve"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for unknown project", rec.Code)
+	}
+}
+
+// TestPostReview_BadVerdict_400: a verdict outside the taxonomy → the stub
+// returns the "unknown verdict ..." error and the handler maps it to 400.
+func TestPostReview_BadVerdict_400(t *testing.T) {
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/post-review-badverdict", "owner/name")
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	stubPostReview(t, func(_ context.Context, _ string, _ int, _ string, _ string, _ []github.InlineComment) ([]byte, error) {
+		// PostReview's verdictToEvent map rejects "ship_it" with this exact
+		// prefix; the production helper owns the taxonomy so the handler just
+		// maps the error code via the prefix sniff.
+		return nil, errors.New("unknown verdict \"ship_it\" (want approve, request_changes, or comment)")
+	})
+
+	rec := prPostBody(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/5/reviews", `{"verdict":"ship_it"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a bad verdict", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "unknown verdict") {
+		t.Fatalf("body = %q, want it to contain 'unknown verdict'", rec.Body.String())
+	}
+}
+
+// TestPostReview_GhFailure_502: a non-verdict gh failure → 502 with the
+// "couldn't post this review: <err>" degrade shape.
+func TestPostReview_GhFailure_502(t *testing.T) {
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/post-review-ghfail", "owner/name")
+	mux := newPRReviewEnv(t, db, t.TempDir())
+	stubPostReview(t, func(_ context.Context, _ string, _ int, _ string, _ string, _ []github.InlineComment) ([]byte, error) {
+		return nil, errors.New("gh timeout")
+	})
+
+	rec := prPostBody(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/5/reviews", `{"verdict":"approve"}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 for a gh failure", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "couldn't post this review: gh timeout") {
+		t.Fatalf("body = %q, want it to contain 'couldn't post this review: gh timeout'", rec.Body.String())
+	}
 }
