@@ -34,6 +34,7 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxCli
 	mux.HandleFunc("GET /api/sessions", s.list)
 	mux.HandleFunc("POST /api/sessions", s.create)
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
+	mux.HandleFunc("POST /api/sessions/{id}/input", s.input)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.delete)
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.rename)
 	// Phase 08 read-only endpoints (MCPSESS-01/02/03 server-side): the bridge
@@ -506,6 +507,42 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 	}
 	go sess.Stop()
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// input handles POST /api/sessions/{id}/input — writes a message to the
+// session's PTY via the existing WriteInput primitive (the same code path
+// the browser WS handler uses at internal/ws/handler.go:164). This is the
+// server-side half of the v1.11 D-14 read-only-terminal REVERSAL for the
+// agent delegate surface: the MCP bridge reaches the PTY-write primitive
+// through this HTTP endpoint, NOT through the WS frame protocol. The browser
+// WS interactive surface is unchanged.
+//
+// Newline normalization is the ONLY "smart" behavior: a trailing '\n' is
+// appended when the message does not already end in one, so a prompt
+// actually fires rather than sitting in the input buffer. No quoting,
+// escaping, or content sanitization — verbatim passthrough.
+func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.mgr.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	msg := req.Message
+	if !strings.HasSuffix(msg, "\n") {
+		msg += "\n"
+	}
+	if err := sess.WriteInput([]byte(msg)); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"bytes_written": len(msg)})
 }
 
 // maxLabelRunes bounds a stored+rendered session label (T-24-01): an unbounded
