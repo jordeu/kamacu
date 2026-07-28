@@ -7,7 +7,7 @@ status: executing
 stopped_at: Phase 09 context gathered
 last_updated: "2026-07-28T10:53:28.755Z"
 last_activity: 2026-07-28
-last_activity_desc: Completed quick task 260728-s5a (fix send_session_message CR terminator)
+last_activity_desc: Completed quick task 260728-t4c (bracketed paste wrap for send_session_message)
 progress:
   total_phases: 4
   completed_phases: 4
@@ -45,7 +45,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
 Phase: 09
 Plan: Not started
 Status: Executing Phase 09
-Last activity: 2026-07-28 - Completed quick task 260728-s5a (fix send_session_message CR terminator)
+Last activity: 2026-07-28 - Completed quick task 260728-t4c (bracketed paste wrap for send_session_message)
 
 Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 
@@ -58,6 +58,7 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 | 260728-r86 | Add MCP tool post_pr_review(project_id, pr_number, verdict, body, inline_comments?) that posts a PR review to GitHub via gh. Reverses v1.3 Out-of-Scope "no GitHub writes" for the agent delegate surface. The MCP tool is the write primitive only — multi-agent orchestration (subagent double-checking, verdict synthesis) and publish-checkpoint UX live in the agent workflow prompt, NOT in this tool. | 2026-07-28 | 6003e9b | [260728-r86-add-mcp-tool-post-pr-review-project-id-p](./quick/260728-r86-add-mcp-tool-post-pr-review-project-id-p/) |
 | 260728-s5a | Fix send_session_message terminator — \r (CR) not \n (LF). Raw-mode TUI agents (Claude Code, opencode) read \r as the Enter key; \n does not submit the prompt. The browser WS path worked because xterm.js sends \r; the existing integration test passed because it drives bash (cooked mode). | 2026-07-28 | 9c3bf0d | [260728-s5a-fix-send-session-message-terminator-must](./quick/260728-s5a-fix-send-session-message-terminator-must/) |
 | 260728-sm5 | Fix send_session_message — split the PTY write into two WriteInput calls (body, then \r). The CR-terminator fix (260728-s5a) was necessary but not sufficient: a single combined write of (text + \r) triggers paste-detection in raw-mode TUIs (Claude Code via Ink), which treats the embedded CR as paste content rather than the Enter key. Two writes mirror how human typing reaches the PTY. | 2026-07-28 | e6cfb1c | [260728-sm5-fix-send-session-message-split-the-pty-w](./quick/260728-sm5-fix-send-session-message-split-the-pty-w/) |
+| 260728-t4c | Fix send_session_message (3rd attempt, deterministic) — wrap body in bracketed paste markers (ESC[2004 ... ESC[2014) so raw-mode TUIs capture the chunk as a single paste event, then send \r OUTSIDE the closing bracket as a separate WriteInput call so it is interpreted as the Enter key (submit). VERIFIED on live Claude Code v2.1.22 / Opus 5 — agent went idle→working. The split-write fix (260728-sm5) was necessary but not sufficient; with brackets + outside-\r, submission is deterministic. | 2026-07-28 | 563e19f | [260728-t4c-fix-send-session-message-3rd-attempt-wra](./quick/260728-t4c-fix-send-session-message-3rd-attempt-wra/) |
 
 ## Session
 
