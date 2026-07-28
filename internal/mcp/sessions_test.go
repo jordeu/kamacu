@@ -810,3 +810,116 @@ func TestSubscribe_CancelBeforeAttach_ReturnsEmptyEnvelopeNotError(t *testing.T)
 // tests reference it directly. (TestBridge_Subscribe_Non200_ReturnsWrappedError
 // uses strings.Contains — kept separate.)
 var _ = errors.Is
+
+// ============================================================================
+// start_task_agent (MCPSESS-05) — the MCP-only auto-start reversal. Tests
+// below cover the happy D-05 passthrough (201 → verbatim body), resume flag
+// routing into the POST body, and the dedup 409 wrap.
+// ============================================================================
+
+// TestBridge_StartTaskAgent_Happy_PostsAgentBody (MCPSESS-05 happy path,
+// D-05 passthrough): POST /api/sessions is called with the right path and
+// method, the body decodes to {"kind":"agent","task_id":N,"resume":false},
+// and Kamacu's 201 session-row JSON is passed through verbatim in a single
+// TextContent block.
+func TestBridge_StartTaskAgent_Happy_PostsAgentBody(t *testing.T) {
+	const canned = `{"id":"sess-9","taskId":7,"kind":"agent","status":"running"}`
+	var (
+		gotPath   string
+		gotMethod string
+		gotBody   map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(canned))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"task_id":7}`))
+	res, err := b.startTaskAgent(context.Background(), req)
+	if err != nil {
+		t.Fatalf("startTaskAgent: %v", err)
+	}
+	if gotPath != "/api/sessions" {
+		t.Errorf("request URL.Path: want %q, got %q", "/api/sessions", gotPath)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("request method: want %q, got %q", http.MethodPost, gotMethod)
+	}
+	if gotBody["kind"] != "agent" {
+		t.Errorf("body kind: want %q, got %v", "agent", gotBody["kind"])
+	}
+	if gotBody["task_id"] != float64(7) {
+		t.Errorf("body task_id: want %v, got %v", float64(7), gotBody["task_id"])
+	}
+	if gotBody["resume"] != false {
+		t.Errorf("body resume: want false, got %v", gotBody["resume"])
+	}
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("result.Content[0]: want *TextContent, got %T", res.Content[0])
+	}
+	if tc.Text != canned {
+		t.Errorf("passthrough text: want %q, got %q", canned, tc.Text)
+	}
+}
+
+// TestBridge_StartTaskAgent_ResumeTrue_SendsResumeBody (MCPSESS-05 resume
+// routing): when resume:true is supplied in the tool args, the bool flag is
+// marshalled into the POST body — proving the one novel wiring this tool adds
+// beyond createTask's POST-with-body shape.
+func TestBridge_StartTaskAgent_ResumeTrue_SendsResumeBody(t *testing.T) {
+	var (
+		gotBody map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"sess-9"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"task_id":7,"resume":true}`))
+	if _, err := b.startTaskAgent(context.Background(), req); err != nil {
+		t.Fatalf("startTaskAgent: %v", err)
+	}
+	if gotBody["resume"] != true {
+		t.Errorf("body resume: want true, got %v", gotBody["resume"])
+	}
+}
+
+// TestBridge_StartTaskAgent_AlreadyRunning_Kamacu409 (MCPSESS-05 dedup error
+// path, D-05 wrap): Kamacu's 409 with {"error":"agent session already running"}
+// (the one-running-agent-per-task dedup, sessions.go:310) surfaces through
+// bridge.call's non-2xx wrap as a handler error containing both "HTTP 409"
+// and the Kamacu message (Gap 2 — the message survives the wrap).
+func TestBridge_StartTaskAgent_AlreadyRunning_Kamacu409(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		// Real Kamacu shape (sessions.go:310) — keyed on "error".
+		_, _ = w.Write([]byte(`{"error":"agent session already running"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"task_id":7}`))
+	_, err := b.startTaskAgent(context.Background(), req)
+	if err == nil {
+		t.Fatal("startTaskAgent: expected error for dedup 409, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 409") {
+		t.Errorf("startTaskAgent error: want substring \"HTTP 409\", got %q", err.Error())
+	}
+	// Gap 2: assert on the Kamacu message substring, NOT on a JSON key name.
+	// The raw body is inlined in the D-05 wrap, so the message text survives.
+	if !strings.Contains(err.Error(), "agent session already running") {
+		t.Errorf("startTaskAgent error: want substring \"agent session already running\" (Kamacu message survives D-05 wrap), got %q", err.Error())
+	}
+}
