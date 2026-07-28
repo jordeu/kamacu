@@ -517,9 +517,12 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 // through this HTTP endpoint, NOT through the WS frame protocol. The browser
 // WS interactive surface is unchanged.
 //
-// CR-terminator normalization is the ONLY "smart" behavior: see
-// normalizeInputTerminator for the raw-mode-TUI rationale. No quoting,
-// escaping, or content sanitization — verbatim passthrough.
+// The body and the submit key are written as TWO SEPARATE WriteInput calls
+// (body first, then "\r"). A single combined (body + "\r") write trips
+// paste-detection in raw-mode TUIs (Claude Code via Ink), which then treats
+// the embedded CR as paste content rather than the Enter key — the prompt
+// never submits. See splitInputForWrite for the raw-mode-TUI rationale. No
+// quoting, escaping, or content sanitization — verbatim passthrough.
 func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.mgr.Get(r.PathValue("id"))
 	if !ok {
@@ -533,26 +536,44 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	msg := normalizeInputTerminator(req.Message)
-	if err := sess.WriteInput([]byte(msg)); err != nil {
+	body, submit := splitInputForWrite(req.Message)
+	if err := sess.WriteInput([]byte(body)); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"bytes_written": len(msg)})
+	if err := sess.WriteInput([]byte(submit)); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"bytes_written": len(body) + len(submit)})
 }
 
-// normalizeInputTerminator collapses any request-supplied trailing line ending
-// (none, "\n", "\r", or "\r\n") to a single trailing "\r". Raw-mode TUIs
-// (Claude Code via Ink, opencode, anything readline/bubbletea-based) read "\r"
-// (carriage return, 0x0d) as the Enter key; a "\n" is a literal line feed that
-// does not submit the prompt, so the text arrives but the agent never acts on
-// it. xterm.js sends "\r" on Enter — the browser WS path already matches; this
-// normalizes the MCP HTTP bridge to the same contract. Internal "\n"s in a
-// multi-line body are preserved verbatim — only the terminator is touched.
-func normalizeInputTerminator(msg string) string {
+// splitInputForWrite decomposes a request message into the ordered pair of
+// WriteInput payloads the input handler sends to the PTY: the body (any
+// request-supplied trailing terminator stripped) first, then a single "\r"
+// submit key. The handler writes them as two separate WriteInput calls, never
+// one combined (body + "\r") write.
+//
+// Raw-mode TUIs (Claude Code via Ink, opencode, anything readline/bubbletea-
+// based) run a paste-detection heuristic on stdin chunks: a single chunk that
+// "looks pasted" (longer text, multi-byte UTF-8, etc.) is buffered for
+// preview, and any embedded CR is consumed as paste content rather than the
+// Enter key — the prompt text lands but never submits. Splitting the write
+// mirrors how human typing reaches the PTY (text in one stdin chunk, Enter in
+// the next) and is robust regardless of message content or size. xterm.js in
+// the browser produces per-keystroke chunks naturally, so the interactive WS
+// path never tripped this — only the HTTP bridge, which produced one big
+// chunk per request, did.
+//
+// "\r" (carriage return, 0x0d) is the submit key, not "\n": raw-mode TUIs
+// read "\r" as Enter and treat "\n" as a literal line feed that does not
+// submit. Internal "\n"s in a multi-line body are preserved verbatim — only
+// the trailing terminator is stripped here and re-added as a standalone "\r"
+// write by the caller.
+func splitInputForWrite(msg string) (body, submit string) {
 	msg = strings.TrimSuffix(msg, "\n")
 	msg = strings.TrimSuffix(msg, "\r")
-	return msg + "\r"
+	return msg, "\r"
 }
 
 // maxLabelRunes bounds a stored+rendered session label (T-24-01): an unbounded
