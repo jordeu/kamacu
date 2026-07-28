@@ -2112,14 +2112,15 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 
 // TestInput_Happy_WritesAndAppendsCR is the POST /api/sessions/{id}/input
 // happy path: a known live session id + {"message":"echo qsf-input-marker"}
-// returns 200 {"bytes_written":N} where N == len(message)+1 (the standalone
-// "\r" submit key, written as a SEPARATE WriteInput call after the body),
-// AND the marker actually reaches the PTY — verified by polling the output
-// endpoint. Proves WriteInput was called, not just that 200 returned. (See
-// TestSplitInputForWrite for the byte-exact two-write assertion — bash's
-// cooked-mode line discipline makes \r and \n indistinguishable in this
-// round-trip, so the count is the load-bearing claim here, not the
-// terminator byte nor the write split.)
+// returns 200 {"bytes_written":N} where N == len(message)+11 (the message
+// wrapped in bracketed paste markers — 5 prefix bytes + body + 5 suffix
+// bytes — as ONE WriteInput call, then a standalone "\r" submit key as a
+// SECOND WriteInput call), AND the marker actually reaches the PTY —
+// verified by polling the output endpoint. Proves WriteInput was called, not
+// just that 200 returned. (See TestWrapInputForWrite for the byte-exact
+// two-write + bracket assertion — bash's cooked-mode line discipline makes
+// \r and \n indistinguishable in this round-trip, so the count is the
+// load-bearing claim here, not the terminator byte nor the write split.)
 func TestInput_Happy_WritesAndAppendsCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
@@ -2139,7 +2140,7 @@ func TestInput_Happy_WritesAndAppendsCR(t *testing.T) {
 	if istatus != http.StatusOK {
 		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
 	}
-	wantBytes := len("echo "+marker) + 1
+	wantBytes := len("echo "+marker) + 13 // 6 (ESC[2004) + body + 6 (ESC[2014) + 1 ("\r")
 	if ibody["bytes_written"] != float64(wantBytes) {
 		t.Errorf("bytes_written = %v, want %d", ibody["bytes_written"], wantBytes)
 	}
@@ -2188,9 +2189,9 @@ func TestInput_UnknownID_404(t *testing.T) {
 }
 
 // TestInput_TrailingLF_TranslatedToCR: a message already ending in "\n" has
-// its LF terminator stripped and a standalone "\r" submit key written after
-// the body — bytes_written == 3 for {"message":"hi\n"} (body "hi" = 2 bytes,
-// submit "\r" = 1 byte, two separate WriteInput calls).
+// its LF terminator stripped, then the body is wrapped in bracketed paste
+// markers and a standalone "\r" submit key written after the closing bracket
+// — bytes_written == 15 for {"message":"hi\n"} (6 + "hi" (2) + 6 + "\r" (1)).
 func TestInput_TrailingLF_TranslatedToCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
@@ -2209,14 +2210,15 @@ func TestInput_TrailingLF_TranslatedToCR(t *testing.T) {
 	if istatus != http.StatusOK {
 		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
 	}
-	if ibody["bytes_written"] != float64(3) {
-		t.Errorf("bytes_written = %v, want 3 (\"hi\\n\" -> \"hi\\r\")", ibody["bytes_written"])
+	if ibody["bytes_written"] != float64(15) {
+		t.Errorf("bytes_written = %v, want 15 (\"hi\\n\" -> ESC[2004hiESC[2014 + \"\\r\")", ibody["bytes_written"])
 	}
 }
 
 // TestInput_EmptyMessage_WritesBareCR: an empty message still performs BOTH
-// writes — a 0-byte body WriteInput, then a 1-byte "\r" submit WriteInput —
-// a bare Enter, a legitimate default-prompt answer. bytes_written == 1.
+// writes — the 12-byte bracket pair (ESC[2004 + ESC[2014, back-to-back, no
+// body in between), then a 1-byte "\r" submit WriteInput — a bare Enter, a
+// legitimate default-prompt answer. bytes_written == 13.
 func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
@@ -2235,56 +2237,71 @@ func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 	if istatus != http.StatusOK {
 		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
 	}
-	if ibody["bytes_written"] != float64(1) {
-		t.Errorf("bytes_written = %v, want 1 (bare \"\\r\")", ibody["bytes_written"])
+	if ibody["bytes_written"] != float64(13) {
+		t.Errorf("bytes_written = %v, want 13 (empty body -> ESC[2004ESC[2014 + \"\\r\")", ibody["bytes_written"])
 	}
 }
 
-// TestSplitInputForWrite is the byte-exact regression guard for the
+// TestWrapInputForWrite is the byte-exact regression guard for the
 // POST /api/sessions/{id}/input TWO-WRITE contract. The input handler calls
-// splitInputForWrite to obtain an ORDERED pair of WriteInput payloads — body
-// first (any request-supplied terminator stripped), then a single "\r" submit
-// key — and writes them as two separate sess.WriteInput calls. A single
-// combined (body + "\r") write trips paste-detection in raw-mode TUIs
-// (Claude Code via Ink), which treats the embedded CR as paste content rather
-// than the Enter key: the prompt text lands but never submits. Splitting the
-// write mirrors how human typing reaches the PTY (text in one stdin chunk,
-// Enter in the next).
+// wrapInputForWrite to obtain an ORDERED pair of WriteInput payloads — the
+// body wrapped in ANSI bracketed paste markers (ESC[2004<body>ESC[2014)
+// first, then a single "\r" submit key — and writes them as two separate
+// sess.WriteInput calls.
+//
+// Raw-mode TUIs (Claude Code via Ink, opencode, anything readline/bubbletea-
+// based with bracketed paste enabled) run a heuristic paste detector on stdin
+// chunks; programmatic writes arrive at PTY-read speed and trip the
+// heuristic, absorbing any embedded "\r" as paste content rather than the
+// Enter key. The explicit bracketed sequence tells the TUI "this is one
+// paste event", bypassing the heuristic; the trailing "\r" lands OUTSIDE the
+// bracket as a standalone Enter keystroke that submits the captured paste.
+// This is the canonical "paste and submit" sequence. (Iterative diagnosis:
+// 260728-s5a set the "\r" submit key, 260728-sm5 split the two writes,
+// 260728-t4c added the bracketed wrap — the deterministic fix.)
 //
 // This pure-function assertion is the load-bearing guard: it fails loudly if
-// the write shape ever reverts to one combined call, or if the submit key
-// reverts to "\n". The HTTP round-trip tests above cannot distinguish the
-// two-write shape (nor "\r" from "\n" — bash's cooked-mode line discipline
-// translates both identically on input), so this function's return values
-// ARE the byte stream that reaches the PTY, in order.
+// the write shape ever reverts to one combined call, if the submit key
+// reverts to "\n", OR if the bracketed paste wrap is dropped. The HTTP
+// round-trip tests below cannot distinguish the two-write shape (nor "\r"
+// from "\n" — bash's cooked-mode line discipline translates both identically
+// on input) nor observe the bracket markers (bash in cooked mode echoes
+// control sequences literally), so this function's return values ARE the
+// byte stream that reaches the PTY, in order.
 //
 // The multi-byte UTF-8 case is the regression guard for the original failing
 // symptom: a single combined write of a multi-byte body + "\r" was flagged as
 // a paste and never submitted.
-func TestSplitInputForWrite(t *testing.T) {
+func TestWrapInputForWrite(t *testing.T) {
+	const (
+		pasteStart = "\x1b[2004" // ESC[2004 — bracketed paste start
+		pasteEnd   = "\x1b[2014" // ESC[2014 — bracketed paste end
+	)
+	// wantBody is the trimmed body wrapped in bracketed paste markers.
+	wrap := func(s string) string { return pasteStart + s + pasteEnd }
 	cases := []struct {
 		name       string
 		in         string
 		wantBody   string
 		wantSubmit string
 	}{
-		{"no terminator", "hello", "hello", "\r"},
-		{"trailing LF", "hello\n", "hello", "\r"},
-		{"trailing CR", "hello\r", "hello", "\r"},
-		{"trailing CRLF", "hello\r\n", "hello", "\r"},
-		{"empty message", "", "", "\r"},
-		{"multi-byte UTF-8", "ping — test", "ping — test", "\r"},
-		{"internal LFs preserved", "line one\nline two", "line one\nline two", "\r"},
-		{"internal LFs preserved with trailing LF", "line one\nline two\n", "line one\nline two", "\r"},
+		{"no terminator", "hello", wrap("hello"), "\r"},
+		{"trailing LF", "hello\n", wrap("hello"), "\r"},
+		{"trailing CR", "hello\r", wrap("hello"), "\r"},
+		{"trailing CRLF", "hello\r\n", wrap("hello"), "\r"},
+		{"empty message", "", wrap(""), "\r"},
+		{"multi-byte UTF-8", "ping — test", wrap("ping — test"), "\r"},
+		{"internal LFs preserved", "line one\nline two", wrap("line one\nline two"), "\r"},
+		{"internal LFs preserved with trailing LF", "line one\nline two\n", wrap("line one\nline two"), "\r"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotBody, gotSubmit := splitInputForWrite(tc.in)
+			gotBody, gotSubmit := wrapInputForWrite(tc.in)
 			if gotBody != tc.wantBody {
-				t.Errorf("splitInputForWrite(%q) body = %q, want %q", tc.in, gotBody, tc.wantBody)
+				t.Errorf("wrapInputForWrite(%q) body = %q, want %q", tc.in, gotBody, tc.wantBody)
 			}
 			if gotSubmit != tc.wantSubmit {
-				t.Errorf("splitInputForWrite(%q) submit = %q, want %q", tc.in, gotSubmit, tc.wantSubmit)
+				t.Errorf("wrapInputForWrite(%q) submit = %q, want %q", tc.in, gotSubmit, tc.wantSubmit)
 			}
 			// The submit key is ALWAYS exactly one byte, 0x0d — never empty,
 			// never "\n", never doubled. This is the byte-exact guard against
@@ -2292,10 +2309,21 @@ func TestSplitInputForWrite(t *testing.T) {
 			if len(gotSubmit) != 1 || gotSubmit[0] != '\r' {
 				t.Errorf("submit key = %q (%d bytes), want exactly \"\\r\" (0x0d, 1 byte)", gotSubmit, len(gotSubmit))
 			}
-			// The body must never carry a trailing terminator: that would
-			// re-introduce the combined-write shape the split defeats.
-			if len(gotBody) > 0 && (gotBody[len(gotBody)-1] == '\n' || gotBody[len(gotBody)-1] == '\r') {
-				t.Errorf("body %q ends with a terminator byte; splitInputForWrite must strip it", gotBody)
+			// The body MUST be wrapped in the bracketed paste markers: it
+			// starts with ESC[2004 and ends with ESC[2014. Dropping either
+			// bracket defeats the heuristic bypass — the load-bearing fix
+			// from 260728-t4c.
+			if !strings.HasPrefix(gotBody, pasteStart) {
+				t.Errorf("body %q missing bracketed-paste start %q", gotBody, pasteStart)
+			}
+			if !strings.HasSuffix(gotBody, pasteEnd) {
+				t.Errorf("body %q missing bracketed-paste end %q", gotBody, pasteEnd)
+			}
+			// The wrapped content must never carry a trailing terminator: that
+			// would re-introduce the combined-write shape the split defeats.
+			inner := strings.TrimPrefix(strings.TrimSuffix(gotBody, pasteEnd), pasteStart)
+			if len(inner) > 0 && (inner[len(inner)-1] == '\n' || inner[len(inner)-1] == '\r') {
+				t.Errorf("inner body %q ends with a terminator byte; wrapInputForWrite must strip it", inner)
 			}
 		})
 	}
