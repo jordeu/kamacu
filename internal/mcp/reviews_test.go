@@ -251,3 +251,131 @@ func TestBridge_OpenReview_GateBlocked_Kamacu409(t *testing.T) {
 		t.Errorf("openReview error: want substring \"GitHub integration is off\" (Kamacu message survives D-05 wrap), got %q", err.Error())
 	}
 }
+
+// TestBridge_PostPRReview_Happy_PostsReviewsPath (MCPREV-04, D-05 passthrough):
+// when Kamacu's POST returns 201 with the gh JSON response, post_pr_review
+// returns IsError=false and the TextContent is the raw body verbatim. Also
+// proves the bridge POSTs to /api/projects/{id}/pull-requests/{n}/reviews
+// (PLURAL — distinct from the singular /review open-workspace route) with the
+// marshaled JSON body carrying verdict/body/inline_comments.
+func TestBridge_PostPRReview_Happy_PostsReviewsPath(t *testing.T) {
+	const canned = `{"id":99,"state":"APPROVED"}`
+	var (
+		gotPath   string
+		gotMethod string
+		gotBody   map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated) // 201 Created — full 2xx range accepted by bridge.call
+		_, _ = w.Write([]byte(canned))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"project_id":3,"pr_number":42,"verdict":"approve","body":"LGTM","inline_comments":[{"path":"a.go","line":1,"body":"x"}]}`))
+	res, err := b.postPRReview(context.Background(), req)
+	if err != nil {
+		t.Fatalf("postPRReview: %v", err)
+	}
+	if res.IsError {
+		t.Errorf("IsError: want false on 201, got true")
+	}
+	if gotPath != "/api/projects/3/pull-requests/42/reviews" {
+		t.Errorf("request URL.Path: want %q, got %q", "/api/projects/3/pull-requests/42/reviews", gotPath)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("request method: want %q, got %q", http.MethodPost, gotMethod)
+	}
+	// The marshaled body carries the verdict + body + inline_comments through
+	// to Kamacu verbatim (D-04 verbatim passthrough).
+	if gotBody["verdict"] != "approve" {
+		t.Errorf("body.verdict = %v, want approve", gotBody["verdict"])
+	}
+	if gotBody["body"] != "LGTM" {
+		t.Errorf("body.body = %v, want LGTM", gotBody["body"])
+	}
+	ics, ok := gotBody["inline_comments"].([]any)
+	if !ok {
+		t.Fatalf("body.inline_comments not an array: %T", gotBody["inline_comments"])
+	}
+	if len(ics) != 1 {
+		t.Fatalf("len(inline_comments) = %d, want 1", len(ics))
+	}
+	c0, _ := ics[0].(map[string]any)
+	if c0["path"] != "a.go" || c0["line"] != float64(1) || c0["body"] != "x" {
+		t.Errorf("inline_comments[0] = %v, want {path:a.go line:1 body:x}", c0)
+	}
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("result.Content[0]: want *TextContent, got %T", res.Content[0])
+	}
+	// D-05: verbatim passthrough — the raw gh JSON response survives.
+	if tc.Text != canned {
+		t.Errorf("passthrough text: want %q, got %q (D-05 verbatim)", canned, tc.Text)
+	}
+}
+
+// TestBridge_PostPRReview_GateBlocked_Kamacu409 (MCPREV-04, D-05 wrap): when
+// Kamacu's POST returns 409 (the two-gate ladder blocks), post_pr_review
+// returns a non-nil error wrapping `kamacu POST ...: HTTP 409: <body>`.
+// Identical degrade contract to openReview's gate test.
+func TestBridge_PostPRReview_GateBlocked_Kamacu409(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"GitHub integration is off"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"project_id":3,"pr_number":42,"verdict":"approve"}`))
+	_, err := b.postPRReview(context.Background(), req)
+	if err == nil {
+		t.Fatal("postPRReview: expected error for gate-blocked 409, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 409") {
+		t.Errorf("postPRReview error: want substring \"HTTP 409\", got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GitHub integration is off") {
+		t.Errorf("postPRReview error: want substring \"GitHub integration is off\" (Kamacu message survives D-05 wrap), got %q", err.Error())
+	}
+}
+
+// TestBridge_PostPRReview_OptionalFieldsOmitted_SendsVerdictOnly (MCPREV-04,
+// omitempty): when the agent supplies ONLY the required verdict (no body, no
+// inline_comments), the marshaled body carries ONLY verdict — proves the bridge
+// does not require/synthesize the optional fields. The body/inline_comments
+// keys MUST be absent (not just empty), matching the API layer's own omitempty.
+func TestBridge_PostPRReview_OptionalFieldsOmitted_SendsVerdictOnly(t *testing.T) {
+	const canned = `{"id":7,"state":"COMMENTED"}`
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(canned))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"project_id":1,"pr_number":2,"verdict":"comment"}`))
+	res, err := b.postPRReview(context.Background(), req)
+	if err != nil {
+		t.Fatalf("postPRReview: %v", err)
+	}
+	if res.IsError {
+		t.Errorf("IsError: want false on 201, got true")
+	}
+	if gotBody["verdict"] != "comment" {
+		t.Errorf("body.verdict = %v, want comment", gotBody["verdict"])
+	}
+	if _, present := gotBody["body"]; present {
+		t.Errorf("body.body present; want omitted (no body arg → not sent)")
+	}
+	if _, present := gotBody["inline_comments"]; present {
+		t.Errorf("body.inline_comments present; want omitted (no inline_comments arg → not sent)")
+	}
+}
