@@ -923,3 +923,97 @@ func TestBridge_StartTaskAgent_AlreadyRunning_Kamacu409(t *testing.T) {
 		t.Errorf("startTaskAgent error: want substring \"agent session already running\" (Kamacu message survives D-05 wrap), got %q", err.Error())
 	}
 }
+
+// TestBridge_SendSessionMessage_Happy_PostsInputPath (MCPSESS-06 happy path,
+// D-05 passthrough): POST /api/sessions/{id}/input is called with the right
+// path + method, the body decodes to {"message":"run tests"}, and Kamacu's
+// 200 {"bytes_written":N} is passed through verbatim in a single TextContent.
+func TestBridge_SendSessionMessage_Happy_PostsInputPath(t *testing.T) {
+	const canned = `{"bytes_written":14}`
+	var (
+		gotPath   string
+		gotMethod string
+		gotBody   map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(canned))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"s1","message":"run tests"}`))
+	res, err := b.sendSessionMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("sendSessionMessage: %v", err)
+	}
+	if want := "/api/sessions/s1/input"; gotPath != want {
+		t.Errorf("request URL.Path: want %q, got %q", want, gotPath)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("request method: want %q, got %q", http.MethodPost, gotMethod)
+	}
+	if gotBody["message"] != "run tests" {
+		t.Errorf("body message: want %q, got %v", "run tests", gotBody["message"])
+	}
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("result.Content[0]: want *TextContent, got %T", res.Content[0])
+	}
+	if tc.Text != canned {
+		t.Errorf("passthrough text: want %q, got %q", canned, tc.Text)
+	}
+}
+
+// TestBridge_SendSessionMessage_UnknownID_Kamacu404 (MCPSESS-06 error path,
+// D-05 wrap): Kamacu's 404 with {"error":"session not found"} surfaces through
+// bridge.call's non-2xx wrap as a handler error containing both "HTTP 404" and
+// the Kamacu message (Gap 2 — the message survives the wrap).
+func TestBridge_SendSessionMessage_UnknownID_Kamacu404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"session not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"gone","message":"hi"}`))
+	_, err := b.sendSessionMessage(context.Background(), req)
+	if err == nil {
+		t.Fatal("sendSessionMessage: expected error for unknown id 404, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 404") {
+		t.Errorf("sendSessionMessage error: want substring \"HTTP 404\", got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "session not found") {
+		t.Errorf("sendSessionMessage error: want substring \"session not found\" (Kamacu message survives D-05 wrap), got %q", err.Error())
+	}
+}
+
+// TestBridge_SendSessionMessage_EmptyMessage_StillPosted: an empty message is
+// POSTed verbatim — the bridge does ZERO client-side validation; Kamacu's
+// newline normalization handles it server-side. The body posted is
+// {"message":""}, proving the empty message reaches Kamacu unchanged.
+func TestBridge_SendSessionMessage_EmptyMessage_StillPosted(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"bytes_written":1}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+	req := newCallToolRequest(json.RawMessage(`{"session_id":"s1","message":""}`))
+	if _, err := b.sendSessionMessage(context.Background(), req); err != nil {
+		t.Fatalf("sendSessionMessage empty message: %v", err)
+	}
+	if gotBody["message"] != "" {
+		t.Errorf("body message: want \"\" (empty message posted verbatim — bridge does no validation), got %q", gotBody["message"])
+	}
+}
