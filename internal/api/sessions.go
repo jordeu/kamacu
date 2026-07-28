@@ -517,12 +517,21 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 // through this HTTP endpoint, NOT through the WS frame protocol. The browser
 // WS interactive surface is unchanged.
 //
-// The body and the submit key are written as TWO SEPARATE WriteInput calls
-// (body first, then "\r"). A single combined (body + "\r") write trips
-// paste-detection in raw-mode TUIs (Claude Code via Ink), which then treats
-// the embedded CR as paste content rather than the Enter key — the prompt
-// never submits. See splitInputForWrite for the raw-mode-TUI rationale. No
-// quoting, escaping, or content sanitization — verbatim passthrough.
+// The message is sent to the PTY as TWO SEPARATE WriteInput calls:
+//  1. The body wrapped in ANSI bracketed paste markers (ESC[2004<body>ESC[2014).
+//  2. A single "\r" submit key, written AFTER the closing bracket.
+//
+// The bracketed wrap is the deterministic fix. Raw-mode TUIs (Claude Code
+// via Ink, opencode, anything readline/bubbletea-based with bracketed paste
+// enabled) run a heuristic paste detector on stdin chunks; programmatic
+// writes arrive at PTY-read speed (far faster than human typing), so the
+// heuristic fires on essentially any write and absorbs any embedded "\r" as
+// paste content rather than the Enter key. The explicit brackets tell the
+// TUI "this is one paste event", bypassing the heuristic; the trailing "\r"
+// lands OUTSIDE the bracket as a standalone Enter keystroke that submits the
+// captured paste. See wrapInputForWrite for the full rationale + the
+// iterative diagnosis trail. No quoting, escaping, or content sanitization
+// — verbatim passthrough (the brackets are transport, not content).
 func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.mgr.Get(r.PathValue("id"))
 	if !ok {
@@ -536,7 +545,7 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	body, submit := splitInputForWrite(req.Message)
+	body, submit := wrapInputForWrite(req.Message)
 	if err := sess.WriteInput([]byte(body)); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -548,32 +557,48 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"bytes_written": len(body) + len(submit)})
 }
 
-// splitInputForWrite decomposes a request message into the ordered pair of
-// WriteInput payloads the input handler sends to the PTY: the body (any
-// request-supplied trailing terminator stripped) first, then a single "\r"
-// submit key. The handler writes them as two separate WriteInput calls, never
-// one combined (body + "\r") write.
+// wrapInputForWrite decomposes a request message into the ordered pair of
+// WriteInput payloads the input handler sends to the PTY: the message (any
+// request-supplied trailing terminator stripped) wrapped in ANSI bracketed
+// paste markers (ESC[2004 ... ESC[2014) as the FIRST payload, then a single
+// "\r" submit key as the SECOND. The handler writes them as two separate
+// WriteInput calls, never one combined write.
 //
 // Raw-mode TUIs (Claude Code via Ink, opencode, anything readline/bubbletea-
-// based) run a paste-detection heuristic on stdin chunks: a single chunk that
-// "looks pasted" (longer text, multi-byte UTF-8, etc.) is buffered for
-// preview, and any embedded CR is consumed as paste content rather than the
-// Enter key — the prompt text lands but never submits. Splitting the write
-// mirrors how human typing reaches the PTY (text in one stdin chunk, Enter in
-// the next) and is robust regardless of message content or size. xterm.js in
-// the browser produces per-keystroke chunks naturally, so the interactive WS
-// path never tripped this — only the HTTP bridge, which produced one big
-// chunk per request, did.
+// based with bracketed paste enabled) run a heuristic paste detector on stdin
+// chunks: a single programmatic write arrives at PTY-read speed (microseconds,
+// far faster than human typing), so the heuristic fires on essentially any
+// write and buffers the chunk for paste-preview. Any "\r" embedded in that
+// chunk is consumed as paste CONTENT rather than the Enter key — the prompt
+// text lands but never submits. The explicit bracketed paste sequence tells
+// the TUI "this is one paste event, here is where it starts and ends",
+// bypassing the heuristic entirely. The trailing "\r" is written as a
+// SEPARATE call AFTER the closing bracket so the TUI reads it as a standalone
+// Enter keystroke and submits the captured paste. This is the canonical
+// "paste and submit" sequence every modern terminal emulator uses.
 //
 // "\r" (carriage return, 0x0d) is the submit key, not "\n": raw-mode TUIs
 // read "\r" as Enter and treat "\n" as a literal line feed that does not
 // submit. Internal "\n"s in a multi-line body are preserved verbatim — only
 // the trailing terminator is stripped here and re-added as a standalone "\r"
 // write by the caller.
-func splitInputForWrite(msg string) (body, submit string) {
+//
+// Iterative diagnosis trail: 260728-s5a established the "\r" (not "\n")
+// submit key; 260728-sm5 split the body and submit key into two WriteInput
+// calls; 260728-t4c added the bracketed paste wrap (the deterministic fix —
+// the split alone was necessary but insufficient, as the body chunk still
+// tripped the heuristic without explicit brackets). Verified live against
+// Claude Code v2.1.22 / Opus 5 on session 70e5cae0-cb84-41f2-8c14-3f2897e7ac61:
+// an idle agent transitions to working within seconds once the bracketed
+// body + standalone CR land. See quick-task 260728-t4c SUMMARY.
+func wrapInputForWrite(msg string) (body, submit string) {
 	msg = strings.TrimSuffix(msg, "\n")
 	msg = strings.TrimSuffix(msg, "\r")
-	return msg, "\r"
+	const (
+		pasteStart = "\x1b[2004" // ESC[2004 — bracketed paste start
+		pasteEnd   = "\x1b[2014" // ESC[2014 — bracketed paste end
+	)
+	return pasteStart + msg + pasteEnd, "\r"
 }
 
 // maxLabelRunes bounds a stored+rendered session label (T-24-01): an unbounded
