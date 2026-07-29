@@ -10,13 +10,31 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ## Milestone Status
 
-**Active: v1.11 Kamacu MCP Server** — started 2026-07-21. Goal: expose Kamacu's full surface (tasks, sessions, projects, workspaces, reviews, agents) as MCP tools so an agent running inside Kamacu can drive the entire app as the user's delegate. Promotes AGNT-01 from backlog.
+**Active: planning next milestone.** v1.11 Kamacu MCP Server shipped 2026-07-29 — Kamacu's task/session/project/workspace/review surface is exposed as MCP tools so an agent running inside a Kamacu task PTY can drive the entire app as the user's delegate.
 
-**Just shipped:** v1.10 Configurable Agents shipped 2026-07-11 (18/18 requirements; archived to `milestones/v1.10-*`).
+**Just shipped:** v1.11 Kamacu MCP Server shipped 2026-07-29 (23/23 requirements; 4 phases, 11 plans; archived to `milestones/v1.11-*`). AGNT-01 fully delivered.
 
 ---
 
-_v1.10 Configurable Agents shipped 2026-07-11 (18/18 requirements, 5 phases, 20 plans; archived to `milestones/v1.10-*`). Prior shipped milestones are in the collapsible blocks below._
+_v1.11 Kamacu MCP Server shipped 2026-07-29 (23/23 requirements, 4 phases, 11 plans; archived to `milestones/v1.11-*`). Prior shipped milestones are in the collapsible blocks below._
+
+<details>
+<summary>Shipped milestone targets — v1.11 Kamacu MCP Server (2026-07-29)</summary>
+
+**Goal:** Expose Kamacu's task / session / project / workspace / review surface as MCP tools so an agent running inside a Kamacu task PTY can drive the entire app as the user's delegate. Read + subscribe only on terminals — no PTY keystroke injection (write stays browser-only).
+
+**Delivered features:**
+- `kamacu mcp serve` stdio MCP subcommand (built on `github.com/modelcontextprotocol/go-sdk` v1.6.1) speaking JSON-RPC over stdio, bridging tool calls to the running Kamacu HTTP API at `127.0.0.1:7333` via an env-driven `*bridge` HTTP client with the `X-Kamacu-Token` header (reusing the existing `KAMACU_HOOK_TOKEN` / `KAMACU_HOOK_BASE` envelope injected in v1.10). `kamacu` is now a `google/subcommands` dispatcher; `kamacu serve` runs the server verbatim.
+- 16 CRUD MCP tools (6 task + 5 project + 5 workspace) mirroring every SPA action, each a thin build-path-and-delegate to a shared `bridge.call` helper. Includes the v1.4 managed-checkout atomic create + all-or-nothing gated delete, the v1.9 guarded workspace delete, and cross-workspace project transfer — all gates apply unchanged through the bridge.
+- 4 session tools with type-level read-only terminal access: `list_sessions` / `get_session` / `get_session_output` (snapshot, default 4 KB / 512 KiB clamp) / `subscribe_session_output` (bounded live tail, default 30s / hard cap 300s) with proven cancellation-and-no-leak semantics (ctx cancel returns the partial stream + detaches within 2s; goroutine count stable across N cycles). An agent observing a sibling session can never inject PTY bytes — the read-only contract is enforced at the type level (scoped grep gates: zero `WriteInput`/`FrameData` refs, no `internal/session` import in the bridge).
+- 3 PR-review tools (`list_pending_reviews` / `list_recently_reviewed` / `open_review`) reusing Kamacu's existing v1.3/v1.5 `internal/github` surface — zero new endpoints, zero new `gh` calls, zero bypass of the existing two-gate ladder.
+- A coordinated `X-Kangent-Token` → `X-Kamacu-Token` rename across the source (byte-for-byte security posture preserved) and three small Kamacu endpoint additions (`GET /api/tasks`, `?workspace_id=` on `GET /api/projects`, `GET /api/projects/{id}`) the bridge tools need.
+
+**Settled decisions (milestone-time):** actor = agents inside Kamacu (the AGNT-01 framing expanded from self-report to full delegate); transport = stdio MCP subcommand spawned by the agent CLI (one binary serves both modes, reuses `KAMACU_HOOK_TOKEN` envelope); session I/O = read + subscribe only (write would conflict with the browser-attached user — the read-only contract enforced at the type level, not just by convention); per-resource file split (`internal/mcp/{tasks,projects,workspaces,sessions,reviews}.go`) tracks the resource acted on (D-07); `bridge.call` widened from HTTP 200-only to the full 2xx range so POST→201 and DELETE→204 surface as results. Post-milestone quick tasks (agent delegate surface) reversed two v1.11 Out-of-Scope rules: `start_task_agent` + `send_session_message` (PTY input via MCP, bracketed-paste-wrapped) and `post_pr_review` (GitHub writes via MCP) — these are agent-delegate write primitives only; the browser stays the authoritative interactive surface.
+
+</details>
+
+_v1.10 Configurable Agents shipped 2026-07-11 (18/18 requirements; archived to `milestones/v1.10-*`). Prior shipped milestones are in the collapsible blocks below._
 
 <details>
 <summary>Shipped milestone targets — v1.10 Configurable Agents (2026-07-11)</summary>
@@ -256,16 +274,7 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-**v1.11 Kamacu MCP Server** — defined 2026-07-21. Expose Kamacu's full surface as MCP tools so agents running inside Kamacu task PTYs can drive the entire app as the user's delegate. Requirements being scoped via `.planning/REQUIREMENTS.md`.
-
-Target capabilities:
-- `kamacu mcp serve` stdio MCP subcommand bridging to the running Kamacu HTTP API
-- Agent-CLI integration: at spawn, Kamacu writes an `mcpServers` entry into the agent's config (Claude Code, opencode) so tools auto-discover
-- Per-task auto-scoping via the inherited `KAMACU_SESSION_ID` (convenience tools need no params; cross-task tools accept explicit IDs)
-- Full UI parity tool surface: tasks, sessions, projects, workspaces, agents, reviews, diff, settings, worktree cleanup
-- Read + subscribe terminal access (snapshots + live tail; **no keystroke injection** — read-only, never conflicts with the browser-attached user)
-
-Settled decisions (milestone-time): actor = agents inside Kamacu (the original AGNT-01 framing expanded from self-report to full delegate); transport = stdio MCP subcommand spawned by the agent CLI (one binary serves both modes, reuses `KAMACU_HOOK_TOKEN` envelope); session I/O = read + subscribe only (write would conflict with browser-attached user).
+(None — v1.11 shipped. Next milestone requirements will be defined via `/gsd-new-milestone`.)
 
 ### Out of Scope
 
@@ -343,9 +352,10 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**v1.10 Configurable Agents shipped 2026-07-11.** Candidates NOT pulled into v1.10 remain parked below for a future milestone.
+**v1.11 Kamacu MCP Server shipped 2026-07-29.** Candidates NOT pulled into v1.11 remain parked below for a future milestone.
 
 Banked forward investments worth a future milestone:
+- **v1.11 MCP follow-ups** (scoped in `milestones/v1.11-REQUIREMENTS.md` "v1.12+ Requirements"): per-task auto-scoping convenience tools (`get_my_task`/`get_my_session`, ToolFilter — MCPAUTO-01..03); agent-CLI auto-registration at spawn (`.mcp.json` / `opencode.json` writers — MCPREG-01..03); additional tool categories — agents CRUD, settings, worktree-cleanup ops (MCPMORE-01..03); quality/hardening — typed JSON-RPC error taxonomy, stdout-pollution guards, real-binary e2e harness (MCPHARD-01..03).
 - v1.10 configurable-agents follow-ups: additional built-in engines beyond claude + opencode with their own status heuristics + restart-resume (AGFUT-03 — e.g. codex, gemini CLI as first-class seeds); per-agent workspace-scoped overrides (AGFUT-01); agent template export/import sharing (AGFUT-02).
 - v1.7 project-icon follow-ups, scoped in `milestones/v1.7-REQUIREMENTS.md` "Future Requirements": image/logo icons (ICON-FUT-01), emoji icons (ICON-FUT-02), free-form hex color beyond the curated swatches (ICON-FUT-03), drag-to-reorder projects in the rail (ICON-FUT-04), and Add-project (+) / Settings (gear) reachable as icons in the collapsed rail so it is fully functional without expanding (ICON-FUT-05).
 - The v1.4 managed-checkout follow-ups, already scoped in `milestones/v1.4-REQUIREMENTS.md` "Future Requirements": on-demand checkout sync (CKMNT-01), non-default base branch at create (CKMNT-02), shallow/partial clone for large repos (CKMNT-03), and live clone-progress streaming + cancel (CKUX-01). The frontend `Project.managed` wire field is already in place to hang a managed-delete cleanup affordance on.
@@ -357,7 +367,7 @@ Banked forward investments worth a future milestone:
 
 ## Deferred (post-v1.1)
 
-Parked candidates: browser notifications on waiting/finished (NOTF-01), one-click "Move to In Review?" on the Stop hook (NOTF-02), stale-worktree purge list (MAINT-01), MCP server for agent board access (AGNT-01), per-project settings overrides. One carried bug to confirm: whether plan-mode exit-plan approval triggers the amber waiting dot (research OQ1) — still unobserved as of Phase 6's gate (user approved without reporting it).
+Parked candidates: browser notifications on waiting/finished (NOTF-01), one-click "Move to In Review?" on the Stop hook (NOTF-02), stale-worktree purge list (MAINT-01), ~~MCP server for agent board access (AGNT-01)~~ ✓ delivered in v1.11, per-project settings overrides. One carried bug to confirm: whether plan-mode exit-plan approval triggers the amber waiting dot (research OQ1) — still unobserved as of Phase 6's gate (user approved without reporting it).
 
 ## Context
 
@@ -439,3 +449,5 @@ This document evolves at phase transitions and milestone boundaries.
 *Last updated: 2026-07-21 to start v1.11 Kamacu MCP Server. Active section reset to the v1.11 milestone scope (the promoted-and-expanded AGNT-01 — full-surface MCP server for agents running inside Kamacu). Three settled decisions logged in Active (actor = agents-inside, transport = stdio subcommand, session I/O = read + subscribe only). Two new Out-of-Scope items (MCP PTY writes; MCP for external editors). Prior evolution entry preserved below.*
 
 *Last updated: 2026-07-11 after v1.10 Configurable Agents milestone. Full evolution review: "What This Is" now names configurable agents + multiple engines; the v1.10 milestone block added to shipped history; all 18 v1.10 requirements (AGDATA·AGMGMT·AGSPAWN·AGUI·OCENG·OCRESUME) moved to Validated (Phases 01–05); Active reset to "next milestone not yet scoped"; six v1.10 Key Decisions logged (typed engine column, custom running/exited-only status, extra-params consolidated on the agent row, fetch-based status plugin, async opencode session-id capture, opencode restart-resume). "Multiple agent CLIs" Out-of-Scope item revised (configurable agents + opencode shipped; additional first-class engines deferred as AGFUT-03). v1.10 shipped 2026-07-11 — 5 phases, 20 plans, 18 tasks; archived to `milestones/v1.10-*`.*
+
+*Last updated: 2026-07-29 after v1.11 Kamacu MCP Server milestone. Full evolution review: the v1.11 milestone block added to shipped history; all 23 v1.11 requirements (MCPPROC·MCPTASK·MCPSESS·MCPREV·MCPPROJ) already in Validated from per-phase transitions; Active reset to "next milestone not yet scoped"; Next Milestone updated (v1.11 follow-ups banked: MCPAUTO, MCPREG, MCPMORE, MCPHARD); AGNT-01 marked delivered in Deferred. Milestone Status flipped to "planning next milestone". v1.11 shipped 2026-07-29 — 4 phases (06–09), 11 plans, 23/23 requirements; archived to `milestones/v1.11-*`; tag v1.11.*

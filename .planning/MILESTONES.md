@@ -1,5 +1,29 @@
 # Milestones
 
+## v1.11 Kamacu MCP Server (Shipped: 2026-07-29)
+
+**Phases completed:** 4 phases, 11 plans, 22 tasks
+
+**Key accomplishments:**
+
+- `cmd/kamacu/main.go` slimmed to a 14-line `google/subcommands` dispatcher; today's entire server body moved verbatim into `cmd/kamacu/serve.go`'s `serveCmd`; bare `kamacu` now prints help and exits non-zero (D-04 break-clean).
+- `internal/mcp/` package built on `github.com/modelcontextprotocol/go-sdk` v1.6.1 — `kamacu mcp serve` speaks JSON-RPC over stdio, registers exactly one production tool (`list_projects`), and is wired into the dispatcher via Pattern 2 nested Commander. The SC2 malformed-tool regression test (D-11) proves error handlers emit clean JSON-RPC error responses on stdout — never crashes, never stream desync.
+- Single coordinated sweep renaming `X-Kangent-Token` → `X-Kamacu-Token` across 10 source occurrences in 7 files (3 production + 4 test), preserving byte-for-byte security posture (32-byte token, constant-time compare, fresh-per-start re-injection) with zero fallback.
+- Three Kamacu endpoint additions (D-01 GET /api/tasks, D-02 ?workspace_id= on GET /api/projects, Gap 1 GET /api/projects/{id}) plus the D-07 per-resource split (tasks.go/projects.go/workspaces.go) and bridge.call shared helper — laying the foundation Plans 02/03/04 each fill one file.
+- Six task MCP tools (list_tasks / get_task / create_task / update_task / move_task / delete_task) bridging to Kamacu's task endpoints — each a thin build-path-and-delegate to bridge.call, with 13 httptest cases and a Rule 1 fix widening bridge.call from HTTP 200-only to full 2xx.
+- Four project MCP tools (get_project / create_project / update_project / delete_project) bridging to Kamacu's project endpoints — each a thin build-path-and-delegate to bridge.call, with 12 httptest cases covering the D-04 two-arg fork, D-03 partial-PATCH with excluded fields, and the Gap 2 managed-delete 409 structured body.
+- Five workspace MCP tools (list_workspaces / create_workspace / update_workspace / delete_workspace / move_project_to_workspace) bridging to Kamacu's workspace endpoints plus the v1.9 PATCH /api/projects/{id} transfer surface — each a thin build-path-and-delegate to bridge.call, with 10 httptest cases covering both v1.9 guarded-delete 409 messages and the cross-route transfer's {workspace_id}-only body.
+- Read-only HTTP endpoints (get_session / get_session_output / subscribe / list project_id filter) backing the four MCP session tools, with type-level read-only enforcement and no new long-lived goroutines
+- Three non-streaming MCP session tools (list_sessions / get_session / get_session_output) bridged to the Plan 01 Kamacu endpoints, with a panic-recovery wrapper closing Phase 06 Open Question 1 ahead of Plan 03's streaming
+- subscribe_session_output (MCPSESS-04) — the streaming panic surface — delivered with the SC3 cancellation/leak regression gate proven via the SDK in-memory transport + a fake streaming server; ctx cancel returns a partial D-08 envelope and detaches within 2s, goroutine count is stable across N cycles
+- 3 MCP tools (list_pending_reviews, list_recently_reviewed, open_review) bridging Kamacu's existing v1.3/v1.5 GitHub-integration HTTP surface — the milestone's mechanical coda: pure translation, zero new endpoints/gh-calls/gates
+
+**Known deferred items at close:** 6 (the pre-close artifact audit flagged 6 quick tasks as open; all 6 are carried over from prior milestones v1.3–v1.7 — none are v1.11 work. See STATE.md → Deferred Items.)
+
+**Requirements:** 23/23 v1.11 requirements complete (MCPPROC·MCPTASK·MCPSESS·MCPREV·MCPPROJ). No formal milestone audit was run (override closeout — the 6 flagged items are all prior-milestone stale quick tasks).
+
+---
+
 ## v1.10 Configurable Agents (Shipped: 2026-07-11)
 
 **Phases completed:** 5 phases, 20 plans, 18 tasks

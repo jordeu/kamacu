@@ -350,6 +350,49 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 
 ---
 
+## Milestone: v1.11 — Kamacu MCP Server
+
+**Shipped:** 2026-07-29
+**Phases:** 4 (06–09) | **Plans:** 11 | **Tasks:** 22
+
+### What Was Built
+- (Phase 06, plans 06-01..03) `kamacu` → `google/subcommands` dispatcher (`main.go` slimmed to 14 lines; server body moved verbatim into `serveCmd`); `kamacu mcp serve` stdio MCP subcommand on `github.com/modelcontextprotocol/go-sdk` v1.6.1 bridging to the Kamacu HTTP API via an env-driven `*bridge` client (`X-Kamacu-Token` header, `127.0.0.1:7333` default + `KAMACU_HOOK_BASE` override); `list_projects` proves the bridge end-to-end; SC2 malformed-tool regression proves handler errors emit clean JSON-RPC on stdout (never stream-desync). Coordinated `X-Kangent-Token` → `X-Kamacu-Token` rename (security posture byte-for-byte). (MCPPROC-01/02/03)
+- (Phase 07, plans 07-01..04) 16 CRUD MCP tools (6 task + 5 project + 5 workspace) mirroring every SPA action — each a thin build-path-and-delegate to the shared `bridge.call`; D-07 per-resource file split; D-03 partial-PATCH pointer fields; the v1.4 managed-checkout + v1.9 guarded-delete gates apply unchanged through the bridge. One Rule-1 fix widened `bridge.call` from HTTP 200-only to full 2xx. (MCPTASK-01..06, MCPPROJ-01..07)
+- (Phase 08, plans 08-01..03) 4 session tools + type-level read-only terminal access — the milestone's risk center. Three read-only Kamacu endpoints (`GET /api/sessions/{id}`, `/output`, `/subscribe`); `subscribe_session_output` diverges from `bridge.call` (dedicated no-timeout streaming client, ctx.Done partial-return, 1 MiB most-recent cap); SC3 cancellation/no-leak proven structurally. Read-only contract enforced at the type level (zero `WriteInput`/`FrameData` refs). (MCPSESS-01..04)
+- (Phase 09, plan 09-01) 3 PR-review tools reusing the v1.3/v1.5 `internal/github` surface — zero new endpoints/gh-calls/gates. (MCPREV-01/02/03)
+- (Post-milestone quick tasks, 260728-*) Agent delegate write primitives that reversed two v1.11 Out-of-Scope rules: `start_task_agent` + `send_session_message` (bracketed-paste-wrapped PTY input — a deterministic fix that took 4 attempts: CR-terminator → split-write → bracketed paste + outside-`\r`) and `post_pr_review` (GitHub writes via MCP).
+
+### What Worked
+- **The bridge pattern was load-bearing.** Proving it end-to-end with ONE tool (`list_projects`) in Phase 06 made Phases 07–09 mechanical: every subsequent tool was a thin build-path-and-delegate to `bridge.call`. The milestone was 11 plans in 8 days precisely because Phase 06 paid the architecture tax.
+- **Per-resource file split (D-07) scaled.** `internal/mcp/{tasks,projects,workspaces,sessions,reviews}.go` each owning their `register*Tools` kept `server.go` a 3-line delegator and let plans execute in parallel waves with zero file overlap.
+- **Type-level read-only enforcement (D-14).** Rather than convention ("don't call WriteInput"), the contract was enforced by what the bridge imports — scoped grep gates prove zero `internal/session` import. An agent observing a sibling session cannot inject PTY bytes even if the bridge author wanted to.
+- **SC3 proven structurally, not by timeout.** The cancellation/no-leak guarantee was tested via a handler-side recorder (go-sdk returns `(nil, context.Canceled)` to the client, so the handler's actual return is what matters) + goroutine-count-stability across N cycles — not a fragile timing assertion.
+- **Wave-based parallelization kept phases tight.** Phase 07 (4 plans, 2 waves) and Phase 08 (3 plans, 2 waves) executed in ~1 day each because parallel-wave plans had zero file overlap.
+
+### What Was Inefficient
+- **`send_session_message` took 4 quick-task iterations** to reach deterministic submission (CR-terminator → split-write → bracketed-paste + outside-`\r`). Each fix was necessary but not sufficient; the raw-mode-TUI paste-detection behavior was only fully understood after live testing against Claude Code v2.1.22. A spike against the real agent earlier would have short-circuited the loop.
+- **The traceability table in REQUIREMENTS.md was left "Pending"** even though every checkbox was `[x]`. The requirements were all delivered and verified, but the status column wasn't updated alongside — a manual-sync gap. (Corrected in the archived copy.)
+- **No formal milestone audit.** Override closeout with 6 carried-over prior-milestone quick tasks. The v1.11 work itself was verified phase-by-phase, but a cross-phase E2E audit (does an agent actually drive the whole app end-to-end?) was not run — that's the highest-value gap to close in v1.12.
+
+### Patterns Established
+- **Stdio MCP subcommand as the agent-delegate transport.** One binary (`kamacu`) serves both modes (`serve` = HTTP server, `mcp serve` = stdio MCP); auth rides the existing `KAMACU_HOOK_TOKEN` envelope already injected at spawn. This is the reusable shape for any future agent-facing surface.
+- **`bridge.call` as the canonical HTTP-bridge helper** — build path → delegate → 2xx-check → TextContent passthrough, capped at 1 MiB. Halves per-tool line count and enforces the every-tool-is-the-same-shape invariant.
+- **Streaming tools diverge from `bridge.call` deliberately** — a dedicated no-timeout `*http.Client` for bounded live-tail, with ctx.Done partial-return. The divergence is documented, not accidental.
+- **Bracketed-paste wrap (ESC[2004 … ESC[2014) + outside-`\r`** as the deterministic PTY-input submission pattern for raw-mode TUIs (Claude Code / opencode via Ink). Two WriteInput calls: the bracketed body, then `\r` outside the closing bracket.
+
+### Key Lessons
+- **Prove the architecture with the smallest possible tool first.** Phase 06's `list_projects` was the cheapest possible end-to-end proof; everything after was repetition. Resisting the urge to build more in the foundation phase kept it at 3 plans / 1 day.
+- **Enforce invariants at the type/import level, not by convention.** "Don't write to PTYs" as a comment is fragile; "the bridge package doesn't import the session engine" is structural. The scoped-grep gate turned the read-only contract into a testable assertion.
+- **Raw-mode TUI input submission has three interacting variables** (terminator char, paste-detection, write chunking) — only live testing against the real agent reveals the interaction. Unit tests against a cooked-mode bash PTY will pass while the real TUI hangs.
+- **An agent's MCP write surface is a different trust boundary than its read surface.** v1.11 shipped read-only, then post-milestone quick tasks added the write primitives (start agent, send message, post review) as deliberate, individually-scoped reversals — each a one-way-door action surfaced as the agent's delegate write primitive.
+
+### Cost Observations
+- Plan durations: 8–25 min each (median ~10 min); the streaming Phase 08-03 was the longest at 25 min.
+- Model mix: inherit (planner/executor inherit the host model).
+- Notable: 11 plans in 8 calendar days (2026-07-21 → 2026-07-28); the milestone was backend-only (no frontend changes, no migrations, no new goroutines inside the Kamacu binary) which kept each phase a pure additive layer.
+
+---
+
 ## Milestone: v1.10 — Configurable Agents
 
 **Shipped:** 2026-07-11

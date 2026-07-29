@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.11
 milestone_name: Kamacu MCP Server
-current_phase: 09
-status: executing
+current_phase: 11
+status: Awaiting next milestone
 stopped_at: Phase 09 context gathered
-last_updated: "2026-07-28T10:53:28.755Z"
-last_activity: 2026-07-28
-last_activity_desc: Completed quick task 260728-t4c (bracketed paste wrap for send_session_message)
+last_updated: "2026-07-29T14:18:13.517Z"
+last_activity: 2026-07-29
+last_activity_desc: Milestone v1.11 completed and archived
 progress:
   total_phases: 4
   completed_phases: 4
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-07-21)
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-07-11 (carried over from v1.10 — none are v1.11 work):
+Items acknowledged and deferred at milestone close on 2026-07-29 (carried over from prior milestones — none are v1.11 work):
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -38,16 +38,14 @@ Items acknowledged and deferred at milestone close on 2026-07-11 (carried over f
 | quick_task | 260625-9db-the-bottom-status-bar-is-hidding-the-bot | unknown |
 | quick_task | 260626-hwd-add-an-opt-in-insecure-allow-remote-flag | unknown |
 
-Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11)
+Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 — see STATE.md Deferred Items)
 
 ## Current Position
 
-Phase: 09
-Plan: Not started
-Status: Executing Phase 09
-Last activity: 2026-07-28 - Completed quick task 260728-t4c (bracketed paste wrap for send_session_message)
-
-Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
+Phase: Milestone v1.11 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-29 — Milestone v1.11 completed and archived
 
 ### Quick Tasks Completed
 
@@ -102,3 +100,7 @@ Progress: [░░░░░░░░░░] 0% (v1.11 milestone-scoped)
 - [Phase ?]: [Phase 08 / Plan 03]: Exit marker via follow-up GET (08-RESEARCH Open Q2 option b) over a trailing JSON line on the stream (option a). Option (b) avoids sentinel-byte/length-prefix framing of the raw application/octet-stream (which would complicate the D-08 envelope contract), reuses the existing Plan 01 GET /api/sessions/{id}, and costs one extra loopback GET per subscribe — acceptable for v1.11 single-user localhost.
 - [Phase ?]: [Phase 08 / Plan 03]: D-01 cancel-before-attach returns emptySubscribeEnvelope + nil (NOT a transport error). D-01's 'returns ONE CallToolResult' holds even when zero bytes were streamed because the ctx was cancelled before subscribeClient.Do succeeded. The envelope is a valid zero-byte D-08 result.
 - [Phase ?]: [Phase 08 / Plan 03]: SC3 contract is on the HANDLER's return value, not what CallTool surfaces to the client. go-sdk@v1.6.1's own Example_cancellation shows CallTool returns (nil, context.Canceled) to the client when the client's ctx is cancelled — the handler still runs to completion and returns its partial result internally. TestSubscribe_CancelledViaContext wraps subscribeSessionOutput in a recorder to observe the handler's actual return — the load-bearing SC3 assertion.
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
