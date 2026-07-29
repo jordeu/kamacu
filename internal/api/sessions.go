@@ -550,6 +550,7 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
+	time.Sleep(100 * time.Millisecond)
 	if err := sess.WriteInput([]byte(submit)); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -595,8 +596,8 @@ func wrapInputForWrite(msg string) (body, submit string) {
 	msg = strings.TrimSuffix(msg, "\n")
 	msg = strings.TrimSuffix(msg, "\r")
 	const (
-		pasteStart = "\x1b[2004" // ESC[2004 — bracketed paste start
-		pasteEnd   = "\x1b[2014" // ESC[2014 — bracketed paste end
+		pasteStart = "\x1b[2004~" // ESC[2004~ — bracketed paste start (CSI final byte ~)
+		pasteEnd   = "\x1b[2014~" // ESC[2014~ — bracketed paste end (CSI final byte ~)
 	)
 	return pasteStart + msg + pasteEnd, "\r"
 }

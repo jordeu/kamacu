@@ -2274,8 +2274,8 @@ func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 // a paste and never submitted.
 func TestWrapInputForWrite(t *testing.T) {
 	const (
-		pasteStart = "\x1b[2004" // ESC[2004 — bracketed paste start
-		pasteEnd   = "\x1b[2014" // ESC[2014 — bracketed paste end
+		pasteStart = "\x1b[2004~" // ESC[2004~ — bracketed paste start
+		pasteEnd   = "\x1b[2014~" // ESC[2014~ — bracketed paste end
 	)
 	// wantBody is the trimmed body wrapped in bracketed paste markers.
 	wrap := func(s string) string { return pasteStart + s + pasteEnd }
