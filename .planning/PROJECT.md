@@ -10,7 +10,7 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ## Milestone Status
 
-**Active: planning next milestone.** v1.11 Kamacu MCP Server shipped 2026-07-29 — Kamacu's task/session/project/workspace/review surface is exposed as MCP tools so an agent running inside a Kamacu task PTY can drive the entire app as the user's delegate.
+**Active: v1.12 Activity & Statistics (planning).** A new top-level Activity page lists tasks done and PR reviews completed (merged/closed) over a rolling week/month window — scoped globally, by workspace, or by project — alongside a statistics section with counts and min/max/median cycle + per-column dwell times.
 
 **Just shipped:** v1.11 Kamacu MCP Server shipped 2026-07-29 (23/23 requirements; 4 phases, 11 plans; archived to `milestones/v1.11-*`). AGNT-01 fully delivered.
 
@@ -274,7 +274,11 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-(None — v1.11 shipped. Next milestone requirements will be defined via `/gsd-new-milestone`.)
+**v1.12 Activity & Statistics** — a new top-level Activity page (route + sidebar entry, like Settings) with a Global / Workspace / Project scope selector and a segmented Week/Month toggle (last 7 / last 30 days rolling):
+- [ ] **Tasks done list** — manual tasks (`source='manual'`) with `done_at` in the window, grouped by project
+- [ ] **Reviews done list** — PRs from `reviewed-by:@me` that MERGED or CLOSED in the window (GitHub merge/close timestamp), grouped by project
+- [ ] **Statistics** — counts (tasks done, reviews done) + min/max/median **cycle time** (In Progress→Done) and **per-column dwell** (time in In Progress, time in In Review), powered by the existing per-status timestamps (migration 00006)
+- [ ] Time stats apply to **tasks only**; reviews surface counts only (GitHub's merge signal has no Kamacu in-progress/in-review timestamps)
 
 ### Out of Scope
 
@@ -440,6 +444,8 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
+*Last updated: 2026-07-29 to start v1.12 Activity & Statistics. Milestone Status flipped to v1.12 planning. Active section reset to the v1.12 milestone scope (a new top-level Activity page: tasks-done + reviews-done lists over a rolling Week/Month window, scoped Global/Workspace/Project, plus a statistics section with counts and min/max/median cycle + per-column dwell times built on the banked v1.2 per-status timestamps). Built on the v1.3/v1.5 GitHub integration (reviewed-by:@me merge/close) and migration 00006. Phase numbering continues from the previous milestone (no reset).*
+
 *Last updated: 2026-07-23 after Phase 08 (sessions-terminal-read-access) completion. Added one validated entry to Requirements (MCPSESS-01/02/03/04 — four MCP session tools + read-only terminal access, the milestone's risk center). New Current State entry for Phase 08. Active section unchanged (the v1.11 milestone scope already covered read + subscribe terminal access; Phase 08 delivered it). One new Key Decision implicit in the entry: the read-only D-14 contract is type-level-enforced (scoped grep gates prove zero PTY-write refs), and SC3 (<100ms detach-on-cancel) is structurally proven via a handler-side recorder because go-sdk@v1.6.1 returns `(nil, context.Canceled)` to the client.*
 
 *Last updated: 2026-07-28 after Phase 09 (pr-review-tools) completion — the final phase of v1.11. Added three validated entries to Requirements (MCPREV-01/02/03 — the 3 PR review tools: `list_pending_reviews`, `list_recently_reviewed`, `open_review`, all thin bridges over the existing v1.3/v1.5 `internal/github` surface). New Current State entry for Phase 09. v1.11 Kamacu MCP Server is now fully implemented (4 phases, 11 plans) — ready for `/gsd:complete-milestone` to audit and archive.*
