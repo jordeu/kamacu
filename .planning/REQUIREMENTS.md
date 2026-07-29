@@ -66,27 +66,29 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ACT-01 | — | Pending |
-| ACT-02 | — | Pending |
-| ACT-03 | — | Pending |
-| ACT-04 | — | Pending |
-| TASKS-01 | — | Pending |
-| TASKS-02 | — | Pending |
-| TASKS-03 | — | Pending |
-| REVIEWS-01 | — | Pending |
-| REVIEWS-02 | — | Pending |
-| REVIEWS-03 | — | Pending |
-| REVIEWS-04 | — | Pending |
-| STATS-01 | — | Pending |
-| STATS-02 | — | Pending |
-| STATS-03 | — | Pending |
-| STATS-04 | — | Pending |
+| ACT-01 | Phase 11 | Pending |
+| ACT-02 | Phase 11 | Pending |
+| ACT-03 | Phase 11 | Pending |
+| ACT-04 | Phase 11 | Pending |
+| TASKS-01 | Phase 10 | Pending |
+| TASKS-02 | Phase 11 | Pending |
+| TASKS-03 | Phase 11 | Pending |
+| REVIEWS-01 | Phase 10 | Pending |
+| REVIEWS-02 | Phase 11 | Pending |
+| REVIEWS-03 | Phase 11 | Pending |
+| REVIEWS-04 | Phase 10 | Pending |
+| STATS-01 | Phase 10 | Pending |
+| STATS-02 | Phase 10 | Pending |
+| STATS-03 | Phase 10 | Pending |
+| STATS-04 | Phase 10 | Pending |
 
 **Coverage:**
 - v1.12 requirements: 15 total
-- Mapped to phases: 0
-- Unmapped: 15 ⚠️
+- Mapped to phases: 15
+- Unmapped: 0 ✓
+
+**Phase distribution:** Phase 10 (Activity Data & API): 7 — TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01..04. Phase 11 (Activity Page & Controls): 8 — ACT-01..04, TASKS-02..03, REVIEWS-02..03.
 
 ---
 *Requirements defined: 2026-07-29*
-*Last updated: 2026-07-29 after initial definition (milestone v1.12 Activity & Statistics)*
+*Last updated: 2026-07-29 after roadmap creation (milestone v1.12 Activity & Statistics — Phases 10–11, 15/15 requirements mapped)*

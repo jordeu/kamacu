@@ -14,8 +14,54 @@
 - ✅ **v1.9 Workspaces** — Phases 25–26 (shipped 2026-07-06) — see [milestones/v1.9-ROADMAP.md](milestones/v1.9-ROADMAP.md)
 - ✅ **v1.10 Configurable Agents** — Phases 01–05 (shipped 2026-07-11) — see [milestones/v1.10-ROADMAP.md](milestones/v1.10-ROADMAP.md)
 - ✅ **v1.11 Kamacu MCP Server** — Phases 06–09 (shipped 2026-07-29) — see [milestones/v1.11-ROADMAP.md](milestones/v1.11-ROADMAP.md)
+- 🚧 **v1.12 Activity & Statistics** — Phases 10–11 (planning 2026-07-29)
 
 ## Phases
+
+<details open>
+<summary>🚧 v1.12 Activity & Statistics (Phases 10–11) — PLANNING 2026-07-29</summary>
+
+**Milestone goal:** A new top-level Activity page lists tasks done and PR reviews completed (merged/closed) over a rolling Week (7d) / Month (30d) window — scoped globally, by workspace, or by project — alongside a statistics section with counts and min/max/median cycle (In-Progress→Done) + per-column dwell times. Tasks-only for time stats (GitHub's merge signal has no Kamacu in-progress/in-review timestamps).
+
+**Phase Numbering:** continues from v1.11's last phase (09). v1.12 = Phases 10–11.
+
+- [ ] **Phase 10: Activity Data & API** - Scoped/windowed tasks-done, reviews-done (merged/closed reviewed-by:@me), and task cycle/dwell statistics behind a new activity endpoint set
+- [ ] **Phase 11: Activity Page & Controls** - Top-level Activity page (sidebar entry, scope selector, Week/Month toggle) rendering tasks-done + reviews-done lists and statistics
+
+## Phase Details
+
+### Phase 10: Activity Data & API
+
+**Goal**: The backend answers "which tasks were done, which reviews were completed (merged/closed), and what are the cycle/dwell stats" for any Global / Workspace / Project scope and a Week (7d) / Month (30d) window — including the new merged/closed `reviewed-by:@me` `gh` search dimension and graceful degradation when `gh` is absent.
+**Depends on**: Nothing (first phase of v1.12; the per-status timestamps powering the stats already exist from migration 00006 — `todo_at`/`in_progress_at`/`in_review_at`/`done_at` — and the `internal/github` package + per-repo cache from v1.3/v1.5 are reused).
+**Requirements**: TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01, STATS-02, STATS-03, STATS-04
+**Success Criteria** (what must be TRUE):
+
+  1. An activity endpoint returns every task completed (moved to Done) within the selected scope and window, each carrying its project name, title, and `done_at` timestamp.
+  2. The activity endpoint returns PRs reviewed-by:@me that MERGED or CLOSED within the window, each with PR number, title, and merge/close date — backed by a NEW `is:merged`/`is:closed` + `reviewed-by:@me` `gh` search aggregated across the projects in scope (reusing the v1.3/v1.5 `internal/github` package + per-repo cache).
+  3. When `gh` is unavailable, GitHub integration is off, or an individual repo's fetch fails, the reviews-done portion returns empty without breaking the tasks-done list or the task statistics (degrade-don't-break).
+  4. The activity endpoint returns counts of tasks done and reviews done within the selected scope and window.
+  5. The activity endpoint returns min / max / median cycle time (In-Progress → Done) and per-column dwell (time in In-Progress and time in In-Review) for tasks done in the window; reviews contribute a count, never time stats.
+
+**Plans**: TBD
+
+### Phase 11: Activity Page & Controls
+
+**Goal**: Users open a dedicated top-level Activity page, scope it (Global / a Workspace / a Project) and toggle Week / Month, and see the tasks-done + reviews-done lists grouped by project plus the task statistics — with the reviews section quietly emptying itself when GitHub integration is off.
+**Depends on**: Phase 10 (the activity data + API).
+**Requirements**: ACT-01, ACT-02, ACT-03, ACT-04, TASKS-02, TASKS-03, REVIEWS-02, REVIEWS-03
+**Success Criteria** (what must be TRUE):
+
+  1. User can open a dedicated top-level Activity page from a persistent sidebar entry (like Settings), accessible app-wide.
+  2. User can change scope (Global / a specific workspace / a specific project) via a selector, and both the lists and the statistics update to that scope.
+  3. User can toggle the time window between Week (last 7 days) and Month (last 30 days), rolling from now, and both the lists and the statistics update to the chosen window.
+  4. Tasks-done and reviews-done entries are each grouped by project with their fields shown (task title + completion time for tasks; PR number + title + merge/close date for reviews); clicking a tasks-done entry navigates to that task's view, and clicking a reviews-done entry opens the PR (its review workspace if it exists, else the PR).
+  5. When GitHub integration is off (or `gh` absent), the reviews section renders empty while tasks-done and task statistics still display normally.
+
+**Plans**: TBD
+**UI hint**: yes
+
+</details>
 
 <details>
 <summary>✅ v1.11 Kamacu MCP Server (Phases 06–09) — SHIPPED 2026-07-29</summary>
@@ -81,7 +127,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 
 ## Progress
 
-**Execution Order:** Phases execute in numeric order: 06 → 07 → 08 → 09.
+**Execution Order:** Phases execute in numeric order: 06 → 07 → 08 → 09 (v1.11, shipped) → 10 → 11 (v1.12, active).
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -94,3 +140,5 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
+| 10. Activity Data & API | v1.12 | 0/? | Not started | - |
+| 11. Activity Page & Controls | v1.12 | 0/? | Not started | - |
