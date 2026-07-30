@@ -16,7 +16,7 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 
 ### Tasks Done (TASKS)
 
-- [ ] **TASKS-01**: User can see a list of tasks completed (moved to Done) within the selected window and scope
+- [x] **TASKS-01**: User can see a list of tasks completed (moved to Done) within the selected window and scope
 - [ ] **TASKS-02**: Tasks-done entries are grouped by project, showing the task title and when it was completed
 - [ ] **TASKS-03**: Clicking a tasks-done entry navigates to that task's view
 
@@ -29,10 +29,10 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 
 ### Statistics (STATS)
 
-- [ ] **STATS-01**: User can see a count of tasks done and a count of reviews done within the selected window and scope
+- [x] **STATS-01**: User can see a count of tasks done and a count of reviews done within the selected window and scope
 - [x] **STATS-02**: User can see min / max / median cycle time (In Progress → Done) for tasks done in the window
 - [x] **STATS-03**: User can see min / max / median dwell time per column (time in In Progress, and time in In Review) for tasks done in the window
-- [ ] **STATS-04**: Cycle/dwell time stats cover tasks only; reviews contribute a count, not time stats (GitHub's merge signal has no Kamacu in-progress/in-review timestamps)
+- [x] **STATS-04**: Cycle/dwell time stats cover tasks only; reviews contribute a count, not time stats (GitHub's merge signal has no Kamacu in-progress/in-review timestamps)
 
 ## Future Requirements
 
@@ -70,17 +70,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ACT-02 | Phase 11 | Pending |
 | ACT-03 | Phase 11 | Pending |
 | ACT-04 | Phase 11 | Pending |
-| TASKS-01 | Phase 10 | Pending |
+| TASKS-01 | Phase 10 | Complete |
 | TASKS-02 | Phase 11 | Pending |
 | TASKS-03 | Phase 11 | Pending |
 | REVIEWS-01 | Phase 10 | Complete |
 | REVIEWS-02 | Phase 11 | Pending |
 | REVIEWS-03 | Phase 11 | Pending |
 | REVIEWS-04 | Phase 10 | Complete |
-| STATS-01 | Phase 10 | Pending |
+| STATS-01 | Phase 10 | Complete |
 | STATS-02 | Phase 10 | Complete |
 | STATS-03 | Phase 10 | Complete |
-| STATS-04 | Phase 10 | Pending |
+| STATS-04 | Phase 10 | Complete |
 
 **Coverage:**
 

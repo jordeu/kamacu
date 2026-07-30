@@ -51,7 +51,7 @@
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 10-02-PLAN.md — `GET /api/activity` handler (wire types, cross-repo aggregation with reviews window-filter cutoff, GATE 1, always-200) consuming 10-01 + 10-03
+- [x] 10-02-PLAN.md — `GET /api/activity` handler (wire types, cross-repo aggregation with reviews window-filter cutoff, GATE 1, always-200) consuming 10-01 + 10-03
 
 ### Phase 11: Activity Page & Controls
 
@@ -148,5 +148,5 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
-| 10. Activity Data & API | v1.12 | 2/3 | In Progress|  |
+| 10. Activity Data & API | v1.12 | 3/3 | Complete   | 2026-07-30 |
 | 11. Activity Page & Controls | v1.12 | 0/? | Not started | - |
