@@ -267,6 +267,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	api.UsageRoutes(mux, quotaSvc)
 	ghSvc := github.New(github.Config{})
 	api.PullRequestRoutes(mux, db, ghSvc, wtSvc)
+	api.ActivityRoutes(mux, db, ghSvc)
 	// Worktree-cleanup panel (WTREE-01..04): the 3rd caller of CleanupWorktreeGated.
 	// ghSvc is the SAME *github.Service the reaper + PR routes use (PRStateGetter) —
 	// no new construction; it drives PR merged/closed eligibility + display and
