@@ -44,8 +44,13 @@
   5. The activity endpoint returns min / max / median cycle time (In-Progress → Done) and per-column dwell (time in In-Progress and time in In-Review) for tasks done in the window; reviews contribute a count, never time stats.
 
 **Plans**:
+**Wave 1**
+
 - [ ] 10-01-PLAN.md — GitHub `GetMergedClosed` extension (merged/closed reviewed-by:@me data source with its own 5min-TTL cache, decoupled from the review-column hot path)
 - [ ] 10-03-PLAN.md — Pure activity helpers & wire types (scope/window parsing, in-Go cycle/dwell/median stats, review-state rollup, mismatched-precision ISO-time parser) — wave-1 sibling parallel to 10-01
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 10-02-PLAN.md — `GET /api/activity` handler (wire types, cross-repo aggregation with reviews window-filter cutoff, GATE 1, always-200) consuming 10-01 + 10-03
 
 ### Phase 11: Activity Page & Controls

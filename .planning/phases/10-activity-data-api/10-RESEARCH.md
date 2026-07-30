@@ -436,23 +436,23 @@ func aggregateReviews(ctx context.Context, ghSvc *github.Service, repos []repoRo
 
 **No `[ASSUMED]`-only package names are recommended** — the only external symbol (`errgroup`) is verified present in go.mod.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`--state closed` flag vs `is:closed` qualifier — RESOLVED (recommend both, qualifier authoritative).**
    - What we know: `--state closed` currently includes merged (filed bug #8102); `is:closed` search qualifier stably includes merged (docs). `closedAt` is the right date field.
    - Recommendation: `--search "reviewed-by:@me draft:false is:closed"` + `--state closed` + `completedAt ← closedAt`. This resolves D-05's "verify the exact flag" discretion item definitively.
 
-2. **Server-side vs client-side window filter for reviews.**
+2. **Server-side vs client-side window filter for reviews — RESOLVED (client-side adopted; planner threaded cutoff into aggregateReviews).**
    - What we know: existing `listPRs` fetches everything then reduces (no server-side date filter). The new 5min cache would be window-agnostic if filtering is client-side (one entry serves week OR month).
    - What's unclear: whether `--limit 100` fetches enough deep history for very active reviewers (server-side `closed:>=` would bound it precisely).
    - Recommendation: **client-side** for cache coherence (matches existing pattern + window-agnostic cache), with `--limit 100` to bound truncation risk. Add a server-side `closed:>=YYYY-MM-DD` qualifier ONLY if profiling shows the full-set fetch is too large — keep it as a documented optimization knob. Planner treats the exact choice as low-risk either way.
 
-3. **Exact definition of `dwellInProgress` (STATS-03).**
+3. **Exact definition of `dwellInProgress` (STATS-03) — RESOLVED (user-confirmed during revision: per-column dwell, in_review_at − in_progress_at when set, else done_at − in_progress_at).**
    - What we know: cycle = `done_at − in_progress_at` (clear). dwellInReview = `done_at − in_review_at` (clear).
    - What's unclear: does `dwellInProgress` mean "total time in In Progress" = `done_at − in_progress_at` (same as cycle, redundant), OR "time in In Progress before moving to In Review" = `in_review_at − in_progress_at` (only meaningful for rows that entered In Review)?
    - Recommendation: STATS-03 says "time in In Progress AND time in In Review" — the natural per-column dwell. For rows that went In Progress → In Review → Done: dwellInProgress = `in_review_at − in_progress_at`, dwellInReview = `done_at − in_review_at`. For rows that skipped In Review (In Progress → Done directly): dwellInProgress = `done_at − in_progress_at`, dwellInReview excluded. **The planner should confirm this interpretation with the user** since it affects the numbers Phase 11 shows; it's a semantic choice, not a technical one. (cycle stays `done_at − in_progress_at` regardless.)
 
-4. **`?refresh=1` propagation.**
+4. **`?refresh=1` propagation — RESOLVED (yes; force fans out to every in-scope repo).**
    - What we know: the review-column endpoint uses `?refresh=1` → `force=true` (bypasses TTL, bound by `attemptFloor`).
    - What's unclear: should the activity `?refresh=1` propagate `force=true` to EVERY repo's `GetMergedClosed` in the aggregate?
    - Recommendation: yes — mirror the existing precedent; `force` fans out to all in-scope repos. Low-risk; planner can confirm.
