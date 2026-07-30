@@ -224,23 +224,12 @@ func listPRs(ctx context.Context, repo, repoDir, search string) (prs []PRSummary
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
 	if runErr != nil {
-		es := stderr.String()
-		var exitErr *exec.ExitError
-		code := -1
-		if errors.As(runErr, &exitErr) {
-			code = exitErr.ExitCode()
-		}
-		// Exit code 4 ALONE is unreliable (cli/cli#9338) — combine the code
-		// AND stderr substring sniffing (Pitfall 4). Never log the stderr body.
-		if code == 4 ||
-			strings.Contains(es, "gh auth login") ||
-			strings.Contains(es, "401") ||
-			strings.Contains(es, "Bad credentials") {
-			slog.Debug("github pr list degraded", "state", "auth_required")
-			return nil, "auth_required", nil
-		}
-		slog.Debug("github pr list degraded", "state", "error")
-		return nil, "error", nil
+		// Shared classification (Pattern 3) — listCompletedReviews uses the
+		// exact same sniff so the two fetchers never drift (Pitfall 4).
+		// T-10-03: log the classified state only, NEVER the stderr body.
+		state := classifyGhListError(runErr, stderr.String())
+		slog.Debug("github pr list degraded", "state", state)
+		return nil, state, nil
 	}
 
 	var raws []prRaw
@@ -371,9 +360,20 @@ type completedRaw struct {
 // Pure: no I/O, no logging — the caller slog.Debug's the returned state with a
 // `state` attr only (T-10-03: never log the stderr body).
 func classifyGhListError(runErr error, stderr string) string {
-	_ = runErr
-	_ = stderr
-	return "" // RED STUB
+	var exitErr *exec.ExitError
+	code := -1
+	if errors.As(runErr, &exitErr) {
+		code = exitErr.ExitCode()
+	}
+	// Exit code 4 ALONE is unreliable (cli/cli#9338) — combine the code AND
+	// stderr substrings, matching the historically-inlined listPRs sniff.
+	if code == 4 ||
+		strings.Contains(stderr, "gh auth login") ||
+		strings.Contains(stderr, "401") ||
+		strings.Contains(stderr, "Bad credentials") {
+		return "auth_required"
+	}
+	return "error"
 }
 
 // parseCompletedReviews decodes gh's `--json number,title,closedAt,url` output
@@ -383,8 +383,26 @@ func classifyGhListError(runErr error, stderr string) string {
 // same as chronologically, so a string compare is correct (same property
 // listPRs relies on for UpdatedAt).
 func parseCompletedReviews(stdout []byte) ([]ReviewDoneSummary, error) {
-	_ = stdout
-	return nil, errors.New("RED STUB") //nolint:err113 // stub-only
+	var raws []completedRaw
+	if err := json.Unmarshal(stdout, &raws); err != nil {
+		return nil, err
+	}
+	out := make([]ReviewDoneSummary, 0, len(raws))
+	for _, r := range raws {
+		out = append(out, ReviewDoneSummary{
+			Number:      r.Number,
+			Title:       r.Title,
+			CompletedAt: r.ClosedAt, // A merge IS a close, so closedAt is set for BOTH (D-05).
+			URL:         r.URL,
+			// Provenance fields stay zero — annotated by the Plan 02 aggregation loop (D-06).
+		})
+	}
+	// Most-recently-completed first. ISO 8601 strings sort lexically the same
+	// as chronologically (the property listPRs relies on for UpdatedAt).
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CompletedAt > out[j].CompletedAt
+	})
+	return out, nil
 }
 
 // listCompletedReviews is the I/O primitive for the activity endpoint's
@@ -408,8 +426,30 @@ func parseCompletedReviews(stdout []byte) ([]ReviewDoneSummary, error) {
 // err is always nil for classified degrades; the caller switches on state,
 // never on err (the listPRs contract).
 func listCompletedReviews(ctx context.Context, repo, repoDir string) (prs []ReviewDoneSummary, state string, _ error) {
-	_ = ctx
-	_ = repo
-	_ = repoDir
-	return nil, "", nil // RED STUB
+	if !Available() {
+		return nil, "no_gh", nil // never spawn (D-00c)
+	}
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
+		"-R", repo,
+		"--search", searchCompletedReviews,
+		"--state", "closed",
+		"--limit", "100",
+		"--json", "number,title,closedAt,url",
+	)
+	cmd.Dir = repoDir // D-00b / Pitfall 6: selects the right gh host/account
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := cmd.Run()
+	if runErr != nil {
+		state := classifyGhListError(runErr, stderr.String())
+		// T-10-03: log the classified state only, NEVER the stderr body.
+		slog.Debug("github pr list degraded", "state", state)
+		return nil, state, nil
+	}
+	out, err := parseCompletedReviews(stdout.Bytes())
+	if err != nil {
+		slog.Debug("github pr list degraded", "state", "error")
+		return nil, "error", nil
+	}
+	return out, "ok", nil
 }
