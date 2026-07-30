@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
 current_phase: 10
-current_phase_name: not yet planned
-status: awaiting-planning
-stopped_at: Phase 10 context gathered
-last_updated: "2026-07-29T15:54:00.082Z"
-last_activity: 2026-07-29
-last_activity_desc: v1.12 roadmap created (Phases 10–11, 15/15 requirements mapped, 0 orphans)
+current_phase_name: activity-data-api
+status: executing
+stopped_at: Completed 10-01-PLAN.md (GetMergedClosed extension)
+last_updated: "2026-07-30T11:59:58.338Z"
+last_activity: 2026-07-30
+last_activity_desc: Phase 10 execution started
 progress:
   total_phases: 2
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 0
 ---
 
 # Project State
 
-**Current focus:** Phase 10 — Activity Data & API (roadmap created, not yet planned)
+**Current focus:** Phase 10 — activity-data-api
 
 See: .planning/PROJECT.md (updated 2026-07-21)
 
@@ -42,10 +42,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 ## Current Position
 
-Phase: 10 — Activity Data & API (not yet planned)
-Plan: —
-Status: Roadmap created (v1.12) — ready to plan Phase 10
-Last activity: 2026-07-29 — v1.12 roadmap created (Phases 10–11, 15/15 requirements mapped, 0 orphans)
+Phase: 10 (activity-data-api) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-07-30 — Phase 10 execution started
 
 ### Quick Tasks Completed
 
@@ -60,9 +60,9 @@ Last activity: 2026-07-29 — v1.12 roadmap created (Phases 10–11, 15/15 requi
 
 ## Session
 
-**Last session:** 2026-07-29T15:54:00.064Z
-**Stopped at:** Phase 10 context gathered
-**Resume file:** .planning/phases/10-activity-data-api/10-CONTEXT.md
+**Last session:** 2026-07-30T11:59:37.151Z
+**Stopped at:** Completed 10-01-PLAN.md (GetMergedClosed extension)
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -78,6 +78,7 @@ Last activity: 2026-07-29 — v1.12 roadmap created (Phases 10–11, 15/15 requi
 | Phase 08 P01 | 21 min | 2 tasks | 2 files |
 | Phase 08 P02 | 10 min | 2 tasks | 3 files |
 | Phase 08 P03 | 25min | 2 tasks | 2 files |
+| Phase 10 P01 | 12 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -100,6 +101,9 @@ Last activity: 2026-07-29 — v1.12 roadmap created (Phases 10–11, 15/15 requi
 - [Phase ?]: [Phase 08 / Plan 03]: Exit marker via follow-up GET (08-RESEARCH Open Q2 option b) over a trailing JSON line on the stream (option a). Option (b) avoids sentinel-byte/length-prefix framing of the raw application/octet-stream (which would complicate the D-08 envelope contract), reuses the existing Plan 01 GET /api/sessions/{id}, and costs one extra loopback GET per subscribe — acceptable for v1.11 single-user localhost.
 - [Phase ?]: [Phase 08 / Plan 03]: D-01 cancel-before-attach returns emptySubscribeEnvelope + nil (NOT a transport error). D-01's 'returns ONE CallToolResult' holds even when zero bytes were streamed because the ctx was cancelled before subscribeClient.Do succeeded. The envelope is a valid zero-byte D-08 result.
 - [Phase ?]: [Phase 08 / Plan 03]: SC3 contract is on the HANDLER's return value, not what CallTool surfaces to the client. go-sdk@v1.6.1's own Example_cancellation shows CallTool returns (nil, context.Canceled) to the client when the client's ctx is cancelled — the handler still runs to completion and returns its partial result internally. TestSubscribe_CancelledViaContext wraps subscribeSessionOutput in a recorder to observe the handler's actual return — the load-bearing SC3 assertion.
+- [Phase 10]: [Phase 10/Plan 01]: 5min TTL (mergedClosedTTL) for the merged/closed reviews cache, fully decoupled from the 60s review-column cacheTTL (D-03/D-04). Coupling onto the 5s-poll hot path would 3x the gh load for data the column never renders. — Mirrors Service.Get/cacheTTL=60s with a separate map+TTL; the gate-ladder (in-flight dedup + attemptFloor + drop-after-N) is reused verbatim.
+- [Phase 10]: [Phase 10/Plan 01]: is:closed SEARCH QUALIFIER is the authoritative merged+closed filter (GitHub docs #5599); --state closed is belt-and-suspenders only since cli/cli #8102 is a filed unfixed bug. — Verified against local gh 2.82.0 + cli/cli #475/#8102. A future gh fix to #8102 would silently drop merged PRs if we relied on the flag alone.
+- [Phase 10]: [Phase 10/Plan 01]: classifyGhListError extracted as a PURE helper shared by listPRs + listCompletedReviews (Pattern 3) — one classification path, no drift on exit-code-4 + stderr-substring sniff (cli/cli#9338). — Pure (no I/O, no logging) so unit-testable directly; callers slog.Debug the state only (T-10-03: never log stderr body).
 
 ## Operator Next Steps
 

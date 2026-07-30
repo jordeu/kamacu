@@ -22,10 +22,10 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 
 ### Reviews Done (REVIEWS)
 
-- [ ] **REVIEWS-01**: User can see a list of PRs they reviewed (`reviewed-by:@me`) that MERGED or CLOSED within the selected window and scope, with the merge/close date
+- [x] **REVIEWS-01**: User can see a list of PRs they reviewed (`reviewed-by:@me`) that MERGED or CLOSED within the selected window and scope, with the merge/close date
 - [ ] **REVIEWS-02**: Reviews-done entries are grouped by project, showing the PR number, title, and merge/close date
 - [ ] **REVIEWS-03**: Clicking a reviews-done entry opens that PR (its review workspace if it exists, else the PR)
-- [ ] **REVIEWS-04**: The reviews-done list is best-effort and degrades gracefully when `gh` is unavailable or a repo's fetch fails (never blocks the rest of the page)
+- [x] **REVIEWS-04**: The reviews-done list is best-effort and degrades gracefully when `gh` is unavailable or a repo's fetch fails (never blocks the rest of the page)
 
 ### Statistics (STATS)
 
@@ -73,16 +73,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TASKS-01 | Phase 10 | Pending |
 | TASKS-02 | Phase 11 | Pending |
 | TASKS-03 | Phase 11 | Pending |
-| REVIEWS-01 | Phase 10 | Pending |
+| REVIEWS-01 | Phase 10 | Complete |
 | REVIEWS-02 | Phase 11 | Pending |
 | REVIEWS-03 | Phase 11 | Pending |
-| REVIEWS-04 | Phase 10 | Pending |
+| REVIEWS-04 | Phase 10 | Complete |
 | STATS-01 | Phase 10 | Pending |
 | STATS-02 | Phase 10 | Pending |
 | STATS-03 | Phase 10 | Pending |
 | STATS-04 | Phase 10 | Pending |
 
 **Coverage:**
+
 - v1.12 requirements: 15 total
 - Mapped to phases: 15
 - Unmapped: 0 ✓

@@ -46,7 +46,7 @@
 **Plans**:
 **Wave 1**
 
-- [ ] 10-01-PLAN.md — GitHub `GetMergedClosed` extension (merged/closed reviewed-by:@me data source with its own 5min-TTL cache, decoupled from the review-column hot path)
+- [x] 10-01-PLAN.md — GitHub `GetMergedClosed` extension (merged/closed reviewed-by:@me data source with its own 5min-TTL cache, decoupled from the review-column hot path)
 - [ ] 10-03-PLAN.md — Pure activity helpers & wire types (scope/window parsing, in-Go cycle/dwell/median stats, review-state rollup, mismatched-precision ISO-time parser) — wave-1 sibling parallel to 10-01
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -148,5 +148,5 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
-| 10. Activity Data & API | v1.12 | 0/2 | Not started | - |
+| 10. Activity Data & API | v1.12 | 1/3 | In Progress|  |
 | 11. Activity Page & Controls | v1.12 | 0/? | Not started | - |
