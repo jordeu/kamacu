@@ -278,9 +278,39 @@ func (e *mergedClosedEntry) resultMergedClosedLocked() MergedClosedResult {
 // multiply gh load on the 5s-poll hot path (D-03/D-04). NEVER touches
 // s.entries; never returns state "disabled" (endpoint-only, Plan 02 GATE 1).
 func (s *Service) GetMergedClosed(ctx context.Context, repo, repoDir string, force bool) MergedClosedResult {
-	_ = ctx
-	_ = repo
-	_ = repoDir
-	_ = force
-	return MergedClosedResult{} // RED STUB
+	s.mu.Lock()
+	e := s.entryMergedClosed(repo)
+	now := s.now()
+
+	// Serve the cache without fetching when any gate holds. Identical ladder
+	// to Get with mergedClosedTTL standing in for cacheTTL.
+	if (!force && e.hasCache && now.Sub(e.fetchedAt) < mergedClosedTTL) ||
+		now.Sub(e.lastAttempt) < attemptFloor ||
+		e.inflight {
+		res := e.resultMergedClosedLocked()
+		s.mu.Unlock()
+		return res
+	}
+
+	// Fetch. Release mu during the gh spawn; inflight dedups concurrent calls.
+	e.inflight = true
+	e.lastAttempt = now
+	s.mu.Unlock()
+
+	prs, state, _ := s.completedRunner(ctx, repo, repoDir)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e.inflight = false
+	switch state {
+	case "ok":
+		e.cached = prs
+		e.hasCache = true
+		e.fetchedAt = s.now()
+		e.failures = 0
+		e.lastErr = ""
+	default: // no_gh / auth_required / error — the disabled state is endpoint-only (Plan 02 GATE 1)
+		e.recordFailureLocked(state)
+	}
+	return e.resultMergedClosedLocked()
 }
