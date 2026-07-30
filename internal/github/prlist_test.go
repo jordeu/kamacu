@@ -1,6 +1,12 @@
 package github
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"os/exec"
+	"strconv"
+	"testing"
+)
 
 // TestReduceChecks is the table guard for the statusCheckRollup → pill
 // reduction (D-00d). It exercises BOTH __typename variants (CheckRun &
@@ -222,4 +228,171 @@ func TestDedupeReviewed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// exitErrOf spawns `sh -c "exit <code>"` to produce a REAL *exec.ExitError
+// (os.ProcessState is not publicly constructible). The returned error's chain
+// contains the *exec.ExitError that classifyGhListError unwraps via errors.As.
+// Tests run on Linux/macOS where sh is present; if sh is absent the sub-test
+// is skipped.
+func exitErrOf(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+	if err == nil {
+		t.Skipf("sh -c 'exit %d' exited 0 unexpectedly; cannot construct exit error", code)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("sh spawn did not yield *exec.ExitError: %T", err)
+	}
+	if exitErr.ExitCode() != code {
+		t.Fatalf("sh exit code = %d, want %d", exitErr.ExitCode(), code)
+	}
+	return err
+}
+
+// TestClassifyGhListError is the table guard for the shared gh-failure
+// classification (Pattern 3). It pins the THREE substrings + exit-4 path that
+// map to "auth_required", plus the "everything else → error" fallback, and the
+// no-exit-info case (a non-ExitError runErr still classifies via stderr
+// alone). Identical sniffing for listPRs and listCompletedReviews — one path,
+// no drift (Pitfall 4).
+func TestClassifyGhListError(t *testing.T) {
+	// Plain (non-ExitError) runErrs — classifyGhListError reads only stderr
+	// for these (code stays -1).
+	plainErr := errors.New("boom") //nolint:err113 // test-only
+
+	tests := []struct {
+		name   string
+		runErr error
+		stderr string
+		want   string
+	}{
+		// auth_required paths
+		{"exit code 4 alone", exitErrOf(t, 4), "", "auth_required"},
+		{"exit code 4 with stderr", exitErrOf(t, 4), "could not authenticate: forbidden", "auth_required"},
+		{"stderr 'gh auth login'", plainErr, "run `gh auth login` to retry", "auth_required"},
+		{"stderr '401'", plainErr, "HTTP 401 Unauthorized", "auth_required"},
+		{"stderr 'Bad credentials'", plainErr, "Bad credentials provided", "auth_required"},
+		{"exit 1 + auth stderr", exitErrOf(t, 1), "Error: 401 expired token", "auth_required"},
+
+		// error paths (non-auth failures)
+		{"exit 1 generic", exitErrOf(t, 1), "HTTP 500 internal error", "error"},
+		{"exit 2 generic", exitErrOf(t, 2), "connection refused", "error"},
+		{"no exit info, no auth substring", plainErr, "panic: something else", "error"},
+		{"empty stderr, exit 1", exitErrOf(t, 1), "", "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyGhListError(tt.runErr, tt.stderr); got != tt.want {
+				t.Errorf("classifyGhListError(stderr=%q) = %q, want %q",
+					tt.stderr, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseCompletedReviews pins the ok-path transformation of gh's
+// `--json number,title,closedAt,url` output: closedAt→CompletedAt field map,
+// most-recently-completed-first ordering (ISO 8601 lexical == chrono), and
+// the malformed-JSON → error path. Pure-helper coverage so listCompletedReviews
+// stays thin (the gh spawn itself is exercised via Service.GetMergedClosed in
+// service_test.go).
+func TestParseCompletedReviews(t *testing.T) {
+	t.Run("maps closedAt to CompletedAt", func(t *testing.T) {
+		stdout := []byte(`[{"number":42,"title":"ship","closedAt":"2026-07-25T14:30:00Z","url":"https://x/42"}]`)
+		got, err := parseCompletedReviews(stdout)
+		if err != nil {
+			t.Fatalf("parseCompletedReviews: unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("len = %d, want 1", len(got))
+		}
+		p := got[0]
+		if p.Number != 42 {
+			t.Errorf("Number = %d, want 42", p.Number)
+		}
+		if p.Title != "ship" {
+			t.Errorf("Title = %q, want ship", p.Title)
+		}
+		if p.CompletedAt != "2026-07-25T14:30:00Z" {
+			t.Errorf("CompletedAt = %q, want 2026-07-25T14:30:00Z (mapped from closedAt)", p.CompletedAt)
+		}
+		if p.URL != "https://x/42" {
+			t.Errorf("URL = %q, want https://x/42", p.URL)
+		}
+		// Provenance fields stay zero — GetMergedClosed leaves them for the
+		// Plan 02 aggregation loop to annotate (D-06).
+		if p.ProjectName != "" || p.ProjectID != 0 || p.Repo != "" {
+			t.Errorf("provenance not zero: %+v (annotated by Plan 02)", p)
+		}
+	})
+
+	t.Run("sorts by CompletedAt descending", func(t *testing.T) {
+		// Feed out of order; expect newest-first.
+		stdout := []byte(`[
+			{"number":3,"title":"old","closedAt":"2026-06-01T00:00:00Z","url":""},
+			{"number":1,"title":"new","closedAt":"2026-07-29T00:00:00Z","url":""},
+			{"number":2,"title":"mid","closedAt":"2026-07-15T00:00:00Z","url":""}
+		]`)
+		got, err := parseCompletedReviews(stdout)
+		if err != nil {
+			t.Fatalf("parseCompletedReviews: unexpected error: %v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("len = %d, want 3", len(got))
+		}
+		wantOrder := []int{1, 2, 3} // newest → mid → oldest
+		for i, w := range wantOrder {
+			if got[i].Number != w {
+				t.Errorf("out[%d].Number = %d, want %d (desc CompletedAt)", i, got[i].Number, w)
+			}
+		}
+	})
+
+	t.Run("empty array yields empty slice", func(t *testing.T) {
+		got, err := parseCompletedReviews([]byte(`[]`))
+		if err != nil {
+			t.Fatalf("parseCompletedReviews: unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("len = %d, want 0 for empty gh output", len(got))
+		}
+	})
+
+	t.Run("malformed JSON returns error", func(t *testing.T) {
+		_, err := parseCompletedReviews([]byte(`not json`))
+		if err == nil {
+			t.Fatal("expected error for malformed JSON, got nil")
+		}
+	})
+}
+
+// TestListCompletedReviews exercises the no_gh degrade path directly: when
+// gh is absent (Available() false), listCompletedReviews returns state="no_gh"
+// with an empty PR list and NEVER spawns a process. The ok/auth_required/error
+// classification paths are covered by TestClassifyGhListError, and the ok-path
+// transformation (closedAt→CompletedAt, sort) by TestParseCompletedReviews —
+// together they cover the four listCompletedReviews states without coupling
+// to live gh (the existing listPRs is tested the same way: through Service.Runner
+// in service_test.go, not by shelling out).
+func TestListCompletedReviews(t *testing.T) {
+	t.Run("no_gh returns empty + no spawn", func(t *testing.T) {
+		restore := SetAvailableForTest(false)
+		defer restore()
+
+		// Available() false means listCompletedReviews must short-circuit
+		// BEFORE building or running any exec.Cmd. If it did spawn, gh would
+		// either fail to start (not on PATH) or, worse, hit the network.
+		prs, state, err := listCompletedReviews(context.Background(), "owner/name", "/tmp/anywhere")
+		if err != nil {
+			t.Fatalf("err = %v, want nil for classified degrade", err)
+		}
+		if state != "no_gh" {
+			t.Fatalf("state = %q, want no_gh", state)
+		}
+		if prs != nil {
+			t.Fatalf("prs = %v, want nil when gh is absent", prs)
+		}
+	})
 }

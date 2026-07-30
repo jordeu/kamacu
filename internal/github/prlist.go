@@ -322,3 +322,94 @@ func dedupeReviewed(awaiting, reviewed []PRSummary) []PRSummary {
 	}
 	return out
 }
+
+// ReviewDoneSummary is the per-completed-PR wire shape for the activity
+// endpoint's reviews-done list (REVIEWS-01, D-06). It carries only what the
+// list renders: the gh-sourced identity/timestamp/URL plus provenance fields
+// the Plan 02 handler annotates at aggregation time (PRSummary has no
+// repo/project field, so provenance is added by the loop that knows which
+// project each repo belongs to). GetMergedClosed (Task 2) leaves the three
+// provenance fields at their zero values. PRSummary — the review-column wire
+// type — is intentionally untouched (D-06: a dedicated type keeps each wire
+// focused).
+type ReviewDoneSummary struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	CompletedAt string `json:"completedAt"` // ISO 8601; closedAt from gh, set for BOTH merged+closed (D-05)
+	URL         string `json:"url"`
+	ProjectName string `json:"projectName"` // annotated by the Plan 02 aggregation loop
+	ProjectID   int64  `json:"projectId"`   // annotated by the Plan 02 aggregation loop
+	Repo        string `json:"repo"`        // annotated by the Plan 02 aggregation loop
+}
+
+// searchCompletedReviews is the activity endpoint's reviews-done search arg
+// (D-05). The is:closed SEARCH QUALIFIER is the AUTHORITATIVE merged+closed
+// filter — it stably includes merged per GitHub's search docs (discussion
+// #5599). --state closed is kept too (see listCompletedReviews) for
+// belt-and-suspenders, but it is a filed unfixed bug (cli/cli #8102) that a
+// future gh could "fix" to EXCLUDE merged; the qualifier is the stable
+// contract. draft:false drops never-published drafts from the completed set.
+const searchCompletedReviews = "reviewed-by:@me draft:false is:closed"
+
+// completedRaw is the lenient decode shape for ONE entry from
+// `gh pr list --json number,title,closedAt,url`. A MERGE IS a close, so
+// closedAt is set for BOTH merged and closed PRs (D-05); mergedAt would be
+// merged-only and is intentionally NOT fetched. The four fields are exactly
+// what ReviewDoneSummary's gh-sourced half needs.
+type completedRaw struct {
+	Number   int    `json:"number"`
+	Title    string `json:"title"`
+	ClosedAt string `json:"closedAt"`
+	URL      string `json:"url"`
+}
+
+// classifyGhListError maps a non-nil gh pr list failure (the runErr from
+// cmd.Run plus the captured stderr) to the wire state "auth_required" or
+// "error". Exit code 4 ALONE is unreliable (cli/cli#9338), so the call
+// combines the code AND stderr-substring sniffing — identical sniffing for
+// listPRs and listCompletedReviews, one path, no drift (Pitfall 4 / Pattern 3).
+// Pure: no I/O, no logging — the caller slog.Debug's the returned state with a
+// `state` attr only (T-10-03: never log the stderr body).
+func classifyGhListError(runErr error, stderr string) string {
+	_ = runErr
+	_ = stderr
+	return "" // RED STUB
+}
+
+// parseCompletedReviews decodes gh's `--json number,title,closedAt,url` output
+// into ReviewDoneSummary values with CompletedAt mapped from closedAt, sorted
+// most-recently-completed first. Pure (no I/O) so the ok-path transformation
+// is unit-testable with a canned fixture. ISO 8601 strings sort lexically the
+// same as chronologically, so a string compare is correct (same property
+// listPRs relies on for UpdatedAt).
+func parseCompletedReviews(stdout []byte) ([]ReviewDoneSummary, error) {
+	_ = stdout
+	return nil, errors.New("RED STUB") //nolint:err113 // stub-only
+}
+
+// listCompletedReviews is the I/O primitive for the activity endpoint's
+// reviews-done list (REVIEWS-01, D-05). It mirrors listPRs structurally —
+// arg-array spawn (never shell-interpolated), cmd.Dir selects the gh
+// host/account, the outcome is classified into
+// "ok"|"no_gh"|"auth_required"|"error" via the SHARED classifyGhListError
+// helper — but targets the merged+closed set:
+//
+//   - --search is searchCompletedReviews (reviewed-by:@me + draft:false +
+//     is:closed; the is:closed qualifier is the authoritative merged+closed
+//     filter, NOT --state closed which is a filed unfixed bug).
+//   - --state is the literal "closed" (belt-and-suspenders with is:closed,
+//     consistent with listPRs's --state open pattern).
+//   - --limit 100 avoids the default-30 truncation that would silently drop a
+//     weeks/months review history (Pitfall 1).
+//   - --json is number,title,closedAt,url (closedAt maps to CompletedAt; NO
+//     statusCheckRollup/isDraft/ref fields — the completed set renders no
+//     checks pill and needs no draft filter).
+//
+// err is always nil for classified degrades; the caller switches on state,
+// never on err (the listPRs contract).
+func listCompletedReviews(ctx context.Context, repo, repoDir string) (prs []ReviewDoneSummary, state string, _ error) {
+	_ = ctx
+	_ = repo
+	_ = repoDir
+	return nil, "", nil // RED STUB
+}
