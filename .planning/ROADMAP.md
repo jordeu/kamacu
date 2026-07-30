@@ -25,7 +25,7 @@
 
 **Phase Numbering:** continues from v1.11's last phase (09). v1.12 = Phases 10–11.
 
-- [ ] **Phase 10: Activity Data & API** - Scoped/windowed tasks-done, reviews-done (merged/closed reviewed-by:@me), and task cycle/dwell statistics behind a new activity endpoint set
+- [x] **Phase 10: Activity Data & API** - Scoped/windowed tasks-done, reviews-done (merged/closed reviewed-by:@me), and task cycle/dwell statistics behind a new activity endpoint set (completed 2026-07-30)
 - [ ] **Phase 11: Activity Page & Controls** - Top-level Activity page (sidebar entry, scope selector, Week/Month toggle) rendering tasks-done + reviews-done lists and statistics
 
 ## Phase Details
@@ -148,5 +148,5 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
-| 10. Activity Data & API | v1.12 | 3/3 | Complete   | 2026-07-30 |
+| 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
 | 11. Activity Page & Controls | v1.12 | 0/? | Not started | - |
