@@ -43,7 +43,9 @@
   4. The activity endpoint returns counts of tasks done and reviews done within the selected scope and window.
   5. The activity endpoint returns min / max / median cycle time (In-Progress → Done) and per-column dwell (time in In-Progress and time in In-Review) for tasks done in the window; reviews contribute a count, never time stats.
 
-**Plans**: TBD
+**Plans**:
+- [ ] 10-01-PLAN.md — GitHub `GetMergedClosed` extension (merged/closed reviewed-by:@me data source with its own 5min-TTL cache, decoupled from the review-column hot path)
+- [ ] 10-02-PLAN.md — `GET /api/activity` handler (scope/window parsing, tasks-done SQL, in-Go cycle/dwell stats, concurrent cross-repo aggregation, GATE 1, always-200)
 
 ### Phase 11: Activity Page & Controls
 
@@ -140,5 +142,5 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 07. Tasks, Projects & Workspaces Tools | v1.11 | 4/4 | Complete    | 2026-07-22 |
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
-| 10. Activity Data & API | v1.12 | 0/? | Not started | - |
+| 10. Activity Data & API | v1.12 | 0/2 | Not started | - |
 | 11. Activity Page & Controls | v1.12 | 0/? | Not started | - |
