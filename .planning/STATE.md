@@ -6,7 +6,7 @@ current_phase: 10
 current_phase_name: activity-data-api
 status: executing
 stopped_at: Completed 10-01-PLAN.md (GetMergedClosed extension)
-last_updated: "2026-07-30T11:59:58.338Z"
+last_updated: "2026-07-30T13:29:50.704Z"
 last_activity: 2026-07-30
 last_activity_desc: Phase 10 execution started
 progress:
@@ -43,7 +43,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 ## Current Position
 
 Phase: 10 (activity-data-api) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-07-30 — Phase 10 execution started
 
@@ -60,7 +60,7 @@ Last activity: 2026-07-30 — Phase 10 execution started
 
 ## Session
 
-**Last session:** 2026-07-30T11:59:37.151Z
+**Last session:** 2026-07-30T13:28:11.927Z
 **Stopped at:** Completed 10-01-PLAN.md (GetMergedClosed extension)
 **Resume file:** None
 
@@ -79,6 +79,7 @@ Last activity: 2026-07-30 — Phase 10 execution started
 | Phase 08 P02 | 10 min | 2 tasks | 3 files |
 | Phase 08 P03 | 25min | 2 tasks | 2 files |
 | Phase 10 P01 | 12 min | 2 tasks | 4 files |
+| Phase 10 P03 | 15 min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -104,6 +105,9 @@ Last activity: 2026-07-30 — Phase 10 execution started
 - [Phase 10]: [Phase 10/Plan 01]: 5min TTL (mergedClosedTTL) for the merged/closed reviews cache, fully decoupled from the 60s review-column cacheTTL (D-03/D-04). Coupling onto the 5s-poll hot path would 3x the gh load for data the column never renders. — Mirrors Service.Get/cacheTTL=60s with a separate map+TTL; the gate-ladder (in-flight dedup + attemptFloor + drop-after-N) is reused verbatim.
 - [Phase 10]: [Phase 10/Plan 01]: is:closed SEARCH QUALIFIER is the authoritative merged+closed filter (GitHub docs #5599); --state closed is belt-and-suspenders only since cli/cli #8102 is a filed unfixed bug. — Verified against local gh 2.82.0 + cli/cli #475/#8102. A future gh fix to #8102 would silently drop merged PRs if we relied on the flag alone.
 - [Phase 10]: [Phase 10/Plan 01]: classifyGhListError extracted as a PURE helper shared by listPRs + listCompletedReviews (Pattern 3) — one classification path, no drift on exit-code-4 + stderr-substring sniff (cli/cli#9338). — Pure (no I/O, no logging) so unit-testable directly; callers slog.Debug the state only (T-10-03: never log stderr body).
+- [Phase ?]: [Phase 10/Plan 03]: parseActivityTime is the shared mismatched-precision ISO parser (tries ms layout '2006-01-02T15:04:05.000Z' then bare-Z) — consumed by buildDurationSlices here AND plan 10-02's reviews-window cutoff; never string-compare timestamps across precisions. The .000Z layout requires the fraction, so the bare-Z fallback is what makes one comparison correct for reaper ms timestamps vs gh second-precision closedAt.
+- [Phase ?]: [Phase 10/Plan 03]: buildDurationSlices implements the Open Q3 dwellInProgress semantic (USER-CONFIRMED) — in_review_at set -> dwellInProgress = inReview - inProgress; absent -> fallback done - inProgress. cycle is always done - inProgress; dwellInReview is always done - inReview.
+- [Phase ?]: [Phase 10/Plan 03]: activity_helpers.go is stdlib-only (fmt/sort/strconv/strings/time) — no *sql.DB, no internal/github — so it ran as a wave-1 sibling parallel to plan 10-01. Negative-grep gate (internal/github==0, database/sql==0) is the purity contract; all gh/DB coupling lives in plan 10-02's handler.
 
 ## Operator Next Steps
 

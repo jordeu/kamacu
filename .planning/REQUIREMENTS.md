@@ -30,8 +30,8 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 ### Statistics (STATS)
 
 - [ ] **STATS-01**: User can see a count of tasks done and a count of reviews done within the selected window and scope
-- [ ] **STATS-02**: User can see min / max / median cycle time (In Progress → Done) for tasks done in the window
-- [ ] **STATS-03**: User can see min / max / median dwell time per column (time in In Progress, and time in In Review) for tasks done in the window
+- [x] **STATS-02**: User can see min / max / median cycle time (In Progress → Done) for tasks done in the window
+- [x] **STATS-03**: User can see min / max / median dwell time per column (time in In Progress, and time in In Review) for tasks done in the window
 - [ ] **STATS-04**: Cycle/dwell time stats cover tasks only; reviews contribute a count, not time stats (GitHub's merge signal has no Kamacu in-progress/in-review timestamps)
 
 ## Future Requirements
@@ -78,8 +78,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REVIEWS-03 | Phase 11 | Pending |
 | REVIEWS-04 | Phase 10 | Complete |
 | STATS-01 | Phase 10 | Pending |
-| STATS-02 | Phase 10 | Pending |
-| STATS-03 | Phase 10 | Pending |
+| STATS-02 | Phase 10 | Complete |
+| STATS-03 | Phase 10 | Complete |
 | STATS-04 | Phase 10 | Pending |
 
 **Coverage:**
