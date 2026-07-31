@@ -3,25 +3,25 @@ gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
 current_phase: 11
-current_phase_name: activity-page-controls
 status: completed
-stopped_at: Phase 11 complete — all 3 plans done (11-03 gap closure: non-nil activity wire contract)
-last_updated: "2026-07-31T15:52:50.000Z"
+stopped_at: Milestone v1.12 complete — all phases done (Phase 11 UAT 7/7 + verification passed)
+last_updated: "2026-07-31T18:15:49.888Z"
 last_activity: 2026-07-31
-last_activity_desc: Phase 11 Plan 03 gap closure — non-nil activity wire contract (tasks:[]/prs:[]) + null-guard render path
+last_activity_desc: Milestone v1.12 (Activity & Statistics) complete — Phase 11 verified 26/26 + UAT 7/7
 progress:
   total_phases: 2
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 6
+  completed_plans: 6
   percent: 100
+current_phase_name: activity-page-controls
 ---
 
 # Project State
 
-**Current focus:** Phase 11 — activity-page-controls
+**Current focus:** Milestone v1.12 (Activity & Statistics) complete — ready to archive
 
-See: .planning/PROJECT.md (updated 2026-07-21)
+See: .planning/PROJECT.md (updated 2026-07-31)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent agent session you can open, leave, and reattach to from the browser.
 
@@ -43,9 +43,9 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 ## Current Position
 
 Phase: 11 (activity-page-controls) — COMPLETE
-Plan: 3 of 3 (11-03 gap closure landed)
-Status: Phase 11 complete — UAT Test 1 blocker (black /activity page on empty instance) closed
-Last activity: 2026-07-31 — Phase 11 Plan 03 gap closure (non-nil activity wire contract)
+Plan: 3/3 done
+Status: Milestone v1.12 complete — Phase 11 verified 26/26 must-haves + UAT 7/7 (0 issues); black-page blocker closed (fix 11-03)
+Last activity: 2026-07-31 — Milestone v1.12 complete
 
 ### Quick Tasks Completed
 
@@ -60,9 +60,9 @@ Last activity: 2026-07-31 — Phase 11 Plan 03 gap closure (non-nil activity wir
 
 ## Session
 
-**Last session:** 2026-07-31T06:02:05.489Z
-**Stopped at:** Phase 11 UI-SPEC approved
-**Resume file:** .planning/phases/11-activity-page-controls/11-UI-SPEC.md
+**Last session:** 2026-07-31
+**Stopped at:** Milestone v1.12 complete — ready to archive via /gsd-complete-milestone
+**Resume file:** None
 
 ## Performance Metrics
 
