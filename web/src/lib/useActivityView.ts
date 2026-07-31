@@ -28,12 +28,15 @@ export type ActivityWindow = "week" | "month";
  */
 function readScope(fallback: ActivityScope): ActivityScope {
   const raw = localStorage.getItem(ACTIVITY_SCOPE_KEY);
+  if (raw === null) {
+    return fallback;
+  }
   if (
     raw === "global" ||
     /^workspace:\d+$/.test(raw) ||
     /^project:\d+$/.test(raw)
   ) {
-    return raw;
+    return raw as ActivityScope;
   }
   return fallback;
 }
