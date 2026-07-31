@@ -66,7 +66,16 @@
   4. Tasks-done and reviews-done entries are each grouped by project with their fields shown (task title + completion time for tasks; PR number + title + merge/close date for reviews); clicking a tasks-done entry navigates to that task's view, and clicking a reviews-done entry opens the PR (its review workspace if it exists, else the PR).
   5. When GitHub integration is off (or `gh` absent), the reviews section renders empty while tasks-done and task statistics still display normally.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+**Wave 1**
+
+- [ ] 11-01-PLAN.md — Data & state foundation (activity wire types, useActivity query, formatDuration util, useActivityView localStorage hook)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11-02-PLAN.md — Activity page, controls & sidebar entry (page shell, scope selector, window toggle, stats strip, grouped tasks-done/reviews-done lists, sidebar entry with collapsed-rail reachability)
+
 **UI hint**: yes
 
 </details>
@@ -149,4 +158,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
 | 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
-| 11. Activity Page & Controls | v1.12 | 0/? | Not started | - |
+| 11. Activity Page & Controls | v1.12 | 0/2 | Not started | - |
