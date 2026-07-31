@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
-import { Plus, Settings } from "lucide-react";
+import { Plus, Settings, Activity } from "lucide-react";
 import { useProjects } from "@/api/queries";
 import { useAgentStatuses } from "@/api/agents";
 import { Button } from "@/components/ui/button";
@@ -159,18 +159,28 @@ export function ProjectSidebar() {
         </SidebarMenu>
       </SidebarContent>
 
-      <SidebarFooter className="flex-row items-center gap-2 group-data-[collapsible=icon]:hidden">
+      {/* Phase 11 D-02 wrinkle (Pitfall 1): the footer used to carry
+          group-data-[collapsible=icon]:hidden which hid the WHOLE footer in
+          the collapsed rail. Activity must stay reachable when collapsed, so
+          the footer hide is removed and re-applied per-child: "Add project"
+          and the Settings gear keep hiding (their existing behavior); the
+          Activity button is left without it and additionally grows to a
+          rail-appropriate target size when collapsed. */}
+      <SidebarFooter className="flex-row items-center gap-2">
         <Button
           variant="ghost"
           size="sm"
-          className="flex-1 justify-start"
+          className="flex-1 justify-start group-data-[collapsible=icon]:hidden"
           onClick={() => setAddOpen(true)}
         >
           <Plus />
           Add project
         </Button>
-        {/* SET-01: gear → dedicated full-page /settings route. Active state
-            reuses the selected-sidebar-item treatment from the project rows. */}
+        {/* Phase 11 — Activity entry (D-01/D-02/D-03). Sits next to the
+            Settings gear in the expanded footer AND stays reachable as an
+            icon in the collapsed rail (the project-row rail/expanded pair
+            idiom). Active state derives from location.pathname === "/activity"
+            — the Settings-gear idiom (D-01). */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -178,6 +188,30 @@ export function ProjectSidebar() {
               variant="ghost"
               size="icon-sm"
               className={cn(
+                "group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:rounded-md",
+                location.pathname === "/activity" &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground",
+              )}
+            >
+              <Link to="/activity" aria-label="Activity">
+                <Activity className="size-4" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Activity</TooltipContent>
+        </Tooltip>
+        {/* SET-01: gear → dedicated full-page /settings route. Active state
+            reuses the selected-sidebar-item treatment from the project rows.
+            Hides in the collapsed rail (the Activity button above takes the
+            rail footer slot). */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon-sm"
+              className={cn(
+                "group-data-[collapsible=icon]:hidden",
                 location.pathname === "/settings" &&
                   "bg-sidebar-accent text-sidebar-accent-foreground",
               )}

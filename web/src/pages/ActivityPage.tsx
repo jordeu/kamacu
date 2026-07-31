@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ActivityList } from "@/components/activity/ActivityList";
+import { ReviewsList } from "@/components/activity/ReviewsList";
 import { ScopeSelector } from "@/components/activity/ScopeSelector";
 import { StatsStrip } from "@/components/activity/StatsStrip";
 import { WindowToggle } from "@/components/activity/WindowToggle";
@@ -53,8 +55,8 @@ export default function ActivityPage() {
               <WindowToggle window={window} onWindowChange={setWindow} />
             </div>
             <StatsStrip stats={data.stats} />
-            {/* Tasks-done section — wired in Task 2 */}
-            {/* Reviews-done section — wired in Task 2 */}
+            <ActivityList tasks={data.tasks} />
+            <ReviewsList reviews={data.reviews} />
           </div>
         )}
       </div>
