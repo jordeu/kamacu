@@ -1,6 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./client";
-import type { Agent, Project, Task, Workspace } from "./types";
+import type {
+  ActivityResponse,
+  Agent,
+  Project,
+  Task,
+  Workspace,
+} from "./types";
 
 export function useProjects() {
   return useQuery({
@@ -68,5 +74,35 @@ export function useGithubStatus() {
   return useQuery({
     queryKey: ["github-status"],
     queryFn: () => get<{ gh_available: boolean }>("/api/github/status"),
+  });
+}
+
+/**
+ * Phase 11 — the Activity page's combined data fetch (Phase 10 D-01: one
+ * endpoint → one query, one loading state). Switching scope/window just
+ * changes the queryKey.
+ *
+ * The scope/window types are inlined to match the exact parseScope/
+ * parseWindow grammar (activity_helpers.go:51-80) without forward-referencing
+ * useActivityView.ts (structurally compatible — TypeScript structural typing).
+ * The authoritative type aliases live in useActivityView.ts.
+ *
+ * `enabled` lets the page defer the fetch until the persisted scope resolves
+ * (Phase 11 RESEARCH Pitfall 6 — don't fire with a null-derived scope). No
+ * `refetchInterval` — Activity is an occasional view, not a live dashboard
+ * (contrast pullRequests.ts which polls every 60s).
+ */
+export function useActivity(
+  scope: "global" | `workspace:${number}` | `project:${number}`,
+  window: "week" | "month",
+  enabled: boolean = true,
+) {
+  return useQuery({
+    queryKey: ["activity", scope, window],
+    queryFn: () =>
+      get<ActivityResponse>(
+        `/api/activity?scope=${scope}&window=${window}`,
+      ),
+    enabled,
   });
 }
