@@ -47,16 +47,20 @@ function byCompletedDesc(a: ReviewDoneSummary, b: ReviewDoneSummary): number {
 }
 
 export function ReviewsList({ reviews }: { reviews: ActivityResponse["reviews"] }) {
+  // Null-safe: a buggy/older server can ship `prs: null` (Go nil slice -> JSON
+  // null). Normalize once so the degrade check and the spread never throw.
+  const prs = reviews.prs ?? [];
+
   // D-12: quietly empty on hard-degrade with no cached PRs — return null (NO
   // amber hint, NO heading, NO body). Never toast (Phase 26 convention).
-  if (HARD_DEGRADE.has(reviews.state) && reviews.prs.length === 0) {
+  if (HARD_DEGRADE.has(reviews.state) && prs.length === 0) {
     return null;
   }
 
   // ok / partial / error-with-cached-prs: sort the cross-repo merge by
   // completedAt DESC before grouping (Pitfall 5). Never whitelist {ok} alone —
   // partial carries real PRs and must render.
-  const sorted = [...reviews.prs].sort(byCompletedDesc);
+  const sorted = [...prs].sort(byCompletedDesc);
   const groups = groupByProject(sorted);
 
   // Quiet empty even on ok+empty (Phase 11 RESEARCH Open Q1 — suppress the

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -558,5 +559,44 @@ func TestActivityHandler_InvalidWindow(t *testing.T) {
 	rec := activityGet(t, mux, "/api/activity?scope=global&window=decade")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for invalid window", rec.Code)
+	}
+}
+
+// TestActivityHandler_EmptyInstanceNonNilSlices: on a fresh/empty instance (no
+// done tasks, no linked repos) the JSON contract must be `tasks:[]` and
+// `reviews.prs:[]` — NEVER `null`. A Go nil slice marshals to `null`, which
+// crashed the Activity page on empty instances (groupByProject `for...of null` /
+// ReviewsList `[...null]` -> TypeError -> blank page). This guards the WIRE
+// contract, not the decoded struct: json.Unmarshal accepts `null` for a slice,
+// so a len==0 check alone cannot catch a nil-slice regression.
+func TestActivityHandler_EmptyInstanceNonNilSlices(t *testing.T) {
+	db := newPRTestDB(t) // fresh: only the default Personal workspace; no tasks, no linked repos
+	mux := newActivityEnv(t, db, nil, nil)
+
+	rec := activityGet(t, mux, "/api/activity?scope=global&window=week")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"tasks":null`) {
+		t.Errorf("tasks serialized as null (nil slice) — must be []; body=%s", body)
+	}
+	if !strings.Contains(body, `"tasks":[]`) {
+		t.Errorf("tasks not serialized as []; body=%s", body)
+	}
+	if strings.Contains(body, `"prs":null`) {
+		t.Errorf("reviews.prs serialized as null (nil slice) — must be []; body=%s", body)
+	}
+	if !strings.Contains(body, `"prs":[]`) {
+		t.Errorf("reviews.prs not serialized as []; body=%s", body)
+	}
+
+	// Decoded shape sanity: empty + ok degrade state.
+	res := decodeActivity(t, rec)
+	if res.Reviews.State != "ok" {
+		t.Errorf("reviews.state = %q, want ok (no linked repos)", res.Reviews.State)
+	}
+	if len(res.Tasks) != 0 || len(res.Reviews.PRs) != 0 {
+		t.Errorf("expected empty tasks/prs, got tasks=%d prs=%d", len(res.Tasks), len(res.Reviews.PRs))
 	}
 }

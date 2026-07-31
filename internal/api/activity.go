@@ -58,7 +58,7 @@ type repoRow struct {
 // never as an errgroup error. When repos is empty, state="ok" with empty PRs.
 func aggregateReviews(ctx context.Context, ghSvc *github.Service, repos []repoRow, force bool, cutoff time.Time) aggregateReviewsResult {
 	if len(repos) == 0 {
-		return aggregateReviewsResult{State: "ok"}
+		return aggregateReviewsResult{State: "ok", PRs: []github.ReviewDoneSummary{}}
 	}
 
 	type perRepo struct {
@@ -101,7 +101,9 @@ func aggregateReviews(ctx context.Context, ghSvc *github.Service, repos []repoRo
 	_ = g.Wait()
 
 	states := make([]string, 0, len(results))
-	var allPRs []github.ReviewDoneSummary
+	// Non-nil so the wire contract is `[]` even when every repo's window filter
+	// drops all PRs (empty-state null crash).
+	allPRs := make([]github.ReviewDoneSummary, 0)
 	var latestFetched *time.Time
 	anyStale := false
 	for _, r := range results {
@@ -149,7 +151,10 @@ func fetchActivityTasks(ctx context.Context, db *sql.DB, scopeKind string, scope
 		return nil, err
 	}
 	defer rows.Close()
-	var out []activityTask
+	// Non-nil zero-length slice so the JSON contract is `[]` (never `null`)
+	// when no tasks match — the frontend types tasks as ActivityTask[] and
+	// iterates it without a null guard (empty-state crash on fresh instances).
+	out := make([]activityTask, 0)
 	for rows.Next() {
 		var t activityTask
 		var doneAt, inProg, inRev sql.NullString
@@ -236,7 +241,8 @@ func ActivityRoutes(mux *http.ServeMux, db *sql.DB, ghSvc *github.Service) {
 		if qerr != nil {
 			slog.Error("activity: tasks-done query", "error", qerr)
 			writeJSON(w, http.StatusOK, activityResponse{
-				Reviews: aggregateReviewsResult{State: "error"},
+				Tasks:   []activityTask{},
+				Reviews: aggregateReviewsResult{State: "error", PRs: []github.ReviewDoneSummary{}},
 				Stats:   statsBlock{TaskCount: 0},
 			})
 			return
@@ -252,7 +258,10 @@ func ActivityRoutes(mux *http.ServeMux, db *sql.DB, ghSvc *github.Service) {
 		// GATE 1 (GHSET-02): integration toggle off -> disabled, NEVER spawn gh.
 		// settings.Get returns the code default "on" for an absent row, so any
 		// non-"on" value disables (mirrors pullrequests.go:56-64).
-		var reviews aggregateReviewsResult
+		// PRs pre-initialized to a non-nil empty slice so the disabled/error
+		// degrade paths (which only set State) still emit `prs: []` on the wire
+		// — never `null` (frontend ReviewsList reads prs.length / spreads prs).
+		reviews := aggregateReviewsResult{PRs: []github.ReviewDoneSummary{}}
 		val, gerr := settings.Get(db, settings.KeyGithubIntegration)
 		if gerr != nil {
 			reviews.State = "error"

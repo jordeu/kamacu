@@ -25,12 +25,15 @@ interface ProjectGroup<T> {
 /**
  * Bucket rows by projectId, preserving arrival order within each group.
  * Used by both ActivityList (tasks) and ReviewsList (reviews, post-sort).
+ *
+ * Null/undefined-safe: a buggy or older server can ship `tasks: null` (Go nil
+ * slice -> JSON null); guard the iteration so the page never blanks.
  */
 export function groupByProject<
   T extends { projectId: number; projectName: string },
->(rows: T[]): ProjectGroup<T>[] {
+>(rows: T[] | null | undefined): ProjectGroup<T>[] {
   const map = new Map<number, ProjectGroup<T>>();
-  for (const r of rows) {
+  for (const r of rows ?? []) {
     let g = map.get(r.projectId);
     if (!g) {
       g = { projectId: r.projectId, projectName: r.projectName, entries: [] };

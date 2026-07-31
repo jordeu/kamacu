@@ -1,21 +1,14 @@
 ---
-status: testing
+status: partial
 phase: 11-activity-page-controls
 source: [11-VERIFICATION.md]
 started: 2026-07-31T06:18:59Z
-updated: 2026-07-31T06:18:59Z
+updated: 2026-07-31T06:56:58Z
 ---
 
 ## Current Test
 
-number: 1
-name: Activity sidebar entry reachable in both expanded and collapsed rail
-expected: |
-  Open /activity in the browser with the sidebar expanded AND collapsed (Ctrl+B).
-  The Activity entry (lucide Activity icon) is reachable in BOTH states — visible
-  in the footer when expanded, visible as a rail icon when collapsed. Active state
-  (bg-sidebar-accent) appears when on /activity.
-awaiting: user response
+[testing paused — Test 1 blocker: blank /activity page on empty instance; tests 2-7 cannot run until fixed AND an instance with data is used]
 
 ## Tests
 
@@ -26,7 +19,9 @@ expected: |
   when expanded, visible as a rail icon when collapsed. Active state (bg-sidebar-accent)
   appears when on /activity. Confirms the per-child collapsed-rail visibility refactor
   (ProjectSidebar.tsx:162-202).
-result: [pending]
+result: issue
+reported: "when I go to /activity page I get a black page, nothing else (verified against http://127.0.0.1:7334/activity — empty/fresh instance)"
+severity: blocker
 
 ### 2. Scope dropdown lists Global + every workspace + every project, active scope checked
 expected: |
@@ -77,9 +72,38 @@ result: [pending]
 
 total: 7
 passed: 0
-issues: 0
-pending: 7
+issues: 1
+pending: 6
 skipped: 0
 blocked: 0
 
 ## Gaps
+
+- truth: "GET /activity renders the activity page (sidebar entry + scope/window controls + stats + tasks + reviews sections). On an empty instance it renders a BLANK/BLACK page instead."
+  status: failed
+  reason: "User reported: 'when I go to /activity page I get a black page, nothing else' (verified against http://127.0.0.1:7334/activity, a fresh/empty Kamacu instance on a separate DB)"
+  severity: blocker
+  test: 1
+  root_cause: >
+    Backend emits `tasks: null` and `reviews.prs: null` because Go nil slices
+    marshal to JSON null (not []). On an empty instance fetchActivityTasks
+    returns a nil []activityTask (activity.go:152) and aggregateReviews returns
+    nil PRs (activity.go:61, 104), so the API violates its own ActivityTask[]/
+    ReviewDoneSummary[] contract. The frontend has no null guard, so React's
+    render throws and unmounts to a blank page. The main 7333 instance has real
+    done tasks/reviews so the slices are non-nil — that is why dev + phase-11
+    verification passed but a fresh instance blanks.
+  artifacts:
+    - path: "internal/api/activity.go"
+      issue: "fetchActivityTasks uses `var out []activityTask` (nil) -> null when empty (L152); error-path omits Tasks -> null (L238-241); aggregateReviews empty-repos path returns nil PRs (L61) and rollup allPRs is nil when no PRs (L104)."
+    - path: "web/src/components/activity/ActivityList.tsx"
+      issue: "groupByProject does `for (const r of rows)` with no null guard (L33) -> TypeError when tasks=null."
+    - path: "web/src/components/activity/ReviewsList.tsx"
+      issue: "L59 `[...reviews.prs].sort(...)` -> TypeError when prs=null (would crash after tasks fix)."
+    - path: "web/src/pages/ActivityPage.tsx"
+      issue: "L58-59 passes data.tasks / data.reviews straight through with no `?? []` guard."
+  missing:
+    - "Backend (canonical contract fix): initialize empty slices so empty collections marshal to [] — fetchActivityTasks `out := []activityTask{}`; aggregateReviews empty paths `PRs: []github.ReviewDoneSummary{}`; error-path activityResponse `Tasks: []activityTask{}`."
+    - "Frontend (defense in depth): null-guard groupByProject (`rows ?? []`) and ActivityPage (`data.tasks ?? []`; `reviews.prs ?? []`)."
+    - "Add backend test asserting empty activity -> tasks:[] and reviews.prs:[] (not null)."
+  debug_session: ""

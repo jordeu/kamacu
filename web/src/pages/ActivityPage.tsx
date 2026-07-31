@@ -55,8 +55,8 @@ export default function ActivityPage() {
               <WindowToggle window={window} onWindowChange={setWindow} />
             </div>
             <StatsStrip stats={data.stats} />
-            <ActivityList tasks={data.tasks} />
-            <ReviewsList reviews={data.reviews} />
+            <ActivityList tasks={data.tasks ?? []} />
+            <ReviewsList reviews={{ ...data.reviews, prs: data.reviews.prs ?? [] }} />
           </div>
         )}
       </div>
