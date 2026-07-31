@@ -9,3 +9,10 @@ export function formatAgo(iso: string | null, now: number): string {
   if (mins < 60) return `${mins}m`;
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
+
+/** STUB — RED phase. Returns a deliberately wrong value so the D-10 behavior
+ *  assertions fail. The GREEN commit replaces this with the adaptive
+ *  largest-1-2-units d/h/m/s formatter per CONTEXT D-10. */
+export function formatDuration(totalSeconds: number): string {
+  return "STUB";
+}
