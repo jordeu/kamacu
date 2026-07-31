@@ -582,22 +582,25 @@ function ReviewsSection({ reviews }: { reviews: ActivityResponse["reviews"] }) {
 
 **No `[ASSUMED]` package-name claims** — this phase adds no packages.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the reviews section heading render at all when degraded?**
    - What we know: D-12 says "quietly empty — no error, no hint" for `disabled`/`no_gh`.
    - What's unclear: Whether "no hint" includes suppressing the "Reviews" heading, or just the body.
    - Recommendation: Suppress the entire section (heading + body) on hard-degrade states; render heading + body otherwise. This is the most literal "quietly empty." Agent's call (CONTEXT lists copy as discretion).
+   - **RESOLVED:** Suppress the entire section (heading + body) on hard-degrade states. Enacted in 11-02 Task 2 — `ReviewsList` returns `null` on `disabled`/`no_gh`/`auth_required`, which suppresses both the "Reviews" heading and the body.
 
 2. **Scope dropdown structure — flat with section labels, or nested workspace→projects?**
    - What we know: D-04 wants one dropdown listing Global + workspaces + projects, mirroring the switcher's "section/label idioms."
    - What's unclear: With many projects, a flat list gets long; nesting (`DropdownMenuSub`) under each workspace is cleaner but more markup.
    - Recommendation: Flat with `DropdownMenuLabel` section headers ("Global" implied, "Workspaces", "Projects") for v1.12 — matches the switcher's simplicity. Revisit nesting if project count grows. Agent's discretion.
+   - **RESOLVED:** Flat structure with `DropdownMenuLabel` section headers. Enacted in 11-02 Task 1 — `ScopeSelector` uses flat `DropdownMenuLabel` sections ("Global", "Workspaces", "Projects") rather than nested `DropdownMenuSub`.
 
 3. **Should the stats strip / lists refetch when the user returns to the tab?**
-   - What we know: `QueryClient` default is `refetchOnWindowFocus: false`, no `staleTime` (so refetch on mount/re-invalidHome). Activity has no `refetchInterval`.
+   - What we know: `QueryClient` default is `refetchOnWindowFocus: false`, no `staleTime` (so refetch on mount/re-validHome). Activity has no `refetchInterval`.
    - What's unclear: Whether returning to `/activity` should always refetch (staleTime 0) or cache the last view for the session.
    - Recommendation: Keep defaults (refetch on mount) — Activity is occasional; a fresh fetch on each open is correct and cheap (5min gh cache on the backend absorbs repeats).
+   - **RESOLVED:** Keep TanStack defaults (refetch on mount, no `refetchInterval`). Enacted in 11-01 Task 1 — `useActivity` sets no `refetchInterval`, so Activity refetches on mount/tab-return only.
 
 ## Environment Availability
 
