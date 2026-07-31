@@ -5,6 +5,7 @@ import { useProjects, useWorkspaces } from "@/api/queries";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 import { Button } from "@/components/ui/button";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
+import ActivityPage from "@/pages/ActivityPage";
 import BoardPage from "@/pages/BoardPage";
 import SettingsPage from "@/pages/SettingsPage";
 import TaskPage from "@/pages/TaskPage";
@@ -133,6 +134,10 @@ export default function App() {
           }
         />
         <Route path="/settings" element={<SettingsPage />} />
+        {/* Phase 11 — bare top-level Activity route (sibling of /settings).
+            scope/window live in localStorage (CONTEXT D-06), so /activity has
+            NO :projectId and is NOT wrapped in BoardWorkspaceSync. */}
+        <Route path="/activity" element={<ActivityPage />} />
         {/* Dev/debug surface for the terminal engine (D-12) — reached by URL */}
         <Route path="/terminal" element={<TerminalPage />} />
       </Route>
