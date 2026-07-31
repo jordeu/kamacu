@@ -4,17 +4,17 @@ milestone: v1.12
 milestone_name: Activity & Statistics
 current_phase: 11
 current_phase_name: activity-page-controls
-status: executing
+status: verifying
 stopped_at: Phase 11 UI-SPEC approved
-last_updated: "2026-07-31T05:50:14.321Z"
+last_updated: "2026-07-31T06:02:42.572Z"
 last_activity: 2026-07-31
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 4
-  percent: 50
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -44,7 +44,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 Phase: 11 (activity-page-controls) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-31 — Phase 11 execution started
 
 ### Quick Tasks Completed
@@ -60,7 +60,7 @@ Last activity: 2026-07-31 — Phase 11 execution started
 
 ## Session
 
-**Last session:** 2026-07-31T05:49:28.001Z
+**Last session:** 2026-07-31T06:02:05.489Z
 **Stopped at:** Phase 11 UI-SPEC approved
 **Resume file:** .planning/phases/11-activity-page-controls/11-UI-SPEC.md
 
@@ -82,6 +82,7 @@ Last activity: 2026-07-31 — Phase 11 execution started
 | Phase 10 P03 | 15 min | 1 tasks | 2 files |
 | Phase 10 P02 | 9 min | 2 tasks | 4 files |
 | Phase Phase 11 P01 | 5 min | 2 tasks | 4 files |
+| Phase 11 P02 | 5 min | 2 tasks | 8 files |
 
 ## Decisions
 
@@ -113,6 +114,7 @@ Last activity: 2026-07-31 — Phase 11 execution started
 - [Phase 10]: [Phase 10/Plan 02]: GET /api/activity is ONE combined endpoint ({tasks,reviews,stats}) so Phase 11 issues ONE TanStack query with ONE loading state; degradation rides in reviews.state and the whole response is always 200 (D-01, REVIEWS-04). GATE 1 (github_integration != 'on') short-circuits to reviews.state='disabled' with zero gh spawns before any aggregateReviews call.
 - [Phase 10]: [Phase 10/Plan 02]: aggregateReviews uses errgroup (SetLimit 5, promoted indirect→direct v0.20.0) with per-repo 12s timeout; closures return nil on EVERY outcome so a degrade rides in the per-repo state and NEVER cancels the group (Pitfall 4). The reviews WINDOW FILTER compares time.Time-vs-time.Time via parseActivityTime — never a string compare across the ms cutoff vs second-precision gh closedAt (REVIEWS-01/STATS-01). Two cutoff representations (cutoffStr ms-ISO for lexical SQL, cutoffTime time.Time for reviews) derive from one now.Add(-window).
 - [Phase Phase 11]: Split Task 1 (tdd=true) into 3 commits: non-TDD parts (types+query) first, then RED→GREEN for formatDuration — keeps TDD discipline clean for the behavior-specified function — Only formatDuration has a behavior block (TDD candidate); wire types and query are declarations/glue code (Skip TDD per tdd.md guidance). Splitting avoids forcing type declarations into a test commit.
+- [Phase ?]: [Phase 11 / Plan 02]: Per-child collapsed-rail visibility — removed SidebarFooter's wholesale group-data-[collapsible=icon]:hidden and re-applied it per-child (Add project + Settings gear keep hiding; Activity stays reachable) rather than lifting Activity into a separate sidebar menu. Generalizes the project-row dual-surface idiom to footer utility buttons and satisfies D-02 (Activity always reachable in both states).
 
 ## Operator Next Steps
 

@@ -9,22 +9,22 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 
 ### Activity Page & Controls (ACT)
 
-- [ ] **ACT-01**: User can open a dedicated top-level Activity page from a persistent sidebar entry (like Settings), accessible app-wide
+- [x] **ACT-01**: User can open a dedicated top-level Activity page from a persistent sidebar entry (like Settings), accessible app-wide
 - [x] **ACT-02**: User can scope the Activity page to Global / a specific Workspace / a specific Project via a selector; the lists and stats update to that scope
 - [x] **ACT-03**: User can toggle the time window between Week (last 7 days) and Month (last 30 days), rolling from now; the toggle drives both the lists and the statistics
-- [ ] **ACT-04**: When GitHub integration is off (or `gh` absent), the reviews section quietly degrades to empty while tasks-done and task stats still work
+- [x] **ACT-04**: When GitHub integration is off (or `gh` absent), the reviews section quietly degrades to empty while tasks-done and task stats still work
 
 ### Tasks Done (TASKS)
 
 - [x] **TASKS-01**: User can see a list of tasks completed (moved to Done) within the selected window and scope
-- [ ] **TASKS-02**: Tasks-done entries are grouped by project, showing the task title and when it was completed
-- [ ] **TASKS-03**: Clicking a tasks-done entry navigates to that task's view
+- [x] **TASKS-02**: Tasks-done entries are grouped by project, showing the task title and when it was completed
+- [x] **TASKS-03**: Clicking a tasks-done entry navigates to that task's view
 
 ### Reviews Done (REVIEWS)
 
 - [x] **REVIEWS-01**: User can see a list of PRs they reviewed (`reviewed-by:@me`) that MERGED or CLOSED within the selected window and scope, with the merge/close date
-- [ ] **REVIEWS-02**: Reviews-done entries are grouped by project, showing the PR number, title, and merge/close date
-- [ ] **REVIEWS-03**: Clicking a reviews-done entry opens that PR (its review workspace if it exists, else the PR)
+- [x] **REVIEWS-02**: Reviews-done entries are grouped by project, showing the PR number, title, and merge/close date
+- [x] **REVIEWS-03**: Clicking a reviews-done entry opens that PR (its review workspace if it exists, else the PR)
 - [x] **REVIEWS-04**: The reviews-done list is best-effort and degrades gracefully when `gh` is unavailable or a repo's fetch fails (never blocks the rest of the page)
 
 ### Statistics (STATS)
@@ -66,16 +66,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ACT-01 | Phase 11 | Pending |
+| ACT-01 | Phase 11 | Complete |
 | ACT-02 | Phase 11 | Complete |
 | ACT-03 | Phase 11 | Complete |
-| ACT-04 | Phase 11 | Pending |
+| ACT-04 | Phase 11 | Complete |
 | TASKS-01 | Phase 10 | Complete |
-| TASKS-02 | Phase 11 | Pending |
-| TASKS-03 | Phase 11 | Pending |
+| TASKS-02 | Phase 11 | Complete |
+| TASKS-03 | Phase 11 | Complete |
 | REVIEWS-01 | Phase 10 | Complete |
-| REVIEWS-02 | Phase 11 | Pending |
-| REVIEWS-03 | Phase 11 | Pending |
+| REVIEWS-02 | Phase 11 | Complete |
+| REVIEWS-03 | Phase 11 | Complete |
 | REVIEWS-04 | Phase 10 | Complete |
 | STATS-01 | Phase 10 | Complete |
 | STATS-02 | Phase 10 | Complete |
