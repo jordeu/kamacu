@@ -10,8 +10,8 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 ### Activity Page & Controls (ACT)
 
 - [ ] **ACT-01**: User can open a dedicated top-level Activity page from a persistent sidebar entry (like Settings), accessible app-wide
-- [ ] **ACT-02**: User can scope the Activity page to Global / a specific Workspace / a specific Project via a selector; the lists and stats update to that scope
-- [ ] **ACT-03**: User can toggle the time window between Week (last 7 days) and Month (last 30 days), rolling from now; the toggle drives both the lists and the statistics
+- [x] **ACT-02**: User can scope the Activity page to Global / a specific Workspace / a specific Project via a selector; the lists and stats update to that scope
+- [x] **ACT-03**: User can toggle the time window between Week (last 7 days) and Month (last 30 days), rolling from now; the toggle drives both the lists and the statistics
 - [ ] **ACT-04**: When GitHub integration is off (or `gh` absent), the reviews section quietly degrades to empty while tasks-done and task stats still work
 
 ### Tasks Done (TASKS)
@@ -67,8 +67,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | ACT-01 | Phase 11 | Pending |
-| ACT-02 | Phase 11 | Pending |
-| ACT-03 | Phase 11 | Pending |
+| ACT-02 | Phase 11 | Complete |
+| ACT-03 | Phase 11 | Complete |
 | ACT-04 | Phase 11 | Pending |
 | TASKS-01 | Phase 10 | Complete |
 | TASKS-02 | Phase 11 | Pending |

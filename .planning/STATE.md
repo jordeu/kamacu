@@ -6,14 +6,14 @@ current_phase: 11
 current_phase_name: activity-page-controls
 status: executing
 stopped_at: Phase 11 UI-SPEC approved
-last_updated: "2026-07-31T05:38:53.916Z"
+last_updated: "2026-07-31T05:50:14.321Z"
 last_activity: 2026-07-31
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
   percent: 50
 ---
 
@@ -43,8 +43,8 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 ## Current Position
 
 Phase: 11 (activity-page-controls) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 11
+Plan: 2 of 2
+Status: Ready to execute
 Last activity: 2026-07-31 — Phase 11 execution started
 
 ### Quick Tasks Completed
@@ -60,7 +60,7 @@ Last activity: 2026-07-31 — Phase 11 execution started
 
 ## Session
 
-**Last session:** 2026-07-31T05:04:37.009Z
+**Last session:** 2026-07-31T05:49:28.001Z
 **Stopped at:** Phase 11 UI-SPEC approved
 **Resume file:** .planning/phases/11-activity-page-controls/11-UI-SPEC.md
 
@@ -81,6 +81,7 @@ Last activity: 2026-07-31 — Phase 11 execution started
 | Phase 10 P01 | 12 min | 2 tasks | 4 files |
 | Phase 10 P03 | 15 min | 1 tasks | 2 files |
 | Phase 10 P02 | 9 min | 2 tasks | 4 files |
+| Phase Phase 11 P01 | 5 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -111,6 +112,7 @@ Last activity: 2026-07-31 — Phase 11 execution started
 - [Phase ?]: [Phase 10/Plan 03]: activity_helpers.go is stdlib-only (fmt/sort/strconv/strings/time) — no *sql.DB, no internal/github — so it ran as a wave-1 sibling parallel to plan 10-01. Negative-grep gate (internal/github==0, database/sql==0) is the purity contract; all gh/DB coupling lives in plan 10-02's handler.
 - [Phase 10]: [Phase 10/Plan 02]: GET /api/activity is ONE combined endpoint ({tasks,reviews,stats}) so Phase 11 issues ONE TanStack query with ONE loading state; degradation rides in reviews.state and the whole response is always 200 (D-01, REVIEWS-04). GATE 1 (github_integration != 'on') short-circuits to reviews.state='disabled' with zero gh spawns before any aggregateReviews call.
 - [Phase 10]: [Phase 10/Plan 02]: aggregateReviews uses errgroup (SetLimit 5, promoted indirect→direct v0.20.0) with per-repo 12s timeout; closures return nil on EVERY outcome so a degrade rides in the per-repo state and NEVER cancels the group (Pitfall 4). The reviews WINDOW FILTER compares time.Time-vs-time.Time via parseActivityTime — never a string compare across the ms cutoff vs second-precision gh closedAt (REVIEWS-01/STATS-01). Two cutoff representations (cutoffStr ms-ISO for lexical SQL, cutoffTime time.Time for reviews) derive from one now.Add(-window).
+- [Phase Phase 11]: Split Task 1 (tdd=true) into 3 commits: non-TDD parts (types+query) first, then RED→GREEN for formatDuration — keeps TDD discipline clean for the behavior-specified function — Only formatDuration has a behavior block (TDD candidate); wire types and query are declarations/glue code (Skip TDD per tdd.md guidance). Splitting avoids forcing type declarations into a test commit.
 
 ## Operator Next Steps
 

@@ -70,7 +70,7 @@
 
 **Wave 1**
 
-- [ ] 11-01-PLAN.md — Data & state foundation (activity wire types, useActivity query, formatDuration util, useActivityView localStorage hook)
+- [x] 11-01-PLAN.md — Data & state foundation (activity wire types, useActivity query, formatDuration util, useActivityView localStorage hook)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -158,4 +158,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 08. Sessions & Terminal Read Access | v1.11 | 3/3 | Complete    | 2026-07-23 |
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
 | 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
-| 11. Activity Page & Controls | v1.12 | 0/2 | Not started | - |
+| 11. Activity Page & Controls | v1.12 | 1/2 | In Progress|  |
