@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
 current_phase: 12
+current_phase_name: activity-chart-tooltips
 status: in_progress
-stopped_at: Phase 12 added — v1.12 reopened for Activity chart + stat tooltips (not yet planned)
-last_updated: "2026-08-01T07:40:00.000Z"
+stopped_at: Phase 12 context gathered
+last_updated: "2026-08-01T10:23:00.726Z"
 last_activity: 2026-08-01
-last_activity_desc: v1.12 reopened — Phase 12 (Activity Chart & Stat Tooltips) added to ROADMAP
+last_activity_desc: Phase 12 added to ROADMAP (v1.12 reopened)
 progress:
-  total_phases: 3
+  total_phases: 2
   completed_phases: 2
   total_plans: 6
   completed_plans: 6
-  percent: 67
-current_phase_name: activity-chart-tooltips
+  percent: 100
 ---
 
 # Project State
@@ -60,9 +60,9 @@ Last activity: 2026-08-01 — Phase 12 added to ROADMAP (v1.12 reopened)
 
 ## Session
 
-**Last session:** 2026-08-01
-**Stopped at:** Phase 12 added to v1.12 (reopened) — ready to plan
-**Resume file:** None
+**Last session:** 2026-08-01T10:23:00.716Z
+**Stopped at:** Phase 12 context gathered
+**Resume file:** .planning/phases/12-activity-chart-tooltips/12-CONTEXT.md
 
 ## Performance Metrics
 
