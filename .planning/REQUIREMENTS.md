@@ -38,9 +38,9 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 
 Phase 12 (v1.12 reopened) — pulls the one previously-deferred viz (ACTFUT-02, the daily stacked bar) into scope and makes every number self-explanatory. Frontend-only; no backend change (reuses the Phase 10 `GET /api/activity` data).
 
-- [ ] **CHART-01**: The Activity page shows a daily stacked-bar chart (tasks-done + reviews-done per calendar day; one bar per day; Week window = 7 bars, Month window = 30 bars) that recomputes on scope/window change. All N bars are always present (a zero-activity day renders as a minimal baseline stub, not a gap); tasks segment on the bottom, reviews stacked on top in two distinguishable muted hues; Week x-axis shows a weekday label per bar, Month shows sparse date markers; hovering any bar shows the absolute date + per-series counts; when reviews are unavailable the reviews segment reads as 0 per bar and the chart renders tasks-only without breaking.
-- [ ] **STAT-01**: The three time-stat rows (Cycle, In-progress dwell, In-review dwell) each have an explanatory tooltip (triggered by an info icon) explaining the metric definition and the min·median·max legend; the two lead counts get no tooltip.
-- [ ] **ENTRY-01**: Each tasks-done and reviews-done entry shows an absolute completion timestamp (`Jul 29, 14:32` — compact date + 24h time) beside it, replacing the previous relative time.
+- [x] **CHART-01**: The Activity page shows a daily stacked-bar chart (tasks-done + reviews-done per calendar day; one bar per day; Week window = 7 bars, Month window = 30 bars) that recomputes on scope/window change. All N bars are always present (a zero-activity day renders as a minimal baseline stub, not a gap); tasks segment on the bottom, reviews stacked on top in two distinguishable muted hues; Week x-axis shows a weekday label per bar, Month shows sparse date markers; hovering any bar shows the absolute date + per-series counts; when reviews are unavailable the reviews segment reads as 0 per bar and the chart renders tasks-only without breaking.
+- [x] **STAT-01**: The three time-stat rows (Cycle, In-progress dwell, In-review dwell) each have an explanatory tooltip (triggered by an info icon) explaining the metric definition and the min·median·max legend; the two lead counts get no tooltip.
+- [x] **ENTRY-01**: Each tasks-done and reviews-done entry shows an absolute completion timestamp (`Jul 29, 14:32` — compact date + 24h time) beside it, replacing the previous relative time.
 
 ## Future Requirements
 
@@ -92,9 +92,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CHART-01 | Phase 12 | Pending |
-| STAT-01 | Phase 12 | Pending |
-| ENTRY-01 | Phase 12 | Pending |
+| CHART-01 | Phase 12 | Complete |
+| STAT-01 | Phase 12 | Complete |
+| ENTRY-01 | Phase 12 | Complete |
 
 **Coverage:**
 

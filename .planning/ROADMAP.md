@@ -90,7 +90,7 @@
 
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — Foundation & stat tooltips (shadcn chart primitive + recharts via `shadcn add chart`; `formatDateTime` formatter in `lib/time.ts`; StatsStrip Info-icon tooltips on the three time-stat rows)
+- [x] 12-01-PLAN.md — Foundation & stat tooltips (shadcn chart primitive + recharts via `shadcn add chart`; `formatDateTime` formatter in `lib/time.ts`; StatsStrip Info-icon tooltips on the three time-stat rows)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -184,4 +184,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
 | 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete    | 2026-07-31 |
-| 12. Activity Chart & Stat Tooltips | v1.12 | 0/2 | Not started | — |
+| 12. Activity Chart & Stat Tooltips | v1.12 | 1/2 | In Progress|  |
