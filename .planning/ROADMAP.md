@@ -27,7 +27,7 @@
 
 - [x] **Phase 10: Activity Data & API** - Scoped/windowed tasks-done, reviews-done (merged/closed reviewed-by:@me), and task cycle/dwell statistics behind a new activity endpoint set (completed 2026-07-30)
 - [x] **Phase 11: Activity Page & Controls** - Top-level Activity page (sidebar entry, scope selector, Week/Month toggle) rendering tasks-done + reviews-done lists and statistics (completed 2026-07-31)
-- [ ] **Phase 12: Activity Chart & Stat Tooltips** - Daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) + explanatory tooltips on the stats strip and per-entry completion times
+- [x] **Phase 12: Activity Chart & Stat Tooltips** - Daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) + explanatory tooltips on the stats strip and per-entry completion times (completed 2026-08-01)
 
 ## Phase Details
 
@@ -86,7 +86,7 @@
 **Goal**: Make the Activity page communicate daily cadence at a glance and make every number self-explanatory — add a daily stacked-bar chart (tasks-done + reviews-done per day; one bar per day, Week window = 7 bars, Month window = 30 bars) that recomputes on scope/window change, and add explanatory tooltips to the StatsStrip rows (cycle, in-progress dwell, in-review dwell min·median·max) and the per-entry completion times shown beside each task/review.
 **Depends on**: Phase 11 (extends the Activity page, ScopeSelector/WindowToggle/StatsStrip/ActivityList/ReviewsList, and the GET /api/activity contract; reuses the existing client-side task `done_at` + review `completedAt` data — no backend change).
 **Requirements**: CHART-01, STAT-01, ENTRY-01
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 **Wave 1**
 
@@ -184,4 +184,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
 | 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete    | 2026-07-31 |
-| 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete   | 2026-08-01 |
+| 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete    | 2026-08-01 |

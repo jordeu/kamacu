@@ -1,38 +1,48 @@
 ---
 phase: 12-activity-chart-tooltips
 verified: 2026-08-01T14:05:00Z
-status: human_needed
+status: passed
 score: 10/15 must-haves verified
 behavior_unverified: 5 # truths present + wired but behavior not exercised (no test runner in this project — visual/interaction UAT deferred to /gsd-verify-work)
 overrides_applied: 0
 human_verification:
+
   - test: "Open the Activity page (Week window); confirm 7 stacked-bar columns render left→right with the weekday label under each (Mon..today)."
     expected: "All 7 bars present; tasks (muted blue #5e719c) on the bottom, reviews (muted teal #46776f) stacked on top; weekday labels legible in the dark theme."
     why_human: "Bar geometry, color distinction, and dark-theme legibility are runtime-rendering properties grep cannot see."
+
   - test: "Hover each of the 7 Week bars (including any zero-activity day)."
     expected: "A tooltip appears showing the absolute date header (e.g. 'Wed, Jul 29') plus two rows — 'Tasks' and 'Reviews' — with their counts. Zero-day bars show '0 / 0'. Cursor highlight is muted (var(--accent) @ 40%)."
     why_human: "ChartTooltip/ChartTooltipContent wiring is structurally confirmed but the actual hover-render behavior is recharts runtime; no test exercises it."
+
   - test: "Switch to the Month window."
     expected: "30 bars render with ~5 sparse date markers (indices 0,7,14,21,28 → 'M/D' labels like '7/2'); the timeline does NOT crowd. Zero-activity days still show the 2px baseline stub."
     why_human: "Sparse-marker rendering and zero-day stub geometry at the x-axis baseline are runtime-rendering properties."
+
   - test: "Inspect a zero-activity day bar closely."
     expected: "A 2px muted (var(--border)) baseline tick sits at the x-axis baseline — NOT a gap, NOT a full-height bar. Confirms D-05 ZeroDayStub custom shape renders correctly."
     why_human: "The ZeroDayStub function is structurally present and uses recharts BarShapeProps geometry, but its actual painted output at runtime (correct x/y/width/height from the `background` prop) needs visual confirmation — Assumption A3 (MEDIUM risk) per 12-RESEARCH."
+
   - test: "Toggle scope (Global → a Workspace → a Project) and toggle window (Week ↔ Month)."
     expected: "The chart rebuckets from the fresh useActivity data — bars update to the new scope/window. No new fetch spinner, no chart-local loading state; the page's single loading skeleton handles the transition."
     why_human: "Recompute-on-prop-change is structurally sound (bucketByDay called from `data` prop, no internal state/fetch) but the actual rebucket-on-refetch behavior is a runtime state transition no test exercises."
+
   - test: "Force a HARD_DEGRADE reviews state (disable GitHub integration in Settings, or run with gh absent) and open the Activity page."
     expected: "The reviews segment reads 0 on every bar (tasks-only bars); the chart never breaks or hides. Reviews-done list below suppresses entirely (Phase 11 D-12)."
     why_human: "The degrade mechanism (empty prs array → bucket loop body never runs → 0 per bucket) is structurally sound but the actual tasks-only rendering under degrade is a runtime state transition."
+
   - test: "Hover/focus the Info (i) icon beside each of the three time-stat rows (Cycle, In progress, In review)."
     expected: "Tooltip opens instantly (delayDuration=0) showing the D-08 copy: metric definition + 'min · median · max = fastest · typical · slowest'. Mouse-leave/blur closes it."
     why_human: "Tooltip-open-on-focus is radix default behavior; the Info-icon-in-button wiring is structurally confirmed but the actual interaction is runtime."
+
   - test: "Tab through the StatsStrip with the keyboard."
     expected: "Tab reaches each of the three Info <button> elements (aria-label present); focus alone opens the tooltip; Esc dismisses. Counts (taskCount/reviewCount) are NOT in the tab order for tooltips."
     why_human: "Keyboard reachability and focus-open are runtime interaction properties."
+
   - test: "Inspect the per-entry timestamps in the tasks-done and reviews-done lists."
     expected: "Each entry shows an absolute 'Jul 29, 14:32' (compact month-abbrev + day + 24h HH:MM, no weekday/year) — NOT a relative '3h ago'. Null/invalid timestamps render as em-dash '—'."
     why_human: "The formatDateTime call sites are structurally confirmed and the format is node-asserted, but the rendered string reading correctly in the dark theme is a visual judgment."
+
   - test: "Confirm the chart sits ABOVE the StatsStrip in the page flow."
     expected: "Page order top→bottom: heading → control bar (scope + window) → ActivityChart → StatsStrip → tasks-done → reviews-done."
     why_human: "Mount position is structurally confirmed (line 58 < line 59 in ActivityPage.tsx) but the visual page-flow ordering is a quick visual confirm."

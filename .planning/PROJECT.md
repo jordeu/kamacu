@@ -10,7 +10,7 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ## Milestone Status
 
-**Active: v1.12 Activity & Statistics (reopened 2026-08-01 for Phase 12).** Phases 10–11 shipped (2 phases, 6 plans, 8/8 requirements; Phase 11 verified 26/26 + UAT 7/7). Phase 12 added to extend the Activity page: a daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) + explanatory tooltips on the stats strip and per-entry completion times. Chart via recharts (shadcn chart pattern); tooltips via the existing shadcn tooltip; no backend change (reuses client-side task/review data).
+**Active: v1.12 Activity & Statistics (complete 2026-08-01).** All 3 phases shipped (10–12, 6 plans). Phase 12 closed the milestone: a daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) with hover tooltips, explanatory tooltips on the stats strip, and absolute per-entry completion times. Chart via recharts (shadcn chart pattern); no backend change. UAT 10/10 passed; verification canonicalized. Ready for `/gsd-complete-milestone` to audit + archive.
 
 **Previously shipped:** v1.11 Kamacu MCP Server shipped 2026-07-29 (23/23 requirements; 4 phases, 11 plans; archived to `milestones/v1.11-*`). AGNT-01 fully delivered.
 
@@ -274,11 +274,16 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
+_(v1.12 requirements all validated — see below.)_
+
+### Recently Validated
+
 **v1.12 Activity & Statistics** — a new top-level Activity page (route + sidebar entry, like Settings) with a Global / Workspace / Project scope selector and a segmented Week/Month toggle (last 7 / last 30 days rolling):
-- [ ] **Tasks done list** — manual tasks (`source='manual'`) with `done_at` in the window, grouped by project
-- [ ] **Reviews done list** — PRs from `reviewed-by:@me` that MERGED or CLOSED in the window (GitHub merge/close timestamp), grouped by project
-- [ ] **Statistics** — counts (tasks done, reviews done) + min/max/median **cycle time** (In Progress→Done) and **per-column dwell** (time in In Progress, time in In Review), powered by the existing per-status timestamps (migration 00006)
-- [ ] Time stats apply to **tasks only**; reviews surface counts only (GitHub's merge signal has no Kamacu in-progress/in-review timestamps)
+- ✓ **Tasks done list** — manual tasks (`source='manual'`) with `done_at` in the window, grouped by project — Phases 10–11
+- ✓ **Reviews done list** — PRs from `reviewed-by:@me` that MERGED or CLOSED in the window (GitHub merge/close timestamp), grouped by project — Phases 10–11
+- ✓ **Statistics** — counts (tasks done, reviews done) + min/max/median **cycle time** (In Progress→Done) and **per-column dwell** (time in In Progress, time in In Review), powered by the existing per-status timestamps (migration 00006) — Phases 10–11
+- ✓ Time stats apply to **tasks only**; reviews surface counts only (GitHub's merge signal has no Kamacu in-progress/in-review timestamps) — Phases 10–11
+- ✓ **Activity chart** — daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) with hover tooltips showing absolute date + counts, plus explanatory tooltips on the stats strip and absolute per-entry completion times (recharts via shadcn chart pattern; no backend change) — Phase 12 (CHART-01/STAT-01/ENTRY-01)
 
 ### Out of Scope
 
@@ -464,3 +469,5 @@ This document evolves at phase transitions and milestone boundaries.
 *Last updated: 2026-07-31 after v1.12 Activity & Statistics milestone. All 8 v1.12 requirements (ACT·TASKS·REVIEWS) validated across Phases 10–11; Active reset to "next milestone not yet scoped"; Milestone Status flipped to "just shipped v1.12". One new Key Decision logged (non-nil-slice wire contract as the canonical JSON-array contract + byte-level regression tests). v1.12 implemented 2026-07-31 — 2 phases (10–11), 6 plans, 8/8 requirements; ready for `/gsd:complete-milestone` audit + archive.*
 
 *Last updated: 2026-07-29 after v1.11 Kamacu MCP Server milestone. Full evolution review: the v1.11 milestone block added to shipped history; all 23 v1.11 requirements (MCPPROC·MCPTASK·MCPSESS·MCPREV·MCPPROJ) already in Validated from per-phase transitions; Active reset to "next milestone not yet scoped"; Next Milestone updated (v1.11 follow-ups banked: MCPAUTO, MCPREG, MCPMORE, MCPHARD); AGNT-01 marked delivered in Deferred. Milestone Status flipped to "planning next milestone". v1.11 shipped 2026-07-29 — 4 phases (06–09), 11 plans, 23/23 requirements; archived to `milestones/v1.11-*`; tag v1.11.*
+
+*Last updated: 2026-08-01 after Phase 12 (v1.12 Activity & Statistics milestone complete). Phase 12 added the activity chart (recharts stacked-bar, Week=7/Month=30 bars, hover tooltips), stat-strip explanatory tooltips, and absolute per-entry completion times (CHART-01/STAT-01/ENTRY-01); no backend change. UAT 10/10 passed, verification canonicalized to passed. Three v1.12 chart/tooltip requirements moved to Validated; Milestone Status flipped to "v1.12 complete". v1.12 now 3 phases (10–12), 6 plans — ready for `/gsd-complete-milestone` audit + archive.*
