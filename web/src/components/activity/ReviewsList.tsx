@@ -3,7 +3,7 @@ import type {
   ActivityReviewState,
   ReviewDoneSummary,
 } from "@/api/types";
-import { formatAgo } from "@/lib/time";
+import { formatDateTime } from "@/lib/time";
 import { groupByProject } from "./ActivityList";
 
 /**
@@ -69,8 +69,6 @@ export function ReviewsList({ reviews }: { reviews: ActivityResponse["reviews"] 
     return null;
   }
 
-  const now = Date.now();
-
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Reviews completed`}</h2>
@@ -94,7 +92,7 @@ export function ReviewsList({ reviews }: { reviews: ActivityResponse["reviews"] 
                   {review.title}
                 </span>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {formatAgo(review.completedAt, now)}
+                  {formatDateTime(review.completedAt)}
                 </span>
               </a>
             ))}

@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import type { ActivityTask } from "@/api/types";
-import { formatAgo } from "@/lib/time";
+import { formatDateTime } from "@/lib/time";
 
 /**
  * Phase 11 — the tasks-done list (CONTEXT D-13, D-15; TASKS-02/03).
@@ -45,7 +45,6 @@ export function groupByProject<
 }
 
 export function ActivityList({ tasks }: { tasks: ActivityTask[] }) {
-  const now = Date.now();
   const groups = groupByProject(tasks);
 
   return (
@@ -70,7 +69,7 @@ export function ActivityList({ tasks }: { tasks: ActivityTask[] }) {
                     {task.title}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {formatAgo(task.doneAt, now)}
+                    {formatDateTime(task.doneAt)}
                   </span>
                 </Link>
               ))}
