@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ActivityChart } from "@/components/activity/ActivityChart";
 import { ActivityList } from "@/components/activity/ActivityList";
 import { ReviewsList } from "@/components/activity/ReviewsList";
 import { ScopeSelector } from "@/components/activity/ScopeSelector";
@@ -54,6 +55,7 @@ export default function ActivityPage() {
               <ScopeSelector scope={scope} onScopeChange={setScope} />
               <WindowToggle window={window} onWindowChange={setWindow} />
             </div>
+            <ActivityChart data={data} window={window} />
             <StatsStrip stats={data.stats} />
             <ActivityList tasks={data.tasks ?? []} />
             <ReviewsList reviews={{ ...data.reviews, prs: data.reviews.prs ?? [] }} />
