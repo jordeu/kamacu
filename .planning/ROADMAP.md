@@ -94,12 +94,12 @@
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 12-02-PLAN.md — Chart component & entry times (`ActivityChart.tsx` daily stacked-bar + mount above StatsStrip; `formatAgo` → `formatDateTime` swap in ActivityList/ReviewsList)
+- [x] 12-02-PLAN.md — Chart component & entry times (`ActivityChart.tsx` daily stacked-bar + mount above StatsStrip; `formatAgo` → `formatDateTime` swap in ActivityList/ReviewsList)
 
 <details><summary>Plans</summary>
 
-- [ ] 12-01-PLAN.md — Foundation & stat tooltips
-- [ ] 12-02-PLAN.md — Chart component & entry times
+- [x] 12-01-PLAN.md — Foundation & stat tooltips
+- [x] 12-02-PLAN.md — Chart component & entry times
 
 </details>
 
@@ -184,4 +184,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
 | 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete    | 2026-07-31 |
-| 12. Activity Chart & Stat Tooltips | v1.12 | 1/2 | In Progress|  |
+| 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete   | 2026-08-01 |

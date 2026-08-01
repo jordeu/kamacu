@@ -5,8 +5,8 @@ milestone_name: Activity & Statistics
 current_phase: 12
 current_phase_name: activity-chart-tooltips
 status: executing
-stopped_at: Phase 12 UI-SPEC approved
-last_updated: "2026-08-01T11:12:56.356Z"
+stopped_at: Completed 12-02-PLAN.md (Activity chart + absolute entry times)
+last_updated: "2026-08-01T11:24:32.905Z"
 last_activity: 2026-08-01
 last_activity_desc: Phase 12 execution started
 progress:
@@ -43,8 +43,8 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 ## Current Position
 
 Phase: 12 (activity-chart-tooltips) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 12
+Plan: 2 of 2
+Status: Ready to execute
 Last activity: 2026-08-01 — Phase 12 execution started
 
 ### Quick Tasks Completed
@@ -60,9 +60,9 @@ Last activity: 2026-08-01 — Phase 12 execution started
 
 ## Session
 
-**Last session:** 2026-08-01T11:12:03.760Z
-**Stopped at:** Phase 12 UI-SPEC approved
-**Resume file:** .planning/phases/12-activity-chart-tooltips/12-UI-SPEC.md
+**Last session:** 2026-08-01T11:24:32.896Z
+**Stopped at:** Completed 12-02-PLAN.md (Activity chart + absolute entry times)
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -85,6 +85,7 @@ Last activity: 2026-08-01 — Phase 12 execution started
 | Phase 11 P02 | 5 min | 2 tasks | 8 files |
 | Phase 11 P03 | 10 min | 3 tasks (resume) | 5 source + 3 docs |
 | Phase 12 P01 | 5 min | 3 tasks | 5 files |
+| Phase Phase 12 P02 | 6 min | 2 tasks tasks | 4 files files |
 
 ## Decisions
 
@@ -121,6 +122,8 @@ Last activity: 2026-08-01 — Phase 12 execution started
 - [Phase 12]: shadcn add chart resolved recharts to ^3.8.0 (not ^3.10.1 as RESEARCH projected) — same v3 major, peer-declares react ^19.0.0; the D-02 sole-new-dep contract is satisfied (the before/after package.json diff showed recharts as the ONLY new entry). The specific patch version within v3 is not load-bearing.
 - [Phase 12]: recharts SUS verdict from package-legitimacy seam overridden (false positive — keyed on latest-version publish date 2026-07-25, not the package's 2015-08-07 creation date; 49M weekly downloads, 11-year history, shadcn's own chart block depends on it). No checkpoint:human-verify needed; documented in the plan's T-12-SC threat entry.
 - [Phase 12]: Pre-existing npm run lint errors (29 errors, primarily react-hooks/set-state-in-effect in TaskPage.tsx) are OUT OF SCOPE for this frontend chart-tooltips phase — chart.tsx and StatsStrip.tsx both lint clean in isolation. Logged to deferred-items.md for a dedicated cleanup task.
+- [Phase Phase 12]: [Phase 12 / Plan 02]: ZeroDayStub passed as a function reference (shape={ZeroDayStub}) rather than an element — RESEARCH documents both as equivalent; the function form is type-safe against recharts BarShapeProps (the element form would require Partial weakening). Same D-05 zero-day-stub behavior.
+- [Phase Phase 12]: [Phase 12 / Plan 02]: bucketByDay(now) defaults to Date.now() internally; ActivityChart does not pass now — buckets recomputed every render from useActivity data, so scope/window change rebuckets without a new fetch (Phase 10 D-01).
 
 ## Operator Next Steps
 
