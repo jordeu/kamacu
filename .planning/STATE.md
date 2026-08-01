@@ -5,8 +5,8 @@ milestone_name: Activity & Statistics
 current_phase: 12
 current_phase_name: activity-chart-tooltips
 status: in_progress
-stopped_at: Phase 12 context gathered
-last_updated: "2026-08-01T10:23:00.726Z"
+stopped_at: Phase 12 UI-SPEC approved
+last_updated: "2026-08-01T10:30:27.407Z"
 last_activity: 2026-08-01
 last_activity_desc: Phase 12 added to ROADMAP (v1.12 reopened)
 progress:
@@ -60,9 +60,9 @@ Last activity: 2026-08-01 — Phase 12 added to ROADMAP (v1.12 reopened)
 
 ## Session
 
-**Last session:** 2026-08-01T10:23:00.716Z
-**Stopped at:** Phase 12 context gathered
-**Resume file:** .planning/phases/12-activity-chart-tooltips/12-CONTEXT.md
+**Last session:** 2026-08-01T10:30:27.397Z
+**Stopped at:** Phase 12 UI-SPEC approved
+**Resume file:** .planning/phases/12-activity-chart-tooltips/12-UI-SPEC.md
 
 ## Performance Metrics
 

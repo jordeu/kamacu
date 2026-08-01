@@ -34,6 +34,14 @@ Requirements for v1.12 — Activity & Statistics. Each maps to roadmap phases.
 - [x] **STATS-03**: User can see min / max / median dwell time per column (time in In Progress, and time in In Review) for tasks done in the window
 - [x] **STATS-04**: Cycle/dwell time stats cover tasks only; reviews contribute a count, not time stats (GitHub's merge signal has no Kamacu in-progress/in-review timestamps)
 
+### Activity Chart & Stat Tooltips (CHART/STAT/ENTRY)
+
+Phase 12 (v1.12 reopened) — pulls the one previously-deferred viz (ACTFUT-02, the daily stacked bar) into scope and makes every number self-explanatory. Frontend-only; no backend change (reuses the Phase 10 `GET /api/activity` data).
+
+- [ ] **CHART-01**: The Activity page shows a daily stacked-bar chart (tasks-done + reviews-done per calendar day; one bar per day; Week window = 7 bars, Month window = 30 bars) that recomputes on scope/window change. All N bars are always present (a zero-activity day renders as a minimal baseline stub, not a gap); tasks segment on the bottom, reviews stacked on top in two distinguishable muted hues; Week x-axis shows a weekday label per bar, Month shows sparse date markers; hovering any bar shows the absolute date + per-series counts; when reviews are unavailable the reviews segment reads as 0 per bar and the chart renders tasks-only without breaking.
+- [ ] **STAT-01**: The three time-stat rows (Cycle, In-progress dwell, In-review dwell) each have an explanatory tooltip (triggered by an info icon) explaining the metric definition and the min·median·max legend; the two lead counts get no tooltip.
+- [ ] **ENTRY-01**: Each tasks-done and reviews-done entry shows an absolute completion timestamp (`Jul 29, 14:32` — compact date + 24h time) beside it, replacing the previous relative time.
+
 ## Future Requirements
 
 Deferred to a later release. Tracked but not in the current roadmap.
@@ -82,14 +90,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STATS-03 | Phase 10 | Complete |
 | STATS-04 | Phase 10 | Complete |
 
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| CHART-01 | Phase 12 | Pending |
+| STAT-01 | Phase 12 | Pending |
+| ENTRY-01 | Phase 12 | Pending |
+
 **Coverage:**
 
-- v1.12 requirements: 15 total
-- Mapped to phases: 15
+- v1.12 requirements: 18 total
+- Mapped to phases: 18
 - Unmapped: 0 ✓
 
-**Phase distribution:** Phase 10 (Activity Data & API): 7 — TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01..04. Phase 11 (Activity Page & Controls): 8 — ACT-01..04, TASKS-02..03, REVIEWS-02..03.
+**Phase distribution:** Phase 10 (Activity Data & API): 7 — TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01..04. Phase 11 (Activity Page & Controls): 8 — ACT-01..04, TASKS-02..03, REVIEWS-02..03. Phase 12 (Activity Chart & Stat Tooltips): 3 — CHART-01, STAT-01, ENTRY-01.
 
 ---
 *Requirements defined: 2026-07-29*
-*Last updated: 2026-07-29 after roadmap creation (milestone v1.12 Activity & Statistics — Phases 10–11, 15/15 requirements mapped)*
+*Last updated: 2026-08-01 after Phase 12 planning (added CHART-01, STAT-01, ENTRY-01; v1.12 reopened for Phase 12 — 18/18 requirements mapped)*

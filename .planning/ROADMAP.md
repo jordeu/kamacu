@@ -85,12 +85,21 @@
 
 **Goal**: Make the Activity page communicate daily cadence at a glance and make every number self-explanatory — add a daily stacked-bar chart (tasks-done + reviews-done per day; one bar per day, Week window = 7 bars, Month window = 30 bars) that recomputes on scope/window change, and add explanatory tooltips to the StatsStrip rows (cycle, in-progress dwell, in-review dwell min·median·max) and the per-entry completion times shown beside each task/review.
 **Depends on**: Phase 11 (extends the Activity page, ScopeSelector/WindowToggle/StatsStrip/ActivityList/ReviewsList, and the GET /api/activity contract; reuses the existing client-side task `done_at` + review `completedAt` data — no backend change).
-**Requirements**: TBD (define in /gsd-discuss-phase 12 — candidates: daily-chart, stat-tooltip, entry-time-tooltip).
-**Plans:** 0 plans
+**Requirements**: CHART-01, STAT-01, ENTRY-01
+**Plans:** 2 plans
+
+**Wave 1**
+
+- [ ] 12-01-PLAN.md — Foundation & stat tooltips (shadcn chart primitive + recharts via `shadcn add chart`; `formatDateTime` formatter in `lib/time.ts`; StatsStrip Info-icon tooltips on the three time-stat rows)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 12-02-PLAN.md — Chart component & entry times (`ActivityChart.tsx` daily stacked-bar + mount above StatsStrip; `formatAgo` → `formatDateTime` swap in ActivityList/ReviewsList)
 
 <details><summary>Plans</summary>
 
-- [ ] TBD (run /gsd-plan-phase 12 to break down)
+- [ ] 12-01-PLAN.md — Foundation & stat tooltips
+- [ ] 12-02-PLAN.md — Chart component & entry times
 
 </details>
 
@@ -175,4 +184,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
 | 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete    | 2026-07-31 |
-| 12. Activity Chart & Stat Tooltips | v1.12 | 0/0 | Not started | — |
+| 12. Activity Chart & Stat Tooltips | v1.12 | 0/2 | Not started | — |
