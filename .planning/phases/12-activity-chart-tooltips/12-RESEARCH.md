@@ -661,22 +661,19 @@ function ZeroDayStub(props: ShapeProps) {
 
 **No `[ASSUMED]` package-name claims** — `recharts` is named in CONTEXT D-01 and verified on npm; all other deps are existing in-repo packages.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does the `radix-nova` preset's generated `chart.tsx` differ materially from the `new-york-v4` source read here?**
+1. **Does the `radix-nova` preset's generated `chart.tsx` differ materially from the `new-york-v4` source read here?** — RESOLVED: The executor reads the actual generated `chart.tsx` after running `shadcn add chart` and adapts. The export surface (the 7 named exports + `ChartConfig` type) is stable across presets. LOW risk. (Incorporated into Plan 12-01 Task 1: read-first on the generated file.)
    - What we know: components.json:3 declares `"style": "radix-nova"`; the source read was from `new-york-v4`. Both are official shadcn registry paths.
    - What's unclear: whether class names or minor helper signatures differ in the `radix-nova` variant.
-   - Recommendation: The executor reads the actual generated `chart.tsx` after running `shadcn add chart` and adapts. The export surface (the 7 named exports + `ChartConfig` type) is stable across presets. LOW risk.
 
-2. **Exact sparse-marker indices for Month (interval=6 vs a custom tick function).**
+2. **Exact sparse-marker indices for Month (interval=6 vs a custom tick function).** — RESOLVED: Use `interval={6}` (declarative, simplest — gives indices 0,7,14,21,28, ~5 labels for 30 bars per D-06). If UAT finds the markers land on odd days, switch to a custom `tick` function that formats only Mondays. (Incorporated into Plan 12-02 Task 1: `interval={window === "week" ? 0 : 6}`.)
    - What we know: D-06 wants ~5 date markers across 30 bars; `interval={6}` gives indices 0,7,14,21,28.
    - What's unclear: whether those land on visually sensible Mondays or arbitrary days.
-   - Recommendation: Use `interval={6}` (declarative, simplest). If UAT finds the markers land on odd days, switch to a custom `tick` function that formats only Mondays. CONTEXT discretion item.
 
-3. **Should the chart animate on data change (scope/window switch)?**
+3. **Should the chart animate on data change (scope/window switch)?** — RESOLVED: Leave the default (`auto`); it respects `prefers-reduced-motion` and is subtle for a 192px canvas. The executor can disable (`isAnimationActive={false}`) if UAT flags it as distracting. (CONTEXT discretion item — no plan change needed; default behavior.)
    - What we know: recharts `Bar` has `isAnimationActive` (default `"auto"` — respects `prefers-reduced-motion`).
    - What's unclear: whether the default 400ms enter-animation feels good when switching scope/window (re-bucket).
-   - Recommendation: Leave the default (`auto`); it respects reduced-motion and is subtle for a 192px canvas. The executor can disable (`isAnimationActive={false}`) if UAT flags it as distracting.
 
 ## Environment Availability
 
