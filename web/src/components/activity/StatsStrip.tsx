@@ -1,5 +1,11 @@
+import { Info } from "lucide-react";
 import type { StatsBlock, TimeStat } from "@/api/types";
 import { formatDuration } from "@/lib/time";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 /**
  * Phase 11 — the statistics strip (CONTEXT D-08/D-09/D-11). A compact strip
@@ -15,10 +21,34 @@ import { formatDuration } from "@/lib/time";
  * No cards grid, no charts (D-09 / Out of Scope ACTFUT-02). Reviews
  * contribute `reviewCount` ONLY (STATS-04 — never a time-stat row).
  */
-function TimeStatRow({ label, stat }: { label: string; stat: TimeStat }) {
+function TimeStatRow({
+  label,
+  stat,
+  help,
+}: {
+  label: string;
+  stat: TimeStat;
+  help?: string;
+}) {
   return (
     <div className="flex items-baseline gap-2 text-sm">
-      <span className="min-w-[5.5rem] text-muted-foreground">{label}</span>
+      <span className="flex min-w-[6.5rem] items-center gap-1 text-muted-foreground">
+        {label}
+        {help && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`${label} metric explanation`}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Info className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{help}</TooltipContent>
+          </Tooltip>
+        )}
+      </span>
       {stat.n === 0 ? (
         <span className="font-mono text-muted-foreground">—</span>
       ) : (
@@ -53,9 +83,21 @@ export function StatsStrip({ stats }: { stats: StatsBlock }) {
         </div>
       </div>
       <div className="flex flex-col gap-1">
-        <TimeStatRow label={`Cycle`} stat={stats.cycle} />
-        <TimeStatRow label={`In progress`} stat={stats.dwellInProgress} />
-        <TimeStatRow label={`In review`} stat={stats.dwellInReview} />
+        <TimeStatRow
+          label={`Cycle`}
+          stat={stats.cycle}
+          help={`Time from In Progress → Done. min · median · max = fastest · typical · slowest.`}
+        />
+        <TimeStatRow
+          label={`In progress`}
+          stat={stats.dwellInProgress}
+          help={`Time spent in the In Progress column. min · median · max = fastest · typical · slowest.`}
+        />
+        <TimeStatRow
+          label={`In review`}
+          stat={stats.dwellInReview}
+          help={`Time spent in the In Review column. min · median · max = fastest · typical · slowest.`}
+        />
       </div>
     </section>
   );
