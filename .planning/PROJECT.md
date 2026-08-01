@@ -10,7 +10,7 @@ One place to see and drive all agent work: every task gets its own isolated work
 
 ## Milestone Status
 
-**Just shipped: v1.12 Activity & Statistics (implemented 2026-07-31).** A new top-level Activity page lists tasks done and PR reviews completed (merged/closed) over a rolling week/month window — scoped globally, by workspace, or by project — alongside a statistics section with counts and min/max/median cycle + per-column dwell times. 2 phases (10–11), 6 plans, 8/8 requirements (ACT·TASKS·REVIEWS); Phase 11 verified 26/26 must-haves + UAT 7/7 (0 issues); the empty-instance "black page" contract bug was found in UAT and closed in-plan (11-03: non-nil wire contract `tasks:[]`/`prs:[]` + three-layer frontend null defense). Run `/gsd:complete-milestone` to audit and archive.
+**Active: v1.12 Activity & Statistics (reopened 2026-08-01 for Phase 12).** Phases 10–11 shipped (2 phases, 6 plans, 8/8 requirements; Phase 11 verified 26/26 + UAT 7/7). Phase 12 added to extend the Activity page: a daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) + explanatory tooltips on the stats strip and per-entry completion times. Chart via recharts (shadcn chart pattern); tooltips via the existing shadcn tooltip; no backend change (reuses client-side task/review data).
 
 **Previously shipped:** v1.11 Kamacu MCP Server shipped 2026-07-29 (23/23 requirements; 4 phases, 11 plans; archived to `milestones/v1.11-*`). AGNT-01 fully delivered.
 

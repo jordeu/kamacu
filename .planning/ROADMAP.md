@@ -14,19 +14,20 @@
 - ✅ **v1.9 Workspaces** — Phases 25–26 (shipped 2026-07-06) — see [milestones/v1.9-ROADMAP.md](milestones/v1.9-ROADMAP.md)
 - ✅ **v1.10 Configurable Agents** — Phases 01–05 (shipped 2026-07-11) — see [milestones/v1.10-ROADMAP.md](milestones/v1.10-ROADMAP.md)
 - ✅ **v1.11 Kamacu MCP Server** — Phases 06–09 (shipped 2026-07-29) — see [milestones/v1.11-ROADMAP.md](milestones/v1.11-ROADMAP.md)
-- 🚧 **v1.12 Activity & Statistics** — Phases 10–11 (planning 2026-07-29)
+- 🚧 **v1.12 Activity & Statistics** — Phases 10–12 (reopened 2026-07-31 for Phase 12)
 
 ## Phases
 
 <details open>
-<summary>🚧 v1.12 Activity & Statistics (Phases 10–11) — PLANNING 2026-07-29</summary>
+<summary>🚧 v1.12 Activity & Statistics (Phases 10–12) — REOPENED 2026-07-31 (Phase 12 added)</summary>
 
 **Milestone goal:** A new top-level Activity page lists tasks done and PR reviews completed (merged/closed) over a rolling Week (7d) / Month (30d) window — scoped globally, by workspace, or by project — alongside a statistics section with counts and min/max/median cycle (In-Progress→Done) + per-column dwell times. Tasks-only for time stats (GitHub's merge signal has no Kamacu in-progress/in-review timestamps).
 
-**Phase Numbering:** continues from v1.11's last phase (09). v1.12 = Phases 10–11.
+**Phase Numbering:** continues from v1.11's last phase (09). v1.12 = Phases 10–12 (Phase 12 added 2026-07-31 to extend the Activity page with a daily chart + stat tooltips).
 
 - [x] **Phase 10: Activity Data & API** - Scoped/windowed tasks-done, reviews-done (merged/closed reviewed-by:@me), and task cycle/dwell statistics behind a new activity endpoint set (completed 2026-07-30)
 - [x] **Phase 11: Activity Page & Controls** - Top-level Activity page (sidebar entry, scope selector, Week/Month toggle) rendering tasks-done + reviews-done lists and statistics (completed 2026-07-31)
+- [ ] **Phase 12: Activity Chart & Stat Tooltips** - Daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) + explanatory tooltips on the stats strip and per-entry completion times
 
 ## Phase Details
 
@@ -79,6 +80,21 @@
 **UI hint**: yes
 
 </details>
+
+### Phase 12: Activity Chart & Stat Tooltips
+
+**Goal**: Make the Activity page communicate daily cadence at a glance and make every number self-explanatory — add a daily stacked-bar chart (tasks-done + reviews-done per day; one bar per day, Week window = 7 bars, Month window = 30 bars) that recomputes on scope/window change, and add explanatory tooltips to the StatsStrip rows (cycle, in-progress dwell, in-review dwell min·median·max) and the per-entry completion times shown beside each task/review.
+**Depends on**: Phase 11 (extends the Activity page, ScopeSelector/WindowToggle/StatsStrip/ActivityList/ReviewsList, and the GET /api/activity contract; reuses the existing client-side task `done_at` + review `completedAt` data — no backend change).
+**Requirements**: TBD (define in /gsd-discuss-phase 12 — candidates: daily-chart, stat-tooltip, entry-time-tooltip).
+**Plans:** 0 plans
+
+<details><summary>Plans</summary>
+
+- [ ] TBD (run /gsd-plan-phase 12 to break down)
+
+</details>
+
+**UI hint**: yes
 
 <details>
 <summary>✅ v1.11 Kamacu MCP Server (Phases 06–09) — SHIPPED 2026-07-29</summary>
@@ -144,7 +160,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 
 ## Progress
 
-**Execution Order:** Phases execute in numeric order: 06 → 07 → 08 → 09 (v1.11, shipped) → 10 → 11 (v1.12, active).
+**Execution Order:** Phases execute in numeric order: 06 → 07 → 08 → 09 (v1.11, shipped) → 10 → 11 (v1.12, shipped) → 12 (v1.12, reopened — Activity chart + tooltips).
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -159,3 +175,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 09. PR Review Tools | v1.11 | 1/1 | Complete    | 2026-07-28 |
 | 10. Activity Data & API | v1.12 | 3/3 | Complete    | 2026-07-30 |
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete    | 2026-07-31 |
+| 12. Activity Chart & Stat Tooltips | v1.12 | 0/0 | Not started | — |

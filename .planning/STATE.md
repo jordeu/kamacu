@@ -2,24 +2,24 @@
 gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
-current_phase: 11
-status: completed
-stopped_at: Milestone v1.12 complete — all phases done (Phase 11 UAT 7/7 + verification passed)
-last_updated: "2026-07-31T18:15:49.888Z"
-last_activity: 2026-07-31
-last_activity_desc: Milestone v1.12 (Activity & Statistics) complete — Phase 11 verified 26/26 + UAT 7/7
+current_phase: 12
+status: in_progress
+stopped_at: Phase 12 added — v1.12 reopened for Activity chart + stat tooltips (not yet planned)
+last_updated: "2026-08-01T07:40:00.000Z"
+last_activity: 2026-08-01
+last_activity_desc: v1.12 reopened — Phase 12 (Activity Chart & Stat Tooltips) added to ROADMAP
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 2
   total_plans: 6
   completed_plans: 6
-  percent: 100
-current_phase_name: activity-page-controls
+  percent: 67
+current_phase_name: activity-chart-tooltips
 ---
 
 # Project State
 
-**Current focus:** Milestone v1.12 (Activity & Statistics) complete — ready to archive
+**Current focus:** Phase 12 — Activity Chart & Stat Tooltips (v1.12 reopened)
 
 See: .planning/PROJECT.md (updated 2026-07-31)
 
@@ -42,10 +42,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 ## Current Position
 
-Phase: 11 (activity-page-controls) — COMPLETE
-Plan: 3/3 done
-Status: Milestone v1.12 complete — Phase 11 verified 26/26 must-haves + UAT 7/7 (0 issues); black-page blocker closed (fix 11-03)
-Last activity: 2026-07-31 — Milestone v1.12 complete
+Phase: 12 (activity-chart-tooltips) — NOT STARTED
+Plan: 0/0 (not yet planned)
+Status: v1.12 reopened — Phase 12 added (Activity Chart & Stat Tooltips); Phases 10–11 remain complete
+Last activity: 2026-08-01 — Phase 12 added to ROADMAP (v1.12 reopened)
 
 ### Quick Tasks Completed
 
@@ -60,8 +60,8 @@ Last activity: 2026-07-31 — Milestone v1.12 complete
 
 ## Session
 
-**Last session:** 2026-07-31
-**Stopped at:** Milestone v1.12 complete — ready to archive via /gsd-complete-milestone
+**Last session:** 2026-08-01
+**Stopped at:** Phase 12 added to v1.12 (reopened) — ready to plan
 **Resume file:** None
 
 ## Performance Metrics
