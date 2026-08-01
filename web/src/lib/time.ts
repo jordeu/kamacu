@@ -31,3 +31,30 @@ export function formatDuration(totalSeconds: number): string {
   const remH = h % 24;
   return remH > 0 ? `${d}d ${remH}h` : `${d}d`;
 }
+
+/** Absolute "Jul 29, 14:32" — compact month-abbrev + day + comma + 24h HH:MM,
+ *  no weekday, no year (D-11). All entries fall within the 7/30-day rolling
+ *  Activity window so the year is implicit and the weekday is recoverable from
+ *  the chart.
+ *
+ *  Sibling of formatAgo / formatDuration. Zero deps (D-02 — the Phase-11
+ *  zero-new-npm-deps principle is relaxed for recharts ONLY, never for date
+ *  libs); uses Date.prototype.toLocaleString with an explicit "en-US" locale
+ *  for determinism (MDN warns output varies by host locale — Pitfall 6).
+ *
+ *  Accepts null AND undefined: ReviewDoneSummary.completedAt is gh-sourced
+ *  and could in theory be absent; the null/undefined + NaN guards are
+ *  defense-in-depth so a malformed gh closedAt never renders a blank row or
+ *  throws (mirrors formatDuration's em-dash sentinel). */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "—";
+  return new Date(ms).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
