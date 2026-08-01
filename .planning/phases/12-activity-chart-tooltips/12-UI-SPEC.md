@@ -1,10 +1,11 @@
 ---
 phase: 12
 slug: activity-chart-tooltips
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-08-01
+reviewed_at: 2026-08-01
 ---
 
 # Phase 12 — UI Design Contract
