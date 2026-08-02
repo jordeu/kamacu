@@ -2,24 +2,24 @@
 gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
-current_phase: 12
-status: executing
-stopped_at: Completed 12-02-PLAN.md (Activity chart + absolute entry times)
-last_updated: "2026-08-01T16:58:30.403Z"
+current_phase: 12.1
+status: ready_to_plan
+stopped_at: Phase 12.1 context gathered
+last_updated: "2026-08-02T05:16:12.371Z"
 last_activity: 2026-08-01
-last_activity_desc: Phase 12 complete
+last_activity_desc: "Phase 12.1 inserted (v1.12 audit gap closure: WR-01..03)"
 progress:
   total_phases: 2
   completed_phases: 2
   total_plans: 6
   completed_plans: 6
   percent: 100
-current_phase_name: activity-chart-tooltips
+current_phase_name: address-activity-tech-debt-wr-01-03
 ---
 
 # Project State
 
-**Current focus:** Milestone v1.12 complete — all phases shipped (10–12). Ready for `/gsd-complete-milestone` to audit + archive.
+**Current focus:** Phase 12.1 — Address Activity tech debt (WR-01..03) (INSERTED — gap closure from the v1.12 audit)
 
 See: .planning/PROJECT.md (updated 2026-08-01)
 
@@ -42,10 +42,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 ## Current Position
 
-Phase: 12
+Phase: 12.1
 Plan: Not started
-Status: Milestone complete — ready for /gsd-complete-milestone
-Last activity: 2026-08-01 — Phase 12 complete (UAT 10/10, verification passed)
+Status: Ready to plan
+Last activity: 2026-08-01 — Phase 12.1 inserted (v1.12 audit gap closure: WR-01..03)
 
 ### Quick Tasks Completed
 
@@ -60,9 +60,9 @@ Last activity: 2026-08-01 — Phase 12 complete (UAT 10/10, verification passed)
 
 ## Session
 
-**Last session:** 2026-08-01
-**Stopped at:** Phase 12 complete (UAT 10/10 passed, verification canonicalized to passed). Milestone v1.12 fully implemented — ready for `/gsd-complete-milestone` audit + archive.
-**Resume file:** None
+**Last session:** 2026-08-02T05:16:12.363Z
+**Stopped at:** Phase 12.1 context gathered
+**Resume file:** .planning/phases/12.1-address-activity-tech-debt-wr-01-03/12.1-CONTEXT.md
 
 ## Performance Metrics
 
@@ -129,3 +129,9 @@ Last activity: 2026-08-01 — Phase 12 complete (UAT 10/10, verification passed)
 
 - Phase 10 verified & complete (UAT 16/16, 7/7 requirements: TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01..04)
 - Next: Phase 11 — Activity Page & Controls (consumes Phase 10's `GET /api/activity`) — `/gsd-discuss-phase 11` → `/gsd-plan-phase 11`
+
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 12.1 inserted after Phase 12: Address Activity tech debt (WR-01..03) (URGENT)
