@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
+import { useProjects } from "@/api/queries";
+import { useWorkspaces } from "@/api/queries";
 
 /**
  * Phase 11 — the Activity page's persisted scope+window view state.
@@ -14,7 +16,11 @@ import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
  * The persisted scope is validated against the EXACT parseScope grammar
  * (activity_helpers.go:51-80: `global | workspace:N | project:N`) on read so a
  * tampered/stale localStorage value falls back to default — mirrors
- * useActiveWorkspace.tsx:60-65's stale-fallback pattern.
+ * useActiveWorkspace.tsx:60-65's stale-fallback pattern. Phase 12.1 layers a
+ * liveness check on top (D-07): a grammatically-valid `workspace:N`/`project:N`
+ * whose id is absent from the loaded rows demotes to `global` as the EFFECTIVE
+ * scope VALUE (D-04), without persisting the demotion (D-06 — mirrors
+ * useActiveWorkspace.tsx:57-66: persist only via the explicit setScope wrapper).
  */
 export const ACTIVITY_SCOPE_KEY = "kamacu.activity.scope";
 export const ACTIVITY_WINDOW_KEY = "kamacu.activity.window";
@@ -58,10 +64,20 @@ function readWindow(): ActivityWindow {
  * `workspace:<id>` as the default — WITHOUT overwriting a user's saved scope
  * (Phase 11 RESEARCH Pitfall 6: check the key is null, not just that
  * activeWorkspaceId resolved).
+ *
+ * Phase 12.1 return shape:
+ * - `scope` is the useMemo-derived EFFECTIVE scope (grammar-validated saved
+ *   scope, demoted to `"global"` once rows load and the id is absent — D-04/D-06).
+ *   Callers (`ActivityPage`, `ScopeSelector`) consume it transparently.
+ * - `scopeResolved` (Phase 12.1 WR-01, D-02) is the gate signal forwarded as
+ *   `useActivity`'s `enabled` arg: true once a saved scope exists OR the active
+ *   workspace resolved. Closes the Phase 11 Pitfall 6 dead gate (IN-01).
  */
 export function useActivityView() {
   const { activeWorkspaceId } = useActiveWorkspace();
-  const [scope, setScopeState] = useState<ActivityScope>(() =>
+  const { data: workspaces } = useWorkspaces();
+  const { data: projects } = useProjects();
+  const [savedScope, setSavedScope] = useState<ActivityScope>(() =>
     readScope("global"),
   );
   const [window, setWindowState] = useState<ActivityWindow>(readWindow);
@@ -74,12 +90,31 @@ export function useActivityView() {
       activeWorkspaceId !== null &&
       localStorage.getItem(ACTIVITY_SCOPE_KEY) === null
     ) {
-      setScopeState(`workspace:${activeWorkspaceId}`);
+      setSavedScope(`workspace:${activeWorkspaceId}`);
     }
   }, [activeWorkspaceId]);
 
+  const scopeResolved = useMemo(
+    () =>
+      localStorage.getItem(ACTIVITY_SCOPE_KEY) !== null ||
+      activeWorkspaceId !== null,
+    [activeWorkspaceId],
+  );
+
+  const scope = useMemo<ActivityScope>(() => {
+    if (savedScope === "global") return "global";
+    if (savedScope.startsWith("workspace:")) {
+      const id = Number(savedScope.slice("workspace:".length));
+      if (workspaces && !workspaces.some((w) => w.id === id)) return "global";
+      return savedScope;
+    }
+    const id = Number(savedScope.slice("project:".length));
+    if (projects && !projects.some((p) => p.id === id)) return "global";
+    return savedScope;
+  }, [savedScope, workspaces, projects]);
+
   const setScope = (s: ActivityScope) => {
-    setScopeState(s);
+    setSavedScope(s);
     localStorage.setItem(ACTIVITY_SCOPE_KEY, s);
   };
 
@@ -88,5 +123,5 @@ export function useActivityView() {
     localStorage.setItem(ACTIVITY_WINDOW_KEY, w);
   };
 
-  return { scope, setScope, window, setWindow };
+  return { scope, setScope, window, setWindow, scopeResolved };
 }

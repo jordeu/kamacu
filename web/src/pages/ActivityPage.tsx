@@ -21,8 +21,8 @@ import { useActivityView } from "@/lib/useActivityView";
  * wrapped in BoardWorkspaceSync (which reconciles a URL :projectId).
  */
 export default function ActivityPage() {
-  const { scope, setScope, window, setWindow } = useActivityView();
-  const { data, isLoading, isError, refetch } = useActivity(scope, window);
+  const { scope, setScope, window, setWindow, scopeResolved } = useActivityView();
+  const { data, isLoading, isError, refetch } = useActivity(scope, window, scopeResolved);
 
   if (isError) {
     // Mirrors SettingsPage.tsx:128-138 / BoardPage load-failure pattern.
