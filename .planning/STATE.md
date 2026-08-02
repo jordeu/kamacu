@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
 current_phase: 12.1
-status: ready_to_plan
+current_phase_name: Address Activity tech debt (WR-01..03
+status: verifying
 stopped_at: Phase 12.1 context gathered
-last_updated: "2026-08-02T05:16:12.371Z"
-last_activity: 2026-08-01
-last_activity_desc: "Phase 12.1 inserted (v1.12 audit gap closure: WR-01..03)"
+last_updated: "2026-08-02T06:01:44.392Z"
+last_activity: 2026-08-02
+last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 2
   completed_phases: 2
   total_plans: 6
   completed_plans: 6
   percent: 100
-current_phase_name: address-activity-tech-debt-wr-01-03
 ---
 
 # Project State
 
-**Current focus:** Phase 12.1 — Address Activity tech debt (WR-01..03) (INSERTED — gap closure from the v1.12 audit)
+**Current focus:** Phase 12.1 — Address Activity tech debt (WR-01..03)
 
 See: .planning/PROJECT.md (updated 2026-08-01)
 
@@ -42,10 +42,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 ## Current Position
 
-Phase: 12.1
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-01 — Phase 12.1 inserted (v1.12 audit gap closure: WR-01..03)
+Phase: 12.1 (Address Activity tech debt (WR-01..03)) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-08-02 — Phase 12.1 execution started
 
 ### Quick Tasks Completed
 
@@ -60,7 +60,7 @@ Last activity: 2026-08-01 — Phase 12.1 inserted (v1.12 audit gap closure: WR-0
 
 ## Session
 
-**Last session:** 2026-08-02T05:16:12.363Z
+**Last session:** 2026-08-02T06:01:00.218Z
 **Stopped at:** Phase 12.1 context gathered
 **Resume file:** .planning/phases/12.1-address-activity-tech-debt-wr-01-03/12.1-CONTEXT.md
 
@@ -86,6 +86,7 @@ Last activity: 2026-08-01 — Phase 12.1 inserted (v1.12 audit gap closure: WR-0
 | Phase 11 P03 | 10 min | 3 tasks (resume) | 5 source + 3 docs |
 | Phase 12 P01 | 5 min | 3 tasks | 5 files |
 | Phase Phase 12 P02 | 6 min | 2 tasks tasks | 4 files files |
+| Phase 12.1 P01 | 4 min | 3 tasks tasks | 4 files files |
 
 ## Decisions
 
@@ -124,6 +125,7 @@ Last activity: 2026-08-01 — Phase 12.1 inserted (v1.12 audit gap closure: WR-0
 - [Phase 12]: Pre-existing npm run lint errors (29 errors, primarily react-hooks/set-state-in-effect in TaskPage.tsx) are OUT OF SCOPE for this frontend chart-tooltips phase — chart.tsx and StatsStrip.tsx both lint clean in isolation. Logged to deferred-items.md for a dedicated cleanup task.
 - [Phase Phase 12]: [Phase 12 / Plan 02]: ZeroDayStub passed as a function reference (shape={ZeroDayStub}) rather than an element — RESEARCH documents both as equivalent; the function form is type-safe against recharts BarShapeProps (the element form would require Partial weakening). Same D-05 zero-day-stub behavior.
 - [Phase Phase 12]: [Phase 12 / Plan 02]: bucketByDay(now) defaults to Date.now() internally; ActivityChart does not pass now — buckets recomputed every render from useActivity data, so scope/window change rebuckets without a new fetch (Phase 10 D-01).
+- [Phase ?]: [Phase 12.1 / Plan 01]: scopeResolved computed via useMemo over [activeWorkspaceId] (not the audit state+effect snippet) — avoids the react-hooks/set-state-in-effect lint-debt class; effective Activity scope computed via useMemo over [savedScope, workspaces, projects] mirroring useActiveWorkspace.tsx:57-66 so D-06 (do not persist the demotion) is structurally satisfied (the useMemo returns the literal global without calling any setter)
 
 ## Operator Next Steps
 

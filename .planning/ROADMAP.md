@@ -115,7 +115,7 @@
 
 Plans:
 
-- [ ] 12.1-01-PLAN.md — Close WR-01 (enabled gate), WR-02 (stale-scope demotion to effective global), WR-03 (reviews aria-label title) + define TD-ACT-01/02/03 in REQUIREMENTS.md
+- [x] 12.1-01-PLAN.md — Close WR-01 (enabled gate), WR-02 (stale-scope demotion to effective global), WR-03 (reviews aria-label title) + define TD-ACT-01/02/03 in REQUIREMENTS.md
 
 **Inserted**: 2026-08-01 — urgent gap closure from the v1.12 milestone audit (tech_debt status).
 

@@ -46,9 +46,9 @@ Phase 12 (v1.12 reopened) — pulls the one previously-deferred viz (ACTFUT-02, 
 
 Phase 12.1 (v1.12 milestone archive) — closes the three non-blocking quality gaps the v1.12 audit (and `11-REVIEW.md`) surfaced in the Phase 11 Activity page. Frontend-only debt closure; no new capability requirements — each TD-ACT ID hardens an existing v1.12 requirement that stays marked Complete.
 
-- [ ] **TD-ACT-01**: The `useActivity` `enabled` gate is wired (`scopeResolved` forwarded from `useActivityView` to `useActivity`) so first-time users get no wasted `global` fetch and no wrong-scope flash on first `/activity` open (closes 11-REVIEW WR-01/IN-01; hardens ACT-03)
-- [ ] **TD-ACT-02**: A stale/deleted persisted `workspace:N`/`project:N` scope self-heals to effective `global` so the ScopeSelector trigger label, the All-activity dropdown check, and the `?scope=` query all agree (closes 11-REVIEW WR-02; hardens ACT-02). The demotion is ephemeral — `kamacu.activity.scope` retains the dead value
-- [ ] **TD-ACT-03**: Each `ReviewsList` entry's accessible name includes the PR title (`aria-label` carries both number and title) so screen readers hear the title that distinguishes entries (closes 11-REVIEW WR-03; hardens REVIEWS-02)
+- [x] **TD-ACT-01**: The `useActivity` `enabled` gate is wired (`scopeResolved` forwarded from `useActivityView` to `useActivity`) so first-time users get no wasted `global` fetch and no wrong-scope flash on first `/activity` open (closes 11-REVIEW WR-01/IN-01; hardens ACT-03)
+- [x] **TD-ACT-02**: A stale/deleted persisted `workspace:N`/`project:N` scope self-heals to effective `global` so the ScopeSelector trigger label, the All-activity dropdown check, and the `?scope=` query all agree (closes 11-REVIEW WR-02; hardens ACT-02). The demotion is ephemeral — `kamacu.activity.scope` retains the dead value
+- [x] **TD-ACT-03**: Each `ReviewsList` entry's accessible name includes the PR title (`aria-label` carries both number and title) so screen readers hear the title that distinguishes entries (closes 11-REVIEW WR-03; hardens REVIEWS-02)
 
 ## Future Requirements
 
@@ -106,9 +106,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TD-ACT-01 | Phase 12.1 | Pending |
-| TD-ACT-02 | Phase 12.1 | Pending |
-| TD-ACT-03 | Phase 12.1 | Pending |
+| TD-ACT-01 | Phase 12.1 | Complete |
+| TD-ACT-02 | Phase 12.1 | Complete |
+| TD-ACT-03 | Phase 12.1 | Complete |
 
 **Coverage:**
 
