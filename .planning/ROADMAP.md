@@ -28,6 +28,7 @@
 - [x] **Phase 10: Activity Data & API** - Scoped/windowed tasks-done, reviews-done (merged/closed reviewed-by:@me), and task cycle/dwell statistics behind a new activity endpoint set (completed 2026-07-30)
 - [x] **Phase 11: Activity Page & Controls** - Top-level Activity page (sidebar entry, scope selector, Week/Month toggle) rendering tasks-done + reviews-done lists and statistics (completed 2026-07-31)
 - [x] **Phase 12: Activity Chart & Stat Tooltips** - Daily stacked-bar chart (tasks + reviews per day; Week = 7 bars, Month = 30 bars) + explanatory tooltips on the stats strip and per-entry completion times (completed 2026-08-01)
+- [ ] **Phase 12.1: Address Activity tech debt (WR-01..03) (INSERTED)** - Close the v1.12 audit's non-blocking quality gaps: wire the `useActivity` `enabled` gate (WR-01/04), fix the `ScopeSelector` stale-scope label (WR-02), and restore the PR title in the `ReviewsList` external-link `aria-label` (WR-03 a11y).
 
 ## Phase Details
 
@@ -104,6 +105,19 @@
 </details>
 
 **UI hint**: yes
+
+### Phase 12.1: Address Activity tech debt (WR-01..03) (INSERTED)
+
+**Goal**: Close the three non-blocking quality gaps surfaced by the v1.12 milestone audit (11-REVIEW.md) before archiving — wire the `useActivity` `enabled` gate so first-time users don't get a wasted/discarded `global` fetch + wrong-scope flash (WR-01/04), make `ScopeSelector` resolve a stale/deleted persisted scope to its real effective value instead of showing "Global" while querying a dead id (WR-02), and include the PR title in the `ReviewsList` external-link accessible name so screen readers don't hear only PR numbers (WR-03).
+**Depends on**: Phase 11 (touches `useActivity`/`useActivityView`/`ScopeSelector`/`ReviewsList` — all Phase 11 artifacts).
+**Requirements**: TD-ACT-01 (gate-wired, hardens ACT-03), TD-ACT-02 (stale-scope-resolved, hardens ACT-02), TD-ACT-03 (reviews-a11y-name, hardens REVIEWS-02)
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 12.1-01-PLAN.md — Close WR-01 (enabled gate), WR-02 (stale-scope demotion to effective global), WR-03 (reviews aria-label title) + define TD-ACT-01/02/03 in REQUIREMENTS.md
+
+**Inserted**: 2026-08-01 — urgent gap closure from the v1.12 milestone audit (tech_debt status).
 
 <details>
 <summary>✅ v1.11 Kamacu MCP Server (Phases 06–09) — SHIPPED 2026-07-29</summary>
