@@ -42,6 +42,14 @@ Phase 12 (v1.12 reopened) — pulls the one previously-deferred viz (ACTFUT-02, 
 - [x] **STAT-01**: The three time-stat rows (Cycle, In-progress dwell, In-review dwell) each have an explanatory tooltip (triggered by an info icon) explaining the metric definition and the min·median·max legend; the two lead counts get no tooltip.
 - [x] **ENTRY-01**: Each tasks-done and reviews-done entry shows an absolute completion timestamp (`Jul 29, 14:32` — compact date + 24h time) beside it, replacing the previous relative time.
 
+### Phase 12.1 tech-debt closure (TD-ACT)
+
+Phase 12.1 (v1.12 milestone archive) — closes the three non-blocking quality gaps the v1.12 audit (and `11-REVIEW.md`) surfaced in the Phase 11 Activity page. Frontend-only debt closure; no new capability requirements — each TD-ACT ID hardens an existing v1.12 requirement that stays marked Complete.
+
+- [ ] **TD-ACT-01**: The `useActivity` `enabled` gate is wired (`scopeResolved` forwarded from `useActivityView` to `useActivity`) so first-time users get no wasted `global` fetch and no wrong-scope flash on first `/activity` open (closes 11-REVIEW WR-01/IN-01; hardens ACT-03)
+- [ ] **TD-ACT-02**: A stale/deleted persisted `workspace:N`/`project:N` scope self-heals to effective `global` so the ScopeSelector trigger label, the All-activity dropdown check, and the `?scope=` query all agree (closes 11-REVIEW WR-02; hardens ACT-02). The demotion is ephemeral — `kamacu.activity.scope` retains the dead value
+- [ ] **TD-ACT-03**: Each `ReviewsList` entry's accessible name includes the PR title (`aria-label` carries both number and title) so screen readers hear the title that distinguishes entries (closes 11-REVIEW WR-03; hardens REVIEWS-02)
+
 ## Future Requirements
 
 Deferred to a later release. Tracked but not in the current roadmap.
@@ -96,14 +104,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STAT-01 | Phase 12 | Complete |
 | ENTRY-01 | Phase 12 | Complete |
 
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| TD-ACT-01 | Phase 12.1 | Pending |
+| TD-ACT-02 | Phase 12.1 | Pending |
+| TD-ACT-03 | Phase 12.1 | Pending |
+
 **Coverage:**
 
-- v1.12 requirements: 18 total
-- Mapped to phases: 18
+- v1.12 requirements: 21 total
+- Mapped to phases: 21
 - Unmapped: 0 ✓
 
-**Phase distribution:** Phase 10 (Activity Data & API): 7 — TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01..04. Phase 11 (Activity Page & Controls): 8 — ACT-01..04, TASKS-02..03, REVIEWS-02..03. Phase 12 (Activity Chart & Stat Tooltips): 3 — CHART-01, STAT-01, ENTRY-01.
+**Phase distribution:** Phase 10 (Activity Data & API): 7 — TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01..04. Phase 11 (Activity Page & Controls): 8 — ACT-01..04, TASKS-02..03, REVIEWS-02..03. Phase 12 (Activity Chart & Stat Tooltips): 3 — CHART-01, STAT-01, ENTRY-01. Phase 12.1 (Address Activity tech debt): 3 — TD-ACT-01..03 (debt closure hardening ACT-02/ACT-03/REVIEWS-02).
 
 ---
 *Requirements defined: 2026-07-29*
-*Last updated: 2026-08-01 after Phase 12 planning (added CHART-01, STAT-01, ENTRY-01; v1.12 reopened for Phase 12 — 18/18 requirements mapped)*
+*Last updated: 2026-08-02 after Phase 12.1 planning (added TD-ACT-01..03 tech-debt closure IDs; 21/21 requirements mapped)*
