@@ -84,7 +84,7 @@ export function ReviewsList({ reviews }: { reviews: ActivityResponse["reviews"] 
                 href={review.url}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`Open PR #${review.number} on GitHub`}
+                aria-label={`Open PR #${review.number} ${review.title} on GitHub`}
                 className="flex items-baseline gap-2 text-sm hover:text-foreground"
               >
                 <span className="flex-1 truncate text-muted-foreground hover:text-foreground">
