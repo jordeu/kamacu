@@ -552,6 +552,312 @@ func TestPutGlobalManagedReattachMismatch(t *testing.T) {
 	}
 }
 
+// TestPutGlobalRootBlockedByLiveTmux (GCONF-04 / D-13/D-15, 14-RESEARCH
+// Pitfall 7): the 409 gate tripped against a REAL detached global tmux
+// session — not a zero-rows unit fake. The worktrees_test.go:397-440 recipe
+// adapted to the global scope: LookPath skip-guard, per-test socket Client,
+// KillServer cleanup registered BEFORE the server is built (LIFO — it runs
+// after the harness cleanup), a seeded scope='global' tmux_sessions row
+// (task_id NULL satisfies the 00018 XOR CHECK), and a real new-session -d.
+// Proves: every root-field shape gates, the row stays untouched, agent-only
+// PUTs pass (D-24), and liveness — not row existence — is what blocks
+// (D-14): stop the session and the same PUT succeeds.
+func TestPutGlobalRootBlockedByLiveTmux(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not on PATH")
+	}
+	// Per-test socket + kill-server cleanup registered BEFORE the server
+	// (LIFO: runs after the harness teardown).
+	c := tmux.Client{Socket: fmt.Sprintf("ktest-globalgate-%d", os.Getpid()), ConfPath: "/dev/null"}
+	t.Cleanup(func() { _ = c.KillServer(context.Background()) })
+	srv, db := newGlobalTestServerWithTmux(t, c)
+
+	// A non-empty prior root so "row untouched" asserts against something.
+	prior := gitRepo(t)
+	if status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"root_path": prior}); status != http.StatusOK {
+		t.Fatalf("seed folder root: status = %d; body=%v", status, body)
+	}
+
+	// Persisted global row + a REAL detached tmux session under that name —
+	// exactly the restart-survivor shape the gate must catch.
+	name := "kamacu-global-1"
+	if _, err := db.Exec(
+		`INSERT INTO tmux_sessions (scope, n, name, label) VALUES ('global', 1, ?, 'Bash 1')`, name); err != nil {
+		t.Fatalf("seed tmux_sessions row: %v", err)
+	}
+	detach := append(c.BaseArgs(), "new-session", "-d", "-s", name, "-c", t.TempDir())
+	if err := exec.Command("tmux", detach...).Run(); err != nil {
+		t.Fatalf("seed live global tmux session: %v", err)
+	}
+	awaitHasSession(t, c, name, true)
+
+	// The CLEAR shape (root_path:"") gates: 409 with the structured D-15
+	// grammar — non-empty error + non-empty reasons[] of {kind,target} maps.
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"root_path": ""})
+	if status != http.StatusConflict {
+		t.Fatalf("clear under live session: status = %d, want 409; body=%v", status, body)
+	}
+	if got, _ := body["error"].(string); got == "" {
+		t.Errorf("409 error = %v, want non-empty", body["error"])
+	}
+	reasons, ok := body["reasons"].([]any)
+	if !ok || len(reasons) == 0 {
+		t.Fatalf("409 reasons = %v, want a non-empty array", body["reasons"])
+	}
+	first, ok := reasons[0].(map[string]any)
+	if !ok {
+		t.Fatalf("reasons[0] = %v, want a {kind,target} map", reasons[0])
+	}
+	if got := first["kind"]; got != "sessions" {
+		t.Errorf("reasons[0].kind = %v, want %q", got, "sessions")
+	}
+	if got := first["target"]; got != name {
+		t.Errorf("reasons[0].target = %v, want %q", got, name)
+	}
+
+	// A non-empty folder root gates too — every root-field shape.
+	other := gitRepo(t)
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"root_path": other})
+	if status != http.StatusConflict {
+		t.Fatalf("folder change under live session: status = %d, want 409; body=%v", status, body)
+	}
+
+	// The singleton row is untouched by both 409s.
+	rootPath, repo, agentID := readGlobalRow(t, db)
+	if rootPath != prior {
+		t.Errorf("root_path = %q, want the prior %q after a 409", rootPath, prior)
+	}
+	if repo.Valid {
+		t.Errorf("github_repo = %v, want NULL (prior was a folder root)", repo)
+	}
+	status, gbody := doJSON(t, "GET", srv.URL+"/api/global", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET after 409s: status = %d", status)
+	}
+	if got := gbody["root_path"]; got != prior {
+		t.Errorf("GET root_path = %v, want the prior %s", got, prior)
+	}
+	if got, ok := gbody["github_repo"]; !ok || got != nil {
+		t.Errorf("GET github_repo = %v (present=%v), want null after a 409", got, ok)
+	}
+
+	// D-24: under the SAME live session an agent-only PUT succeeds — the
+	// gate scopes to root changes only. Re-PUT the current agent (a no-op
+	// agent change is a sanctioned success) so the row comparison above
+	// stays meaningful for the post-kill clear below.
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"agent_id": agentID})
+	if status != http.StatusOK {
+		t.Fatalf("agent-only PUT under live session: status = %d, want 200; body=%v", status, body)
+	}
+
+	// D-13/D-14: LIVENESS blocks, not row existence. Stop the session (the
+	// row stays) and the identical clear succeeds.
+	if err := c.KillServer(context.Background()); err != nil {
+		t.Fatalf("KillServer: %v", err)
+	}
+	awaitHasSession(t, c, name, false)
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"root_path": ""})
+	if status != http.StatusOK {
+		t.Fatalf("clear after session stopped: status = %d, want 200; body=%v", status, body)
+	}
+	if got := body["root_path"]; got != "" {
+		t.Errorf("root_path = %v, want \"\" after the clear", got)
+	}
+	if got, ok := body["github_repo"]; !ok || got != nil {
+		t.Errorf("github_repo = %v (present=%v), want null after the clear", got, ok)
+	}
+}
+
+// TestPutGlobalConfigHistory (Pitfall 8 + D-04/D-16): the managed → folder →
+// clear → managed lifecycle over ONE HOME-sandboxed server. The stale-marker
+// invariant (github_repo NULL the moment the root leaves the managed
+// variant), the no-reclone reattach (a must-not-be-called clone fake), and
+// the D-16 id-clearing woven through EVERY root PUT — including the final
+// same-repo reattach re-PUT (identical values, no no-op exception) — while
+// an agent-only interlude leaves the ids set. updated_at strictly increases
+// across each successful PUT (millisecond strftime ⇒ lexical compare).
+func TestPutGlobalConfigHistory(t *testing.T) {
+	srv, db := newGlobalTestServer(t)
+	// Managed-variant seams: verified-by-fake + a clone fake that git-inits
+	// dest with the canonical origin (reattach later builds on it).
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return parsed, true, nil
+	})()
+	defer github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		return "", fakeGitClone(t, ref, dest)
+	})()
+
+	put := func(payload map[string]any) (int, map[string]any) {
+		// Millisecond-resolution updated_at: sleep past the tick so each
+		// PUT's bump is strictly greater, deterministically.
+		time.Sleep(15 * time.Millisecond)
+		return doJSON(t, "PUT", srv.URL+"/api/global", payload)
+	}
+	updated := func() string {
+		var s string
+		if err := db.QueryRow(`SELECT updated_at FROM global_task WHERE id = 1`).Scan(&s); err != nil {
+			t.Fatalf("read updated_at: %v", err)
+		}
+		return s
+	}
+	seedIDs := func(c, o string) {
+		if _, err := db.Exec(`UPDATE global_task SET claude_session_id = ?, opencode_session_id = ?`, c, o); err != nil {
+			t.Fatalf("seed resume ids: %v", err)
+		}
+	}
+	readIDs := func() (claude, opencode sql.NullString) {
+		if err := db.QueryRow(`SELECT claude_session_id, opencode_session_id FROM global_task WHERE id = 1`).Scan(&claude, &opencode); err != nil {
+			t.Fatalf("read resume ids: %v", err)
+		}
+		return
+	}
+	// assertCleared: both ids NULL after a root PUT (D-16, no exceptions).
+	assertCleared := func(step string) {
+		c, o := readIDs()
+		if c.Valid || o.Valid {
+			t.Errorf("%s: resume ids must be NULL after a root PUT (D-16), got claude=%v opencode=%v", step, c, o)
+		}
+	}
+
+	wantDest := globalManagedDest(t, "octo/widgets")
+	prevUpdated := updated()
+
+	// 1. MANAGED: clone into the global namespace; GET agrees.
+	seedIDs("c1", "o1")
+	status, body := put(map[string]any{"repo": "octo/widgets"})
+	if status != http.StatusOK {
+		t.Fatalf("managed PUT: status = %d; body=%v", status, body)
+	}
+	if got := body["root_path"]; got != wantDest {
+		t.Errorf("managed root_path = %v, want %s", got, wantDest)
+	}
+	if got := body["github_repo"]; got != "octo/widgets" {
+		t.Errorf("managed github_repo = %v, want octo/widgets", got)
+	}
+	assertCleared("managed PUT")
+	if now := updated(); now <= prevUpdated {
+		t.Errorf("updated_at not bumped by the managed PUT: %q then %q", prevUpdated, now)
+	} else {
+		prevUpdated = now
+	}
+	status, body = doJSON(t, "GET", srv.URL+"/api/global", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET managed: status = %d", status)
+	}
+	if got := body["root_path"]; got != wantDest {
+		t.Errorf("GET managed root_path = %v, want %s", got, wantDest)
+	}
+	if got := body["github_repo"]; got != "octo/widgets" {
+		t.Errorf("GET managed github_repo = %v, want octo/widgets", got)
+	}
+
+	// 2. FOLDER transition: the stale-marker assertion — github_repo goes
+	// JSON null in the SAME UPDATE that sets the folder root.
+	seedIDs("c2", "o2")
+	folder := gitRepo(t)
+	status, body = put(map[string]any{"root_path": folder})
+	if status != http.StatusOK {
+		t.Fatalf("folder PUT: status = %d; body=%v", status, body)
+	}
+	if got := body["github_repo"]; got != nil {
+		t.Errorf("folder PUT github_repo = %v, want nil — a stale managed marker must never survive the transition", got)
+	}
+	assertCleared("folder PUT")
+	if now := updated(); now <= prevUpdated {
+		t.Errorf("updated_at not bumped by the folder PUT: %q then %q", prevUpdated, now)
+	} else {
+		prevUpdated = now
+	}
+	status, body = doJSON(t, "GET", srv.URL+"/api/global", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET folder: status = %d", status)
+	}
+	if got, ok := body["github_repo"]; !ok || got != nil {
+		t.Errorf("GET folder github_repo = %v (present=%v), want null — no stale marker", got, ok)
+	}
+	if got := body["root_path"]; got != folder {
+		t.Errorf("GET folder root_path = %v, want %s", got, folder)
+	}
+
+	// 3. CLEAR: both root columns empty.
+	seedIDs("c3", "o3")
+	status, body = put(map[string]any{"root_path": ""})
+	if status != http.StatusOK {
+		t.Fatalf("clear PUT: status = %d; body=%v", status, body)
+	}
+	assertCleared("clear PUT")
+	if now := updated(); now <= prevUpdated {
+		t.Errorf("updated_at not bumped by the clear PUT: %q then %q", prevUpdated, now)
+	} else {
+		prevUpdated = now
+	}
+	status, body = doJSON(t, "GET", srv.URL+"/api/global", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET cleared: status = %d", status)
+	}
+	if got := body["root_path"]; got != "" {
+		t.Errorf("GET cleared root_path = %v, want \"\"", got)
+	}
+	if got, ok := body["github_repo"]; !ok || got != nil {
+		t.Errorf("GET cleared github_repo = %v (present=%v), want null", got, ok)
+	}
+
+	// 4. AGENT-ONLY interlude: the ids survive (D-25 — D-16 is the only
+	// clearing path), updated_at still bumps.
+	seedIDs("c4", "o4")
+	var agentID int64
+	if err := db.QueryRow(`SELECT agent_id FROM global_task WHERE id = 1`).Scan(&agentID); err != nil {
+		t.Fatalf("read agent_id: %v", err)
+	}
+	status, body = put(map[string]any{"agent_id": agentID})
+	if status != http.StatusOK {
+		t.Fatalf("agent interlude PUT: status = %d; body=%v", status, body)
+	}
+	if c, o := readIDs(); !c.Valid || c.String != "c4" || !o.Valid || o.String != "o4" {
+		t.Errorf("agent-only PUT must leave resume ids set (D-25), got claude=%v opencode=%v", c, o)
+	}
+	if now := updated(); now <= prevUpdated {
+		t.Errorf("updated_at not bumped by the agent PUT: %q then %q", prevUpdated, now)
+	} else {
+		prevUpdated = now
+	}
+
+	// 5. SAME-REPO REATTACH: the dest from step 1 is still on disk, so the
+	// re-PUT must succeed WITHOUT invoking the clone runner (D-04) and —
+	// identical values or not — STILL clear the resume ids (D-16's
+	// no-no-op-re-PUT exception ban, on the exact path most likely to skip
+	// it). failCloneNeverCalled installs the must-not-be-called seam NOW
+	// (the deferred call restores it at test end).
+	defer failCloneNeverCalled(t)()
+	seedIDs("c5", "o5")
+	status, body = put(map[string]any{"repo": "octo/widgets"})
+	if status != http.StatusOK {
+		t.Fatalf("reattach PUT: status = %d, want 200; body=%v", status, body)
+	}
+	if got := body["root_path"]; got != wantDest {
+		t.Errorf("reattach root_path = %v, want the same %s", got, wantDest)
+	}
+	if got := body["github_repo"]; got != "octo/widgets" {
+		t.Errorf("reattach github_repo = %v, want octo/widgets", got)
+	}
+	assertCleared("reattach PUT")
+	if now := updated(); now <= prevUpdated {
+		t.Errorf("updated_at not bumped by the reattach PUT: %q then %q", prevUpdated, now)
+	}
+	// Managed config fully restored.
+	status, body = doJSON(t, "GET", srv.URL+"/api/global", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET after reattach: status = %d", status)
+	}
+	if got := body["root_path"]; got != wantDest {
+		t.Errorf("GET after reattach root_path = %v, want %s", got, wantDest)
+	}
+	if got := body["github_repo"]; got != "octo/widgets" {
+		t.Errorf("GET after reattach github_repo = %v, want octo/widgets", got)
+	}
+}
+
 // TestPutGlobalRepoDispatch (D-20/D-22 + Open Question 2): the dispatch
 // grammar edges — both fields supplied, explicit-but-empty repo, and a
 // syntactically invalid ref.
