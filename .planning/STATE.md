@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
 current_phase: 12.1
-current_phase_name: Address Activity tech debt (WR-01..03
 status: verifying
 stopped_at: Phase 12.1 context gathered
-last_updated: "2026-08-02T06:01:44.392Z"
-last_activity: 2026-08-02
-last_activity_desc: Phase 12.1 execution started
+last_updated: "2026-08-25T05:20:51.216Z"
+last_activity: 2026-08-25
+last_activity_desc: Phase 12.1 complete
 progress:
   total_phases: 2
   completed_phases: 2
   total_plans: 6
   completed_plans: 6
   percent: 100
+current_phase_name: Address Activity tech debt (WR-01..03
 ---
 
 # Project State
 
-**Current focus:** Phase 12.1 — Address Activity tech debt (WR-01..03)
+**Current focus:** Milestone v1.12 complete — Phase 12.1 (Address Activity tech debt WR-01..03) verified via UAT 3/3; ready to archive
 
 See: .planning/PROJECT.md (updated 2026-08-01)
 
@@ -42,10 +42,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 ## Current Position
 
-Phase: 12.1 (Address Activity tech debt (WR-01..03)) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-08-02 — Phase 12.1 execution started
+Phase: 12.1 (complete)
+Plan: 1/1
+Status: Milestone v1.12 100% complete — all phases finished
+Last activity: 2026-08-25 — Phase 12.1 complete (UAT 3/3 passed)
 
 ### Quick Tasks Completed
 
@@ -60,9 +60,9 @@ Last activity: 2026-08-02 — Phase 12.1 execution started
 
 ## Session
 
-**Last session:** 2026-08-02T06:01:00.218Z
-**Stopped at:** Phase 12.1 context gathered
-**Resume file:** .planning/phases/12.1-address-activity-tech-debt-wr-01-03/12.1-CONTEXT.md
+**Last session:** 2026-08-25
+**Stopped at:** Phase 12.1 complete — milestone v1.12 ready to archive
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -129,8 +129,8 @@ Last activity: 2026-08-02 — Phase 12.1 execution started
 
 ## Operator Next Steps
 
-- Phase 10 verified & complete (UAT 16/16, 7/7 requirements: TASKS-01, REVIEWS-01, REVIEWS-04, STATS-01..04)
-- Next: Phase 11 — Activity Page & Controls (consumes Phase 10's `GET /api/activity`) — `/gsd-discuss-phase 11` → `/gsd-plan-phase 11`
+- Phase 12.1 verified & complete (UAT 3/3: WR-01 first-open, WR-02 stale-scope self-heal, WR-03 a11y) — milestone v1.12 fully closed
+- Next: `/gsd-complete-milestone` — archive v1.12 and prepare for the next milestone
 
 ## Accumulated Context
 
