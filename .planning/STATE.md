@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Activity & Statistics
-current_phase: 12.1
-status: verifying
-stopped_at: Phase 12.1 context gathered
-last_updated: "2026-08-25T05:20:51.216Z"
+current_phase: 12
+status: Awaiting next milestone
+stopped_at: Phase 12.1 complete — milestone v1.12 ready to archive
+last_updated: "2026-08-25T05:24:38.157Z"
 last_activity: 2026-08-25
-last_activity_desc: Phase 12.1 complete
+last_activity_desc: Milestone v1.12 completed and archived
 progress:
   total_phases: 2
   completed_phases: 2
@@ -19,7 +19,7 @@ current_phase_name: Address Activity tech debt (WR-01..03
 
 # Project State
 
-**Current focus:** Milestone v1.12 complete — Phase 12.1 (Address Activity tech debt WR-01..03) verified via UAT 3/3; ready to archive
+**Current focus:** v1.12 archived — planning next milestone (`/gsd-new-milestone`)
 
 See: .planning/PROJECT.md (updated 2026-08-01)
 
@@ -42,10 +42,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 ## Current Position
 
-Phase: 12.1 (complete)
-Plan: 1/1
-Status: Milestone v1.12 100% complete — all phases finished
-Last activity: 2026-08-25 — Phase 12.1 complete (UAT 3/3 passed)
+Phase: Milestone v1.12 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-25 — Milestone v1.12 completed and archived
 
 ### Quick Tasks Completed
 
@@ -61,7 +61,7 @@ Last activity: 2026-08-25 — Phase 12.1 complete (UAT 3/3 passed)
 ## Session
 
 **Last session:** 2026-08-25
-**Stopped at:** Phase 12.1 complete — milestone v1.12 ready to archive
+**Stopped at:** Milestone v1.12 archived (tag v1.12) — awaiting /gsd-new-milestone
 **Resume file:** None
 
 ## Performance Metrics
@@ -129,8 +129,7 @@ Last activity: 2026-08-25 — Phase 12.1 complete (UAT 3/3 passed)
 
 ## Operator Next Steps
 
-- Phase 12.1 verified & complete (UAT 3/3: WR-01 first-open, WR-02 stale-scope self-heal, WR-03 a11y) — milestone v1.12 fully closed
-- Next: `/gsd-complete-milestone` — archive v1.12 and prepare for the next milestone
+- Start the next milestone with /gsd-new-milestone
 
 ## Accumulated Context
 

@@ -1,5 +1,21 @@
 # Milestones
 
+## v1.12 Activity & Statistics (Shipped: 2026-08-25)
+
+**Phases completed:** 4 phases (10, 11, 12, 12.1-inserted), 9 plans, 20 tasks
+
+Known verification overrides: 6 (all prior-milestone carried-over quick tasks, none v1.12 — see STATE.md Deferred Items)
+
+**Key accomplishments:**
+
+- `GET /api/activity` combined endpoint — scoped/windowed tasks-done, reviews-done (merged/closed via gh with bounded concurrency, 5min-TTL cache), in-Go cycle/dwell/median stats, and the always-200 degrade contract when GitHub integration is off
+- Pure-helper + wire-type contract layer (mismatched-precision ISO parser, scope/window parsing, duration slices, review-state rollup; TanStack query, adaptive duration formatter, localStorage scope/window hook) — fully unit-tested
+- Dedicated `/activity` page: route, ScopeSelector, Week/Month toggle, StatsStrip, grouped tasks/reviews lists, sidebar entry — plus the nil-slice "black page" fix (`tasks:[]` never `null` on every path)
+- Daily stacked-bar ActivityChart (recharts ^3.8.0 via shadcn ChartContainer; sole new dep) with zero-day baseline stubs, sparse Month x-axis, per-bar hover tooltips, explanatory stat tooltips, and absolute formatDateTime timestamps
+- Tech-debt closure (Phase 12.1, UAT 3/3): wired the dead `useActivity` `enabled` gate (WR-01), stale-scope useMemo demotion to global that never persists (WR-02), and restored PR titles to ReviewsList accessible names (WR-03)
+
+---
+
 ## v1.11 Kamacu MCP Server (Shipped: 2026-07-29)
 
 **Phases completed:** 4 phases, 11 plans, 22 tasks

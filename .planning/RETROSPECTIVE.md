@@ -432,6 +432,47 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 
 ---
 
+## Milestone: v1.12 — Activity & Statistics
+
+**Shipped:** 2026-08-25
+**Phases:** 4 (10–12 + 12.1-inserted) | **Plans:** 9 | **Tasks:** 20
+
+### What Was Built
+- (Phase 10, plans 10-01..03) `GET /api/activity` — ONE combined always-200 endpoint ({tasks-done, reviews-completed, stats}) for any Global/Workspace/Project scope × Week/Month window: merged/closed `reviewed-by:@me` gh aggregation (errgroup SetLimit 5, 12s per-repo timeout, 5min-TTL cache decoupled from the review column), in-Go cycle/dwell/median stats on the migration-00006 timestamps, GATE 1 toggle, pure stdlib-only helpers shipped as a parallel wave-1 sibling.
+- (Phase 11, plans 11-01..03) The `/activity` page — route + sidebar entry (collapsed-rail reachable), ScopeSelector, WindowToggle, StatsStrip, grouped tasks/reviews lists; UAT-surfaced "black page on empty instance" closed in-plan by the non-nil-slice wire contract with byte-level regression tests.
+- (Phase 12, plans 12-01..02) Daily stacked-bar ActivityChart (recharts ^3.8.0 via the shadcn chart primitive — sole new dep), zero-day baseline stubs, sparse Month x-axis, per-bar hover tooltips, explanatory stat tooltips, absolute formatDateTime entry timestamps.
+- (Phase 12.1, plan 12.1-01, INSERTED) Audit tech-debt closure: WR-01 `useActivity` enabled-gate wired (no wasted/discarded global fetch, no first-open label flash), WR-02 stale-scope self-heal via a `useMemo` demotion that never persists, WR-03 PR titles restored to ReviewsList accessible names. UAT 3/3 on 2026-08-25.
+
+### What Worked
+- **The formal milestone audit (run at v1.12, after v1.11 skipped it) directly produced the closure work.** The audit's `tech_debt` status enumerated exactly three WR items; Phase 12.1 was inserted to close them and nothing else — 1 plan, 4 minutes, UAT-clean. The audit → inserted-phase → verify loop is the template for future closes.
+- **One combined endpoint made the frontend trivial.** {tasks, reviews, stats} in one always-200 body = one TanStack query, one loading state, degradation riding in `reviews.state` — the page never blanks and never needs coordinated multi-fetch states.
+- **Pure-helper wave parallelism.** Extracting scope/window/stat logic into stdlib-only `activity_helpers.go` (negative-grep gates: no DB, no gh) let it execute as a wave-1 sibling of the gh data-source plan — the handler plan then consumed both without waiting.
+- **Byte-level wire regression tests.** Asserting on RAW body bytes (`"tasks":[]`, never `tasks:null`) is the only way to catch a nil-slice regression — `json.Unmarshal` accepts null so decoded checks pass. Now the canonical pattern for any JSON-array field.
+
+### What Was Inefficient
+- **The enabled-gate (WR-01) was specified in Phase 11's research as a Pitfall-6 mitigation but never wired** — the code review (11-REVIEW.md) caught it post-ship. A "gates specified but not wired" checklist item at plan verification would have caught it in-phase.
+- **The milestone reopened (2026-07-31) to add Phase 12** after initially closing at Phases 10–11 — chart + tooltips were a post-ship want, not in the original scope. Reopening worked cleanly (the archive was not yet cut) but cost a context rebuild.
+- **~29 pre-existing react-hooks lint errors remain carried** (up from ~18–20 at v1.3) — deferred twice now; needs a dedicated cleanup pass before it buries a real signal.
+
+### Patterns Established
+- **Always-200 + state-carrying degrade for combined read endpoints** — degradation rides in a per-section `state` field, never a non-200; the client renders sections independently.
+- **Decoupled TTL caches per consumer cadence** — the 5min merged/closed activity cache is separate from the 60s review-column cache; coupling them would have tripled gh load on the 5s poll path.
+- **Ephemeral self-heal via `useMemo`, never via effect writes** — a stale persisted value demotes to its effective resolution in a pure memo (no setter, no localStorage write), structurally satisfying do-not-persist and dodging the set-state-in-effect lint class.
+- **Audit tech-debt items close as inserted decimal phases** (12.1) with their own requirements (TD-ACT-01..03) — keeping the audit honest without polluting the main phase sequence.
+
+### Key Lessons
+1. **Run the milestone audit BEFORE the close, and let its findings drive inserted phases.** v1.12's audit enumerated 3 tech-debt items with exact file references; closing them was a 1-plan phase with a 3-test UAT. Compare v1.11 (no audit) where the same class of finding surfaced as post-milestone quick tasks.
+2. **`is:closed` is the authoritative merged+closed gh search qualifier** (`--state closed` is belt-and-suspenders only — cli/cli #8102). Search qualifiers survive CLI flag bugs.
+3. **A first-open UX contract (no flash, exactly one fetch) is testable UAT material** — specify it as a requirement (TD-ACT-01), not as an implementation detail.
+4. **Never string-compare timestamps across precisions** — the shared mismatched-precision ISO parser (ms vs bare-Z) exists because SQLite ms timestamps met gh second-precision `closedAt`. One parser, two layouts, everywhere.
+
+### Cost Observations
+- Plan durations: 4–15 min each (median ~7 min) — the fastest milestone per plan to date.
+- Model mix: inherit.
+- Notable: 9 plans across 2026-07-30 → 2026-08-25 (27 days wall-clock, but ~5 working days — the milestone sat idle mid-window waiting for the Phase 12 reopen decision and the 12.1 UAT). Sole new dependency: recharts ^3.8.0. No migrations (rode migration 00006's timestamps).
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -448,6 +489,7 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 | v1.7 | 2 | 6 | Backend-data → frontend-render phase split again; Go-source-of-truth mirrored as a TS `const` with no endpoint; one shared `<ProjectAvatar>` for both sidebar states; idempotent Go backfill for computed per-row defaults; UAT reversed 3 approved visual decisions (square→circle, ring→filled-row, palette re-mute) AND reached back into a shipped phase (a 2nd migration 00010) — second straight milestone the human gate flipped shape/color, so pre-build visual mock is now the standing recommendation |
 | v1.8 | 5 | 26 | _(retrospective section not recorded at close — backfilled facts only)_ Largest post-v1.0 milestone; a risk-split rebrand (code identity in Phase 20, the gated on-disk `~/.kangent`→`~/.kamacu` data migration deferred to Phase 21 as a one-shot idempotent recoverable startup migration); UAT-directed diff-view sticky/scroll redesign; a post-approval WTREE-01 refinement from "list every worktree" to a cleanup queue; renamed-tmux-tab-survives-restart caught at the human gate |
 | v1.9 | 2 | 9 | Backend-data → frontend-render split again; reuse-before-invent (transfer via optional `workspace_id` on the existing PATCH — no new route; one `.filter` scopes both sidebar surfaces; `BackfillWorkspaces` mirrors `BackfillProjectIcons`); one shared active-workspace context (no per-component desync); the human gate caught a framework-timing bug (React-Router-v7 `startTransition` lag defeating URL-wins reconciliation) needing 2 post-gate fixes; first milestone shipped without a formal audit (all-internal, 12/12 requirements + human-verify) |
+| v1.12 | 4 | 9 | Formal milestone audit BEFORE close drove an inserted tech-debt phase (12.1, WR-01..03) — the audit→insert→verify loop; one combined always-200 activity endpoint with state-carrying degrade; pure-helper wave-1 parallelism (stdlib-only, negative-grep gates); milestone reopened once to add Phase 12 (chart) post-ship; byte-level nil-slice wire regression tests as the JSON-array contract |
 
 ### Cumulative Quality
 
@@ -463,6 +505,7 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 | v1.7 | 11 (api `icons` helpers + validators table-tested; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; 2 migrations (00009 columns + the UAT-driven 00010 palette remap); one new `ui/` primitive (`ProjectAvatar.tsx`) + one `lib/` const (`palette.ts`, Go mirror); pre-existing react-hooks advisories still carried |
 | v1.8 | 13 (+`migrate`; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across 5 phases; 1 migration (00011 `diff_viewed`); new `internal/migrate` package for the gated data-dir migration; pre-existing react-hooks advisories still carried |
 | v1.9 | 13 (api `workspaces` CRUD + backfill tested; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; 1 migration (00012 workspaces table + FK); new `/api/workspaces` surface + frontend switcher/dialogs/context; pre-existing react-hooks advisories still carried |
+| v1.12 | 13 (api `activity` handler + helpers tested; full suite green) | tsc + vite build green | One sanctioned npm dep (recharts ^3.8.0 via `shadcn add chart` — the planned sole-new-dep contract held); zero new Go modules; no migrations (rode 00006 timestamps); pre-existing react-hooks advisories grew to ~29 — deferred twice, cleanup pass overdue |
 
 ### Top Lessons (Verified Across Milestones)
 
