@@ -491,21 +491,25 @@ if g > 0 {
 
 **No other [ASSUMED] claims** — schema mechanics, driver behavior, goose behavior, real-install state, and in-repo patterns are all [VERIFIED] via direct probe, official docs, or file:line reads.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Migration split: 00017+00018 (recommended) vs one combined file**
    - What we know: both work; the split keeps NO TRANSACTION scoped and is exactly what the rehearsal validated; CONTEXT defers this to plan-phase.
    - What's unclear: nothing material — planner preference only.
    - Recommendation: split (00017 plain-transaction singleton, 00018 NO TRANSACTION rebuild).
+   - **RESOLVED → 13-01-PLAN.md `<objective>` (planner resolutions): two migrations 00017 + 00018, exactly the split the rehearsal validated.**
 
 2. **Scope discriminator spelling: `scope TEXT` (recommended) vs `global INTEGER`**
    - What we know: both satisfy GDATA-02; the XOR CHECK was verified with `scope TEXT`; STACK.md originally sketched `global INTEGER` with `CHECK ( (task_id IS NULL) = (global = 1) )` (same truth table).
    - Recommendation: `scope TEXT` — self-documenting, extensible, verified.
+   - **RESOLVED → 13-01-PLAN.md `<objective>` + Task 1: `scope TEXT NOT NULL DEFAULT 'task' CHECK (scope IN ('task','global'))` with the verified XOR spelling.**
 
 3. **Delete-guard 409 message wording** for the global reference
    - Planner's call; existing grammar is `fmt.Sprintf("reassign its %d project(s) first", n)`.
+   - **RESOLVED → 13-02-PLAN.md Task 1: count-free exact string `reassign the Scratchpad agent first` (D-09, UI-SPEC Copywriting row 1).**
 
 4. **Where the sweep regression test lives** — `cmd/kamacu/sweep_test.go` (package main, next to the func) is the only option since `sweepOrphanTmux` is package-private; confirmed no existing sweep test file.
+   - **RESOLVED → 13-02-PLAN.md Task 2: `cmd/kamacu/sweep_test.go` in package main, host-gated with locally re-created per-test-socket helpers.**
 
 ## Environment Availability
 
