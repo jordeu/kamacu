@@ -375,11 +375,13 @@ func sweepOrphanTmux(parent context.Context, db *sql.DB, tmuxClient tmux.Client)
 		return // no server running -> no sessions
 	}
 
-	// Known = a tmux_sessions row whose task STILL exists. The JOIN drops rows
-	// whose task was deleted while down, so those sessions get swept too.
+	// Known = a tmux_sessions row whose task STILL exists, OR any global-scoped
+	// row (task-less by design — GDATA-03). The task subquery drops rows whose
+	// task was deleted while down, so those sessions get swept too; globals are
+	// known WITHOUT a task JOIN and must never be swept.
 	known := make(map[string]bool)
 	rows, err := db.QueryContext(ctx,
-		`SELECT ts.name FROM tmux_sessions ts JOIN tasks t ON t.id = ts.task_id`)
+		`SELECT name FROM tmux_sessions WHERE scope = 'global' OR task_id IN (SELECT id FROM tasks)`)
 	if err != nil {
 		slog.Warn("orphan sweep: loading known tmux sessions", "error", err)
 		return // can't tell orphan from live -> never kill blindly (Pitfall 6)
