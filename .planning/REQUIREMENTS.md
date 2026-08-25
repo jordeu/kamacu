@@ -76,31 +76,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GDATA-01 | — | Pending |
-| GDATA-02 | — | Pending |
-| GDATA-03 | — | Pending |
-| GCONF-01 | — | Pending |
-| GCONF-02 | — | Pending |
-| GCONF-03 | — | Pending |
-| GCONF-04 | — | Pending |
-| GCONF-05 | — | Pending |
-| GVIEW-01 | — | Pending |
-| GVIEW-02 | — | Pending |
-| GVIEW-03 | — | Pending |
-| GVIEW-04 | — | Pending |
-| GSESS-01 | — | Pending |
-| GSESS-02 | — | Pending |
-| GSESS-03 | — | Pending |
-| GSESS-04 | — | Pending |
-| GINT-01 | — | Pending |
-| GINT-02 | — | Pending |
-| GINT-03 | — | Pending |
+| GDATA-01 | Phase 13 | Pending |
+| GDATA-02 | Phase 13 | Pending |
+| GDATA-03 | Phase 13 | Pending |
+| GCONF-01 | Phase 14 | Pending |
+| GCONF-02 | Phase 14 | Pending |
+| GCONF-03 | Phase 14 | Pending |
+| GCONF-04 | Phase 14 | Pending |
+| GCONF-05 | Phase 16 | Pending |
+| GVIEW-01 | Phase 16 | Pending |
+| GVIEW-02 | Phase 15 | Pending |
+| GVIEW-03 | Phase 15 | Pending |
+| GVIEW-04 | Phase 16 | Pending |
+| GSESS-01 | Phase 15 | Pending |
+| GSESS-02 | Phase 15 | Pending |
+| GSESS-03 | Phase 15 | Pending |
+| GSESS-04 | Phase 15 | Pending |
+| GINT-01 | Phase 16 | Pending |
+| GINT-02 | Phase 15 | Pending |
+| GINT-03 | Phase 15 | Pending |
 
 **Coverage:**
 - v1.13 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19 ⚠️
+- Mapped to phases: 19
+- Unmapped: 0 ✓
+
+Phase 17 (Hardening & E2E) owns no requirements — it closes the end-to-end verification gates for GCONF-04, GSESS-02, GSESS-03, GINT-02, GINT-03, and the Phase-13 sentinel-leak invariant.
+
+Mapping notes:
+- GVIEW-02/GVIEW-03 map to Phase 15 (not 16) because their observable behaviors — agent runs in the global root cwd, 409 on a second concurrent spawn, bash tabs with the same shell options — are delivered and API-testable with the spawn path; the Agent/bash tab UI itself is covered by GVIEW-01 in Phase 16.
+- GCONF-01..04 map to Phase 14 as API-level capabilities (curl-verifiable); their Settings-section UX is delivered in Phase 16 under GCONF-05.
 
 ---
 *Requirements defined: 2026-08-25*
-*Last updated: 2026-08-25 after initial definition*
+*Last updated: 2026-08-25 after roadmap creation (Phases 13–17)*
