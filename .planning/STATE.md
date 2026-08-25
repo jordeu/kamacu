@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: Global Task
 current_phase: 13
-current_phase_name: Global data foundation & safety net
-status: planning
+current_phase_name: global-data-foundation-safety-net
+status: executing
 stopped_at: Phase 13 UI-SPEC approved
-last_updated: "2026-08-25T12:16:16.466Z"
+last_updated: "2026-08-25T13:27:10.195Z"
 last_activity: 2026-08-25
-last_activity_desc: v1.13 roadmap created (5 phases, 19/19 requirements mapped)
+last_activity_desc: Phase 13 execution started
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
   percent: 0
 ---
 
 # Project State
 
-**Current focus:** v1.13 Global Task — Phase 13 (Global data foundation & safety net) ready to plan
+**Current focus:** Phase 13 — global-data-foundation-safety-net
 
 See: .planning/PROJECT.md (updated 2026-08-25)
 
@@ -42,10 +42,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 ## Current Position
 
-Phase: 13 of 17 (Global data foundation & safety net)
-Plan: — (not yet planned)
-Status: Ready to plan (`/gsd-plan-phase 13`)
-Last activity: 2026-08-25 — v1.13 roadmap created (5 phases, 19/19 requirements mapped)
+Phase: 13 (global-data-foundation-safety-net) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-08-25 — Phase 13 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -74,7 +74,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-25T12:16:16.455Z
+**Last session:** 2026-08-25T13:27:01.654Z
 **Stopped at:** Phase 13 UI-SPEC approved
 **Resume file:** .planning/phases/13-global-data-foundation-safety-net/13-UI-SPEC.md
 
@@ -101,6 +101,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 12 P01 | 5 min | 3 tasks | 5 files |
 | Phase Phase 12 P02 | 6 min | 2 tasks tasks | 4 files files |
 | Phase 12.1 P01 | 4 min | 3 tasks tasks | 4 files files |
+| Phase 13 P01 | 5 min | 2 tasks | 3 files |
 
 ## Decisions
 
@@ -143,6 +144,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase Phase 12]: [Phase 12 / Plan 02]: ZeroDayStub passed as a function reference (shape={ZeroDayStub}) rather than an element — RESEARCH documents both as equivalent; the function form is type-safe against recharts BarShapeProps (the element form would require Partial weakening). Same D-05 zero-day-stub behavior.
 - [Phase Phase 12]: [Phase 12 / Plan 02]: bucketByDay(now) defaults to Date.now() internally; ActivityChart does not pass now — buckets recomputed every render from useActivity data, so scope/window change rebuckets without a new fetch (Phase 10 D-01).
 - [Phase ?]: [Phase 12.1 / Plan 01]: scopeResolved computed via useMemo over [activeWorkspaceId] (not the audit state+effect snippet) — avoids the react-hooks/set-state-in-effect lint-debt class; effective Activity scope computed via useMemo over [savedScope, workspaces, projects] mirroring useActiveWorkspace.tsx:57-66 so D-06 (do not persist the demotion) is structurally satisfied (the useMemo returns the literal global without calling any setter)
+- [Phase ?]: [Phase 13 / Plan 01]: Two-migration split (00017 plain transaction + 00018 NO TRANSACTION rebuild) — keeps the FK-off discipline scoped to the one migration that needs it; the exact split the research rehearsal validated
+- [Phase ?]: [Phase 13 / Plan 01]: global_task seed via SELECT 1, id FROM agents WHERE is_default = 1 (never a literal id) — the default flag is movable on real installs; FK ON DELETE RESTRICT is the DB backstop behind the 13-02 handler guard
+- [Phase ?]: [Phase 13 / Plan 01]: tmux scope XOR CHECK spelling (task_id IS NULL) = (scope = 'global') with both rejection directions test-asserted — inverted or OR spellings fail loudly or protect nothing
 
 ## Operator Next Steps
 
