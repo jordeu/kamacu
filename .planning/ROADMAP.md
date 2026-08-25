@@ -47,7 +47,11 @@
   2. On every boot the `global_task` singleton row (DB-enforced id=1) exists, seeded with the default agent; deleting the row is re-armed by the idempotent backfill; deleting an agent assigned to it is refused by the FK (ON DELETE RESTRICT delete-guard extension).
   3. `tmux_sessions` accepts a task-less global row (explicit scope discriminator + XOR CHECK) and rejects an ambiguous row (both task and global set); task-scoped FK discipline is unchanged for existing rows.
   4. A live `kamacu-global-*` tmux session survives the startup orphan sweep (regression test proves sweep-no-kill on a live global tab) while the pre-existing orphan-killing behavior for task sessions is unchanged.
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — global_task singleton (00017) + tmux_sessions scope rebuild (00018) with the staged-upgrade byte-for-byte migration proof
+- [ ] 13-02-PLAN.md — boot safety net: BackfillGlobalTask wiring, scope-aware orphan sweep (failing-regression-first), Scratchpad agent-delete 409 guard, real-install rehearsal
 
 > **Research flag**: run `/gsd-plan-phase 13 --research-phase` — the `tmux_sessions` full-table rebuild (SQLite can't drop NOT NULL → CREATE-copy-drop-rename under `PRAGMA foreign_keys=OFF`) is the one piece without a direct in-repo precedent at this exact shape; plan a migration rehearsal on a copy of a real install. Phase-1 decisions that bake in here: managed-clone namespace (lean namespaced — structurally safe), folder-root validation strictness, reconfigure gate semantics, UI naming ("Global" vs "Scratchpad").
 
@@ -196,7 +200,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete | 2026-07-31 |
 | 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete | 2026-08-01 |
 | 12.1. Address Activity tech debt (WR-01..03) | v1.12 | 1/1 | Complete | 2026-08-25 |
-| 13. Global data foundation & safety net | v1.13 | 0/? | Not started | - |
+| 13. Global data foundation & safety net | v1.13 | 0/2 | Not started | - |
 | 14. Global config API | v1.13 | 0/? | Not started | - |
 | 15. Global sessions backend | v1.13 | 0/? | Not started | - |
 | 16. Global view, Settings & bar integration | v1.13 | 0/? | Not started | - |
