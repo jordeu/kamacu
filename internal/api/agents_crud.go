@@ -223,14 +223,17 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
-// delete handles DELETE /api/agents/{id}. Two server-side guards, checked before
-// any mutation (mirrors the workspace delete):
+// delete handles DELETE /api/agents/{id}. Three server-side guards, checked
+// before any mutation (mirrors the workspace delete):
 //   - System guard: the is_system claude seed is never deletable (rename-proof,
 //     keyed off the flag -- never the name "Claude Code").
 //   - In-use guard: an agent still referenced by projects is refused 409 with a
 //     count-carrying message (block-until-unassigned, D-006). The explicit COUNT
 //     precedes the delete so the 409 carries a clean message; the ON DELETE
 //     RESTRICT FK at 00013 is the ultimate backstop.
+//   - Global task guard: the agent referenced by the global_task singleton is
+//     refused 409 with the count-free D-09 string (the singleton references
+//     exactly one agent, always); the 00017 RESTRICT FK is the backstop.
 // An unused, non-system agent is removed -> 204.
 func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
@@ -260,6 +263,20 @@ func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if n > 0 {
 		writeError(w, http.StatusConflict, fmt.Sprintf("reassign its %d project(s) first", n))
+		return
+	}
+	// Global task guard: the singleton references exactly one agent, always —
+	// a count-free 409 with the locked D-09 user-facing string (UI-SPEC
+	// Copywriting row 1) ahead of the 00017 ON DELETE RESTRICT backstop. The
+	// FK is the invariant of last resort; this guard runs first for the clean
+	// message (the projects.agent_id pattern).
+	var g int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM global_task WHERE agent_id = ?`, id).Scan(&g); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if g > 0 {
+		writeError(w, http.StatusConflict, "reassign the Scratchpad agent first")
 		return
 	}
 	res, err := h.db.Exec(`DELETE FROM agents WHERE id = ?`, id)

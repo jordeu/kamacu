@@ -188,6 +188,19 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 
+	// v1.13 (GDATA-01): one-shot idempotent global_task guard. Migration 00017
+	// seeds the singleton, but a migration runs exactly once -- a hand-deleted
+	// row would stay missing forever while every later v1.13 phase reads it
+	// unconditionally. BackfillGlobalTask re-arms id=1 on every boot, seeded
+	// from the is_default agent. Ordering is load-bearing: it MUST run after
+	// BackfillAgents/BackfillOpenCodeAgent -- the seed reads the default agent,
+	// so wiring it before BackfillAgents would garble boot on an agents-wiped
+	// install (13-RESEARCH Pitfall 6).
+	if err := api.BackfillGlobalTask(db); err != nil {
+		slog.Error("backfilling global task", "error", err)
+		return subcommands.ExitFailure
+	}
+
 	// M002 (opencode built-in agent engine): ship + idempotently install the
 	// env-gated opencode status plugin. opencode cannot take a per-instance hook
 	// command via argv (unlike claude's --settings overlay), so it loads this
