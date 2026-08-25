@@ -286,6 +286,11 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// no new construction; it drives PR merged/closed eligibility + display and
 	// degrades cleanly when gh is absent.
 	api.WorktreeCleanupRoutes(mux, db, wtSvc, mgr, tmuxClient, ghSvc)
+	// v1.13 (GCONF-01..04): the global Scratchpad config surface —
+	// GET/PUT /api/global (folder/managed-clone root, default agent, and
+	// the live-session 409 gate on root change/clear). No wt dependency:
+	// no worktrees exist for the global scope.
+	api.GlobalRoutes(mux, db, mgr, tmuxClient)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns, c.insecureAllowRemote))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
