@@ -76,7 +76,16 @@ Plans:
   3. The global task's default agent is settable to any configured agent (v1.10 agents CRUD surface); an agent in use by the global task cannot be deleted.
   4. Changing or clearing the root while global sessions are live is refused with a 409 + reasons list; on success the persisted resume ids are cleared.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 14-01-PLAN.md — the complete GET/PUT /api/global surface in internal/api/global.go: D-17 wire shape, dispatch grammar (folder/clear/agent/repo), D-07/D-27 footgun blocks, managed clone into repos/global/ (8-step atomic, reattach), forward-wired live-session 409 gate + D-16 resume-id clearing, serve.go wiring, unit + seam tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 14-02-PLAN.md — hardening verification: live-tmux 409 gate trip (real detached session), config-history staleness matrix (managed→folder→clear→managed), reattach no-reclone + no-no-op id clearing, real-binary curl smoke round-trip + full-package regression
 
 ### Phase 15: Global sessions backend
 
