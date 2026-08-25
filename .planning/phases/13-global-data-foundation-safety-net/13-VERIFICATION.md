@@ -1,20 +1,24 @@
 ---
 phase: 13-global-data-foundation-safety-net
 verified: 2026-08-25T16:32:00Z
-status: human_needed
+status: passed
 score: 12/12 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
+
   - test: "Adjudicate CR-01 (13-REVIEW.md): agents delete handler can delete the current default agent → zero defaults → next boot fails permanently on idx_agents_name_nocase (pre-existing M001 defect chain, adjacent to this phase's guard)"
     expected: "Developer decision: fix now as a phase-13 gap-closure (add is_default guard → 409 'set another default agent first' + regression test), or explicitly schedule it before ship (no later phase in the roadmap covers it — Phase 17's SCs are global-flow E2E, not agents CRUD)"
     why_human: "Verifier judgment: CR-01 does NOT fail any phase-13 must-have (the referenced-agent delete IS refused — proven at handler and DB level) and is verifiably pre-existing, so it is not a phase gap. But the review labels it must-fix-before-ship with an unbootable-app outcome; accept/defer/fix-now is a scope decision only the developer can make"
+
   - test: "Adjudicate WR-01 (13-REVIEW.md): BackfillGlobalTask's INSERT..SELECT silently inserts zero rows (returns nil) when no is_default agent exists"
     expected: "Developer decision: add the RowsAffected()==1 fail-loud guard + zero-default test case (review's fix), or accept as-is. Note: through the real boot pipeline the state is unreachable (BackfillAgents runs first and re-seeds a default — verified wiring at serve.go:171→186→199); the gap only bites direct/future callers"
     why_human: "The specified must-have truth (idempotent no-op + re-insert after hand DELETE) is fully verified; the zero-default hardening is defense-in-depth beyond the phase contract — a scope decision"
+
   - test: "Adjudicate WR-02 (13-REVIEW.md, pre-existing M002): agents update engine allowlist rejects 'opencode' same-value round-trips, 400ing the whole PATCH"
     expected: "Developer decision: schedule the allowlist fix (accept current engine value) in a later phase or a dedicated task; no current UI path trips it (React dialog omits engine on PATCH)"
     why_human: "Entirely outside phase-13's diff and must-haves (update handler untouched); surfaced so it is not lost"
+
   - test: "Schedule investigation of the 4 pre-existing red tests (TestInput_Happy_WritesAndAppendsCR, TestInput_TrailingLF_TranslatedToCR, TestInput_EmptyMessage_WritesBareCR in internal/api; TestCustomEngineDoesNotGetHookEnv in internal/session)"
     expected: "A dedicated investigation task lands before Phase 15 (the milestone's risk center touches session paths); they are logged in deferred-items.md but no roadmap phase owns them"
     why_human: "Independently verified pre-existing at base cc9bb03 (throwaway worktree, per orchestrator context) and confirmed by this verifier's full-suite run (exact same 4 failures, every other package ok). Not phase regressions; scheduling is a developer call"
