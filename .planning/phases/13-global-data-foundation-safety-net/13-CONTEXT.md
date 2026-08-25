@@ -25,31 +25,31 @@ This phase ALSO locks the v1.13 decisions that bake into schema/path formats and
 
 ### Managed-root namespace (bakes into the stored path format now; clone itself is Phase 14)
 
-- **D-01: Separate namespace.** The gh-cloned global root lives in its own namespace — structurally unrepresentable collision with a project's gated `os.RemoveAll` delete (research P8). No cross-entity dedup 409 guards anywhere.
+- **D-01 [deferred]: Separate namespace.** The gh-cloned global root lives in its own namespace — structurally unrepresentable collision with a project's gated `os.RemoveAll` delete (research P8). No cross-entity dedup 409 guards anywhere. *(deferred: exercised in Phase 14)*
 - **D-02: Path format `~/.kamacu/repos/global/<owner>/<name>`.** Sits inside the existing `repos/` tree; `global` reads as a reserved pseudo-owner. Minimal new surface — no second top-level data dir.
-- **D-03: Same repo as project + global is allowed.** The same `owner/name` may exist as a managed project clone AND the global root simultaneously — separate entities by design, zero extra guard code, disk cost is the user's explicit choice.
-- **D-04: Reconfiguring never deletes the old clone.** When the root moves away from a managed clone, the clone stays on disk — so re-configuring the same repo later reattaches for free (Phase-14 SC2). No gated-removal code in the global path.
+- **D-03 [deferred]: Same repo as project + global is allowed.** The same `owner/name` may exist as a managed project clone AND the global root simultaneously — separate entities by design, zero extra guard code, disk cost is the user's explicit choice. *(deferred: Phase 14)*
+- **D-04 [deferred]: Reconfiguring never deletes the old clone.** When the root moves away from a managed clone, the clone stays on disk — so re-configuring the same repo later reattaches for free (Phase-14 SC2). No gated-removal code in the global path. *(deferred: Phase 14)*
 
 ### Folder-root validation (validator lands in Phase 14; strictness locked now)
 
-- **D-05: Git repo required.** Folder-root validation reuses `validateRepoPath` semantics (current project behavior) — a git repo is the recovery story (checkout/reset) for a skip-permissions agent with no worktree isolation. Matches STACK + PITFALLS leans.
-- **D-06: Persistent un-isolation banner.** When the root is a folder (vs managed clone), the global view shows a one-line persistent notice ("agent runs directly in \<root\> — no worktree isolation"). This is the P3 safety element — deliberately DISTINCT from the deselected GT-FUT-01 (root-path legibility line) and GT-FUT-02 (git-status summary).
-- **D-07: Block obvious footguns.** `$HOME` / `~` / `/` (and equivalents) are rejected with a clear 400 at configure time — one equality check against the P3 worst case.
-- **D-08: Spawn-time honesty for a vanished root.** Config validates once at PUT; if the dir disappears later, spawn fails with an honest error (mirrors project folder-path behavior — validated at creation, failures surface at use). No boot-time revalidation.
+- **D-05 [deferred]: Git repo required.** Folder-root validation reuses `validateRepoPath` semantics (current project behavior) — a git repo is the recovery story (checkout/reset) for a skip-permissions agent with no worktree isolation. Matches STACK + PITFALLS leans. *(deferred: validator lands in Phase 14)*
+- **D-06 [deferred]: Persistent un-isolation banner.** When the root is a folder (vs managed clone), the global view shows a one-line persistent notice ("agent runs directly in \<root\> — no worktree isolation"). This is the P3 safety element — deliberately DISTINCT from the deselected GT-FUT-01 (root-path legibility line) and GT-FUT-02 (git-status summary). *(deferred: Phase 15 UI)*
+- **D-07 [deferred]: Block obvious footguns.** `$HOME` / `~` / `/` (and equivalents) are rejected with a clear 400 at configure time — one equality check against the P3 worst case. *(deferred: validator lands in Phase 14)*
+- **D-08 [deferred]: Spawn-time honesty for a vanished root.** Config validates once at PUT; if the dir disappears later, spawn fails with an honest error (mirrors project folder-path behavior — validated at creation, failures surface at use). No boot-time revalidation. *(deferred: Phase 14)*
 
 ### UI naming (label strings start emitting in Phase 15; decided once, early)
 
 - **D-09: User-facing name is "Scratchpad".** Avoids the collision with v1.12 Activity's "Global" scope-selector label. All user-facing copy (Settings section, view title, "Open Scratchpad" affordance) says Scratchpad.
-- **D-10: Synthesized label strings: `projectName:"Global"`, `taskTitle:"Scratchpad"`.** The bar/status row reads "Global · Scratchpad" — scope + name, no duplication; keeps the TS wire contract non-nullable.
+- **D-10 [deferred]: Synthesized label strings.** The bar/status row reads "Global · Scratchpad" from `projectName:"Global"` + `taskTitle:"Scratchpad"` — scope + name, no duplication; keeps the TS wire contract non-nullable. *(deferred: strings start emitting in Phase 15)*
 - **D-11: Internal naming stays `global` everywhere.** `scope:"global"`, `/global` route, `global_task` table, `kamacu-global-*` tmux mint, `repos/global/` namespace — the label is presentation-only; zero churn against the research architecture.
-- **D-12: Bar-row visual treatment settles at UAT (Phase 17).** Research says cosmetic; strings are locked now, visuals (globe badge vs text-only) deferred.
+- **D-12 [deferred]: Bar-row visual treatment settles at UAT (Phase 17).** Research says cosmetic; strings are locked now, visuals (globe badge vs text-only) deferred.
 
 ### "Live" definition for the reconfigure gate (gate enforces in Phase 14; semantics locked now)
 
-- **D-13: Any live global PTY blocks.** Agent + plain-bash + tmux tabs all count as live for the GCONF-04 409 gate (one `ListGlobal()`-nonempty check). A cwd change under a running shell is a lie waiting to happen.
-- **D-14: Exited sessions never block.** Exited PTYs and persisted resume ids do not gate — only live processes. On success the resume ids are cleared (they point at conversations in the OLD root).
-- **D-15: 409 shape is a reasons list.** `{error, reasons:["agent session running", "2 bash tabs running"]}` — mirrors the existing gated-delete 409 grammar (managed project delete, worktree cleanup) app-wide.
-- **D-16: Resume ids clear on ANY successful root change.** Folder↔repo, or clearing — uniform GCONF-04 contract; no no-op-re-PUT exception branch.
+- **D-13 [deferred]: Any live global PTY blocks.** Agent + plain-bash + tmux tabs all count as live for the GCONF-04 409 gate (one `ListGlobal()`-nonempty check). A cwd change under a running shell is a lie waiting to happen. *(deferred: gate enforces in Phase 14)*
+- **D-14 [deferred]: Exited sessions never block.** Exited PTYs and persisted resume ids do not gate — only live processes. On success the resume ids are cleared (they point at conversations in the OLD root). *(deferred: gate enforces in Phase 14)*
+- **D-15 [deferred]: 409 shape is a reasons list.** `{error, reasons:["agent session running", "2 bash tabs running"]}` — mirrors the existing gated-delete 409 grammar (managed project delete, worktree cleanup) app-wide. *(deferred: Phase 14)*
+- **D-16 [deferred]: Resume ids clear on ANY successful root change.** Folder↔repo, or clearing — uniform GCONF-04 contract; no no-op-re-PUT exception branch. *(deferred: Phase 14)*
 
 ### the agent's Discretion
 

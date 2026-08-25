@@ -5,8 +5,8 @@ milestone_name: Global Task
 current_phase: 13
 current_phase_name: Global data foundation & safety net
 status: planning
-stopped_at: Phase 13 context gathered
-last_updated: "2026-08-25T10:48:44.818Z"
+stopped_at: Phase 13 UI-SPEC approved
+last_updated: "2026-08-25T12:16:16.466Z"
 last_activity: 2026-08-25
 last_activity_desc: v1.13 roadmap created (5 phases, 19/19 requirements mapped)
 progress:
@@ -74,9 +74,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-25T10:48:44.800Z
-**Stopped at:** Phase 13 context gathered
-**Resume file:** .planning/phases/13-global-data-foundation-safety-net/13-CONTEXT.md
+**Last session:** 2026-08-25T12:16:16.455Z
+**Stopped at:** Phase 13 UI-SPEC approved
+**Resume file:** .planning/phases/13-global-data-foundation-safety-net/13-UI-SPEC.md
 
 ## Performance Metrics
 
