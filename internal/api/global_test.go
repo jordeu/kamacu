@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"kamacu/internal/github"
 	"kamacu/internal/session"
 	"kamacu/internal/store"
 	"kamacu/internal/tmux"
@@ -344,5 +347,239 @@ func TestPutGlobalRootChangeClearsResumeIDs(t *testing.T) {
 	c, o = readIDs()
 	if !c.Valid || c.String != "c1" || !o.Valid || o.String != "o1" {
 		t.Errorf("resume ids must STILL be set after an agent-only PUT (D-25), got claude=%v opencode=%v", c, o)
+	}
+}
+
+// fakeGitClone is the clone-seam fake that materializes a real git repo at
+// dest with the origin remote a reattach check expects (git init + git
+// remote add) — so reattach tests build directly on a successful "clone".
+func fakeGitClone(t *testing.T, ref, dest string) error {
+	t.Helper()
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	if out, err := exec.Command("git", "init", dest).CombinedOutput(); err != nil {
+		return fmt.Errorf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dest, "remote", "add", "origin",
+		"https://github.com/"+ref+".git").CombinedOutput(); err != nil {
+		return fmt.Errorf("git remote add: %v\n%s", err, out)
+	}
+	return nil
+}
+
+// globalManagedDest computes the expected managed namespace path for a
+// canonical ref under the test HOME sandbox (D-02).
+func globalManagedDest(t *testing.T, canonical string) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	return filepath.Join(home, ".kamacu", "repos", "global", filepath.FromSlash(canonical))
+}
+
+// TestPutGlobalManagedClone (GCONF-02/D-01/D-02): a verified repo clones
+// into ~/.kamacu/repos/global/<owner>/<name> and the PUT response (and a
+// follow-up GET) show the dest as root_path with the canonical
+// github_repo.
+func TestPutGlobalManagedClone(t *testing.T) {
+	srv, _ := newGlobalTestServer(t)
+	var gotDest string
+	defer github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		gotDest = dest
+		return "", fakeGitClone(t, ref, dest)
+	})()
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return "octo/widgets", true, nil // gh-canonicalized casing wins
+	})()
+
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "Octo/Widgets"})
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%v", status, body)
+	}
+	wantDest := globalManagedDest(t, "octo/widgets")
+	if gotDest != wantDest {
+		t.Errorf("clone dest = %q, want %q", gotDest, wantDest)
+	}
+	if got := body["root_path"]; got != wantDest {
+		t.Errorf("root_path = %v, want %s", got, wantDest)
+	}
+	if got := body["github_repo"]; got != "octo/widgets" {
+		t.Errorf("github_repo = %v, want octo/widgets", got)
+	}
+	if got, ok := body["root_exists"]; !ok || got != true {
+		t.Errorf("root_exists = %v (present=%v), want true (the fake created the dir)", got, ok)
+	}
+	// Persisted: a follow-up GET shows the same managed config.
+	status, body = doJSON(t, "GET", srv.URL+"/api/global", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET: status = %d", status)
+	}
+	if got := body["root_path"]; got != wantDest {
+		t.Errorf("GET root_path = %v, want %s", got, wantDest)
+	}
+	if got := body["github_repo"]; got != "octo/widgets" {
+		t.Errorf("GET github_repo = %v, want octo/widgets", got)
+	}
+}
+
+// TestPutGlobalManagedValidateFail (degrade-don't-break): a gh-unverified
+// ref 400s with msgRepoNotFound; with gh absent the copy flips to
+// msgGHUnavailable. No clone on either path.
+func TestPutGlobalManagedValidateFail(t *testing.T) {
+	srv, _ := newGlobalTestServer(t)
+	defer failCloneNeverCalled(t)()
+
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return parsed, false, nil // never verified
+	})()
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "octo/widgets"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("not-verified: status = %d, want 400; body=%v", status, body)
+	}
+	if got := body["error"]; got != msgRepoNotFound {
+		t.Errorf("not-verified error = %v, want %q", got, msgRepoNotFound)
+	}
+
+	defer github.SetAvailableForTest(false)()
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "octo/widgets"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("gh-absent: status = %d, want 400; body=%v", status, body)
+	}
+	if got := body["error"]; got != msgGHUnavailable {
+		t.Errorf("gh-absent error = %v, want %q", got, msgGHUnavailable)
+	}
+}
+
+// TestPutGlobalManagedCloneFailureAtomic (SC2): a failed clone returns ONE
+// inline 500, leaves the PRIOR config byte-identical, and no directory at
+// the dest.
+func TestPutGlobalManagedCloneFailureAtomic(t *testing.T) {
+	srv, db := newGlobalTestServer(t)
+	// Prior working config: a folder root.
+	prior := gitRepo(t)
+	if status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"root_path": prior}); status != http.StatusOK {
+		t.Fatalf("seed folder root: status = %d; body=%v", status, body)
+	}
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return parsed, true, nil
+	})()
+	defer github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		return "fatal: repository not found", fmt.Errorf("clone failed")
+	})()
+
+	dest := globalManagedDest(t, "octo/widgets")
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "octo/widgets"})
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%v", status, body)
+	}
+	// Clone's contract surfaces the trimmed stderr ("fatal: " stripped).
+	if got := body["error"]; got != "repository not found" {
+		t.Errorf("error = %v, want the inline clone stderr", got)
+	}
+	// The singleton keeps its PRIOR value.
+	rootPath, repo, _ := readGlobalRow(t, db)
+	if rootPath != prior {
+		t.Errorf("root_path = %q, want the prior %q", rootPath, prior)
+	}
+	if repo.Valid {
+		t.Errorf("github_repo = %v, want NULL (prior was a folder root)", repo)
+	}
+	// No residue at the dest.
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Errorf("dest %s must not exist after a failed clone (stat err=%v)", dest, err)
+	}
+}
+
+// TestPutGlobalManagedReattach (D-04): a same-repo re-PUT reattaches the
+// existing dir without re-cloning (the clone seam fails the test if
+// invoked).
+func TestPutGlobalManagedReattach(t *testing.T) {
+	srv, _ := newGlobalTestServer(t)
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return parsed, true, nil
+	})()
+	// First PUT: a successful fake clone materializes the dest.
+	defer github.SetCloneRunnerForTest(func(_ context.Context, ref, dest string) (string, error) {
+		return "", fakeGitClone(t, ref, dest)
+	})()
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "octo/widgets"})
+	if status != http.StatusOK {
+		t.Fatalf("first PUT: status = %d; body=%v", status, body)
+	}
+	firstRoot := body["root_path"]
+
+	// Second PUT with the same repo: clone must NOT run.
+	defer failCloneNeverCalled(t)()
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "octo/widgets"})
+	if status != http.StatusOK {
+		t.Fatalf("reattach PUT: status = %d, want 200; body=%v", status, body)
+	}
+	if got := body["root_path"]; got != firstRoot {
+		t.Errorf("reattach root_path = %v, want the same %v", got, firstRoot)
+	}
+	if got := body["github_repo"]; got != "octo/widgets" {
+		t.Errorf("reattach github_repo = %v, want octo/widgets", got)
+	}
+}
+
+// TestPutGlobalManagedReattachMismatch (D-04): an existing dest whose
+// origin points at a different repo is refused 409 — never clobbered.
+func TestPutGlobalManagedReattachMismatch(t *testing.T) {
+	srv, _ := newGlobalTestServer(t)
+	defer failCloneNeverCalled(t)()
+	defer github.SetAvailableForTest(true)()
+	defer github.SetValidateRunnerForTest(func(_ context.Context, parsed string) (string, bool, error) {
+		return parsed, true, nil
+	})()
+	// Hand-materialize the gadgets dest with the WRONG origin (widgets).
+	dest := globalManagedDest(t, "octo/gadgets")
+	if err := fakeGitClone(t, "octo/widgets", dest); err != nil {
+		t.Fatalf("seed mismatched dest: %v", err)
+	}
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "octo/gadgets"})
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%v", status, body)
+	}
+	want := fmt.Sprintf("a different repository is already checked out at %s", dest)
+	if got := body["error"]; got != want {
+		t.Errorf("error = %v, want %q", got, want)
+	}
+}
+
+// TestPutGlobalRepoDispatch (D-20/D-22 + Open Question 2): the dispatch
+// grammar edges — both fields supplied, explicit-but-empty repo, and a
+// syntactically invalid ref.
+func TestPutGlobalRepoDispatch(t *testing.T) {
+	srv, _ := newGlobalTestServer(t)
+	defer failCloneNeverCalled(t)()
+
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "o/w", "root_path": "/x"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("both supplied: status = %d, want 400; body=%v", status, body)
+	}
+	if got := body["error"]; got != "supply either repo or root_path, not both" {
+		t.Errorf("both supplied error = %v, want the not-both copy", got)
+	}
+
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": ""})
+	if status != http.StatusBadRequest {
+		t.Fatalf("empty repo: status = %d, want 400; body=%v", status, body)
+	}
+	if got := body["error"]; got != `repo must be owner/name; to clear the root send root_path ""` {
+		t.Errorf("empty repo error = %v, want the guidance copy", got)
+	}
+
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"repo": "notaref"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid ref: status = %d, want 400; body=%v", status, body)
+	}
+	if got := body["error"]; got != "Not a valid repository — use owner/name or a GitHub URL." {
+		t.Errorf("invalid ref error = %v, want the ParseRepoRef copy", got)
 	}
 }

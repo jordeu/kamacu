@@ -7,8 +7,10 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"kamacu/internal/github"
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
 	"kamacu/internal/tmux"
@@ -126,6 +128,68 @@ func (h *globalHandlers) globalLiveBlockers(ctx context.Context) []deleteBlocker
 	return blockers
 }
 
+// putManagedRoot runs the managed-clone variant (GCONF-02): the v1.4
+// createByRepo 8-step ordering with the row write swapped from INSERT to the
+// caller's UPDATE — the caller has already hoisted the gate to step 0. On
+// any reject it writes the response and returns ok=false with the singleton
+// keeping its PRIOR value (SC2 atomicity: no half-configured row, no
+// directory). Order is load-bearing: parse → gh-validate → dest →
+// reattach-or-clone; the UPDATE runs only after exit 0.
+func (h *globalHandlers) putManagedRoot(w http.ResponseWriter, r *http.Request, repoInput string) (dest, canonical string, ok bool) {
+	// 1. Parse/canonicalize the ref. The ONLY hard, host-independent reject —
+	//    and the argv-injection guard (leading-dash segments never reach gh).
+	if _, err := github.ParseRepoRef(repoInput); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return "", "", false
+	}
+	// 2. gh-validate. Degrade-don't-break copy chosen exactly like
+	//    projects.go's createByRepo: a syntactic error → 400; not-verified →
+	//    400 (msgRepoNotFound, or msgGHUnavailable when gh is absent). No
+	//    clone, no row mutation on any reject.
+	canonical, verified, err := github.ValidateRepo(r.Context(), repoInput)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return "", "", false
+	}
+	if !verified {
+		msg := msgRepoNotFound
+		if !github.Available() {
+			msg = msgGHUnavailable
+		}
+		writeError(w, http.StatusBadRequest, msg)
+		return "", "", false
+	}
+	// 3. The D-02 namespace: ~/.kamacu/repos/global/<owner>/<name> — three
+	//    segments under repos/, structurally uncollidable with the
+	//    two-segment project clones ("global" is the reserved pseudo-owner
+	//    per 00017's in-line contract).
+	base, err := settings.ExpandHome(reposBase)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return "", "", false
+	}
+	dest = filepath.Join(base, "global", canonical)
+	// 4. Dest already on disk → reattach-or-refuse (D-04, reattachManaged
+	//    verbatim — same package, package-level func). Never clobber: a
+	//    mismatched origin, non-git dir, or missing origin is a 409.
+	if _, statErr := os.Stat(dest); statErr == nil {
+		if rerr := reattachManaged(r.Context(), dest, canonical); rerr != nil {
+			writeError(w, http.StatusConflict, rerr.Error())
+			return "", "", false
+		}
+		return dest, canonical, true
+	}
+	// 5. Clone. On failure: belt-and-braces remove (Clone already
+	//    self-cleans) + ONE inline 500 — the singleton KEEPS ITS PRIOR
+	//    VALUE; that is the SC2 atomicity.
+	if cerr := github.Clone(r.Context(), canonical, dest); cerr != nil {
+		_ = os.RemoveAll(dest)
+		writeError(w, http.StatusInternalServerError, cerr.Error())
+		return "", "", false
+	}
+	return dest, canonical, true
+}
+
 // loadGlobalConfig reads the singleton row + agent summary — the stored
 // half of the D-17 wire shape. get() and put() both build their response
 // through this one loader so the endpoint has exactly one wire shape
@@ -199,7 +263,11 @@ func (h *globalHandlers) get(w http.ResponseWriter, r *http.Request) {
 func (h *globalHandlers) put(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RootPath *string `json:"root_path"`
-		AgentID  *int64  `json:"agent_id"`
+		// Repo is the managed-variant dispatch field (D-22) — it matches the
+		// v1.4 create dispatch field exactly; GET keeps github_repo (the
+		// intentional asymmetry).
+		Repo    *string `json:"repo"`
+		AgentID *int64  `json:"agent_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -208,11 +276,30 @@ func (h *globalHandlers) put(w http.ResponseWriter, r *http.Request) {
 	// Branch FIRST, validate AFTER the branch knows what it holds (14-RESEARCH
 	// Pitfall 1 — a naive validate-then-branch sends root_path:"" into
 	// validateRepoPath and 400s "path must be absolute" in the wrong branch).
-	if req.RootPath == nil && req.AgentID == nil {
+	if req.RootPath == nil && req.Repo == nil && req.AgentID == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
-	rootSupplied := req.RootPath != nil
+	repoInput := ""
+	if req.Repo != nil {
+		repoInput = strings.TrimSpace(*req.Repo)
+	}
+	if repoInput != "" && req.RootPath != nil && *req.RootPath != "" {
+		writeError(w, http.StatusBadRequest, "supply either repo or root_path, not both")
+		return
+	}
+	if req.Repo != nil && repoInput == "" {
+		// Explicit-but-empty repo (14-RESEARCH Open Question 2): explicitness
+		// beats silent ignore on a partial-PATCH surface, and root_path:"" is
+		// the ONE clear spelling — never two.
+		writeError(w, http.StatusBadRequest, `repo must be owner/name; to clear the root send root_path ""`)
+		return
+	}
+	managed := repoInput != ""
+	// A repo PUT is a root change — the gate covers it (and MUST run before
+	// any gh/clone work: a clone takes minutes, never discover a 409 after
+	// one).
+	rootSupplied := req.RootPath != nil || managed
 
 	// GCONF-04 gate: any live global session blocks a root change or clear —
 	// NOTHING is mutated, and the check runs before any validation or disk
@@ -235,52 +322,60 @@ func (h *globalHandlers) put(w http.ResponseWriter, r *http.Request) {
 	// untouched (the projects.go update idiom).
 	var newRoot string
 	var newRepo sql.NullString
-	if rootSupplied {
-		if *req.RootPath == "" {
-			// THE CLEAR (D-21): explicit "" resets root_path='' AND
-			// github_repo=NULL. No path validation — "" is not a folder.
-			newRoot = ""
-			newRepo = sql.NullString{}
-		} else {
-			// FOLDER variant (GCONF-01): git repo required (D-05,
-			// validateRepoPath verbatim — no project-overlap guard beyond
-			// this, D-26).
-			abs, err := validateRepoPath(*req.RootPath)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			// D-07 footguns on the POST-expansion absolute value (Pitfall 6):
-			// "~" and "~/" expand to $HOME inside validateRepoPath, so one
-			// equality catches every home spelling; "/" catches the fs root.
-			home, herr := os.UserHomeDir()
-			if herr != nil {
-				writeError(w, http.StatusInternalServerError, herr.Error())
-				return
-			}
-			if abs == home || abs == "/" {
-				writeError(w, http.StatusBadRequest,
-					"the root can't be your home directory or the filesystem root")
-				return
-			}
-			// D-27 block: everything under ~/.kamacu is Kamacu-managed
-			// machinery — a task worktree gets gated-removed by cleanup, a
-			// managed clone belongs to its project — so a global root there
-			// is always a trap, never a choice. Reject equality AND the
-			// child prefix (Pitfall 5: separator-suffixed, expanded base).
-			base, berr := settings.ExpandHome("~/.kamacu")
-			if berr != nil {
-				writeError(w, http.StatusInternalServerError, berr.Error())
-				return
-			}
-			if abs == base || strings.HasPrefix(abs, base+string(os.PathSeparator)) {
-				writeError(w, http.StatusBadRequest,
-					"the root can't live inside ~/.kamacu — everything there is Kamacu-managed machinery (a task worktree is gated-removed by cleanup, a managed clone belongs to its project), so a root there would be cleaned up by its owner")
-				return
-			}
-			newRoot = abs
-			newRepo = sql.NullString{} // folder ⇒ github_repo NULL (Pitfall 8 — never a stale managed marker)
+	if managed {
+		// MANAGED variant (GCONF-02) — the v1.4 createByRepo 8-step ordering
+		// with UPDATE swapped for INSERT; the gate above is the hoisted
+		// step 0.
+		dest, canonical, ok := h.putManagedRoot(w, r, repoInput)
+		if !ok {
+			return
 		}
+		newRoot = dest
+		newRepo = sql.NullString{String: canonical, Valid: true}
+	} else if req.RootPath != nil && *req.RootPath == "" {
+		// THE CLEAR (D-21): explicit "" resets root_path='' AND
+		// github_repo=NULL. No path validation — "" is not a folder.
+		newRoot = ""
+		newRepo = sql.NullString{}
+	} else if req.RootPath != nil {
+		// FOLDER variant (GCONF-01): git repo required (D-05,
+		// validateRepoPath verbatim — no project-overlap guard beyond
+		// this, D-26).
+		abs, err := validateRepoPath(*req.RootPath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// D-07 footguns on the POST-expansion absolute value (Pitfall 6):
+		// "~" and "~/" expand to $HOME inside validateRepoPath, so one
+		// equality catches every home spelling; "/" catches the fs root.
+		home, herr := os.UserHomeDir()
+		if herr != nil {
+			writeError(w, http.StatusInternalServerError, herr.Error())
+			return
+		}
+		if abs == home || abs == "/" {
+			writeError(w, http.StatusBadRequest,
+				"the root can't be your home directory or the filesystem root")
+			return
+		}
+		// D-27 block: everything under ~/.kamacu is Kamacu-managed
+		// machinery — a task worktree gets gated-removed by cleanup, a
+		// managed clone belongs to its project — so a global root there
+		// is always a trap, never a choice. Reject equality AND the
+		// child prefix (Pitfall 5: separator-suffixed, expanded base).
+		base, berr := settings.ExpandHome("~/.kamacu")
+		if berr != nil {
+			writeError(w, http.StatusInternalServerError, berr.Error())
+			return
+		}
+		if abs == base || strings.HasPrefix(abs, base+string(os.PathSeparator)) {
+			writeError(w, http.StatusBadRequest,
+				"the root can't live inside ~/.kamacu — everything there is Kamacu-managed machinery (a task worktree is gated-removed by cleanup, a managed clone belongs to its project), so a root there would be cleaned up by its owner")
+			return
+		}
+		newRoot = abs
+		newRepo = sql.NullString{} // folder ⇒ github_repo NULL (Pitfall 8 — never a stale managed marker)
 	}
 
 	// Agent field (D-24/D-25): existence-validated 400, NO session gate (a
