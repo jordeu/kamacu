@@ -1,685 +1,383 @@
 # Architecture Research
 
-**Domain:** MCP (Model Context Protocol) server capability added to an existing local-only Go single-binary app — a stdio MCP subcommand that bridges to the app's existing HTTP API, plus the spawn-time integration that auto-registers it with the agent CLIs Kamacu spawns.
-**Researched:** 2026-07-21
-**Confidence:** HIGH — every claim below is grounded in: (a) the live Kamacu codebase as it stands at v1.10 (every file/function name in the integration map was read in the actual repo); (b) the official `modelcontextprotocol/go-sdk` v1.6.1 on pkg.go.dev (hand-tested API shapes); (c) the MCP spec pages at `modelcontextprotocol.io/specification/2025-11-25` (read in full for cancellation, tools, lifecycle); (d) the live Claude Code MCP docs at `docs.anthropic.com/en/docs/claude-code/mcp` and the opencode config docs at `opencode.ai/docs/config/` (both fetched 2026-07-21). Aligned with STACK.md (official SDK pick) and FEATURES.md (tool surface).
+**Domain:** A "Global Task" singleton scratchpad added to Kamacu (existing local-only Go+React app) — a task-like agent+bash view with no project, no worktree, no board, running directly in a configured repo/folder.
+**Researched:** 2026-08-25
+**Confidence:** HIGH — every claim below is grounded in the live Kamacu codebase at v1.12 (tag v1.12, worktree `add-global-session-301`): every file/function/line reference in the integration map was read in the actual repo. Schema claims come from `internal/store/migrations/00001–00016`. No external sources were needed — this is an integration-architecture question about our own code.
 
 ---
 
 ## TL;DR for the roadmap author
 
-- **The architecture is overwhelmingly additive.** One new subcommand wired through stdlib subcommand dispatch, two new leaf packages (`internal/mcp` for the server, `internal/mcpconfig` for the spawn-time config writers), two new HTTP endpoints on the existing Kamacu server (`/api/sessions/{id}/snapshot`, `/api/sessions/{id}/tail`) to expose the existing ring buffer read-only to the bridge. No new long-running goroutines inside the Kamacu server binary. No migrations. No DB schema changes. No frontend changes. The v1.10 spawn engine gets one new step between worktree creation and PTY start: write `.mcp.json` (Claude) or `opencode.json` (opencode) into the worktree root.
-- **The subcommand is a child of the agent CLI, not of the Kamacu binary.** This is the central invariant. The agent CLI (`claude` or `opencode`) is the MCP *client*; `kamacu mcp serve` is the MCP *server* it spawns. The MCP subcommand then makes HTTP calls to the long-running Kamacu binary at `127.0.0.1:7333` — it is a thin stdio→HTTP *bridge*. This separates lifecycle concerns: the MCP subcommand lives and dies with the agent CLI; the Kamacu binary can restart independently.
-- **Per-task scoping comes from env inheritance, not config files.** Each Kamacu task spawn already injects `KAMACU_SESSION_ID` + `KAMACU_HOOK_TOKEN` + `KAMACU_HOOK_BASE` into the agent CLI's env (v1.10 opencode path; claude path uses the `--settings` overlay but the env is inherit-all). The agent CLI passes those through to the MCP subcommand it spawns. The subcommand reads them once at startup, resolves `KAMACU_SESSION_ID` → `task_id` via one HTTP GET, and every "my_*" tool reuses the result. No per-task MCP config file content — the *same* `.mcp.json`/`opencode.json` template works for every task because per-task identity rides on env.
-- **Cancellation works for free.** The official Go SDK's tool handler signature is `func(ctx context.Context, req *mcp.CallToolRequest, in Input) (...)`. When the agent CLI sends `notifications/cancelled`, the SDK cancels the context — the handler's `ctx.Done()` fires. For the long-running `subscribe_session_output` tool, this means: block on a `select { case <-ctx.Done(): ... case chunk := <-tailCh: ... }` loop, and cancellation just works. No bespoke plumbing.
-- **Two config-file shapes; one writer per engine.** Claude Code: `~/.claude.json` style would be global, but writing per-worktree `.mcp.json` at the worktree root is the **project-scoped** config Claude Code documents and prefers — each task gets exactly the kamacu entry it needs and nothing pollutes the user's global config. opencode: same idea, `opencode.json` at the worktree root under the `mcp` key. Getting either shape wrong (`mcpServers` vs `mcp`, `command: "bin"` + `args: [...]` vs `command: [bin, ...]`, `env` vs `environment`, `"stdio"` vs `"local"`) = silent tool discovery failure. The writer has to be engine-aware.
-- **Build order is dictated by three dependencies.** (1) The subcommand must exist and speak the protocol before config injection is useful. (2) Config injection must work before any tool that relies on `KAMACU_SESSION_ID` inheritance. (3) The two new HTTP read endpoints must exist before the snapshot/subscribe tools can call them. So the minimal vertical slice is: subcommand skeleton + ONE read-only tool (`get_my_task`) → agent-CLI config writer for ONE engine (Claude) → end-to-end "claude inside kamacu can call a tool" demo. Everything else fans out from that.
+- **Do NOT use a reserved/sentinel `tasks` row.** `tasks.project_id` is `NOT NULL REFERENCES projects(id)` (migration 00001, DB-enforced, SQLite cannot ALTER it away without a table rebuild), and the sentinel escape hatch — a phantom "Global" project — leaks into ~10 surfaces that would all need hiding (sidebar, `GET /api/projects`, workspace non-empty COUNT/delete guard, Activity scopes, MCP `list_projects`/`get_project`, index redirect, agents in-use guard…). The task CRUD/MCP surface (`get_task`/`update_task`/`delete_task` reach any id with no source guard) would additionally need global-aware 409 guards. High blast radius, pure downside.
+- **Recommended: a task-free "global scope" on the session engine + a singleton `global_task` config/state table.** The session engine (`internal/session`) is already **cwd-driven, not worktree-driven** — `Manager.Spawn` requires only a working directory for agents (manager.go:125); every task/worktree coupling lives in the API handler (`sessions.go:269-302`). `TaskID` is an opaque tag to the engine. Adding `SpawnOpts.Global bool` / `Info.Global bool` is small and additive.
+- **Two migrations**: 00017 creates the `global_task` singleton table (root path + repo ref + agent FK + the two resume ids — config and resume state co-located, following the v1.9/v1.10 singleton-row + idempotent-backfill precedent); 00018 rebuilds `tmux_sessions` with a nullable `task_id` + `scope` column so global bash tabs keep restart durability. The rebuild is the codebase's proven NO-TRANSACTION/PRAGMA-off pattern (00012/00013), one notch heavier (CREATE-copy-drop-rename).
+- **One pre-existing killer bug to fix as part of the migration phase**: `sweepOrphanTmux` (serve.go:351-401) computes "known" sessions via `INNER JOIN tmux_sessions × tasks` — once NULL-task global rows exist, every live global tmux tab looks orphaned and gets **killed at startup**. Must become scope-aware in the same phase as the migration.
+- **Almost everything else is additive**: the WS attach path, hooks receiver, TerminalPane, reaper (zero changes — no task row means no Done-TTL and no PR reconcile), and MCP session tools are all session-id-keyed or task-filtered in ways that already behave correctly for a project-less session.
+- **Build order is dictated by three dependencies**: (1) the data layer (table + tmux scope + sweep fix) must exist before any spawn path; (2) the spawn/status backend must exist before the frontend view; (3) the config UI (Settings section) is only useful once `/api/global` exists — but the folder-variant config API and the managed-clone variant can be split into two waves. Minimal vertical slice: `global_task` row + `POST /api/sessions {scope:"global", kind:"agent"}` resolving root+agent + `/api/agents/status` global entry.
 
 ---
 
-## Standard Architecture
+## The Singleton Decision (the central question)
 
-### System Overview
+### Options considered
 
-```
-                              ┌─────────────────────────────┐
-                              │        Host filesystem       │
-                              │  (~.kamacu, worktrees, etc.) │
-                              └─────────────────────────────┘
-                                          ▲
-                                          │
-        ┌─────────────────────────────────┼─────────────────────────────────┐
-        │                                 │                                 │
-        │      KAMACU BINARY              │        AGENT CLI                 │
-        │      (long-lived, v1.10)        │        (claude / opencode)       │
-        │                                 │        child of kamacu,          │
-        │  ┌────────────────────┐         │        short-lived per task      │
-        │  │ HTTP + WS server   │         │                                 │
-        │  │ 127.0.0.1:7333     │         │   ┌──────────────────────┐      │
-        │  │                    │         │   │ PTY + TUI             │      │
-        │  │ Routes:            │         │   │ (the agent proper)    │      │
-        │  │  /api/projects     │         │   └──────────┬───────────┘      │
-        │  │  /api/tasks        │         │              │ spawns            │
-        │  │  /api/sessions     │         │              ▼                   │
-        │  │  /api/sessions/{id}/ws ◄─────┼─ WS attach  ┌──────────────────┐ │
-        │  │  /api/sessions/{id}/snapshot │   (browser)│ MCP CLIENT       │ │
-        │  │  /api/sessions/{id}/tail   ◄─┼─────────── │ in agent runtime │ │
-        │  │  /api/hooks/sessions/{id}  ◄─┼── hooks ───┤                  │ │
-        │  │  /api/agents        │       │            │ spawns (stdio)   │ │
-        │  │  /api/worktrees     │       │            ▼                   │ │
-        │  │  ... (rest)         │       │   ┌──────────────────────┐     │ │
-        │  │                    │       │   │ kamacu mcp serve     │     │ │
-        │  │ SessionManager     │       │   │ (MCP SERVER)         │     │ │
-        │  │  └ PTY children    │       │   │                      │     │ │
-        │  │  └ ring buffers    │       │   │ Reads env:           │     │ │
-        │  │ Reaper goroutine   │       │   │  KAMACU_SESSION_ID   │     │ │
-        │  └─────────┬──────────┘       │   │  KAMACU_HOOK_TOKEN   │     │ │
-        │            │                  │   │  KAMACU_HOOK_BASE    │     │ │
-        │            │                  │   │                      │     │ │
-        │            ▼                  │   │ Bridges → HTTP calls │     │ │
-        │  ┌────────────────────┐       │   │ to 127.0.0.1:7333    │     │ │
-        │  │ SQLite (~.kamacu)   │      │   │ (X-Kamacu-Token hdr) │     │ │
-        │  │ tasks, projects,    │ ◄────┼───│                      │     │ │
-        │  │ sessions, ...       │      │   │ Logs → stderr only   │     │ │
-        │  └────────────────────┘       │   │ (stdout = MCP wire)  │     │ │
-        │            ▲                  │   └──────────────────────┘     │ │
-        │            │                  │                                 │ │
-        │            │ KAMACU_SESSION_ID│                                 │ │
-        │            │ KAMACU_HOOK_TOKEN│  (inherited env at spawn)        │ │
-        │            │ KAMACU_HOOK_BASE │                                 │ │
-        │            └──────────────────┼─── spawn injects ───────────────┘ │
-        │                               │                                   │ │
-        │  ┌────────────────────┐       │                                   │
-        │  │ spawn engine       │       │   ALSO at spawn:                  │
-        │  │ (v1.10 + 1 new     │       │   writes .mcp.json (claude)       │
-        │  │  step: mcpconfig)  │       │   or opencode.json (opencode)     │
-        │  └────────────────────┘       │   into the worktree root          │
-        │                               │                                   │
-        └───────────────────────────────┼───────────────────────────────────┘
-                                         │
-                                  ┌──────┴──────┐
-                                  │  Browser    │
-                                  │  (the user) │
-                                  └─────────────┘
-```
+| Criterion | A. Sentinel project + `tasks` row (`source='global'`) | B. Reserved tasks row, `project_id` made nullable | **C. Task-free sessions + `global_task` singleton table (RECOMMENDED)** |
+|---|---|---|---|
+| Schema cost | None (phantom rows) | **Rebuild of `tasks`** (SQLite can't drop NOT NULL via ALTER) — the most-JOINed table in the app | 2 contained migrations (new table + `tmux_sessions` rebuild) |
+| Task-scoped JOINs keep working | Yes, byte-for-byte (that's the whole appeal) | Only after rewriting both `agents.go` passes + `joinSessionContext` to LEFT JOINs | No — they're *replaced* by one synthesized global entry each (smaller, explicit) |
+| Hidden-entity leaks | **~10 surfaces** (see below) | Few (board queries already filter `source='manual'`) | None — nothing pretends to be a project/task |
+| Task CRUD/MCP guards needed | Yes: `PATCH`/`DELETE`/`get`/MCP `update_task`/`delete_task` must 409 the global row; `create` position subqueries must not count it | Same | None — there is no row to guard |
+| Reaper interaction | Must exclude the global row from Done-TTL/PR passes | Same | **Zero changes** (no task row → both passes skip by construction) |
+| tmux restart durability | Free (real task_id) | Free | Needs the 00018 rebuild |
+| Resume-state storage | Free (`tasks.claude_session_id` etc.) | Free | `global_task.claude_session_id` / `opencode_session_id` — same semantics, one row |
+| Agent resolution | `projects.agent_id` (sentinel project) | needs settings/LEFT JOIN anyway | `global_task.agent_id` FK (same shape as `projects.agent_id`) |
 
-Three processes are involved per task:
+### Why the sentinel row loses — the concrete evidence
 
-1. **The Kamacu binary** (`kamacu` proper) — the long-lived HTTP/WS/PTY server. Started once by the user. Owns the DB, SessionManager, reaper, and the SPA. **Already exists unchanged from v1.10** plus two new read endpoints.
-2. **The agent CLI** (`claude` or `opencode`) — spawned per task by Kamacu's spawn engine inside the task's worktree PTY. Owns the TUI the browser renders. **Already exists unchanged from v1.10.**
-3. **The MCP subcommand** (`kamacu mcp serve`) — spawned by the agent CLI as a child process at agent startup, after the agent CLI reads the worktree-root `.mcp.json` or `opencode.json` Kamacu wrote at task-spawn time. **New in v1.11.**
+1. **`tasks.project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE`** (00001). SQLite has no `ALTER COLUMN`; Option B is a full rebuild of the table behind agents status (agents.go:99, 164), session context JOIN (sessions.go:935), activity (activity.go:135), the board's 5 position queries, the reaper, and PR find-or-create — the hottest paths in the app, all wrapped in regression suites we'd have to re-verify for zero feature gain. Option A dodges the rebuild but only by minting a phantom project — and `projects` is even more surfaced than `tasks`: sidebar rows, collapsed avatar rail, `GET /api/projects[?workspace_id=]`, the v1.9 **workspace non-empty COUNT guard** (a hidden sentinel project makes "Personal" permanently non-empty and undeletable), Activity project scopes, MCP `list_projects`/`get_project`, `RedirectToFirstProject`, project settings, and the agents in-use delete guard.
+2. **The task surface is not source-guarded on the id paths.** The board queries filter `source='manual'` (tasks.go:194, 233, 288, 432, 538, 554) and `/move` 409s non-manual — but `GET/PATCH/DELETE /api/tasks/{id}` and the MCP `get_task`/`update_task`/`delete_task` tools operate on any id. A sentinel row is writable/deletable by the user *and by an MCP agent* unless every one of those grows a guard.
+3. **The engine doesn't need it.** `Manager.Spawn` validates only `opts.Cwd != ""` for agents (manager.go:125-127) — "task has no worktree" is an API-layer gate (sessions.go:269-272), not an engine invariant. `StopAllForTask`/`ListByTask` treat the id opaquely. The DB JOINs are the *only* consumers that truly require a task row, and for the global task they must produce sentinel labels ("Global") anyway.
 
-The three-process model is forced by MCP semantics: a stdio MCP server is a process whose stdin/stdout the client owns. The agent CLI is the MCP client; Kamacu's `kamacu mcp serve` is the MCP server. Kamacu-the-binary is the *upstream HTTP API* the server bridges to. The subcommand cannot live inside the Kamacu binary (would require HTTP/SSE transport, which is the wrong fit and explicitly out of scope per PROJECT.md) and cannot be replaced by the agent CLI talking HTTP directly (the agent would have to discover and re-implement every endpoint — MCP exists precisely to avoid that).
+### What Option C costs (honestly)
 
-### Component Responsibilities
+- One bounded `tmux_sessions` rebuild (nullable `task_id` + `scope TEXT NOT NULL DEFAULT 'task'`) — required because global tmux tabs must persist rows and `task_id INTEGER NOT NULL REFERENCES tasks(id)` (00005) rejects both NULL and a fake 0.
+- Every `tmux_sessions` touchpoint gains scope awareness: spawn INSERT, `reconcileTmux` (+ a global variant), the startup sweep fix, and `defaultTmuxLabel` (already fine — it parses the last `-` segment, so `kamacu-global-3` → "Bash 3").
+- The agents-status and session-context JOINs each get one synthesized global entry instead of riding the JOIN.
 
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| **`kamacu mcp serve` subcommand** | Be a stdio MCP server that translates MCP `tools/call` requests into HTTP calls against the running Kamacu binary. Read envelope env (`KAMACU_*`) once at startup; build one `*http.Client`; register tools; `mcpSrv.Run(ctx, &mcp.StdioTransport{})`. | New `internal/mcp` package. Stdlib subcommand dispatch in `cmd/kamacu/main.go` (no cobra). Uses `github.com/modelcontextprotocol/go-sdk/mcp` v1.6.1 (per STACK.md). |
-| **MCP tool handlers** | Per-tool: validate input, build an `http.Request`, attach `X-Kamacu-Token`, fire it at the right endpoint, translate the response into a `*mcp.CallToolResult`. No business logic. | One Go func per tool, registered via `mcp.AddTool(server, tool, handler)`. Typed-struct handlers so JSON Schemas are auto-derived. |
-| **Per-task scope resolver** | Map the inherited `KAMACU_SESSION_ID` to a `task_id` (one HTTP GET on startup), cache it in the `Server` struct. | One method on the MCP `Server`: `sessionProjectID(ctx) (string, error)`. Resolves via `GET /api/sessions/{KAMACU_SESSION_ID}` → `taskID` → `GET /api/tasks/{id}` → `projectID`. The first call's result is cached for the subcommand's lifetime; the task's project cannot change while the session is running. |
-| **Spawn-time MCP config writer** | At task spawn, after worktree creation, before the agent CLI starts: write the correct MCP config file into the worktree root for the configured agent's engine. | New `internal/mcpconfig` leaf package. Two writers: `WriteClaude(worktreeDir, env)` writes `.mcp.json`; `WriteOpenCode(worktreeDir, env)` writes `opencode.json`. Called from the existing spawn handler. |
-| **New Kamacu HTTP endpoints (terminal reads)** | Expose the existing Session ring buffer read-only for the MCP bridge to consume. Two endpoints: snapshot (full ring) + tail (incremental from offset). | New file under `internal/api/` (e.g. `terminal_reads.go`); route registration alongside the existing `SessionRoutes`. Reuse `mgr.Get(id).Snapshot()` and add an offset-aware variant. Auth: existing `X-Kamacu-Token` envelope. |
-| **Existing Kamacu binary** | Continue serving HTTP + WS + SPA, owning PTYs, reaping, hooks. Unchanged surface; the two new endpoints above are additive. | No change to `cmd/kamacu/main.go` startup except the route registration call (and the new subcommand dispatch). |
+That is strictly less risk than either sentinel variant, and it leaves **zero phantom entities** to hide.
+
+### Rejected sub-variant: resume/config state in the settings KV
+
+Storing `global_root`/`global_agent_id`/`global_claude_session_id` as settings KV rows would need zero migrations, but: (a) `agent_id` as a string loses FK integrity — the agents delete handler's in-use guard (agents_crud.go) counts only `projects`, so a referenced agent becomes deletable and the setting dangles; (b) it mixes per-instance *state* (latest claude session id, discovered opencode id — newest-wins written on every spawn) with user *config* (root, agent), which the settings page's "reset to default" semantics would actively corrupt; (c) `settings.Set` validation would grow root-path/git/agent-id rules foreign to that package. A dedicated table gives us the `REFERENCES agents(id) ON DELETE RESTRICT` backstop for free — the exact shape `projects.agent_id` already has.
 
 ---
 
-## Recommended Project Structure
+## Recommended Architecture
+
+### System overview
 
 ```
-cmd/kamacu/
-├── main.go                      # MODIFIED: subcommand dispatch (stdlib)
-├── main_test.go                 # existing
-└── mcp_subcommand.go            # NEW: the `mcp serve` dispatch entry (calls internal/mcp)
-
-internal/
-├── api/                         # existing package, extended
-│   ├── routes.go                # existing
-│   ├── sessions.go              # existing
-│   ├── terminal_reads.go        # NEW: GET /api/sessions/{id}/snapshot, /tail
-│   └── terminal_reads_test.go   # NEW
-├── mcp/                         # NEW PACKAGE: the MCP server
-│   ├── server.go                # mcp.NewServer + tool registration + StdioTransport.Run
-│   ├── server_test.go           # in-memory transport tests (mcp.NewInMemoryTransport)
-│   ├── bridge.go                # http.Client wrapper: getJSON/postJSON/doRequest with auth header
-│   ├── bridge_test.go           # round-trip tests against httptest.NewServer
-│   ├── scope.go                 # KAMACU_SESSION_ID → task_id/project_id resolution + caching
-│   ├── scope_test.go
-│   ├── tools.go                 # tool registration glue (one func per tool group)
-│   ├── tools_tasks.go           # list_tasks, get_task, create_task, move_task, ...
-│   ├── tools_sessions.go        # list_sessions, get_session, snapshot_session, subscribe_session
-│   ├── tools_projects.go        # list_projects, get_project, list_workspaces, list_agents
-│   ├── tools_terminal.go        # get_session_output (snapshot) + subscribe_session_output (long-running)
-│   ├── tools_github.go          # list_pr_reviews, get_pr_review
-│   ├── tools_diff.go            # get_task_diff, mark_file_viewed
-│   ├── tools_worktree.go        # list_worktree_cleanup_candidates, clean_worktree_eligible, remove_worktree
-│   └── tools_test.go            # per-tool handler tests (bridge mocked)
-├── mcpconfig/                   # NEW LEAF PACKAGE: spawn-time config writers
-│   ├── claude.go                # WriteClaude(worktreeDir, env) → .mcp.json
-│   ├── opencode.go              # WriteOpenCode(worktreeDir, env) → opencode.json
-│   ├── claude_test.go
-│   ├── opencode_test.go
-│   └── doc.go                   # package-level docs
-├── session/                     # existing — minor additive change
-│   └── session.go               # already has Snapshot(); add Tail(since int) if needed
-└── ... (existing packages unchanged)
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Browser (React SPA)                                                      │
+│                                                                          │
+│  ActiveSessionsBar ── global row ("Global · Global Task") ──► /global    │
+│  SettingsPage ── new "Global Task" section (root | repo, agent, Open)    │
+│  GlobalTaskPage (/global) ── AgentTab + Bash N tabs (TaskTabs shell)     │
+│        │  TanStack Query: useGlobalConfig, useGlobalSessions,            │
+│        │                   useSpawnGlobalAgent / useResumeGlobalAgent     │
+└────────┼─────────────────────────────────────────────────────────────────┘
+         │ HTTP/WS (unchanged client.ts / useTerminalSocket — id-keyed)
+┌────────▼─────────────────────────────────────────────────────────────────┐
+│ Go server                                                                │
+│                                                                          │
+│  NEW  POST/GET/PUT /api/global ── internal/api/global.go                 │
+│         folder variant: validate dir      ─┐                             │
+│         repo variant:  gh-validate ────────┼── internal/github (Clone,   │
+│                        github.Clone ───────┘   ValidateRepo, reattach)    │
+│                                                                          │
+│  MOD  POST /api/sessions {scope:"global"} ── sessions.go global branch   │
+│         cwd = global_task.root_path (NO worktree, NO branch)             │
+│         agent = JOIN agents ON global_task.agent_id                      │
+│         tmux name = kamacu-global-<n> (tmux_sessions.scope='global')     │
+│                                                                          │
+│  MOD  GET /api/sessions?scope=global ── list + global reconcileTmux      │
+│  MOD  GET /api/agents/status ── third pass: synthesized global entry     │
+│         (manager-derived + DB-derived post-restart resumable)            │
+│                                                                          │
+│  UNCHANGED  internal/session engine (adds Global flag only),             │
+│             internal/ws (id-keyed), hooks.go (id-keyed), reaper (no-op)  │
+└────────┼─────────────────────────────────────────────────────────────────┘
+┌────────▼─────────────────────────────────────────────────────────────────┐
+│ SQLite                                                                   │
+│   NEW  global_task (singleton id=1: root_path, github_repo, agent_id FK, │
+│        claude_session_id, opencode_session_id)      ── migration 00017   │
+│   MOD  tmux_sessions (task_id nullable, scope 'task'|'global')           │
+│                                                     ── migration 00018   │
+│   UNCHANGED  projects / tasks / agents / workspaces / settings / diff_*  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Structure Rationale
+### Data model
 
-- **`internal/mcp/` (NEW)** mirrors `internal/api/` (REST handlers) and `internal/ws/` (WebSocket handlers): each is one network-facing translation layer over the same `internal/session` + DB substrate. Naming it `mcp` (not `mcpserver`, not `mcpbridge`) follows the existing one-word convention (`api`, `ws`, `diff`, `quota`, `tmux`, `reaper`). Dependency direction is enforced: `internal/mcp` imports `internal/api` types where they exist (the request/response structs) so wire shapes stay in one place, but it does NOT import `internal/session` — terminal reads go through HTTP, not direct Session access, keeping the subcommand a clean bridge.
-- **`internal/mcpconfig/` (NEW LEAF)** mirrors `internal/tmux` (CLI shell-out) and `internal/opencode` (plugin install): each is a leaf that owns one side effect at the OS boundary. Splitting it from `internal/mcp` is deliberate — `mcpconfig` runs *inside the Kamacu binary at task spawn* and writes files; `mcp` runs *inside the subcommand* and speaks the protocol. They share no code; conflating them would create an import cycle (the spawn engine shouldn't depend on the MCP SDK).
-- **Tool handlers split by domain** (`tools_tasks.go`, `tools_sessions.go`, etc.) — one file per Kamacu resource area, mirroring how `internal/api/` is split (`tasks.go`, `sessions.go`, `agents.go`, `workspaces.go`). Easier to navigate; smaller diffs.
-- **`cmd/kamacu/main.go` gets a single new function** (`runMCPSubcommand`) and a dispatch branch at the top. The subcommand body lives in `internal/mcp` so it's testable without spawning a process.
+**Migration 00017 — `global_task` singleton** (new table + idempotent backfill hook `BackfillGlobalTask`, wired in serve.go after `BackfillOpenCodeAgent` — the v1.9/v1.10 pattern):
+
+```sql
+-- +goose Up
+CREATE TABLE global_task (
+  id                  INTEGER PRIMARY KEY CHECK (id = 1),   -- singleton, DB-enforced
+  root_path           TEXT NOT NULL DEFAULT '',              -- effective cwd ("" = unconfigured)
+  github_repo         TEXT,                                  -- non-NULL ⇒ managed clone (v1.4 pattern)
+  agent_id            INTEGER NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+  claude_session_id   TEXT,                                  -- newest-wins resume key (tasks.claude_session_id semantics)
+  opencode_session_id TEXT,                                  -- discovered ses_… (tasks.opencode_session_id semantics)
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+INSERT INTO global_task (id, agent_id)
+  SELECT 1, id FROM agents WHERE is_default = 1;   -- fresh install lands on the Claude seed
+```
+
+Notes:
+- `agent_id NOT NULL … RESTRICT` mirrors `projects.agent_id` (00013) exactly; the agents delete handler's friendly in-use guard grows one more COUNT (see Integration Points). The backfill (not the migration) owns re-creating the row if missing — migration runs once, backfill runs every boot.
+- `root_path` always stores the **effective directory** (for the managed variant: `~/.kamacu/repos/<owner>/<name>` written at save). `github_repo IS NOT NULL` is the "Kamacu owns this dir" marker — the same single-source-of-truth rule the `managed` column plays for projects.
+- Resume ids on the singleton behave exactly like their `tasks` counterparts: written on spawn (claude — kamacu mints it), discovered async (opencode), never cleared on stop (resumable ghost, D-96 posture).
+
+**Migration 00018 — `tmux_sessions` scope rebuild** (the NO-TRANSACTION + `PRAGMA foreign_keys=OFF` discipline from 00012/00013, one step heavier — CREATE-copy-DROP-rename):
+
+```sql
+-- +goose NO TRANSACTION Up
+PRAGMA foreign_keys = OFF;
+BEGIN;
+CREATE TABLE tmux_sessions_new (
+    id         INTEGER PRIMARY KEY,
+    task_id    INTEGER REFERENCES tasks(id),        -- now nullable: global rows have no task
+    scope      TEXT NOT NULL DEFAULT 'task' CHECK (scope IN ('task','global')),
+    n          INTEGER NOT NULL,
+    name       TEXT    NOT NULL UNIQUE,
+    label      TEXT    NOT NULL DEFAULT '',
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    UNIQUE(task_id, n)
+);
+INSERT INTO tmux_sessions_new (id, task_id, scope, n, name, label, created_at)
+  SELECT id, task_id, 'task', n, name, label, created_at FROM tmux_sessions;
+DROP TABLE tmux_sessions;
+ALTER TABLE tmux_sessions_new RENAME TO tmux_sessions;
+COMMIT;
+PRAGMA foreign_key_check;
+PRAGMA foreign_keys = ON;
+```
+
+Consequences to carry through the code (all small, all listed in Integration Points):
+- `n` sequencing for global tabs: `SELECT COALESCE(MAX(n),0)+1 WHERE scope='global'` (in SQLite, NULL `task_id` rows are distinct under `UNIQUE(task_id,n)`, so the pre-existing `name UNIQUE` constraint is the real collision guard — same as today, where the read-then-insert race is accepted with a constraint backstop).
+- Names: `kamacu-global-<n>` — still under the `kamacu-` prefix the orphan sweep filters on, and `defaultTmuxLabel` already derives `Bash <n>` from the last `-` segment.
+- Every existing `WHERE task_id = ?` query keeps working unchanged (NULL rows never match). The **startup sweep is the exception** — see Pitfall 1.
+
+### Component responsibilities
+
+| Component | Status | Responsibility |
+|---|---|---|
+| `internal/api/global.go` | NEW | `GET /api/global` (config + derived state: configured, managed, resolved root, live-session presence), `PUT /api/global` (folder variant: validate; repo variant: gh-validate → `github.Clone` → reattach-or-409 → atomic row update). Owns the v1.4 8-step atomicity ordering adapted to an UPDATE-not-INSERT. |
+| `internal/session` (manager.go, session.go) | MOD (additive) | `SpawnOpts.Global bool`, `Info.Global bool`, a dedicated global bash-label counter (`Bash N`), `Manager.ListGlobal()` + a `StopAllGlobal()` used by the config-switch/root-clear gates. Zero changes to the PTY/ring/attach machinery. |
+| `internal/api/sessions.go` | MOD | `create`: a `scope:"global"` branch (resolve root + agent from `global_task`, one-agent-per-global gate, tmux `kamacu-global-<n>` INSERT with `scope='global'`, resume variants persisting to `global_task`). `list`: `?scope=global` filter + a global `reconcileTmux` variant. |
+| `internal/api/agents.go` | MOD | A third, synthesized pass appended to `status`: manager-derived global entry (newest global agent session) + DB-derived post-restart resumable entry from `global_task`. Emits `source:"global"`, `projectId:null`, `taskTitle:"Global Task"`, `projectName:"Global"`. |
+| `cmd/kamacu/serve.go` | MOD | Wire `BackfillGlobalTask`; register `/api/global`; fix `sweepOrphanTmux` known-set query. |
+| `internal/api/agents_crud.go` | MOD | In-use delete guard counts the `global_task.agent_id` reference (friendly 409 ahead of the RESTRICT backstop). |
+| `internal/api/projects.go` | MOD (guard) | Managed-project delete gate: when `global_task.github_repo`/`root_path` points at this project's clone, a running global session (or any global config tie) is a `sessions` blocker — otherwise `removeManaged`'s `os.RemoveAll(clone)` (projects.go:914) deletes the live global root out from under a running agent. |
+| `internal/reaper` | UNCHANGED | Done-TTL selects `tasks.status='done'` (no global row → skipped); PR reconcile selects `source='github_pr'` (skipped). This is a *feature* of Option C. |
+| `internal/ws`, `internal/api/hooks.go`, `internal/api/resume.go` | UNCHANGED | All id-keyed (`mgr.Get(id)`) or glob-based (`transcriptExists` is repo-agnostic — claude transcript lookup is global by session uuid, cwd-independent). |
+| `internal/mcp` | UNCHANGED (v1.13) | Global sessions already appear in `list_sessions` (the unfiltered `mgr.List()` pass) with empty JOIN fields; `get_session`/`output`/`subscribe`/`send_session_message`/`start_task_agent` are id/task-scoped and simply never address the global scope. An optional `scope` filter on `list_sessions` is a cheap follow-up, not a requirement. |
+| `web/src/api/global.ts` | NEW | `GlobalConfig` type + `useGlobalConfig`, `useSaveGlobalConfig` (folder), `useCloneGlobalRoot` (repo, blocking "Cloning…" state), mirroring the worktreeCleanup/agents client shapes. |
+| `web/src/api/sessions.ts` | MOD | `useGlobalSessions()` (`?scope=global`), `useSpawnGlobalAgent`/`useResumeGlobalAgent`/`useSpawnGlobalBash`/`useReattachGlobalTmux` — the same five hooks with `scope:"global"` bodies and a `["sessions","global"]` cache key. |
+| `web/src/pages/GlobalTaskPage.tsx` | NEW | The trimmed task view: Agent tab + bash tabs ONLY (no Description, no Diff, no title editor, no ⋯ delete/cleanup menu, no WorktreeMetaLine). Reuses `TaskTabs`, `TerminalPane`, and a loosened `AgentTab`. |
+| `web/src/components/task/AgentTab.tsx` | MOD (props loosening) | Currently takes `task: Task` and calls `useSpawnAgent(task.id)`; refactor to take explicit spawn/resume mutation callbacks (or a minimal `{id, worktree_path, description}`-shaped prop) so the global page reuses it without a fake Task object. |
+| `web/src/components/layout/ActiveSessionsBar.tsx` | MOD | `AgentStatusEntry.projectId` → `number \| null`, `source` gains `"global"`; row navigation branches (`source==="global"` → `/global`, else the project/task route); row label renders `Global · Global Task` (a Globe glyph or badge substitutes the project-name span). |
+| `web/src/pages/SettingsPage.tsx` + `components/settings/GlobalSection.tsx` | NEW section | The Settings "Global Task" block: segmented "Local folder | GitHub repo" (reuse the AddProjectDialog toggle pattern), agent selector (reuse the per-project selector), inline validation, and an "Open Global Task" affordance (the idle reachability path). |
+
+### Where sessions run
+
+- **cwd = `global_task.root_path`**, verified at spawn by the engine's existing pre-PTY `os.Stat` check (manager.go:137-143) — a root deleted out from under us produces the clean "couldn't start a session" path.
+- **No worktree, no branch, no fetch** — `internal/worktree` is never in the global spawn path. This is the "true scratchpad" contract from PROJECT.md.
+- **Folder-variant validation** (decision point, recommendation below): absolute path to an existing **directory** — *not* necessarily a git repo. Tasks need git because worktrees need it; the global scratchpad never creates a worktree, and both bash and agent CLIs run fine in a plain folder. Reuse `validateRepoPath`'s `~` expansion + `os.Stat` skeleton but drop the `git rev-parse` requirement (a new `validateDirPath`). The managed variant is git by construction (`gh repo clone`).
+- **Spawn env**: identical to task agents — the claude path (hook overlay, `--session-id`, extras) and the opencode path (`KAMACU_*` env + the load-bearing `PWD=<dir>` pin, manager.go:199, which keeps `opencode session list` directory-matching working when `<dir>` is the global root instead of a worktree) are cwd-parameterized already.
+
+### How the global agent is resolved
+
+- `global_task.agent_id` → `JOIN agents a ON a.id = g.agent_id` supplies `engine`/`command`/`extra_params` — the exact same row shape the task spawn reads via `projects.agent_id` (sessions.go:285-290), so the engine fork (claude / custom / opencode), `renderAgentCommand` placeholders (`{{worktree}}` → the root path), extras tokenization, and the quota-indicator gating all carry over unchanged.
+- Read-at-use (fresh query per spawn, the SET-03 rule): an agent edit applies at the next Start with no restart.
+- Delete guard: `DELETE /api/agents/{id}` grows one COUNT against `global_task` (the RESTRICT FK is the DB backstop) — the same block-until-unassigned contract projects have.
+
+### Restart reconciliation & resume (no task row)
+
+The two-pass pattern in `agents.go` extends by one synthesized pass:
+
+1. **Manager-derived (live)**: newest global agent session from `mgr.List()` (`Kind==agent && Global`), meta from `global_task` (engine, csid, ocsid, root). Resumable derivation is the same engine-branched check with `root_path` standing in for `wtp` (claude: csid + `transcriptExists`; opencode: ocsid alone).
+2. **DB-derived (post-restart)**: when the manager has no global agent entry and `global_task` carries a csid/ocsid that passes the same resumability check, append the `exited`/`resumable:true`/`sessionId:""` entry — the global analogue of agents.go:164-214.
+3. **Resume spawn**: `POST /api/sessions {scope:"global", kind:"agent", resume:true}` — claude reuses `--resume <csid>` (transcript glob is repo-agnostic); opencode appends `-s <ocsid>`. Fresh spawn persists the new csid to `global_task.claude_session_id` (the same newest-wins UPDATE, different table); fresh opencode launches `captureOpencodeSessionAsync` with a persist target of `global_task` — parametrize the persist step (a small func or an owner enum) rather than forking the poller.
+4. **tmux bash tabs**: `GET /api/sessions?scope=global` runs a global `reconcileTmux` (same survivor/GC logic, `WHERE scope='global'`); the frontend's invisible reattach (`reattach_tmux_name`, `new-session -A`) works verbatim because the name is the only key.
+
+### Managed-clone lifecycle for the global root
+
+Reuse the v1.4 primitives; the differences are all *simplifications* (no worktrees hang off it):
+
+- **Save (repo variant)** — the createByRepo 8-step adapted to UPDATE: ParseRepoRef → `ValidateRepo` (gh-gated; 400 with the canonical copy on failure, row untouched) → dest = `~/.kamacu/repos/<owner>/<name>` → existing dir ⇒ `reattachManaged` semantics (origin-match reuses; mismatch/non-git 409s, never clobbers) → `github.Clone` (atomicity: on failure the row keeps its previous value — no half-switched config) → UPDATE `root_path`+`github_repo` on exit 0.
+- **Dedup against projects**: `projects.repo_path` is UNIQUE but the global root is *not* a project row — a managed project and the global root can point at the same clone dir. Recommended guard (decision point): refuse the repo variant with a 409 "this repository is already added as a project" when `projects.repo_path = dest` matches, and conversely extend the managed-project delete gate (above) — otherwise `removeManaged`'s `os.RemoveAll(clone)` orphans the global config and can kill a live global session's cwd. Both directions need exactly one check each.
+- **Switching/clearing the root**: leaving a managed root (folder switch, repo switch, clear) should run the four gates against the old clone (dirty / unpushed vs `origin/<default>` / stash / live global sessions) and 409 with the structured `reasons` list on any trip — `deleteManaged`'s gate phase minus the worktree loop, plus a `StopAllGlobal()` in the remove phase. Folder roots are never touched (the projects D-09 rule).
+- **Freshness**: no per-task fetch equivalent needed — the agent runs on whatever the clone holds; a manual `git pull` in a global bash tab is the scratchpad-native answer.
 
 ---
 
 ## Architectural Patterns
 
-### Pattern 1: Stdlib subcommand dispatch (no framework)
+### Pattern 1: Singleton row + idempotent startup backfill
 
-**What:** The Kamacu binary serves two modes from one binary. `kamacu [global flags]` runs the HTTP server (default, unchanged); `kamacu mcp serve` runs the MCP subcommand. Use stdlib `flag.FlagSet`, not cobra/spf13.
+**What:** one guaranteed row (`global_task` id=1) created by migration, re-armed by `BackfillGlobalTask` every boot.
+**When to use:** any future singleton config/state (this is the third use after workspaces' Personal and agents' Claude seed).
+**Trade-offs:** the `CHECK (id = 1)` makes the singleton DB-enforced; the backfill makes "row missing" unreachable. Cost: one more boot step in serve.go — negligible.
 
-**When to use:** Whenever a binary needs two modes and Kamacu's ethos is stdlib-only.
+### Pattern 2: Explicit scope flag, never a sentinel id
 
-**Trade-offs:** Slightly more code than cobra (~30 LOC vs ~5 LOC for the dispatch), but zero new dependencies, matches the existing `flag` style in `main.go` (which already uses `flag.String` for `--addr`, `--db`, etc.), and avoids pulling cobra's transitive deps. Cobra is justified if subcommands proliferate (5+) or have nested subcommands; Kamacu has exactly one.
+**What:** `SpawnOpts.Global bool` / `Info.Global bool` rather than encoding "global" into `TaskID`.
+**When to use:** whenever a new session family appears.
+**Trade-offs:** a sentinel id (e.g. `-1`) silently interacts with every existing `TaskID <= 0` check (agents.go:50, joinSessionContext, the manager's dev-session label branch) — three places that would treat `-1` as a dev session and one (taskCounters) that would happily allocate it. An explicit flag fails loudly anywhere it isn't threaded. Negative ids are the classic invisible-corruption trap; the codebase already proves the flag approach (`Orphaned bool`, `Kind`).
 
-**Example:**
 ```go
-// cmd/kamacu/main.go
-func main() {
-    if len(os.Args) >= 2 && os.Args[1] == "mcp" {
-        // Subcommand mode: kamacu mcp [serve]
-        os.Exit(runMCPSubcommand(os.Args[2:]))
-    }
-    // Default mode: kamacu (HTTP server) — existing flag.Parse() block unchanged
-    addr := flag.String("addr", "127.0.0.1:7333", "...")
-    // ... rest of existing main ...
-}
-
-// cmd/kamacu/mcp_subcommand.go
-func runMCPSubcommand(args []string) int {
-    fs := flag.NewFlagSet("kamacu mcp", flag.ExitOnError)
-    // No flags today; room for --transport http later (future milestone)
-    fs.Usage = func() {
-        fmt.Fprintln(os.Stderr, "Usage: kamacu mcp serve")
-        fmt.Fprintln(os.Stderr, "  Runs the Kamacu MCP server over stdio (JSON-RPC).")
-    }
-    if err := fs.Parse(args); err != nil {
-        return 2
-    }
-    if fs.NArg() == 0 || fs.Arg(0) != "serve" {
-        fs.Usage()
-        return 2
-    }
-    ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-    defer cancel()
-    if err := mcp.Run(ctx, mcp.OptionsFromEnv()); err != nil {
-        slog.Error("mcp server stopped", "error", err)
-        return 1
-    }
-    return 0
+// manager.go — label branch grows one arm; nothing else in the engine changes
+switch {
+case kind == KindAgent:
+    label = "Agent"
+case opts.Global:                     // NEW — before the TaskID==0 dev arm
+    m.globalCounter++
+    label = fmt.Sprintf("Bash %d", m.globalCounter)
+case opts.TaskID == 0:
+    ...
 }
 ```
 
-Two-level dispatch (`mcp` then `serve`) leaves room for `kamacu mcp list-tools` or `kamacu mcp inspect` (debug subcommands) without further restructuring. If v2 ever adds more subcommands (`kamacu config`, `kamacu doctor`), the same pattern extends.
+### Pattern 3: Synthesized JOIN entries instead of LEFT-JOIN surgery
 
-### Pattern 2: HTTP-bridge, not in-process
+**What:** the global status/context entries are appended by a dedicated pass that reads `global_task`, not produced by rewriting the tasks→projects→agents INNER JOINs.
+**When to use:** whenever a legitimately row-less entity must appear on a JOIN-backed wire.
+**Trade-offs:** two small passes instead of nullable-safe rewrites of the hottest queries in the app; the cost is that the global entry's field set must be maintained in one more place — contained, explicit, and testable in isolation.
 
-**What:** The MCP subcommand talks to the running Kamacu binary exclusively over HTTP at `127.0.0.1:7333`. It does NOT import `internal/session`, `internal/store`, or any internal package directly. Auth is the existing `X-Kamacu-Token` envelope header.
+### Pattern 4: Degrade-don't-break on the unconfigured state
 
-**When to use:** Always, for v1.11. The alternative — importing internal packages and running the MCP server inside the Kamacu binary — would require HTTP/SSE transport (out of scope) and entangle MCP request lifetimes with the long-lived server's goroutines.
-
-**Trade-offs:**
-- **Pros:** Clean separation; existing validation/side effects/reaper/hooks all apply unchanged; existing tests cover the data path; the bridge is trivially substitutable (swap `http.DefaultClient` for a fake in tests); the subcommand can be developed and tested in complete isolation from Kamacu's binary.
-- **Cons:** One extra TCP round-trip per tool call (~1ms on localhost — irrelevant); the bridge duplicates the request/response struct definitions (mitigated by sharing `internal/api/types.go` where they exist).
-
-The "cons" list is short and minor. The bridge pattern is the documented happy path of the official Go SDK — its `examples/server/proxy/main.go` is structurally identical (stdio MCP→HTTP upstream). Kamacu's only adaptation is that the upstream is a REST API rather than another MCP server, which makes each handler *simpler* than the proxy example (no MCP-version negotiation with the upstream).
-
-**Example:**
-```go
-// internal/mcp/bridge.go
-type Bridge struct {
-    client  *http.Client
-    baseURL string                    // http://127.0.0.1:7333
-    token   string                    // KAMACU_HOOK_TOKEN
-}
-
-func (b *Bridge) getJSON(ctx context.Context, path string, out any) error {
-    req, err := http.NewRequestWithContext(ctx, "GET", b.baseURL+path, nil)
-    if err != nil { return err }
-    req.Header.Set("X-Kamacu-Token", b.token)   // existing envelope
-    req.Header.Set("Accept", "application/json")
-    res, err := b.client.Do(req)
-    if err != nil { return fmt.Errorf("kamacu bridge: %w", err) }
-    defer res.Body.Close()
-    if res.StatusCode >= 400 {
-        return &bridgeError{Status: res.StatusCode, Path: path}
-    }
-    if out == nil { return nil }
-    return json.NewDecoder(res.Body).Decode(out)
-}
-```
-
-### Pattern 3: Per-task scoping via env + lazy resolution
-
-**What:** Convenience tools (`get_my_task`, `list_my_tasks`, `subscribe_my_session_output`) need no parameters — they operate on the inherited `KAMACU_SESSION_ID`. The subcommand resolves it to a `task_id` lazily on first use, caches the result on the `Server` struct.
-
-**When to use:** Whenever the subcommand has `KAMACU_SESSION_ID` in env (i.e., always — Kamacu injects it for every spawned agent).
-
-**Trade-offs:**
-- **Pros:** Zero per-tool-call overhead after the first resolution; clear separation of convenience tools (no params) and cross-task tools (explicit IDs); no SDK feature needed (plain Go struct field).
-- **Cons:** If the task is reassigned to another project mid-session (impossible today but a future concern), the cache is stale. Mitigation: cache for the subcommand's lifetime — a single MCP subcommand lives for one agent-CLI session, which is shorter than any conceivable reassignment flow.
-
-**Example:**
-```go
-// internal/mcp/scope.go
-type Scope struct {
-    bridge    *Bridge
-    sessionID string                  // KAMACU_SESSION_ID
-    cached    scopeCache
-}
-
-type scopeCache struct {
-    taskID    int64
-    projectID int64
-    resolved  bool
-}
-
-// taskID resolves KAMACU_SESSION_ID -> tasks.id via one GET. Cached.
-func (s *Scope) taskID(ctx context.Context) (int64, error) {
-    if s.cached.resolved { return s.cached.taskID, nil }
-    var info session.Info
-    if err := s.bridge.getJSON(ctx, "/api/sessions/"+s.sessionID, &info); err != nil {
-        return 0, err
-    }
-    if info.TaskID == 0 {
-        return 0, errUnscopedSession    // dev session, not a task
-    }
-    s.cached = scopeCache{taskID: info.TaskID, projectID: 0, resolved: true}
-    return s.cached.taskID, nil
-}
-```
-
-The lookup happens *lazily on first call*, not at startup. This is deliberate: if Kamacu restarts between agent-CLI spawn and the first MCP tool call (rare but possible), the session row may be briefly gone. A lazy resolver surfaces that as a clean MCP error on the failing tool call; an eager one crashes the subcommand at startup.
-
-### Pattern 4: Spawn-time config injection at the worktree root
-
-**What:** At task spawn, after `worktree.Add` and before `mgr.Spawn`, Kamacu writes a `.mcp.json` (Claude Code) or `opencode.json` (opencode) into the worktree root. The file contains exactly one MCP server entry pointing at `kamacu mcp serve`, with env vars carrying the per-task identity.
-
-**When to use:** For every task with `engine=claude` or `engine=opencode`. Custom agents are skipped — they may not speak MCP.
-
-**Trade-offs:**
-- **Pros:** Zero global-config pollution — each worktree's MCP entry is scoped to that worktree's agent; committed worktrees (rare but possible) don't leak credentials across projects; Claude Code's `--scope project` is the documented pattern for team-shareable MCP server registrations; opencode's per-project `opencode.json` is the highest-precedence standard config layer.
-- **Cons:** Two config shapes to maintain (Claude vs opencode — see table below); the agent CLI must be configured to look at the worktree-root config (Claude Code does this by default for `.mcp.json`; opencode does this by default for `opencode.json`); removing a task removes its worktree, which auto-cleans the config file — no separate GC needed.
-
-**The two shapes (critical to get right):**
-
-| Aspect | Claude Code `.mcp.json` | opencode `opencode.json` |
-|--------|-------------------------|---------------------------|
-| Top-level key | `mcpServers` | `mcp` |
-| Server entry discriminator | `"type": "stdio"` (optional, default) | `"type": "local"` (required) |
-| Command shape | `"command": "kamacu"` + `"args": ["mcp", "serve"]` | `"command": ["kamacu", "mcp", "serve"]` (single array) |
-| Env key | `"env": {...}` | `"environment": {...}` |
-| Env-value expansion | `${VAR}` and `${VAR:-default}` | `{env:VAR_NAME}` |
-| Approval | First-use prompt per project (project scope) | None — trusted from config file |
-| Per-project file location | `<worktree>/.mcp.json` | `<worktree>/opencode.json` |
-
-**Example (Claude):**
-```json
-{
-  "mcpServers": {
-    "kamacu": {
-      "type": "stdio",
-      "command": "kamacu",
-      "args": ["mcp", "serve"],
-      "env": {
-        "KAMACU_HOOK_TOKEN": "abc123...",
-        "KAMACU_SESSION_ID": "550e8400-e29b-41d4-a716-446655440000",
-        "KAMACU_HOOK_BASE": "http://127.0.0.1:7333"
-      }
-    }
-  }
-}
-```
-
-**Example (opencode):**
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "kamacu": {
-      "type": "local",
-      "command": ["kamacu", "mcp", "serve"],
-      "environment": {
-        "KAMACU_HOOK_TOKEN": "abc123...",
-        "KAMACU_SESSION_ID": "550e8400-e29b-41d4-a716-446655440000",
-        "KAMACU_HOOK_BASE": "http://127.0.0.1:7333"
-      },
-      "enabled": true
-    }
-  }
-}
-```
-
-Kamacu writes the literal env values (not `${VAR}` placeholders) because the values are already per-process secret per the existing v1.10 injection posture — agent-CLI env expansion would just add a step that reads from a different env. Note: `kamacu mcp serve` resolves its own absolute path (or relies on PATH lookup by the agent CLI) — the writer should use `os.Executable()` to get the absolute path of the currently-running `kamacu` binary so the spawned subcommand is unambiguous regardless of the agent CLI's PATH.
-
-### Pattern 5: Long-running tool with cancellation + progress
-
-**What:** The `subscribe_session_output` tool is the only long-running tool in v1.11. Its handler blocks for up to `duration_seconds` (default 30, max 300) collecting output chunks via the existing ring buffer + a short-lived WS attach. On agent cancellation (`notifications/cancelled`), it returns immediately with whatever was collected so far.
-
-**When to use:** Whenever the agent wants a "watch this session for ~30s and tell me what happened" affordance. Single-shot snapshots use `get_session_output` instead.
-
-**Trade-offs:**
-- **Pros:** Reuses the existing attach/ring-buffer machinery (no new fan-out path); cancellation works for free via the SDK's context propagation; progress notifications keep the agent-CLI's idle timer from firing (Claude Code's stdio idle default is 30 min; opencode's similar — plenty of headroom); bounded duration means the tool always returns — agents handle bounded waits well and unbounded subscriptions poorly.
-- **Cons:** Two transports in one tool (HTTP for snapshot, WS for live tail) — minor complexity; if the agent-CLI ignores `notifications/progress` (some older versions might), the tool still works but the agent sees no incremental updates until the tool returns.
-
-**Mechanics (textual data flow):**
-
-```
-1. Agent calls subscribe_session_output(session_id, duration_seconds=30, lines?)
-2. MCP handler enters; ctx from SDK carries cancellation semantics
-3. Handler:
-   a. GET /api/sessions/{id}/snapshot?lines=N  (HTTP, ring-buffer slice)
-   b. Emit initial chunk via req.Session.NotifyProgress(ctx, {message:"snapshot", progress:0, total:estimated_bytes})
-   c. Open WS to ws://127.0.0.1:7333/api/sessions/{id}/ws (no input frames — READ-ONLY contract)
-   d. Loop:
-      select {
-      case chunk := <-wsRecvCh:
-         collected = append(collected, chunk...)
-         req.Session.NotifyProgress(ctx, {message:"tail", progress: bytes_so_far, total: budget_bytes})
-      case <-time.After(duration_seconds * time.Second):
-         return final_result(collected)
-      case <-ctx.Done():
-         return final_result(collected)    // cancellation: clean exit, no error
-      }
-4. Final result: *mcp.CallToolResult with TextContent of the collected bytes (base64 if non-UTF-8).
-```
-
-**Critical detail — no PTY writes:** The WS the tool opens is *read-only by contract*. The existing WS handler accepts `FrameData` frames as PTY input — the MCP subcommand MUST NOT send those. Implement this as a `wsReader` wrapper that exposes only the read channel and has no public Write method. (Alternatively, the new `/api/sessions/{id}/tail` HTTP endpoint can be a polled fallback that doesn't even open a WS — simpler, no input risk at all. Recommend the HTTP tail endpoint as the primary path, with the WS as a future optimisation.)
-
-**Cancellation correctness:** The MCP cancellation spec says the receiver SHOULD stop processing and not send a response. The Go SDK's Cancellation example confirms: when the client sends `notifications/cancelled`, the handler's `ctx.Done()` fires. The handler returns `(result, nil)` normally — the SDK suppresses the response for a cancelled request, so the agent sees no spurious reply. Returning the partial result is therefore safe; if the SDK throws away the response, no harm done.
-
-**Max duration:** Hard-cap at 300s (configurable via flag/env). This matches Claude Code's default 30-min stdio idle timeout with ample headroom; tools that run longer should be split into multiple calls. Document this in the tool description so the LLM knows.
+**What:** an empty `root_path` is a normal state, not an error: `/api/agents/status` simply has no global entry; the bar shows nothing; `POST /api/sessions {scope:"global"}` returns a crisp 409 ("global root not configured") exactly like "task has no worktree" (sessions.go:300); the Settings section and the `/global` route render a configure-first empty state that links to Settings.
+**When to use:** every optional-feature surface (the github integration toggle is the house precedent).
 
 ---
 
 ## Data Flow
 
-### Request Flow: MCP tool call → Kamacu HTTP
+### Global agent spawn
 
 ```
-Agent (LLM)
-   │ decides to call a tool
-   ▼
-Agent CLI (claude/opencode)
-   │ tools/call JSON-RPC over stdio
-   │ {"method":"tools/call","params":{"name":"list_tasks","arguments":{...}}}
-   ▼
-kamacu mcp serve (subcommand)
-   │ SDK parses request, dispatches to handler by name
-   │ handler reads input struct (auto-unmarshalled + JSON-Schema-validated)
-   │ handler calls bridge.getJSON(ctx, "/api/projects/123/tasks", &out)
-   ▼
-Bridge (in subcommand)
-   │ http.NewRequestWithContext + X-Kamacu-Token header
-   ▼
-Kamacu binary (HTTP server, 127.0.0.1:7333)
-   │ hostCheck middleware, X-Kamacu-Token validated (existing envelope)
-   │ existing GET /api/projects/123/tasks handler
-   │ SELECT FROM tasks WHERE project_id=123 ORDER BY position
-   ▼
-Response flows back:
-   Kamacu JSON → Bridge → handler packs into CallToolResult → SDK serialises → stdout
-   ▼
-Agent CLI receives tool result, hands to LLM
+GlobalTaskPage "Start agent"
+  → POST /api/sessions {scope:"global", kind:"agent"}
+    → read global_task row (root_path, agent_id, csid/ocsid)     [read-at-use]
+    → root empty? 409 "global root not configured"
+    → one-agent-per-global gate (mgr.List(), Kind==agent && Global && running → 409)
+    → JOIN agents (engine, command, extra_params)
+    → mgr.Spawn{Cwd: root, Kind: agent, Global: true, AgentEngine, ExtraArgs|AgentArgs}
+    → UPDATE global_task.claude_session_id                       [warn-only]
+    → [opencode] go captureOpencodeSessionAsync(..., persist-to: global_task)
+  ← 201 Info{global:true, label:"Agent"}
+  → invalidate ["sessions","global"] + ["agent-statuses"]
 ```
 
-### State Management: Per-task scope resolution
+### Post-restart resume discovery
 
 ```
-At task spawn (existing v1.10 + new step):
-   session.Manager.Spawn
-       ├ injects env (KAMACU_SESSION_ID, KAMACU_HOOK_TOKEN, KAMACU_HOOK_BASE)
-       ├ NEW: writes .mcp.json / opencode.json into worktree root
-       └ starts agent CLI in worktree PTY
-
-Agent CLI starts:
-   ├ reads worktree-root MCP config (one entry: kamacu mcp serve)
-   ├ spawns `kamacu mcp serve` as child process
-   └ inherits env through to subcommand
-
-kamacu mcp serve starts:
-   ├ reads KAMACU_* env once
-   ├ builds Bridge{baseURL, token}
-   ├ builds Scope{sessionID}
-   ├ registers tools
-   └ server.Run(ctx, StdioTransport{})  -- blocks here
-
-On first my_* tool call:
-   Scope.taskID(ctx)
-       ├ GET /api/sessions/{KAMACU_SESSION_ID}
-       ├ parse Info.TaskID
-       └ cache on Scope struct
-
-Subsequent my_* calls:
-   reuse cached taskID, projectID  -- zero HTTP overhead for scoping
+server restart (PTYs die; global_task row survives; tmux server survives)
+  → GET /api/agents/status
+    → pass 1/2 (tasks, unchanged)
+    → pass 3 (NEW): global_task.csid/ocsid + engine-branched check
+        ↳ claude: transcriptExists(~/.claude/projects/*/csid.jsonl)  [cwd-agnostic]
+        ↳ opencode: ocsid valid
+    → append {source:"global", projectId:null, status:"exited", resumable:true}
+  → ActiveSessionsBar: exited is filtered (live-only) — no row
+  → Settings "Open Global Task" → /global → AgentTab pre-start resumable state
+      → "Resume session" → POST {scope:"global", kind:"agent", resume:true}
 ```
 
-### Lifecycle: normal exit, kamacu restart, agent-CLI death
+### Reachability
 
-| Event | What happens | Detection |
-|-------|--------------|-----------|
-| **Agent CLI exits normally** | Closes stdin of `kamacu mcp serve`. The SDK's StdioTransport sees EOF on stdin, `server.Run` returns, subcommand exits 0. | Stdin EOF — clean. |
-| **Agent CLI crashes / killed** | Same as above from the OS's perspective — closing the parent's stdout pipe to the child's stdin causes an EOF or EIO. The subcommand exits within a few ms. | Stdin EOF or SIGPIPE on stdout write. |
-| **`kamacu mcp serve` crashes** | The agent CLI sees the stdio stream close. Most agent CLIs mark the server as failed in their `/mcp` panel and either retry once or stop calling its tools. The Kamacu binary is unaffected. | Tool call returns a transport error; agent CLI handles per its own retry policy. |
-| **Kamacu binary restarts** | All in-flight HTTP calls from the subcommand fail with connection-refused. The subcommand's tool handlers return MCP error results (`CallToolResult{IsError:true, ...}` with a clear message). The Kamacu binary comes back; the *next* tool call succeeds. The subcommand itself stays alive — its stdin/stdout are still connected to the agent CLI. | HTTP 5xx or connection-refused → `bridgeError` → tool returns `isError` result. |
-| **Kamacu binary dies and stays dead** | Same as above but every subsequent tool call also fails. The agent CLI may eventually give up on the kamacu server (after N consecutive failures). The subcommand stays alive — agent can still see the failed state in `/mcp`. | Repeated bridge errors. |
-| **Subcommand outlives agent CLI** (shouldn't happen) | If a bug causes the subcommand to ignore stdin EOF (e.g., a leaked goroutine holding the context), the process could linger. Mitigation: the SDK's `server.Run` returns on stdin EOF; subcommand also installs `signal.NotifyContext(SIGTERM, SIGINT)`. | None needed if SDK behaves; verify with a "kill -9 agent CLI, check no kamacu mcp processes" test. |
-| **Kamacu binary outlives subcommand** (normal) | The Kamacu binary has no idea the subcommand existed. It just served HTTP requests. No state to clean up. The task's PTY, ring buffer, etc. are owned by the Kamacu binary and continue independently. | None. |
-
-**Key invariants:**
-- The subcommand holds **no Kamacu state** that isn't derivable from env or HTTP. It is a stateless translator.
-- The Kamacu binary holds **no per-subcommand state** — it doesn't know which HTTP requests come from the subcommand vs the SPA. (Could add an `X-Kamacu-Source: mcp` header later for observability, but not required.)
-- A subcommand outliving its agent CLI by more than seconds is a **bug**. Test explicitly.
-
-### Key Data Flows
-
-1. **Task spawn → MCP auto-discovery:** `session.Manager.Spawn` → worktree creation → `mcpconfig.Write(worktree, engine, env)` → PTY start → agent CLI reads worktree-root config → spawns `kamacu mcp serve` → subcommand resolves `KAMACU_SESSION_ID` → tools available. End-to-end, no user action.
-2. **Tool call → Kamacu state change:** `create_task` MCP tool → bridge POST → existing `POST /api/projects/{id}/tasks` handler → `provisionWorktree` runs (worktree + branch auto-created) → task row written → response flows back → MCP tool returns the new task ID. The browser-attached user sees the new card appear via the existing board-poll.
-3. **Terminal subscribe (long-running):** `subscribe_session_output` MCP tool → HTTP snapshot → optional WS attach → progress notifications stream chunks → return final result after duration OR cancellation. The browser-attached user is unaffected (the WS attach is read-only; the existing fan-out treats it like any other client).
+- **Live**: the bar's global row (`Global · Global Task` + state dot) → click → `/global` → cross-surface behavior identical to a task row (collapse-on-open, current-row highlight keyed on route instead of taskId).
+- **Idle**: Settings → Global Task section → "Open Global Task" (rendered only when `root_path` is set); `/global` itself is always routable and shows the configure-first empty state when unconfigured.
 
 ---
 
-## Scaling Considerations
+## Anti-Patterns (do NOT do these)
 
-| Scale | Architecture Adjustments |
-|-------|--------------------------|
-| **1–5 concurrent task agents** (typical Kamacu load) | One `kamacu mcp serve` process per active agent CLI. Each makes a handful of HTTP calls/min against the Kamacu binary. Negligible load. No adjustment needed. |
-| **20–50 concurrent task agents** (heavy user) | ~20–50 subcommand processes, each holding an `*http.Client` (cheap — Go pools connections). Kamacu binary sees ~100–500 HTTP req/min from MCP, indistinguishable from a busy SPA. The Kamacu binary's `hostCheck` middleware and SQLite handle this trivially. Still no adjustment. |
-| **100+ concurrent task agents** | Not a v1.11 concern — Kamacu is single-user local. If reached: add request rate-limiting per token, switch the bridge to HTTP keep-alive with a shared `*http.Client` (already does), consider an SSE-broadcast endpoint to replace per-subcommand polling. |
+### Anti-Pattern 1: shipping the tmux migration without the sweep fix
 
-### Scaling Priorities
+**What people do:** add nullable-task rows, forget that `sweepOrphanTmux`'s known-set is `SELECT ts.name FROM tmux_sessions ts JOIN tasks t ON t.id = ts.task_id` (serve.go:369) — an INNER JOIN.
+**Why it's wrong:** every global row (task_id NULL) drops out of the known set, so the sweep classifies every live `kamacu-global-*` tmux session as an orphan and **kills it at next startup** — silently destroying the exact restart durability the feature promises.
+**Do this instead:** same phase as migration 00018, change the known-set to keep scope-aware rows (`ts.task_id IS NULL OR` join-exists — a LEFT JOIN with a NULL check), with a regression test that seeds a `scope='global'` row + a fake live session and asserts no kill.
 
-1. **First bottleneck:** none expected at single-user scale. The Kamacu binary's HTTP server, SQLite, and SessionManager were built for v1.0's full-board-with-10-agents scenario; MCP traffic is a marginal addition.
-2. **Second bottleneck (theoretical):** per-subcommand goroutine count. Each `subscribe_session_output` call holds one goroutine for up to 5 minutes. With 50 concurrent subscriptions across 50 agents, that's 50 goroutines — Go handles tens of thousands trivially.
+### Anti-Pattern 2: a phantom "Global" project (or any hidden sentinel entity)
 
----
+**What people do:** create the sentinel project so the task JOINs keep working, then filter it out of the UI "later".
+**Why it's wrong:** the filter list is long and grows (sidebar expanded+rail, `GET /api/projects` ± workspace filter, workspace non-empty delete guard, Activity scopes, MCP project tools, index redirect, agents in-use guard, quota surface). One missed surface ships a user-visible ghost; the workspace-delete guard ships a *functional* bug (Personal becomes undeletable).
+**Do this instead:** no project, no task — a synthesized global entry at the three consumers that need labels.
 
-## Anti-Patterns
+### Anti-Pattern 3: encoding "global" into TaskID
 
-### Anti-Pattern 1: Importing Kamacu internals in the MCP subcommand
+**What people do:** `task_id = -1` (or 0 with a convention) to avoid touching `SpawnOpts`.
+**Why it's wrong:** `TaskID <= 0` already means "dev session" in three load-bearing checks (agents.go:50, joinSessionContext, the label switch); dev-session semantics (unscoped list, `bash #N` labels, `/terminal` spawns) would collide with global semantics.
+**Do this instead:** an explicit `Global` flag (Pattern 2).
 
-**What people do:** `import "kamacu/internal/session"` in the MCP server code so it can call `mgr.Get(id).Snapshot()` directly, "saving an HTTP round-trip."
-**Why it's wrong:** (a) Couples the subcommand's lifecycle to the Kamacu binary's in-memory state — if the Kamacu binary restarts, the subcommand's reference is to a *different* process's memory. (b) Requires the subcommand to run in the same process as the Kamacu binary, which means HTTP/SSE transport, which is out of scope. (c) Bypasses all the existing HTTP-layer validation, hooks, and audit surfaces. (d) Creates an import cycle risk between `internal/mcp` and `internal/session`.
-**Do this instead:** Bridge over HTTP. One extra millisecond per call is irrelevant on localhost.
+### Anti-Pattern 4: letting two owners race over one managed clone
 
-### Anti-Pattern 2: Writing the MCP config to the user-global file
+**What people do:** allow the global repo root to point at a dir a managed project already owns, "because reattach says it's fine".
+**Why it's wrong:** `removeManaged` does `os.RemoveAll(clone)` (projects.go:914) with gates that count only *task* sessions — a live global agent in that dir is invisible to the gate; delete succeeds; the global session's cwd vanishes mid-run and `global_task.root_path` dangles.
+**Do this instead:** refuse the overlap at config save (409 when `projects.repo_path = dest`), and make the project-delete gate treat a global-root match as a blocker.
 
-**What people do:** Patch `~/.claude.json` or `~/.config/opencode/opencode.json` at task spawn, with the per-task KAMACU_SESSION_ID baked in.
-**Why it's wrong:** (a) Pollutes the user's global config with a per-task entry — every time a task is created or deleted, the global file changes. (b) For opencode, the global config is the *second-highest* precedence layer — a per-project file in the worktree root overrides it cleanly, which is what we want. (c) For Claude Code, the *project-scope* `.mcp.json` is the documented "team-shared" mechanism, while the user-global `mcpServers` is for personal cross-project tools. Per-task MCP entries are neither. (d) Concurrent task spawns would race on the global file.
-**Do this instead:** Write `.mcp.json` / `opencode.json` at the worktree root. The worktree is per-task; the file is per-task; deleting the worktree (on task delete or PR merge) auto-cleans the config. Zero global pollution.
+### Anti-Pattern 5: a second, parallel "global settings" mechanism
 
-### Anti-Pattern 3: One config writer for both engines
-
-**What people do:** Write a generic `WriteMCPConfig(worktreeDir, env)` that emits the same JSON for both engines, "because they're both MCP."
-**Why it's wrong:** The two config shapes are *subtly* different (table above). Claude Code uses `mcpServers` + `command` + `args` + `env` + optional `type:"stdio"`. opencode uses `mcp` + `command:[array]` + `environment` + required `type:"local"`. Get any one of these wrong and the agent CLI silently fails to discover the server — no error, no tools, just an agent that "doesn't know about Kamacu."
-**Do this instead:** Two functions in `internal/mcpconfig`: `WriteClaude` and `WriteOpenCode`. Each emits exactly the right shape. The spawn engine branches on `agent.engine` (the existing v1.10 discriminator).
-
-### Anti-Pattern 4: Long-running tool with no cancellation story
-
-**What people do:** Implement `subscribe_session_output` as an unbounded loop that only returns when the session exits or the agent explicitly sends a "stop" parameter.
-**Why it's wrong:** (a) LLMs don't naturally send "stop" parameters — they wait for the tool to return. (b) Claude Code's stdio idle timeout (30 min) would eventually kill the call, but that's a poor experience. (c) The agent can't decide "I have enough output, let me move on" — it's stuck.
-**Do this instead:** Always include a `duration_seconds` parameter (default 30, max 300). Use the SDK's `ctx.Done()` channel for cancellation — when the agent CLI sends `notifications/cancelled`, the context cancels and the handler returns immediately. Emit `notifications/progress` regularly so the agent sees incremental output and can decide to cancel when satisfied.
-
-### Anti-Pattern 5: PTY write from the MCP bridge
-
-**What people do:** Add a `send_input_to_session` tool that calls the existing WS `FrameData` path "because the agent asked nicely."
-**Why it's wrong:** Explicitly out of scope per PROJECT.md. An agent observing a sibling session must never inject bytes into its PTY — it conflicts with the browser-attached user (the user's keystrokes would race the agent's) and with the other agent's intent (the other agent didn't consent to being driven). Read + subscribe is the contract.
-**Do this instead:** Read-only tools only. If an agent needs to *drive* another session, the user can open that task's view in the browser and type themselves. (Future milestone could add a *user-initiated* "inject prompt" affordance with explicit UI confirmation; that's not the MCP bridge's job.)
-
-### Anti-Pattern 6: Hand-rolling JSON-RPC
-
-**What people do:** "The MCP wire protocol is just newline-delimited JSON-RPC 2.0 — I'll write the 300 LOC myself and skip the SDK dependency."
-**Why it's wrong:** (a) The spec is mid-rewrite (2026-07-28 is a near-complete redesign — stateless model, `server/discover` replacing `initialize`, `subscriptions/listen` stream, MRTR for elicitation). The SDK absorbs that churn; a hand-rolled server would re-implement it for zero benefit. (b) Edge cases are easy to get wrong: JSON-RPC error codes, cancellation propagation, progress tokens, batched requests, partial frames on stdin. (c) No conformance tests. (d) The SDK's transitive deps are all pure Go (no CGO) — the "zero deps" benefit is marginal.
-**Do this instead:** Use `github.com/modelcontextprotocol/go-sdk` v1.6.1 (per STACK.md).
-
-### Anti-Pattern 7: Mounting MCP inside the Kamacu HTTP server
-
-**What people do:** Run the MCP server on a goroutine inside `cmd/kamacu/main.go`, exposed via the SDK's `StreamableHTTPHandler` on `/mcp`.
-**Why it's wrong:** Out of scope per PROJECT.md ("MCP server for external AI editors" is a future milestone). Stdio is the right transport for agents spawned inside Kamacu — they're already subprocesses. An HTTP listener adds auth surface (DNS-rebinding protection, Origin checks, OAuth) that the envelope-token auth avoids. The Kamacu binary would also need to know which agent CLI is calling, breaking the stateless-bridge invariant.
-**Do this instead:** `kamacu mcp serve` as a dedicated subcommand. If a future milestone wants external-editor MCP, add `--transport http` then — the handler registrations don't change.
+**What people do:** put `global_root` in the settings KV because it's already surfaced via `GET /api/settings`.
+**Why it's wrong:** resume state would land in a config table (reset-to-default semantics become hazardous), and the agent reference loses its FK/in-use-guard integrity (see the singleton-decision section).
+**Do this instead:** one resource (`/api/global`) over one table; the Settings *section* is UI placement, not storage placement.
 
 ---
 
 ## Integration Points
 
-### New files
+### Modified — backend
 
-| File | Purpose | Lines (est.) |
-|------|---------|--------------|
-| `cmd/kamacu/mcp_subcommand.go` | Subcommand dispatch entry; parses `mcp serve`, calls `internal/mcp.Run` | ~40 |
-| `internal/mcp/server.go` | `mcp.NewServer` + tool registration + `StdioTransport.Run` | ~80 |
-| `internal/mcp/bridge.go` | Authenticated HTTP client to Kamacu binary | ~80 |
-| `internal/mcp/scope.go` | `KAMACU_SESSION_ID` → task/project resolution + cache | ~60 |
-| `internal/mcp/tools*.go` | Per-domain tool handlers (one file per Kamacu resource area) | ~400 (across 6–8 files) |
-| `internal/mcpconfig/claude.go` | Writes `.mcp.json` at worktree root | ~50 |
-| `internal/mcpconfig/opencode.go` | Writes `opencode.json` at worktree root | ~50 |
-| `internal/api/terminal_reads.go` | `GET /api/sessions/{id}/snapshot`, `/tail` HTTP handlers | ~100 |
-| (Tests for all of the above) | | ~800 |
+| File | Change | Risk |
+|---|---|---|
+| `internal/store/migrations/00017_global_task.sql` (NEW) + `internal/api/global_backfill.go` (NEW) | singleton table + `BackfillGlobalTask` wired in serve.go after `BackfillOpenCodeAgent` | Low (proven pattern; goose upgrade-path test) |
+| `internal/store/migrations/00018_tmux_scope.sql` (NEW) | tmux_sessions rebuild (nullable task_id + scope) | **Medium** — full table rebuild under FK-off discipline; test copy fidelity (row count, UNIQUE name, n-sequence) + FK re-arm |
+| `cmd/kamacu/serve.go` | backfill wiring, `/api/global` registration, `sweepOrphanTmux` scope-aware known-set | **High if skipped** (Pitfall 1) |
+| `internal/api/sessions.go` | `create` global branch (root+agent resolution, one-agent gate, tmux global INSERT, resume, csid persist, opencode capture target); `list` `?scope=global` + global `reconcileTmux` | Medium — the milestone's risk center; fake-claude regression must stay byte-for-byte green on the task path |
+| `internal/api/agents.go` | third synthesized pass (manager + DB-derived) with `source:"global"` / `projectId:null` | Low-Medium — append-only after the existing passes |
+| `internal/api/global.go` (NEW) | GET/PUT config + managed-clone lifecycle + gated root switch/clear | Medium (repo variant reuses createByRepo's ordering) |
+| `internal/api/agents_crud.go` | delete guard counts `global_task.agent_id` | Low |
+| `internal/api/projects.go` | managed-delete gate: global-root tie ⇒ `sessions` blocker | Low (one conditional in `deleteManaged`) |
+| `internal/session/{manager,session}.go` | `Global` flag on SpawnOpts/Info, global label counter, `ListGlobal`/`StopAllGlobal` | Low (additive; no PTY machinery changes) |
+| `internal/reaper/reaper.go` | **none** | — |
 
-**Estimated new code: ~1,600 LOC including tests** (within the typical range for a Kamacu milestone phase).
+### Modified — frontend
 
-### Modified files
+| File | Change |
+|---|---|
+| `web/src/api/sessions.ts` | global hook set (`useGlobalSessions`, spawn/resume/reattach variants) with `["sessions","global"]` cache key; `TermSession.global?: boolean` |
+| `web/src/api/agents.ts` | `projectId: number \| null`, `source: "manual" \| "github_pr" \| "global"` |
+| `web/src/api/global.ts` (NEW) | config client (get/save/clone-root) |
+| `web/src/App.tsx` | `/global` route (sibling of `/settings`/`/activity`; NOT wrapped in BoardWorkspaceSync — no project to sync) |
+| `web/src/pages/GlobalTaskPage.tsx` (NEW) | trimmed TaskPage: Agent + bash tabs, global agent-entry lookup (`e.source === "global"`), Esc → back to previous surface (no board), quota indicator gated on the global agent's engine |
+| `web/src/components/task/AgentTab.tsx` | props loosened from `task: Task` to explicit callbacks/fields for task-free reuse |
+| `web/src/components/layout/ActiveSessionsBar.tsx` | global row rendering + `/global` navigation + current-row highlight |
+| `web/src/pages/SettingsPage.tsx` + `components/settings/GlobalSection.tsx` (NEW) | config section + Open affordance |
 
-| File | Change | Why |
-|------|--------|-----|
-| `cmd/kamacu/main.go` | Add subcommand dispatch at the top of `main()`: `if len(os.Args) >= 2 && os.Args[1] == "mcp" { os.Exit(runMCPSubcommand(os.Args[2:])) }`. Add a new import (`kamacu/internal/mcp`). | One new branch; existing HTTP-server path unchanged. |
-| `internal/api/routes.go` or `sessions.go` | Register the two new read endpoints: `mux.HandleFunc("GET /api/sessions/{id}/snapshot", s.snapshot)` and `mux.HandleFunc("GET /api/sessions/{id}/tail", s.tail)`. | One new `SessionRoutes`-adjacent function. |
-| `internal/session/session.go` | Possibly add `Tail(since int) []byte` if the existing `Snapshot()` isn't sufficient. (Likely unnecessary — `Snapshot()` returns the full ring; the tail endpoint can compute a slice server-side from a byte-offset parameter.) | Only if the read endpoints need a method `Session` doesn't already expose. |
-| `internal/session/manager.go` or `internal/api/sessions.go` | One new step in the spawn path: after `provisionWorktree` returns, before `mgr.Spawn`, call `mcpconfig.Write(engine, worktreePath, env)`. Engine-branch on `agent.engine` (`claude` → `WriteClaude`, `opencode` → `WriteOpenCode`, others → skip). | The single integration point with the v1.10 spawn engine. |
-| `go.mod` | Add `github.com/modelcontextprotocol/go-sdk v1.6.1` and its transitive deps (all pure Go, no CGO). | One `go get` + `go mod tidy`. |
+### Unchanged-by-design (verify, don't touch)
 
-### Internal Boundaries
-
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `internal/mcp` ↔ Kamacu binary | HTTP (loopback) + envelope token | Clean network boundary. The subcommand cannot access Kamacu's in-memory state. |
-| `internal/mcp` ↔ `internal/api` types | Go import (compile-time) | The bridge shares request/response struct definitions with the API layer where they exist, so wire shapes stay in one place. Import direction: `internal/mcp` imports `internal/api`, never the reverse. |
-| `internal/mcp` ↔ `internal/mcpconfig` | None (separate packages, separate processes) | The subcommand reads env; the config writer writes env into a file. They share no code. Don't merge them. |
-| `internal/mcpconfig` ↔ spawn engine | Function call | `mcpconfig.WriteClaude(worktreePath, env)` is called from the existing spawn handler. Pure function, no state. |
-| Agent CLI ↔ `kamacu mcp serve` | stdio (JSON-RPC) | The agent CLI spawns the subcommand; stdin/stdout are the MCP wire. |
-| `kamacu mcp serve` ↔ Kamacu binary WS | WS (read-only) | For the long-running subscribe tool. The subcommand opens a WS as a read-only client — it MUST NOT send `FrameData` (PTY input) frames. Enforced by a `wsReader` wrapper with no Write method. |
+`internal/ws` (id-keyed attach), `internal/api/hooks.go` (id-keyed status receiver — claude AND opencode activity work in the global PTY exactly as in a worktree), `internal/api/resume.go` (`transcriptExists` is cwd-agnostic), `internal/worktree`, `internal/diff`, `internal/quota`, `internal/migrate` (note: its LIKE-gated path rewrite predates `global_task`; a managed global root stored *after* v1.8 needs no legacy rewrite — only note it if the table ever stores user-typed paths that could predate a migration), `internal/mcp` (task/project/workspace/review tools; global sessions already ride the unfiltered session list).
 
 ---
 
-## Suggested Build Order (dependency-aware)
+## Suggested Build Order (dependency-driven)
 
-The build order is forced by three dependencies: (1) the subcommand must speak MCP before config injection is useful; (2) config injection must work before any `KAMACU_SESSION_ID`-inheriting tool is meaningful end-to-end; (3) the new HTTP read endpoints must exist before the terminal tools can call them. The minimal vertical slice that proves the architecture is **subcommand skeleton + one tool + Claude config injection + end-to-end demo**.
+1. **Phase 1 — Data foundation & safety net.** Migration 00017 (`global_task` + backfill), migration 00018 (tmux scope rebuild), `sweepOrphanTmux` fix, agents delete-guard extension. Everything else blocks on this; the sweep fix MUST land with 00018 (Pitfall 1). Tests: goose upgrade path on a seeded install, backfill idempotence, sweep-no-kill regression, FK re-arm.
+2. **Phase 2 — Global config API.** `internal/api/global.go`: GET + PUT folder variant (`validateDirPath`) + repo variant (createByRepo ordering, reattach, clone-atomicity, project-overlap 409) + gated switch/clear. Independently testable with curl; no frontend yet.
+3. **Phase 3 — Session engine scope + spawn/status backend.** `SpawnOpts.Global`/`Info.Global` + counters + `ListGlobal`; sessions.go global branch (bash + agent + resume + tmux + reconcile + opencode capture); agents.go third pass. The fake-claude/fake-opencode suites extend with a global case; the task paths must diff clean. *This is the milestone's risk center — consider it two waves (bash+engine, then agent+status).*
+4. **Phase 4 — Frontend view + reachability.** `/global` route + GlobalTaskPage + global session hooks + AgentTab loosening; bar integration (types, row, navigation); Settings Global section + config client. Depends on 2 (config UI) and 3 (everything else).
+5. **Phase 5 — Hardening & E2E.** Managed-root/project-delete interlock (if not already in 2), restart-resume E2E (claude + opencode + tmux survivor), MCP parity spot-check (global session visible in `list_sessions`; read-only contract untouched), UAT.
 
-### Phase 1 — Subcommand skeleton + minimal vertical slice
+**Research flags:** Phase 1's table rebuild is the one piece without a direct in-repo precedent at this exact shape (00012/00013 add columns; this rebuilds) — plan a migration rehearsal on a copy of a real install. Phase 3's opencode capture re-targeting is mechanical but subtle (the `PWD` pin and directory filter now match the global root — worth one host-gated e2e). Everything else follows established patterns and is unlikely to need phase-specific research.
 
-**Goal:** Prove the architecture end-to-end. `kamacu mcp serve` exists, speaks the protocol, and answers ONE read-only tool (`get_my_task`) by bridging to the existing Kamacu HTTP API. The agent CLI (Claude Code) discovers it via a worktree-root `.mcp.json` and successfully calls the tool from inside a Claude session.
+## Open decision points (for the roadmap author)
 
-**Delivers:**
-- `cmd/kamacu/mcp_subcommand.go` — stdlib dispatch
-- `internal/mcp/server.go` + `bridge.go` + `scope.go` — minimal SDK-wired server
-- `internal/mcp/tools_tasks.go` — `get_my_task` tool only
-- `internal/mcpconfig/claude.go` — writes `.mcp.json` at worktree root
-- One-line modification to the spawn engine: call `mcpconfig.WriteClaude` for `engine=claude` after `provisionWorktree`
-- `go.mod` updated with the official SDK
-- End-to-end smoke test: spawn a Claude task, observe `kamacu mcp serve` start, call `get_my_task` from inside Claude, verify the response matches the task
-
-**Avoids:** Anti-patterns 1 (importing internals), 5 (PTY write — none in this phase), 6 (hand-rolled JSON-RPC).
-
-**Success criterion:** "From inside a Claude session spawned by Kamacu, I can ask Claude 'what task am I working on?' and it correctly answers by calling the Kamacu MCP tool."
-
-**Why first:** Establishes the architecture (subcommand, dispatch, bridge, scope, config injection) before any of the long tail of tools is built. If the architecture is wrong, this is the cheapest place to discover it.
-
-### Phase 2 — Full table-stakes tool surface
-
-**Goal:** Every "table-stakes" tool from FEATURES.md is implemented and tested. The agent can drive the full Kamacu API: tasks, projects, workspaces, agents, sessions, diff, worktree cleanup.
-
-**Depends on:** Phase 1 (server skeleton + scope + bridge).
-**Delivers:**
-- `internal/mcp/tools_tasks.go` (rest of task tools)
-- `internal/mcp/tools_projects.go`, `tools_sessions.go`, `tools_diff.go`, `tools_worktree.go`, `tools_github.go`
-- Per-tool tests with mocked bridge
-
-**Avoids:** Anti-pattern 7 (no mounting inside Kamacu binary — all tools bridge).
-
-### Phase 3 — opencode integration + custom-engine decision
-
-**Goal:** `mcpconfig.WriteOpenCode` ships; opencode tasks get the same auto-discovery. Custom agents are explicitly skipped (documented).
-
-**Depends on:** Phase 1 (the writer pattern is established).
-**Delivers:**
-- `internal/mcpconfig/opencode.go`
-- Spawn engine branch on `engine=opencode` calls `WriteOpenCode`
-- Decision documented: custom agents don't get auto-injection (their CLIs may not speak MCP; users can drop their own config file if they want)
-
-**Why third:** Decoupled from Phase 2 — could ship in parallel. Stays third because Claude Code is the default agent and proves the pattern first; opencode is the second engine and surfaces any engine-specific config quirks.
-
-### Phase 4 — Terminal read access (snapshot + subscribe)
-
-**Goal:** The headline differentiator. The agent can read terminal state. Ship the snapshot tool first, then the bounded subscribe tool with cancellation + progress.
-
-**Depends on:** Phase 1 (server skeleton); the two new HTTP endpoints in `internal/api/terminal_reads.go`.
-**Delivers:**
-- `internal/api/terminal_reads.go` — `GET /api/sessions/{id}/snapshot`, `/tail`
-- `internal/mcp/tools_terminal.go` — `get_session_output` (snapshot) + `subscribe_session_output` (long-running)
-- The `wsReader` wrapper enforcing the read-only contract
-- Cancellation + progress tests using the SDK's `mcp.NewInMemoryTransport`
-
-**Avoids:** Anti-pattern 4 (long-running tool with no cancellation — `duration_seconds` parameter + `ctx.Done()` are explicit), Anti-pattern 5 (PTY write — `wsReader` enforces).
-
-**Success criterion:** "From inside a Claude session, I can ask 'watch my other agent's terminal for 30 seconds and summarise what it did' and Claude correctly calls the subscribe tool, waits for it to return, and summarises the output."
-
-**Why fourth:** The genuinely new capability. Everything before it is translation; this is the one place v1.11 adds a behaviour Kamacu didn't have. Saving it for after the surface is built lets it land on a stable foundation.
-
-### Phase 5 — Polish + edge cases
-
-**Goal:** Lifecycle edge cases tested (kamacu restart mid-tool-call, agent-CLI crash, leaked goroutines). The `get_my_brief` composite tool ships. Observability (`X-Kamacu-Source: mcp` header? logging?) is added if needed.
-
-**Depends on:** All earlier phases.
-
----
-
-## Phase-Specific Warnings (for PITFALLS.md and PLAN-phase)
-
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| Phase 1 (subcommand dispatch) | Forgetting that `flag.Parse()` consumes `os.Args[1:]` — must dispatch BEFORE flag.Parse, not after | Check `os.Args[1] == "mcp"` at the very top of `main()`, before any flag registration. |
-| Phase 1 (config injection) | Writing `${KAMACU_HOOK_TOKEN}` (template) instead of the literal value — Claude Code does env expansion in its *own* env, which doesn't have the token | Write literal values from the in-memory `hookToken` variable in `main.go`. Pass them through the spawn call chain. |
-| Phase 1 (binary path) | Hard-coding `"kamacu"` in the config — breaks if the user installed to a non-PATH location | Use `os.Executable()` in the Kamacu binary at spawn time to get the absolute path; write that into the config. |
-| Phase 4 (WS read-only) | Accidentally sending `FrameData` frames from the subscribe tool — would inject bytes into the sibling agent's PTY | `wsReader` wrapper with no Write method; compile-time guarantee. Reviewer-enforced. |
-| Phase 4 (cancellation) | Returning an error from the handler when `ctx.Done()` fires — SDK treats this as a tool failure, agent sees error | Return `(finalResult, nil)` — the SDK suppresses the response on cancellation; returning a clean result is safe. |
-| Phase 4 (idle timeout) | Tool call blocking past Claude Code's stdio idle timeout (30 min default) — agent kills it | Hard-cap `duration_seconds` at 300; document in the tool description. |
-| All phases (logging) | `fmt.Println` or `log.Println` to stdout — corrupts the MCP JSON-RPC stream | All logging goes through `log/slog` to stderr. Add a test that asserts stdout contains only valid JSON-RPC messages. |
-
----
+- **Folder root: git repo or plain directory?** Recommended: plain directory (scratchpad semantics; nothing in the global path runs git). If UAT disagrees, restoring the git requirement is a one-line validator change.
+- **Managed-root/project overlap policy.** Recommended: refuse at save + block at project delete (Anti-Pattern 4). The permissive alternative (shared dir, both gates counting each other's sessions) is more code for a rare case.
+- **Bar row label.** `Global · Global Task` reads consistently with `project · task` rows; a Globe badge (mirroring the PR `#n` badge) is the lighter alternative. Cosmetic — safe to settle at UAT.
+- **MCP `scope` filter on `list_sessions`** — defer to the banked v1.11 follow-up list unless trivially cheap during Phase 3.
 
 ## Sources
 
-### Primary (HIGH confidence)
-
-- **Live Kamacu codebase at v1.10** — every integration point above (`cmd/kamacu/main.go`, `internal/api/{routes,sessions,hooks}.go`, `internal/session/{manager,session}.go`, `internal/ws/{handler,proto}.go`, `internal/opencode/plugin.go`, `internal/store/migrations/`) was read in full from the working tree on 2026-07-21. Every file/function/table name in the integration map is real.
-- **[pkg.go.dev/github.com/modelcontextprotocol/go-sdk](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk) v1.6.1** — official Go SDK, 4.8k stars, Apache-2.0/MIT, maintained with Google. `mcp.NewServer` + `mcp.AddTool` + `mcp.StdioTransport` API verified; Cancellation example read in full (confirms `ctx.Done()` fires on `notifications/cancelled`); Progress example read in full (confirms `req.Session.NotifyProgress`).
-- **[pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp@v1.6.1](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk@v1.6.1/mcp)** — full API surface: Server, CallToolRequest/Result, sessions, middleware, all transport types.
-- **[MCP spec 2025-11-25: Cancellation](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation)** — `notifications/cancelled` flow, behavior requirements, timing considerations.
-- **[MCP spec 2025-11-25: Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)** — tool definition shape, tool result types (text/image/structured), error handling (protocol vs execution), security considerations.
-- **[Claude Code MCP docs](https://docs.anthropic.com/en/docs/claude-code/mcp)** — three scopes (local/project/user), `.mcp.json` shape, `${VAR}` expansion, `CLAUDE_PROJECT_DIR` env, stdio idle timeout (30min default), `MCP_TOOL_TIMEOUT`, per-server `timeout` field.
-- **[opencode config docs](https://opencode.ai/docs/config/)** — `mcp` key (NOT `mcpServers`), `type: "local"` vs `"remote"`, `command` as single array, `environment` (NOT `env`), precedence order, `{env:VAR_NAME}` interpolation.
-- **[github-mcp-server install-opencode.md](https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-opencode.md)** — corroborating real-world example of the opencode MCP config shape.
-- **[Subcommands with Go's flag package (Abhinav Gupta)](https://abhinavg.net/2022/08/13/flag-subcommand/)** — stdlib subcommand pattern with `flag.NewFlagSet` + `flag.Args()[0]` dispatch; matches Kamacu's stdlib-only ethos.
-
-### Aligned research (this milestone)
-
-- **[.planning/research/STACK.md](./STACK.md)** — official `modelcontextprotocol/go-sdk` v1.6.1 pick, bridge pattern from `examples/server/proxy/main.go`, transitive deps verified, agent-CLI config shapes for both engines.
-- **[.planning/research/FEATURES.md](./FEATURES.md)** — tool surface (28 tools + 2 spawn integrations), `ToolAnnotations` discipline, two-class error handling, subscribe mechanics. (Note: FEATURES.md initially recommended `mark3labs/mcp-go`; STACK.md overrules with the official SDK. This document aligns with STACK.md.)
+- Live codebase at v1.12 (this worktree): `internal/api/{sessions,agents,settings,projects,tasks,routes}.go`, `internal/session/{manager,session,agent}.go`, `internal/reaper/reaper.go`, `internal/store/migrations/00001–00016`, `cmd/kamacu/serve.go`, `internal/mcp/{sessions,tasks,projects,reviews}.go`, `web/src/{App.tsx,api/{sessions,agents,settings}.ts,pages/{TaskPage,SettingsPage}.tsx,components/{task/AgentTab,layout/ActiveSessionsBar}.tsx}` — all read in full or in the cited ranges (HIGH).
+- `.planning/PROJECT.md` v1.13 milestone scope + v1.4/v1.9/v1.10 milestone histories (settled-decision precedents: managed-clone atomicity, singleton-row backfills, agent FK shape) (HIGH).
 
 ---
-
-*Architecture research for: MCP (Model Context Protocol) server capability added to an existing local-only Go single-binary app — stdio MCP subcommand bridging to the existing HTTP API, plus spawn-time agent-CLI integration.*
-*Researched: 2026-07-21*
-*Ready for roadmap: yes*
+*Architecture research for: v1.13 Global Task (Kamacu)*
+*Researched: 2026-08-25*
