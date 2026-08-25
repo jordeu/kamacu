@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 
 	"kamacu/internal/session"
+	"kamacu/internal/settings"
 	"kamacu/internal/tmux"
 )
 
@@ -62,12 +65,13 @@ type globalHandlers struct {
 }
 
 // GlobalRoutes registers the global Scratchpad config endpoints (GCONF):
-// GET reads config + derived live state (D-17). The PUT registration (the
-// single partial config update, D-20) lands with the put handler in the
-// next task.
+// GET reads config + derived live state (D-17); PUT is the single partial
+// config update (D-20) — folder root, managed clone, clear, default agent —
+// behind the live-session 409 gate (GCONF-04).
 func GlobalRoutes(mux *http.ServeMux, db *sql.DB, mgr *session.Manager, tmuxClient tmux.Client) {
 	g := &globalHandlers{db: db, mgr: mgr, tmuxClient: tmuxClient}
 	mux.HandleFunc("GET /api/global", g.get)
+	mux.HandleFunc("PUT /api/global", g.put)
 }
 
 // liveGlobalTmuxNames returns the global-scope tmux session names alive on
@@ -100,6 +104,26 @@ func (h *globalHandlers) liveGlobalTmuxNames(ctx context.Context) []string {
 		}
 	}
 	return live
+}
+
+// globalLiveBlockers returns why a root change must be refused (GCONF-04 /
+// D-13..D-15): one {kind, target} blocker per LIVE global session surface,
+// reusing the app-wide gated-delete grammar (deleteBlocker, projects.go)
+// verbatim — the locked reading of D-15 (14-RESEARCH Open Question 1; the
+// 13-CONTEXT string sketch was illustrative).
+//
+// Today ONLY the tmux half can be non-empty: no global PTY can exist until
+// Phase 15's spawn path lands Info.Global + ListGlobal(), which widens this
+// helper in place (the mgr field is already carried for that seam, D-19).
+// Until then the manager half is a documented zero-count seam. The gate
+// only COUNTS — it never stops anything (stopping is the user's job; the
+// 409 copy says so).
+func (h *globalHandlers) globalLiveBlockers(ctx context.Context) []deleteBlocker {
+	var blockers []deleteBlocker
+	for _, name := range h.liveGlobalTmuxNames(ctx) {
+		blockers = append(blockers, deleteBlocker{Kind: "sessions", Target: name})
+	}
+	return blockers
 }
 
 // loadGlobalConfig reads the singleton row + agent summary — the stored
@@ -155,6 +179,152 @@ func (h *globalHandlers) get(w http.ResponseWriter, r *http.Request) {
 		// hand-SQL DELETE mid-run can drop the row. That is a corrupted
 		// invariant — fail loudly, never paper over it (14-RESEARCH Open
 		// Question 3).
+		writeError(w, http.StatusInternalServerError, "global task row missing")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.deriveGlobalState(r.Context(), &g)
+	writeJSON(w, http.StatusOK, g)
+}
+
+// put handles PUT /api/global — the single partial config endpoint (D-20).
+// Pointer fields: omitted = untouched. root_path:"" is THE CLEAR (D-21 —
+// reset both root columns), a non-empty root_path is the folder variant,
+// agent_id sets the default agent (D-24). The live-session 409 gate guards
+// every root change AND the clear (GCONF-04), and any successful root
+// change clears the resume ids in the SAME single UPDATE (D-16).
+func (h *globalHandlers) put(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootPath *string `json:"root_path"`
+		AgentID  *int64  `json:"agent_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// Branch FIRST, validate AFTER the branch knows what it holds (14-RESEARCH
+	// Pitfall 1 — a naive validate-then-branch sends root_path:"" into
+	// validateRepoPath and 400s "path must be absolute" in the wrong branch).
+	if req.RootPath == nil && req.AgentID == nil {
+		writeError(w, http.StatusBadRequest, "nothing to update")
+		return
+	}
+	rootSupplied := req.RootPath != nil
+
+	// GCONF-04 gate: any live global session blocks a root change or clear —
+	// NOTHING is mutated, and the check runs before any validation or disk
+	// work (D-13: any live global PTY blocks; D-14: exited sessions and
+	// persisted resume ids never block — the probe is live-only by
+	// construction). The error copy uses the Phase-13-locked "Scratchpad"
+	// label (D-09).
+	if rootSupplied {
+		if blockers := h.globalLiveBlockers(r.Context()); len(blockers) > 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":   "the Scratchpad root can't be changed while sessions are running",
+				"reasons": blockers,
+			})
+			return
+		}
+	}
+
+	// Resolve the root variant into newRoot/newRepo. Validation rejects
+	// BEFORE anything is appended to sets/args, so a reject leaves the row
+	// untouched (the projects.go update idiom).
+	var newRoot string
+	var newRepo sql.NullString
+	if rootSupplied {
+		if *req.RootPath == "" {
+			// THE CLEAR (D-21): explicit "" resets root_path='' AND
+			// github_repo=NULL. No path validation — "" is not a folder.
+			newRoot = ""
+			newRepo = sql.NullString{}
+		} else {
+			// FOLDER variant (GCONF-01): git repo required (D-05,
+			// validateRepoPath verbatim — no project-overlap guard beyond
+			// this, D-26).
+			abs, err := validateRepoPath(*req.RootPath)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			// D-07 footguns on the POST-expansion absolute value (Pitfall 6):
+			// "~" and "~/" expand to $HOME inside validateRepoPath, so one
+			// equality catches every home spelling; "/" catches the fs root.
+			home, herr := os.UserHomeDir()
+			if herr != nil {
+				writeError(w, http.StatusInternalServerError, herr.Error())
+				return
+			}
+			if abs == home || abs == "/" {
+				writeError(w, http.StatusBadRequest,
+					"the root can't be your home directory or the filesystem root")
+				return
+			}
+			// D-27 block: everything under ~/.kamacu is Kamacu-managed
+			// machinery — a task worktree gets gated-removed by cleanup, a
+			// managed clone belongs to its project — so a global root there
+			// is always a trap, never a choice. Reject equality AND the
+			// child prefix (Pitfall 5: separator-suffixed, expanded base).
+			base, berr := settings.ExpandHome("~/.kamacu")
+			if berr != nil {
+				writeError(w, http.StatusInternalServerError, berr.Error())
+				return
+			}
+			if abs == base || strings.HasPrefix(abs, base+string(os.PathSeparator)) {
+				writeError(w, http.StatusBadRequest,
+					"the root can't live inside ~/.kamacu — everything there is Kamacu-managed machinery (a task worktree is gated-removed by cleanup, a managed clone belongs to its project), so a root there would be cleaned up by its owner")
+				return
+			}
+			newRoot = abs
+			newRepo = sql.NullString{} // folder ⇒ github_repo NULL (Pitfall 8 — never a stale managed marker)
+		}
+	}
+
+	// Agent field (D-24/D-25): existence-validated 400, NO session gate (a
+	// live global session keeps the agent it was spawned with; the change
+	// applies at the next Start), NO resume-id touching (ids are
+	// engine-keyed, not agent-keyed — D-16 stays the only clearing path).
+	if req.AgentID != nil {
+		var exists int
+		err := h.db.QueryRow(`SELECT 1 FROM agents WHERE id = ?`, *req.AgentID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "agent not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	// Single final UPDATE — never split (Pitfall 2 anti-pattern: a second
+	// write is a partial-failure window). Root changes clear the resume ids
+	// unconditionally in the SAME UPDATE (D-16 — no no-op-re-PUT exception);
+	// agent-only PUTs never touch them (D-25).
+	var sets []string
+	var args []any
+	if rootSupplied {
+		sets = append(sets, "root_path = ?", "github_repo = ?")
+		args = append(args, newRoot, newRepo)
+		sets = append(sets, "claude_session_id = NULL", "opencode_session_id = NULL")
+	}
+	if req.AgentID != nil {
+		sets = append(sets, "agent_id = ?")
+		args = append(args, *req.AgentID)
+	}
+	sets = append(sets, `updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
+	args = append(args, 1)
+	if _, err := h.db.Exec(`UPDATE global_task SET `+strings.Join(sets, ", ")+` WHERE id = 1`, args...); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Re-read through the GET load path so the response IS the GET shape
+	// (D-23) — 200, not 201: this is an update of a guaranteed row.
+	g, err := h.loadGlobalConfig()
+	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "global task row missing")
 		return
 	}
