@@ -81,7 +81,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 14-01-PLAN.md — the complete GET/PUT /api/global surface in internal/api/global.go: D-17 wire shape, dispatch grammar (folder/clear/agent/repo), D-07/D-27 footgun blocks, managed clone into repos/global/ (8-step atomic, reattach), forward-wired live-session 409 gate + D-16 resume-id clearing, serve.go wiring, unit + seam tests
+- [x] 14-01-PLAN.md — the complete GET/PUT /api/global surface in internal/api/global.go: D-17 wire shape, dispatch grammar (folder/clear/agent/repo), D-07/D-27 footgun blocks, managed clone into repos/global/ (8-step atomic, reattach), forward-wired live-session 409 gate + D-16 resume-id clearing, serve.go wiring, unit + seam tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -231,7 +231,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete | 2026-08-01 |
 | 12.1. Address Activity tech debt (WR-01..03) | v1.12 | 1/1 | Complete | 2026-08-25 |
 | 13. Global data foundation & safety net | v1.13 | 2/2 | Complete    | 2026-08-25 |
-| 14. Global config API | v1.13 | 0/? | Not started | - |
+| 14. Global config API | v1.13 | 1/2 | In Progress|  |
 | 15. Global sessions backend | v1.13 | 0/? | Not started | - |
 | 16. Global view, Settings & bar integration | v1.13 | 0/? | Not started | - |
 | 17. Hardening & E2E | v1.13 | 0/? | Not started | - |

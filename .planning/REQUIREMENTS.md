@@ -15,10 +15,10 @@ A single global scratchpad — a task-like view with agent + bash tabs running d
 
 ### Global Configuration
 
-- [ ] **GCONF-01**: User can configure the global root as a validated local folder path from a Global Settings section
-- [ ] **GCONF-02**: User can configure the global root as a GitHub repo (`owner/name`) — Kamacu gh-validates and clones it (v1.4 managed-clone pattern) into a separate global namespace that a project's gated delete can never touch; clone failures surface inline leaving no half-configured state
-- [ ] **GCONF-03**: User can pick the global task's default agent from the configured agents (v1.10 agents CRUD)
-- [ ] **GCONF-04**: Changing or clearing the root while global sessions are live is refused with a 409 + reasons list; on success the persisted resume ids are cleared
+- [x] **GCONF-01**: User can configure the global root as a validated local folder path from a Global Settings section
+- [x] **GCONF-02**: User can configure the global root as a GitHub repo (`owner/name`) — Kamacu gh-validates and clones it (v1.4 managed-clone pattern) into a separate global namespace that a project's gated delete can never touch; clone failures surface inline leaving no half-configured state
+- [x] **GCONF-03**: User can pick the global task's default agent from the configured agents (v1.10 agents CRUD)
+- [x] **GCONF-04**: Changing or clearing the root while global sessions are live is refused with a 409 + reasons list; on success the persisted resume ids are cleared
 - [ ] **GCONF-05**: Settings provides an "Open Global Task" affordance so the global view is reachable when idle (the Active Sessions bar covers the live case)
 
 ### Global View
@@ -79,10 +79,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GDATA-01 | Phase 13 | Complete |
 | GDATA-02 | Phase 13 | Complete |
 | GDATA-03 | Phase 13 | Complete |
-| GCONF-01 | Phase 14 | Pending |
-| GCONF-02 | Phase 14 | Pending |
-| GCONF-03 | Phase 14 | Pending |
-| GCONF-04 | Phase 14 | Pending |
+| GCONF-01 | Phase 14 | Complete |
+| GCONF-02 | Phase 14 | Complete |
+| GCONF-03 | Phase 14 | Complete |
+| GCONF-04 | Phase 14 | Complete |
 | GCONF-05 | Phase 16 | Pending |
 | GVIEW-01 | Phase 16 | Pending |
 | GVIEW-02 | Phase 15 | Pending |
