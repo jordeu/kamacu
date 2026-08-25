@@ -32,7 +32,7 @@ This phase exercises the Phase-13 deferred decisions (13-CONTEXT D-01..D-16: nam
 ### PUT grammar & clear (new)
 
 - **D-20: Single partial PUT.** One `PUT /api/global` with pointer fields `root_path` (*string), `repo` (*string), `agent_id` (*int64) — omitted = untouched (the app-wide partial-PATCH pointer idiom). Root dispatch mirrors `create()`: non-empty `repo` → managed-clone variant; non-empty `root_path` → folder variant; both supplied → 400; `root_path:""` is the clear (not a folder variant).
-- **D-21: `root_path:""` clears the root.** Explicit empty string resets `root_path` → `''` AND `github_repo` → `NULL`, behind the same live-session 409 gate as any root change, resume ids cleared on success (D-16 uniform).
+- **D-21: Empty-string root_path clears the root.** Explicit `root_path:""` resets `root_path` → `''` AND `github_repo` → `NULL`, behind the same live-session 409 gate as any root change, resume ids cleared on success (D-16 uniform).
 - **D-22: Field names `root_path` + `repo` + `agent_id`.** `root_path` matches the 00017 column (GET and PUT share one name); `repo` matches the v1.4 create dispatch field exactly; `agent_id` as everywhere.
 - **D-23: PUT returns the GET shape.** Updated config + root_exists + counts + agent summary — one wire type for the endpoint; curl shows the clone/reattach outcome immediately.
 

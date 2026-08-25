@@ -491,24 +491,24 @@ In-repo precedent evolution (no ecosystem drift applies — zero new dependencie
 
 **No `[ASSUMED]` package/tooling claims** — gh 2.82.0 / git 2.43.0 / tmux 3.4 / sqlite3 verified present on this host (Environment Availability below); all code-level facts read at line in this worktree.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **409 reasons element shape: strings vs `{kind, target}` objects**
+1. **409 reasons element shape: strings vs `{kind, target}` objects** — RESOLVED: structured `{kind, target}` grammar, locked in 14-01-PLAN.md Task 2 item 1 (the locked reading of D-15; reuses `deleteBlocker` verbatim).
    - What we know: 13-CONTEXT D-15 sketches `reasons:["agent session running", ...]` but normatively says "mirrors the app-wide gated-delete grammar"; the grammar in code (deleteManaged, cleanup dialogs) is `reasons:[{kind, target}]` with machine-stable `kind` tokens (projects.go:686-689).
    - What's unclear: whether the sketch's string form was intentional (a lighter global-only grammar) or illustrative.
    - Recommendation: **structured `{kind, target}`** — one grammar app-wide, `kind:"sessions"` is machine-readable for Phase 16's Settings inline copy (mirroring the cleanup dialogs' reason lists), and it reuses `deleteBlocker` verbatim. Planner locks it in the wire contract.
 
-2. **`repo:""` (explicit empty string, non-nil) semantics on PUT**
+2. **`repo:""` (explicit empty string, non-nil) semantics on PUT** — RESOLVED: 400 with guidance ("repo must be owner/name; to clear the root send root_path:\"\""), locked in 14-01-PLAN.md Task 3 item 1.
    - What we know: D-20 dispatches on non-empty `repo`; `create()` treats an empty `repo` field as "not the repo path" (folder fallback). D-21 designates `root_path:""` as THE clear.
    - What's unclear: whether an explicit-but-empty `repo` should be ignored-as-omitted, treated as a managed-variant syntax error, or accepted as an alternative clear spelling.
    - Recommendation: **400 with guidance** ("repo must be owner/name; to clear the root send root_path:\"\"") — explicitness beats silent ignore on a partial-PATCH surface, and it avoids TWO clear spellings. Planner's call (discretion-adjacent).
 
-3. **GET behavior on the (unreachable) missing singleton row**
+3. **GET behavior on the (unreachable) missing singleton row** — RESOLVED: 500 fail-loud, locked in 14-01-PLAN.md Task 1 item 5.
    - What we know: 00017 seeds it; `BackfillGlobalTask` re-arms it every boot; no API path deletes it. Only a hand-SQL DELETE mid-run can drop it.
    - What's unclear: 500 (honest, fail-loud) vs synthesizing defaults (degrade).
    - Recommendation: **500** — the row-missing state is a corrupted invariant, and degrade would mask it (the app-wide posture: gates warn, invariants fail loudly).
 
-4. **Does the PUT gate also need to *re-read* the singleton first (current root) for anything?**
+4. **Does the PUT gate also need to *re-read* the singleton first (current root) for anything?** — RESOLVED: no current-value pre-check anywhere in the PUT path, locked in 14-01-PLAN.md Task 2 gate design (D-16 forbids it).
    - What we know: The gate is unconditional on root-field supply (D-16 kills the no-op exception), so the CURRENT value never affects gating. Reattach needs only dest+canonical.
    - What's unclear: nothing material — listed only so the planner doesn't add a spurious "value actually changed?" pre-check that D-16 forbids.
    - Recommendation: no current-value comparison anywhere in the PUT path.
