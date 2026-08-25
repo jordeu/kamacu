@@ -60,7 +60,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 13-02-PLAN.md — boot safety net: BackfillGlobalTask wiring, scope-aware orphan sweep (failing-regression-first), Scratchpad agent-delete 409 guard, real-install rehearsal
+- [x] 13-02-PLAN.md — boot safety net: BackfillGlobalTask wiring, scope-aware orphan sweep (failing-regression-first), Scratchpad agent-delete 409 guard, real-install rehearsal
 
 > **Research flag**: run `/gsd-plan-phase 13 --research-phase` — the `tmux_sessions` full-table rebuild (SQLite can't drop NOT NULL → CREATE-copy-drop-rename under `PRAGMA foreign_keys=OFF`) is the one piece without a direct in-repo precedent at this exact shape; plan a migration rehearsal on a copy of a real install. Phase-1 decisions that bake in here: managed-clone namespace (lean namespaced — structurally safe), folder-root validation strictness, reconfigure gate semantics, UI naming ("Global" vs "Scratchpad").
 
@@ -221,7 +221,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete | 2026-07-31 |
 | 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete | 2026-08-01 |
 | 12.1. Address Activity tech debt (WR-01..03) | v1.12 | 1/1 | Complete | 2026-08-25 |
-| 13. Global data foundation & safety net | v1.13 | 1/2 | In Progress|  |
+| 13. Global data foundation & safety net | v1.13 | 2/2 | Complete   | 2026-08-25 |
 | 14. Global config API | v1.13 | 0/? | Not started | - |
 | 15. Global sessions backend | v1.13 | 0/? | Not started | - |
 | 16. Global view, Settings & bar integration | v1.13 | 0/? | Not started | - |

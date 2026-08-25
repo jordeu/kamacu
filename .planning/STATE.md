@@ -4,9 +4,9 @@ milestone: v1.13
 milestone_name: Global Task
 current_phase: 13
 current_phase_name: global-data-foundation-safety-net
-status: executing
-stopped_at: Phase 13 UI-SPEC approved
-last_updated: "2026-08-25T13:27:10.195Z"
+status: verifying
+stopped_at: Completed 13-02-PLAN.md
+last_updated: "2026-08-25T13:54:06.136Z"
 last_activity: 2026-08-25
 last_activity_desc: Phase 13 execution started
 progress:
@@ -44,7 +44,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 Phase: 13 (global-data-foundation-safety-net) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-25 — Phase 13 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -74,9 +74,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-25T13:27:01.654Z
-**Stopped at:** Phase 13 UI-SPEC approved
-**Resume file:** .planning/phases/13-global-data-foundation-safety-net/13-UI-SPEC.md
+**Last session:** 2026-08-25T13:54:06.127Z
+**Stopped at:** Completed 13-02-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -102,6 +102,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase Phase 12 P02 | 6 min | 2 tasks tasks | 4 files files |
 | Phase 12.1 P01 | 4 min | 3 tasks tasks | 4 files files |
 | Phase 13 P01 | 5 min | 2 tasks | 3 files |
+| Phase 13 P02 | 24 min | 3 tasks | 10 files |
 
 ## Decisions
 
@@ -147,6 +148,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase ?]: [Phase 13 / Plan 01]: Two-migration split (00017 plain transaction + 00018 NO TRANSACTION rebuild) — keeps the FK-off discipline scoped to the one migration that needs it; the exact split the research rehearsal validated
 - [Phase ?]: [Phase 13 / Plan 01]: global_task seed via SELECT 1, id FROM agents WHERE is_default = 1 (never a literal id) — the default flag is movable on real installs; FK ON DELETE RESTRICT is the DB backstop behind the 13-02 handler guard
 - [Phase ?]: [Phase 13 / Plan 01]: tmux scope XOR CHECK spelling (task_id IS NULL) = (scope = 'global') with both rejection directions test-asserted — inverted or OR spellings fail loudly or protect nothing
+- [Phase 13 / Plan 02]: Sweep fix shipped as the research-verified subquery form (WHERE scope='global' OR task_id IN (SELECT id FROM tasks)); the LEFT-JOIN equivalent deliberately not used (planner resolution) — Both shapes verified equivalent on real data; the subquery form is what the research validated
+- [Phase 13 / Plan 02]: The agents delete-guard 409 message is count-free ('reassign the Scratchpad agent first') — the singleton references exactly one agent, always; D-09 locked string, the 00017 FK RESTRICT stays the backstop
+- [Phase 13 / Plan 02]: TestBackfillAgents wipe simulation updated to drop the global_task singleton first — under 00017 the raw agent DELETE is correctly refused by ON DELETE RESTRICT; BackfillGlobalTask re-arms the row next boot
 
 ## Operator Next Steps
 

@@ -11,7 +11,7 @@ A single global scratchpad — a task-like view with agent + bash tabs running d
 
 - [x] **GDATA-01**: A DB-enforced `global_task` singleton row (id=1) stores the configured root (path + managed/`github_repo` marker), the default `agent_id` (FK to agents, ON DELETE RESTRICT), and restart-resume session ids — seeded with the default agent at migration and guaranteed by an idempotent boot backfill
 - [x] **GDATA-02**: `tmux_sessions` is rebuilt so global bash-tab rows can exist (nullable `task_id` / explicit scope discriminator with an XOR CHECK); existing rows, labels, and FK discipline survive byte-for-byte (goose upgrade-path tested on a seeded install)
-- [ ] **GDATA-03**: The startup tmux orphan sweep is scope-aware — global tmux tabs are never killed at startup (regression test: sweep-no-kill on a live global tab)
+- [x] **GDATA-03**: The startup tmux orphan sweep is scope-aware — global tmux tabs are never killed at startup (regression test: sweep-no-kill on a live global tab)
 
 ### Global Configuration
 
@@ -78,7 +78,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | GDATA-01 | Phase 13 | Complete |
 | GDATA-02 | Phase 13 | Complete |
-| GDATA-03 | Phase 13 | Pending |
+| GDATA-03 | Phase 13 | Complete |
 | GCONF-01 | Phase 14 | Pending |
 | GCONF-02 | Phase 14 | Pending |
 | GCONF-03 | Phase 14 | Pending |
