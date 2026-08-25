@@ -8,7 +8,20 @@ A local-only web app for organizing agent sessions around projects and tasks. A 
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent agent session you can open, leave, and reattach to from the browser.
 
+## Current Milestone: v1.13 Global Task
+
+**Goal:** Give the user a single global scratchpad — a task-like view with agent + bash tabs running directly in a configured repo/folder — for small checks unrelated to any project, without creating a task for it.
+
+**Target features:**
+- Single global task: a task-like view with ONLY the agent tab + bash tabs (no description, no diff, no kanban) — not linked to any workspace or project
+- Sessions run directly in the configured repo/folder (no worktree, no branch — a true scratchpad)
+- Global Settings section to configure the global root (a local folder path, or a GitHub repo cloned like a managed project per the v1.4 pattern) and its default agent (v1.10 agents)
+- Reachable from the Active Sessions bar when a session is live; from Settings when idle
+- Same session semantics as tasks: persistent server-side PTYs, restart reconciliation/resume, live agent status
+
 ## Milestone Status
+
+**Current: v1.13 Global Task — in planning (started 2026-08-25).**
 
 **Shipped: v1.12 Activity & Statistics (2026-08-25).** 4 phases (10–12 + 12.1-inserted), 9 plans, 20 tasks; 21/21 requirements incl. the audit's TD-ACT-01..03 hardening closed by Phase 12.1 (UAT 3/3). Milestone audit `tech_debt` status resolved — the three WR items were the debt. Archived to `milestones/v1.12-*`; tag v1.12.
 
@@ -274,7 +287,12 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-_(v1.12 requirements all validated — see below.)_
+**v1.13 Global Task** — a single global scratchpad for small checks unrelated to any project:
+- A task-like view with ONLY the agent tab + bash tabs (no description, no diff, no kanban board) — not linked to any workspace or project
+- Sessions run directly in the configured repo/folder (no worktree, no branch)
+- Global Settings section configures the global root — a local folder path OR a GitHub repo cloned like a managed project (v1.4 pattern) — plus its default agent (v1.10 agents)
+- Reachable from the Active Sessions bar when a session is live; from Settings when idle
+- Same session semantics as tasks: persistent PTYs, restart reconciliation/resume, live agent status in the bar
 
 ### Recently Validated
 
@@ -366,7 +384,7 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 ## Next Milestone
 
-**v1.12 Activity & Statistics shipped 2026-08-25.** Not yet scoped — run `/gsd-new-milestone` to define v1.13. Candidates from prior milestones remain parked below.
+**v1.13 Global Task scoped 2026-08-25 — see Current Milestone above.** Prior-milestone candidates remain parked below.
 
 Banked forward investments worth a future milestone:
 - **v1.11 MCP follow-ups** (scoped in `milestones/v1.11-REQUIREMENTS.md` "v1.12+ Requirements"): per-task auto-scoping convenience tools (`get_my_task`/`get_my_session`, ToolFilter — MCPAUTO-01..03); agent-CLI auto-registration at spawn (`.mcp.json` / `opencode.json` writers — MCPREG-01..03); additional tool categories — agents CRUD, settings, worktree-cleanup ops (MCPMORE-01..03); quality/hardening — typed JSON-RPC error taxonomy, stdout-pollution guards, real-binary e2e harness (MCPHARD-01..03).
@@ -457,6 +475,8 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
+*Last updated: 2026-08-25 to start v1.13 Global Task. Milestone Status flipped to v1.13 planning. Current Milestone section added; Active section reset to the v1.13 scope (a single global scratchpad: task-like view with agent + bash tabs only, sessions running directly in a configured folder/managed-clone root — no worktree; configured in Global Settings with folder-or-GitHub-repo root + default agent; reachable from the Active Sessions bar when live, from Settings when idle). Phase numbering continues from the previous milestone (no reset — v1.12 ended at phase 12.1, v1.13 starts at phase 13). Prior evolution entry preserved below.*
+
 *Last updated: 2026-08-25 after v1.12 Activity & Statistics milestone close. Full evolution review: Milestone Status flipped to shipped (4 phases 10–12.1, 9 plans, 20 tasks, 21/21 requirements); Phase 12.1 hardening entries added to Recently Validated (TD-ACT-01..03); consolidated v1.12 Current State entry added; two new Key Decisions logged (combined activity endpoint + decoupled 5min cache + is:closed qualifier; ephemeral useMemo scope demotion); Next Milestone reset to "not yet scoped"; lint tech-debt note refreshed (WR-01..03 closed, ~29 react-hooks errors remain parked in deferred-items). Archived to `milestones/v1.12-*`; tag v1.12.*
 
 *Last updated: 2026-08-01 after Phase 12 (v1.12 Activity & Statistics milestone complete). Phase 12 added the activity chart (recharts stacked-bar, Week=7/Month=30 bars, hover tooltips), stat-strip explanatory tooltips, and absolute per-entry completion times (CHART-01/STAT-01/ENTRY-01); no backend change. UAT 10/10 passed, verification canonicalized to passed. Three v1.12 chart/tooltip requirements moved to Validated; Milestone Status flipped to "v1.12 complete". v1.12 now 3 phases (10–12), 6 plans — ready for `/gsd-complete-milestone` audit + archive.*

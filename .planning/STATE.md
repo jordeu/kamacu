@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.12
-milestone_name: Activity & Statistics
-current_phase: 12
-status: Awaiting next milestone
-stopped_at: Phase 12.1 complete — milestone v1.12 ready to archive
-last_updated: "2026-08-25T05:24:38.157Z"
+milestone: v1.13
+milestone_name: Global Task
+status: planning
+last_updated: "2026-08-25T06:17:40.247Z"
 last_activity: 2026-08-25
-last_activity_desc: Milestone v1.12 completed and archived
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
-current_phase_name: Address Activity tech debt (WR-01..03
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -42,10 +38,10 @@ Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 —
 
 ## Current Position
 
-Phase: Milestone v1.12 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-25 — Milestone v1.12 completed and archived
+Status: Defining requirements
+Last activity: 2026-08-25 — Milestone v1.13 started
 
 ### Quick Tasks Completed
 
