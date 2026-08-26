@@ -32,7 +32,7 @@
 - The `/api/agents/status` feed widening MUST ship in the same phase as the global spawn path (Phase 15) — otherwise the global session is invisible and the phase cannot be human-verified.
 
 - [x] **Phase 13: Global data foundation & safety net** - The `global_task` singleton + task-less `tmux_sessions` schema + the scope-aware startup sweep — the base every later phase builds on, landed together with the one pre-existing killer bug it introduces (completed 2026-08-25)
-- [ ] **Phase 14: Global config API** - `GET/PUT /api/global` — root as validated folder or gh-cloned managed repo (v1.4 pattern), default-agent picker, and the live-session 409 gate on root reconfiguration
+- [x] **Phase 14: Global config API** - `GET/PUT /api/global` — root as validated folder or gh-cloned managed repo (v1.4 pattern), default-agent picker, and the live-session 409 gate on root reconfiguration (completed 2026-08-26)
 - [ ] **Phase 15: Global sessions backend** - Session-engine scope + `scope:"global"` spawn (agent + bash + resume + tmux) + the widened status feed — the milestone's risk center
 - [ ] **Phase 16: Global view, Settings & bar integration** - The `/global` route (TaskPage shell, agent + bash tabs only), the Settings Global section, and the Active Sessions bar row
 - [ ] **Phase 17: Hardening & E2E** - Reconfigure-gate + restart-resume E2E, managed-root ↔ project-delete interlock, sentinel-leak sweep, folder-mode UAT — closing the gates invisible until a restart or a delete happens
@@ -231,7 +231,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete | 2026-08-01 |
 | 12.1. Address Activity tech debt (WR-01..03) | v1.12 | 1/1 | Complete | 2026-08-25 |
 | 13. Global data foundation & safety net | v1.13 | 2/2 | Complete    | 2026-08-25 |
-| 14. Global config API | v1.13 | 2/2 | Complete   | 2026-08-26 |
+| 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 15. Global sessions backend | v1.13 | 0/? | Not started | - |
 | 16. Global view, Settings & bar integration | v1.13 | 0/? | Not started | - |
 | 17. Hardening & E2E | v1.13 | 0/? | Not started | - |
