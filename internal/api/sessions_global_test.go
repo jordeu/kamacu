@@ -1191,3 +1191,296 @@ func TestGlobalOpencodeCaptureHost(t *testing.T) {
 		s.Stop()
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 15 Plan 02, Task 2: the status feed widening — ONE synthesized global
+// entry in BOTH passes (manager-derived live + DB-derived post-restart) with
+// source "global", zero ids, and the locked D-09/D-10 labels (SC3).
+// ---------------------------------------------------------------------------
+
+// globalStatusEntries returns the /api/agents/status entries whose source is
+// "global" (the Phase-16 discriminator).
+func globalStatusEntries(t *testing.T, srv *httptest.Server) []map[string]any {
+	t.Helper()
+	status, list := doJSONList(t, srv.URL+"/api/agents/status")
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/agents/status = %d, want 200", status)
+	}
+	var out []map[string]any
+	for _, e := range list {
+		if e["source"] == "global" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// setGlobalOpencodeSession stamps the singleton's opencode session id
+// (restart-sim seeding for the opengine resume/resumable paths).
+func setGlobalOpencodeSession(t *testing.T, db *sql.DB, ocsid string) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE global_task SET opencode_session_id = ? WHERE id = 1`, ocsid); err != nil {
+		t.Fatalf("set global_task.opencode_session_id: %v", err)
+	}
+}
+
+// TestGlobalStatusLiveEntry (SC3 live half, D-09/D-10, Spike 1): a RUNNING
+// global agent appears in /api/agents/status as exactly ONE entry with
+// source "global", taskId 0, projectId 0, the locked labels, and real
+// status/sessionId — while a coexisting TASK entry keeps its exact pre-phase
+// shape (task-path byte-stability) and the task feed count is unchanged.
+func TestGlobalStatusLiveEntry(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, _, _, _, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv)
+
+	// A task agent peer: its entry must stay byte-identical while the global
+	// entry appears alongside it.
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	body := createTask(t, srv, pid, "Task Peer")
+	tid := taskID(t, body)
+	status, tbody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": tid, "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("task agent spawn: status = %d; body=%v", status, tbody)
+	}
+	tsid, _ := tbody["id"].(string)
+
+	status, gbody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("global agent spawn: status = %d; body=%v", status, gbody)
+	}
+	gsid, _ := gbody["id"].(string)
+
+	entries := globalStatusEntries(t, srv)
+	if len(entries) != 1 {
+		t.Fatalf("global entries = %d, want exactly 1: %v", len(entries), entries)
+	}
+	e := entries[0]
+	if e["taskId"] != float64(0) {
+		t.Errorf("taskId = %v, want 0 (non-nullable zero — Spike 1)", e["taskId"])
+	}
+	if e["projectId"] != float64(0) {
+		t.Errorf("projectId = %v, want 0 (non-nullable zero — Spike 1)", e["projectId"])
+	}
+	if e["sessionId"] != gsid {
+		t.Errorf("sessionId = %v, want the live session %q", e["sessionId"], gsid)
+	}
+	if e["status"] != "working" {
+		t.Errorf("status = %v, want %q (real state, spawn -> working)", e["status"], "working")
+	}
+	if e["taskTitle"] != "Scratchpad" {
+		t.Errorf("taskTitle = %v, want the locked %q (D-09)", e["taskTitle"], "Scratchpad")
+	}
+	if e["projectName"] != "Global" {
+		t.Errorf("projectName = %v, want the locked %q (D-10)", e["projectName"], "Global")
+	}
+	if e["source"] != "global" {
+		t.Errorf("source = %v, want %q", e["source"], "global")
+	}
+	if e["resumable"] != false {
+		t.Errorf("resumable = %v, want false (RUNNING is never resumable)", e["resumable"])
+	}
+	if v, present := e["prNumber"]; !present || v != nil {
+		t.Errorf("prNumber = %v (present=%v), want explicit null (no PR badge)", v, present)
+	}
+	if e["stopRequested"] != false {
+		t.Errorf("stopRequested = %v, want false", e["stopRequested"])
+	}
+
+	// Task-entry byte-stability: the manual task entry keeps its exact
+	// pre-phase fields, and the feed carries exactly one task entry.
+	_, list := doJSONList(t, srv.URL+"/api/agents/status")
+	var taskEntry map[string]any
+	manualCount := 0
+	for _, le := range list {
+		if le["source"] == "manual" {
+			manualCount++
+			if le["taskId"] == float64(tid) {
+				taskEntry = le
+			}
+		}
+	}
+	if manualCount != 1 || taskEntry == nil {
+		t.Fatalf("manual task entries = %d (found peer = %v), want exactly 1 with taskId %d: %v", manualCount, taskEntry != nil, tid, list)
+	}
+	if taskEntry["projectId"] != float64(pid) {
+		t.Errorf("task entry projectId = %v, want %d (unchanged)", taskEntry["projectId"], pid)
+	}
+	if taskEntry["sessionId"] != tsid {
+		t.Errorf("task entry sessionId = %v, want %q (unchanged)", taskEntry["sessionId"], tsid)
+	}
+	if taskEntry["status"] != "working" {
+		t.Errorf("task entry status = %v, want %q (unchanged)", taskEntry["status"], "working")
+	}
+	if taskEntry["taskTitle"] != "Task Peer" {
+		t.Errorf("task entry taskTitle = %v, want %q (unchanged)", taskEntry["taskTitle"], "Task Peer")
+	}
+	if taskEntry["resumable"] != false {
+		t.Errorf("task entry resumable = %v, want false (running task agent)", taskEntry["resumable"])
+	}
+}
+
+// TestGlobalStatusPostRestart (SC3 post-restart half, GSESS-02): a FRESH
+// manager over a singleton with resumable engine ids yields exactly ONE
+// global entry — sessionId "", status "exited", resumable true — engine-
+// branched (claude: csid + transcript; opencode: ocsid alone). An
+// unconfigured root or a missing transcript yields NO entry.
+func TestGlobalStatusPostRestart(t *testing.T) {
+	// claude happy path: seeded csid + transcript.
+	srv, _, db, globRoot, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv)
+	csid := uuid.NewString()
+	setGlobalClaudeSession(t, db, csid)
+	seedTranscript(t, globRoot, csid)
+
+	entries := statusEntriesDirect(t, session.NewManager(), db, globRoot)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want exactly 1 DB-derived global entry: %v", len(entries), entries)
+	}
+	e := entries[0]
+	if e["source"] != "global" {
+		t.Errorf("source = %v, want %q", e["source"], "global")
+	}
+	if e["taskId"] != float64(0) || e["projectId"] != float64(0) {
+		t.Errorf("taskId/projectId = %v/%v, want 0/0", e["taskId"], e["projectId"])
+	}
+	if e["sessionId"] != "" {
+		t.Errorf("sessionId = %v, want \"\" (no live session post-restart)", e["sessionId"])
+	}
+	if e["status"] != "exited" {
+		t.Errorf("status = %v, want %q", e["status"], "exited")
+	}
+	if v, present := e["exitCode"]; !present || v != nil {
+		t.Errorf("exitCode = %v (present=%v), want explicit null", v, present)
+	}
+	if e["resumable"] != true {
+		t.Errorf("resumable = %v, want true (engine-branched id check passed)", e["resumable"])
+	}
+	if e["taskTitle"] != "Scratchpad" || e["projectName"] != "Global" {
+		t.Errorf("labels = %v/%v, want Scratchpad/Global", e["taskTitle"], e["projectName"])
+	}
+
+	// Unconfigured root: nothing resumable, no entry.
+	_, _, db2, globRoot2, _, _ := newGlobalAgentServer(t)
+	csid2 := uuid.NewString()
+	setGlobalClaudeSession(t, db2, csid2)
+	seedTranscript(t, globRoot2, csid2)
+	if entries2 := statusEntriesDirect(t, session.NewManager(), db2, globRoot2); len(entries2) != 0 {
+		t.Errorf("unconfigured root: %d global entries, want 0 (root_path plays the worktree's role — Pitfall 10)", len(entries2))
+	}
+
+	// claude without a transcript: not resumable, no entry.
+	srv3, _, db3, globRoot3, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv3)
+	setGlobalClaudeSession(t, db3, uuid.NewString()) // transcript deliberately absent
+	if entries3 := statusEntriesDirect(t, session.NewManager(), db3, globRoot3); len(entries3) != 0 {
+		t.Errorf("no transcript: %d global entries, want 0", len(entries3))
+	}
+
+	// opencode branch: ocsid alone is resumable (no transcript files exist).
+	srv4, _, db4, globRoot4, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv4)
+	status, body := doJSON(t, "PUT", srv4.URL+"/api/global", map[string]any{"agent_id": globalOpencodeAgentID(t, db4)})
+	if status != http.StatusOK {
+		t.Fatalf("PUT agent_id: status = %d; body=%v", status, body)
+	}
+	setGlobalOpencodeSession(t, db4, "ses_restart_oc")
+	entries4 := statusEntriesDirect(t, session.NewManager(), db4, globRoot4)
+	if len(entries4) != 1 {
+		t.Fatalf("opencode entries = %d, want 1: %v", len(entries4), entries4)
+	}
+	if entries4[0]["resumable"] != true {
+		t.Errorf("opencode resumable = %v, want true (ocsid alone — no transcript glob)", entries4[0]["resumable"])
+	}
+}
+
+// TestGlobalStatusNoDuplication (Pitfall 1): when the manager pass emits the
+// global entry, the DB-derived pass emits none — at most ONE global entry at
+// any time, live AND exited-in-manager.
+func TestGlobalStatusNoDuplication(t *testing.T) {
+	srv, mgr, db, globRoot, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("global agent spawn: status = %d; body=%v", status, body)
+	}
+	sid, _ := body["id"].(string)
+
+	// Make the singleton RESUMABLE while the manager entry is live: the
+	// spawn persisted the csid; seed its transcript. Both passes could claim
+	// it — only the manager pass may.
+	csid := globalClaudeSessionID(t, db)
+	seedTranscript(t, globRoot, csid)
+	if got := len(globalStatusEntries(t, srv)); got != 1 {
+		t.Fatalf("live + resumable singleton: %d global entries, want exactly 1 (no duplication)", got)
+	}
+
+	// Exited-but-still-tracked agent: the manager pass owns the entry too —
+	// now with resumable true.
+	doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/stop", nil)
+	waitGlobalSessionExited(t, mgr, sid)
+	entries := globalStatusEntries(t, srv)
+	if len(entries) != 1 {
+		t.Fatalf("exited-in-manager: %d global entries, want exactly 1 (manager pass still covers it)", len(entries))
+	}
+	if entries[0]["status"] != "exited" {
+		t.Errorf("status = %v, want exited", entries[0]["status"])
+	}
+	if entries[0]["sessionId"] != sid {
+		t.Errorf("sessionId = %v, want the tracked session %q", entries[0]["sessionId"], sid)
+	}
+	if entries[0]["resumable"] != true {
+		t.Errorf("resumable = %v, want true (exited + csid + transcript)", entries[0]["resumable"])
+	}
+}
+
+// TestGlobalActivityExclusion (GINT-03, by construction): a RUNNING global
+// agent and a RUNNING global bash are absent from GET /api/activity while a
+// done manual task appears — the activity surface is task-keyed and never
+// sees task-less sessions.
+func TestGlobalActivityExclusion(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, _, db, _, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv)
+
+	// A done manual task in-window: the activity surface's one row.
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	body := createTask(t, srv, pid, "Activity Fixture")
+	tid := taskID(t, body)
+	if _, err := db.Exec(`UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?`,
+		time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), tid); err != nil {
+		t.Fatalf("mark task done: %v", err)
+	}
+
+	// RUNNING global sessions — agent AND plain bash.
+	status, gbody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("global agent spawn: status = %d; body=%v", status, gbody)
+	}
+	status, bbody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "bash"})
+	if status != http.StatusCreated {
+		t.Fatalf("global bash spawn: status = %d; body=%v", status, bbody)
+	}
+
+	// Activity over the same DB (no-gh fakes — never a real gh spawn).
+	amux := newActivityEnv(t, db, nil, nil)
+	asrv := httptest.NewServer(amux)
+	t.Cleanup(asrv.Close)
+	st, raw := getJSON(t, asrv.URL+"/api/activity?window=week")
+	if st != http.StatusOK {
+		t.Fatalf("GET /api/activity: status = %d; body=%s", st, raw)
+	}
+	if !strings.Contains(string(raw), "Activity Fixture") {
+		t.Errorf("activity body omits the done task (the surface's one row):\n%s", raw)
+	}
+	for _, leak := range []string{"Scratchpad", "Global"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("activity body leaks the global session label %q (GINT-03 violation):\n%s", leak, raw)
+		}
+	}
+}
