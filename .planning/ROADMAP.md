@@ -110,7 +110,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 15-02-PLAN.md — global agent spawn (one-agent 409, engine-branched resume, csid persist, opencode capture re-target) + /api/agents/status widening in BOTH passes (source:"global", synthesized labels)
+- [x] 15-02-PLAN.md — global agent spawn (one-agent 409, engine-branched resume, csid persist, opencode capture re-target) + /api/agents/status widening in BOTH passes (source:"global", synthesized labels)
 
 > **Research flag**: run `/gsd-plan-phase 15 --research-phase` — two spikes: the `agentStatusEntry` wire widening (nullable-vs-synthesized choice ripples into 4+ frontend consumers; research recommends synthesized server-side) and the opencode session-capture re-targeting (the `PWD` pin + directory filter now matching the global root — worth one host-gated e2e). If the phase feels heavy at planning time, split into waves (engine+bash, then agent+status) — not separate phases.
 
@@ -242,6 +242,6 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 12.1. Address Activity tech debt (WR-01..03) | v1.12 | 1/1 | Complete | 2026-08-25 |
 | 13. Global data foundation & safety net | v1.13 | 2/2 | Complete    | 2026-08-25 |
 | 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
-| 15. Global sessions backend | v1.13 | 1/2 | In Progress|  |
+| 15. Global sessions backend | v1.13 | 2/2 | Complete   | 2026-08-26 |
 | 16. Global view, Settings & bar integration | v1.13 | 0/? | Not started | - |
 | 17. Hardening & E2E | v1.13 | 0/? | Not started | - |
