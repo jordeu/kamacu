@@ -1,10 +1,11 @@
 ---
 phase: 15
 slug: global-sessions-backend
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-08-26
+reviewed_at: 2026-08-26
 ---
 
 # Phase 15 — UI Design Contract
