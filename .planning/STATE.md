@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: Global Task
-current_phase: 15
-current_phase_name: Global sessions backend
+current_phase: 16
+current_phase_name: Global view, Settings & bar integration
 status: executing
 stopped_at: Phase 15 UI-SPEC approved
-last_updated: "2026-08-26T14:43:13.128Z"
+last_updated: "2026-08-26T14:59:04.658Z"
 last_activity: 2026-08-26
-last_activity_desc: Phase 15 execution started
+last_activity_desc: Phase 15 complete, transitioned to Phase 16
 progress:
   total_phases: 5
   completed_phases: 3
@@ -42,11 +42,11 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 ## Current Position
 
-Phase: 15 (Global sessions backend) — EXECUTING
-Plan: 2 of 2
+Phase: 16 — Global view, Settings & bar integration
+Plan: Not started
 Total Plans in Phase: 2
 Status: Ready to execute
-Last activity: 2026-08-26 — Phase 15 execution started
+Last activity: 2026-08-26 — Phase 15 complete, transitioned to Phase 16
 
 Progress: [████░░░░░░] 40%
 
