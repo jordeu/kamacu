@@ -60,11 +60,20 @@ type sessionHandlers struct {
 // exited-ghost handling is client-side per D-28). ?project_id=N (Phase 08,
 // MCPSESS-01) filters to sessions whose task belongs to that project. The two
 // filters are mutually exclusive; project_id never triggers the tmux reconcile
-// pass (dev lists have no orphaned rows). Every entry now also carries
-// taskTitle/projectName/agentName via the D-10 JOIN (empty for dev sessions).
+// pass (dev lists have no orphaned rows). ?scope=global (Phase 15) returns
+// exactly the global sessions plus the scoped tmux reconcile — the /global
+// view's tab strip. Every entry also carries taskTitle/projectName/agentName
+// via the D-10 JOIN (empty for dev sessions); global entries get their honest
+// synthesized Scratchpad/Global labels instead (GINT-02).
 func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 	var infos []session.Info
-	if q := r.URL.Query().Get("task_id"); q == "" {
+	if r.URL.Query().Get("scope") == "global" {
+		// GLOBAL branch (Phase 15): exactly the engine's global sessions,
+		// then the scoped reconcile — the reconcileTmux survivor/lazy-GC
+		// logic with the WHERE clause on the 00018 scope discriminator
+		// instead of task_id.
+		infos = h.reconcileGlobalTmux(r, h.mgr.ListGlobal())
+	} else if q := r.URL.Query().Get("task_id"); q == "" {
 		// Phase 08 project_id filter (MCPSESS-01): scope to sessions whose
 		// task belongs to the project. One query builds the task-ID set, then
 		// an in-memory filter narrows mgr.List() (D-11: never N round-trips).
@@ -123,14 +132,113 @@ func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 	}
 	// Attach the D-10 task->project->agent JOIN (taskTitle/projectName/
 	// agentName) and serialize as sessionDetail. Dev sessions (TaskID==0)
-	// keep empty JOIN fields (omitted on the wire via omitempty).
+	// keep empty JOIN fields (omitted on the wire via omitempty). Global
+	// entries are synthesized per-entry (GINT-02, D-09/D-10): taskTitle
+	// "Scratchpad", projectName "Global", agentName from ONE singleton agent
+	// JOIN read per request — and NEVER a zero-keyed ctxByTask entry (the
+	// map is keyed by the field global sessions don't have; key 0 would leak
+	// the Scratchpad labels onto every dev session — Pitfall 3).
 	ctxByTask := h.joinSessionContext(infos)
+	var gctx *sessionContext
 	out := make([]sessionDetail, len(infos))
 	for i, info := range infos {
+		if info.Global {
+			if gctx == nil {
+				c := h.globalSessionContext()
+				gctx = &c
+			}
+			out[i] = sessionDetail{Info: info, TaskTitle: "Scratchpad", ProjectName: "Global", AgentName: gctx.agentName}
+			continue
+		}
 		ctx := ctxByTask[info.TaskID]
 		out[i] = sessionDetail{Info: info, TaskTitle: ctx.taskTitle, ProjectName: ctx.projectName, AgentName: ctx.agentName}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// reconcileGlobalTmux is the scoped sibling of reconcileTmux (Phase 15,
+// GSESS-03): the same survivor/lazy-GC pass over the scope='global' rows.
+// A row is a survivor iff (a) NO live in-memory session is bound to its name
+// AND (b) tmux has-session reports it alive; dead rows are lazily GC'd
+// (D-89); inconclusive probes surface nothing (Pitfall 6). The synthesized
+// orphaned Info gains Global:true (the /global view keys off it) and the
+// empty-label fallback goes through defaultTmuxLabel exactly as tasks do
+// ("kamacu-global-3" already yields "Bash 3").
+func (h *sessionHandlers) reconcileGlobalTmux(r *http.Request, infos []session.Info) []session.Info {
+	rows, err := h.db.Query(`SELECT name, label, created_at FROM tmux_sessions WHERE scope = 'global'`)
+	if err != nil {
+		slog.Warn("reconcile global tmux sessions: query", "error", err)
+		return infos
+	}
+	type row struct {
+		name, label, createdAt string
+	}
+	var candidates []row
+	for rows.Next() {
+		var rw row
+		if err := rows.Scan(&rw.name, &rw.label, &rw.createdAt); err != nil {
+			rows.Close()
+			slog.Warn("reconcile global tmux sessions: scan", "error", err)
+			return infos
+		}
+		candidates = append(candidates, rw)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		slog.Warn("reconcile global tmux sessions: rows", "error", err)
+		return infos
+	}
+	rows.Close()
+
+	for _, rw := range candidates {
+		if h.mgr.HasLiveTmux(rw.name) {
+			continue
+		}
+		alive, err := h.tmuxClient.HasSession(r.Context(), rw.name)
+		switch {
+		case err != nil:
+			continue
+		case alive:
+			label := rw.label
+			if label == "" {
+				label = defaultTmuxLabel(rw.name)
+			}
+			created, perr := time.Parse(time.RFC3339, rw.createdAt)
+			if perr != nil {
+				created = time.Now()
+			}
+			infos = append(infos, session.Info{
+				Label:     label,
+				Status:    session.StatusRunning,
+				Kind:      session.KindBash,
+				Global:    true,
+				CreatedAt: created,
+				Orphaned:  true,
+				TmuxName:  rw.name,
+			})
+		default:
+			if _, derr := h.db.Exec(`DELETE FROM tmux_sessions WHERE name = ?`, rw.name); derr != nil {
+				slog.Warn("reconcile global tmux sessions: GC dead row", "name", rw.name, "error", derr)
+			}
+		}
+	}
+	return infos
+}
+
+// globalSessionContext reads the singleton's agent name — the ONE per-request
+// JOIN behind the honest global labels (GINT-02). Degrades to an empty
+// agentName (never fails the read path); ErrNoRows is unreachable (00017
+// seed + BackfillGlobalTask) and also degrades — the labels Scratchpad/
+// Global stay honest even if the agent JOIN hiccups.
+func (h *sessionHandlers) globalSessionContext() sessionContext {
+	var agentName string
+	if err := h.db.QueryRow(
+		`SELECT a.name FROM global_task g JOIN agents a ON a.id = g.agent_id WHERE g.id = 1`,
+	).Scan(&agentName); err != nil {
+		slog.Warn("globalSessionContext: query", "error", err)
+		return sessionContext{}
+	}
+	return sessionContext{taskTitle: "Scratchpad", projectName: "Global", agentName: agentName}
 }
 
 // reconcileTmux appends orphaned (restored) tmux survivor entries to infos for
@@ -1071,6 +1179,18 @@ func (h *sessionHandlers) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := sess.Info()
+	// Global entries get the honest synthesized labels (GINT-02) — same
+	// per-entry gating as the list loop, never a 0-keyed ctxByTask lookup.
+	if info.Global {
+		gctx := h.globalSessionContext()
+		writeJSON(w, http.StatusOK, sessionDetail{
+			Info:        info,
+			TaskTitle:   "Scratchpad",
+			ProjectName: "Global",
+			AgentName:   gctx.agentName,
+		})
+		return
+	}
 	ctxByTask := h.joinSessionContext([]session.Info{info})
 	ctx := ctxByTask[info.TaskID]
 	writeJSON(w, http.StatusOK, sessionDetail{

@@ -114,16 +114,31 @@ func (h *globalHandlers) liveGlobalTmuxNames(ctx context.Context) []string {
 // verbatim — the locked reading of D-15 (14-RESEARCH Open Question 1; the
 // 13-CONTEXT string sketch was illustrative).
 //
-// Today ONLY the tmux half can be non-empty: no global PTY can exist until
-// Phase 15's spawn path lands Info.Global + ListGlobal(), which widens this
-// helper in place (the mgr field is already carried for that seam, D-19).
-// Until then the manager half is a documented zero-count seam. The gate
-// only COUNTS — it never stops anything (stopping is the user's job; the
-// 409 copy says so).
+// Since Phase 15 BOTH halves are real (D-19): the tmux rows by name, and the
+// engine's RUNNING global sessions via ListGlobal(). Disjoint by name (OQ1):
+// a live tmux tab already appears through its row, so the manager loop skips
+// sessions carrying a tmux name — each live surface is listed exactly once.
+// The gate only COUNTS — it never stops anything (stopping is the user's
+// job; the 409 copy says so).
 func (h *globalHandlers) globalLiveBlockers(ctx context.Context) []deleteBlocker {
 	var blockers []deleteBlocker
+	tmuxNames := make(map[string]struct{})
 	for _, name := range h.liveGlobalTmuxNames(ctx) {
+		tmuxNames[name] = struct{}{}
 		blockers = append(blockers, deleteBlocker{Kind: "sessions", Target: name})
+	}
+	for _, info := range h.mgr.ListGlobal() {
+		if info.Status != session.StatusRunning {
+			continue
+		}
+		if _, covered := tmuxNames[info.TmuxName]; covered {
+			continue
+		}
+		target := info.Label
+		if target == "" {
+			target = info.ID
+		}
+		blockers = append(blockers, deleteBlocker{Kind: "sessions", Target: target})
 	}
 	return blockers
 }
@@ -226,11 +241,25 @@ func (h *globalHandlers) deriveGlobalState(ctx context.Context, g *globalConfig)
 			g.RootExists = true
 		}
 	}
-	// tmux half is REAL today (00018 rows + exact-match probe). The manager
-	// half is a zero-count seam until Phase 15's ListGlobal() (D-19).
+	// Live counts are REAL since Phase 15 (D-19): tmux from the persisted
+	// rows + exact-match probe; Agent/Bash from the engine's global session
+	// registry. The three fields are disjoint by construction (OQ1): a
+	// KindAgent session counts only under Agent; a bash tab with a minted
+	// tmux name counts only under Tmux (its row IS the tmux surface); a
+	// plain PTY bash (no tmux name) counts only under Bash. Exited sessions
+	// count nowhere (D-14 — the probe is live-only).
 	g.Live.Tmux = len(h.liveGlobalTmuxNames(ctx))
-	g.Live.Agent = 0 // Phase-15 ListGlobal() seam (D-19)
-	g.Live.Bash = 0  // Phase-15 ListGlobal() seam (D-19)
+	for _, info := range h.mgr.ListGlobal() {
+		if info.Status != session.StatusRunning {
+			continue
+		}
+		switch {
+		case info.Kind == session.KindAgent:
+			g.Live.Agent++
+		case info.TmuxName == "":
+			g.Live.Bash++
+		}
+	}
 }
 
 // get handles GET /api/global: the config + derived-state read that serves

@@ -498,8 +498,8 @@ func (m *Manager) StopAllForTask(taskID int64) {
 // StopAllForScope stops every RUNNING global-scope session concurrently and
 // blocks until all have fully exited (same shape as StopAllForTask with the
 // predicate swapped to the global flag). Scope-targeted stop goes through
-// this method exclusively — NEVER StopAllForTask(0), which would match every
-// dev terminal (GSESS-01 landmine).
+// this method exclusively — NEVER a task-id stop over the zero literal,
+// which would match every dev terminal (GSESS-01 landmine).
 func (m *Manager) StopAllForScope() {
 	m.mu.Lock()
 	targets := make([]*Session, 0, len(m.sessions))
