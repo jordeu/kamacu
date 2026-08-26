@@ -220,11 +220,19 @@ func (h *sessionHandlers) reconcileTmux(r *http.Request, taskID int64, infos []s
 // (the /terminal dev route sends none) spawns an unscoped dev session exactly
 // as before. Agents require a task worktree and are limited to ONE running
 // per task (D-38) — the API enforces both.
+//
+// Phase 15: {"scope":"global"} (mutually exclusive with task_id) spawns in
+// the global Scratchpad root behind the D-28/D-29 gates — plain bash and
+// tmux tabs ("kamacu-global-<n>") with the same shell options as tasks.
 func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TaskID int64  `json:"task_id"`
 		Kind   string `json:"kind"`
 		Resume bool   `json:"resume"` // RCVR-02: resume the task's stored claude session (agent-only)
+		// Scope is the Phase 15 global discriminator: "" (default — task/dev
+		// behavior unchanged) or "global" — the session spawns in the global
+		// root behind the D-28/D-29 gates. Mutually exclusive with task_id.
+		Scope string `json:"scope"`
 		// ReattachTmuxName, when set, reattaches to an EXISTING persisted tmux
 		// session by name instead of minting a new one (TMUX-05, D-88). The
 		// frontend fires it for a restored orphaned entry; new-session -A is
@@ -245,6 +253,18 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid kind")
 		return
 	}
+	// Scope is a closed set (T-15-05): "" or "global", anything else is the
+	// invalid-kind family of 400.
+	if req.Scope != "" && req.Scope != "global" {
+		writeError(w, http.StatusBadRequest, "invalid scope")
+		return
+	}
+	// Mutual exclusion (the global.go repo/root_path family): the global
+	// scope is task-less by construction — a body carrying both is ambiguous.
+	if req.Scope == "global" && req.TaskID != 0 {
+		writeError(w, http.StatusBadRequest, "supply either scope or task_id, not both")
+		return
+	}
 	// Resume is a variant of the agent spawn only — never a bash session.
 	if req.Resume && kind != session.KindAgent {
 		writeError(w, http.StatusBadRequest, "resume requires kind agent")
@@ -259,7 +279,10 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "reattach requires a bash session")
 			return
 		}
-		if req.TaskID <= 0 {
+		// Global scope is the one task-less context tmux rows exist for
+		// (00018 scope discriminator); every other task-less reattach is the
+		// dev route, which keeps its honest 409.
+		if req.TaskID <= 0 && req.Scope != "global" {
 			writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
 			return
 		}
@@ -301,6 +324,39 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		opts.Cwd, opts.TaskID = path.String, req.TaskID
+	} else if req.Scope == "global" {
+		// GLOBAL branch (Phase 15, D-24/D-28..D-33): the singleton read-at-use —
+		// root + agent + resume ids resolved fresh per request, exactly where
+		// the task worktree query feeds every kind above. ErrNoRows is a
+		// corrupted invariant (00017 seed + BackfillGlobalTask) → 500, the
+		// loadGlobalConfig fail-loud posture.
+		var rootPath string
+		err := h.db.QueryRow(
+			`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, a.engine, a.command, a.extra_params
+			 FROM global_task g
+			 JOIN agents a ON a.id = g.agent_id
+			 WHERE g.id = 1`,
+		).Scan(&rootPath, &csid, &ocsid, &agentEngine, &agentCommand, &agentExtraParams)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "global task row missing")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// One gate block for every kind (D-30), order per D-33: unconfigured
+		// root first (D-28) — never a silent home/cwd fallback; then the
+		// vanished-root stat (D-29) with the stored path verbatim.
+		if rootPath == "" {
+			writeError(w, http.StatusConflict, "global root not configured")
+			return
+		}
+		if fi, serr := os.Stat(rootPath); serr != nil || !fi.IsDir() {
+			writeError(w, http.StatusConflict, "global root no longer exists on disk: "+rootPath)
+			return
+		}
+		opts.Cwd, opts.Global = rootPath, true
 	}
 	// One-agent-per-task gate (D-38), checked BEFORE spawning. An EXITED
 	// agent never blocks — that is the "Reset session" path (D-41, revised at checkpoint).
@@ -376,13 +432,22 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// Reattach variant (TMUX-05, D-88): reconnect to a surviving tmux row by
 		// name instead of minting a new one. The worktree query above already set
 		// opts.Cwd/TaskID (and rejected a missing worktree with 409 "task has no
-		// worktree"). Verify the row belongs to THIS task so a client can never
-		// reattach to an arbitrary name, then reuse the persisted name — no
-		// mint, no INSERT (the row already exists; MAX(n)+1 stays correct because
-		// it persists). Spawn runs new-session -A against the live session. The
-		// persisted label is captured into reattachLabel and reapplied after Spawn
-		// (GAP-01) so a renamed survivor keeps its custom name.
-		err := h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&reattachLabel)
+		// worktree"); the global branch likewise set opts.Cwd/Global behind the
+		// root gates. The lookup itself is SCOPE-SCOPED (D-32): task scope reads
+		// its task rows, global scope reads scope='global' rows — a foreign row
+		// simply does not exist in this scope, so both directions get the same
+		// honest 404 with no scope-mismatch oracle and no information leak.
+		// Reuse the persisted name — no mint, no INSERT (the row already exists;
+		// MAX(n)+1 stays correct because it persists). Spawn runs new-session -A
+		// against the live session. The persisted label is captured into
+		// reattachLabel and reapplied after Spawn (GAP-01) so a renamed survivor
+		// keeps its custom name.
+		var err error
+		if req.Scope == "global" {
+			err = h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE scope = 'global' AND name = ?`, req.ReattachTmuxName).Scan(&reattachLabel)
+		} else {
+			err = h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&reattachLabel)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "no session to reattach")
 			return
@@ -393,43 +458,70 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 		opts.TmuxName = req.ReattachTmuxName
 	} else {
-		// Covers task bash tabs AND the unscoped /terminal dev spawn — one
-		// code path (SHELL-02).
+		// Covers task bash tabs, global bash tabs, AND the unscoped /terminal
+		// dev spawn — one code path (SHELL-02); the global scope reads the
+		// same settings shell as tasks (GVIEW-03).
 		sh, err := settings.Get(h.db, settings.KeyShell)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "couldn't start a session")
 			return
 		}
 		if sh == "tmux" {
-			// tmux shells are task-scoped: the name embeds the task id and the row
-			// references tasks(id). The unscoped /terminal dev route gets an honest
-			// 409 (D-56 posture) — NEVER a bare `tmux` exec, which would open an
-			// unnamed session on the user's DEFAULT socket.
-			if req.TaskID <= 0 {
-				writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
-				return
+			if req.Scope == "global" {
+				// GLOBAL mint (D-11/D-02): the scope-scoped counter, name
+				// kamacu-global-<n>. The 00018 XOR CHECK requires (NULL
+				// task_id, scope 'global') to agree; the real mint-race
+				// backstop is name UNIQUE — NULL task_ids are DISTINCT under
+				// UNIQUE(task_id,n), so that composite never protects global
+				// rows (same single-user localhost window the task path
+				// accepts). n from the DB, NEVER the in-memory counter (it
+				// resets on restart); insert BEFORE Spawn, exactly the task
+				// posture.
+				var n int64
+				if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE scope = 'global'`).Scan(&n); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				name := fmt.Sprintf("kamacu-global-%d", n)
+				// D-04 belt-and-braces: persist the default "Bash N" label at
+				// INSERT (same two-writes-agree posture as the task mint).
+				label := fmt.Sprintf("Bash %d", n)
+				if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, scope, n, name, label) VALUES (NULL, 'global', ?, ?, ?)`, n, name, label); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				opts.TmuxName = name
+			} else {
+				// tmux shells are task-scoped: the name embeds the task id and the row
+				// references tasks(id). The unscoped /terminal dev route gets an honest
+				// 409 (D-56 posture) — NEVER a bare `tmux` exec, which would open an
+				// unnamed session on the user's DEFAULT socket.
+				if req.TaskID <= 0 {
+					writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
+					return
+				}
+				// n from the DB, NEVER the in-memory counter (it resets on restart; a
+				// collision would make new-session -A silently attach a second tab to a
+				// surviving shell — research Pitfall 4). Insert BEFORE Spawn reserves n
+				// under UNIQUE(task_id,n); single-user localhost makes the read-then-
+				// insert race window acceptable, with the constraint as backstop.
+				var n int64
+				if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE task_id = ?`, req.TaskID).Scan(&n); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				name := fmt.Sprintf("kamacu-%d-%d", req.TaskID, n)
+				// D-04 belt-and-braces: persist the default "Bash N" label at INSERT so
+				// the column is never transiently '' even if the later sess.Info().Label
+				// back-fill UPDATE (below) fails. The two writes agree (both "Bash N"),
+				// so the back-fill is idempotent reconciliation, not a conflict.
+				label := fmt.Sprintf("Bash %d", n)
+				if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, ?, ?, ?)`, req.TaskID, n, name, label); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				opts.TmuxName = name
 			}
-			// n from the DB, NEVER the in-memory counter (it resets on restart; a
-			// collision would make new-session -A silently attach a second tab to a
-			// surviving shell — research Pitfall 4). Insert BEFORE Spawn reserves n
-			// under UNIQUE(task_id,n); single-user localhost makes the read-then-
-			// insert race window acceptable, with the constraint as backstop.
-			var n int64
-			if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE task_id = ?`, req.TaskID).Scan(&n); err != nil {
-				writeError(w, http.StatusInternalServerError, "couldn't start a session")
-				return
-			}
-			name := fmt.Sprintf("kamacu-%d-%d", req.TaskID, n)
-			// D-04 belt-and-braces: persist the default "Bash N" label at INSERT so
-			// the column is never transiently '' even if the later sess.Info().Label
-			// back-fill UPDATE (below) fails. The two writes agree (both "Bash N"),
-			// so the back-fill is idempotent reconciliation, not a conflict.
-			label := fmt.Sprintf("Bash %d", n)
-			if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, ?, ?, ?)`, req.TaskID, n, name, label); err != nil {
-				writeError(w, http.StatusInternalServerError, "couldn't start a session")
-				return
-			}
-			opts.TmuxName = name
 		} else {
 			opts.Shell = sh
 		}
