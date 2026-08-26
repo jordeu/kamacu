@@ -5,16 +5,16 @@ milestone_name: Global Task
 current_phase: 14
 current_phase_name: Global config API
 status: executing
-stopped_at: Completed 14-01-PLAN.md
-last_updated: "2026-08-25T17:59:14.864Z"
-last_activity: 2026-08-25
+stopped_at: Completed 14-02-PLAN.md
+last_updated: "2026-08-26T05:00:47.664Z"
+last_activity: 2026-08-26
 last_activity_desc: Phase 14 execution started
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
-  percent: 20
+  completed_plans: 4
+  percent: 40
 ---
 
 # Project State
@@ -42,13 +42,13 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 ## Current Position
 
-Phase: 14 (Global config API) — EXECUTING
+Phase: 14 (Global config API) — COMPLETE
 Plan: 2 of 2
 Total Plans in Phase: 2
-Status: Ready to execute
-Last activity: 2026-08-25 — Phase 14 execution started
+Status: Phase complete — ready for /gsd-plan-phase 15
+Last activity: 2026-08-26 — Completed 14-02-PLAN.md
 
-Progress: [██░░░░░░░░░] 20%
+Progress: [████░░░░░░] 40%
 
 ### v1.13 Roadmap Snapshot
 
@@ -75,8 +75,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-25T17:59:14.852Z
-**Stopped at:** Completed 14-01-PLAN.md
+**Last session:** 2026-08-26T05:00:47.149Z
+**Stopped at:** Completed 14-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -105,6 +105,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 13 P01 | 5 min | 2 tasks | 3 files |
 | Phase 13 P02 | 24 min | 3 tasks | 10 files |
 | Phase 14 P01 | 23 min | 3 tasks tasks | 3 source + 2 docs files |
+| Phase 14 P02 | 8 min | 2 tasks | 2 files |
 
 ## Decisions
 
@@ -153,6 +154,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase 13 / Plan 02]: Sweep fix shipped as the research-verified subquery form (WHERE scope='global' OR task_id IN (SELECT id FROM tasks)); the LEFT-JOIN equivalent deliberately not used (planner resolution) — Both shapes verified equivalent on real data; the subquery form is what the research validated
 - [Phase 13 / Plan 02]: The agents delete-guard 409 message is count-free ('reassign the Scratchpad agent first') — the singleton references exactly one agent, always; D-09 locked string, the 00017 FK RESTRICT stays the backstop
 - [Phase 13 / Plan 02]: TestBackfillAgents wipe simulation updated to drop the global_task singleton first — under 00017 the raw agent DELETE is correctly refused by ON DELETE RESTRICT; BackfillGlobalTask re-arms the row next boot
+- [Phase ?]: Phase 14/02: real-binary curl smoke isolates via env (HOME=sandbox + temp --db + free 127.0.0.1 port) rather than containers — every ~-relative resolution follows HOME, which is the exact fresh-install production contract
+- [Phase ?]: Phase 14/02: the managed/clone PUT variant is excluded from the curl smoke (seam-covered by 14-01 fakes; a live gh clone would be network-flaky) — reattach/no-reclone is instead proven in-package by TestPutGlobalConfigHistory
+- [Phase ?]: Phase 14/02: SC3's settable half demonstrated with agent_id=2 (opencode seed) so the agent summary observably changes engine — a same-id no-op PUT could not prove the JOIN reflects the write
 
 ## Operator Next Steps
 
