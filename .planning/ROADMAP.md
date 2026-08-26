@@ -100,7 +100,17 @@ Plans:
   4. After a server restart, global agent sessions reconcile and offer engine-branched Resume (claude `--resume` / opencode `--resume`, keyed on the persisted singleton ids), and global tmux tabs reattach invisibly with no Resume button.
   5. Global sessions never auto-reap (no Done-TTL analog, no PR reconcile pass — immortal until explicitly stopped); MCP session tools list/describe them with honest labels (never 404 or garbled, read-only contract unchanged); Activity stats and lists exclude them.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 15-01-PLAN.md — engine global scope (Global flag, ListGlobal, StopAllForScope) + scope:"global" bash surface (D-28..D-33 gates, tmux mint, scoped reattach) + ?scope=global list/reconcile/labels + real GET /api/global counts & GCONF-04 gate widening
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 15-02-PLAN.md — global agent spawn (one-agent 409, engine-branched resume, csid persist, opencode capture re-target) + /api/agents/status widening in BOTH passes (source:"global", synthesized labels)
 
 > **Research flag**: run `/gsd-plan-phase 15 --research-phase` — two spikes: the `agentStatusEntry` wire widening (nullable-vs-synthesized choice ripples into 4+ frontend consumers; research recommends synthesized server-side) and the opencode session-capture re-targeting (the `PWD` pin + directory filter now matching the global root — worth one host-gated e2e). If the phase feels heavy at planning time, split into waves (engine+bash, then agent+status) — not separate phases.
 
