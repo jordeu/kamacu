@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -1039,5 +1040,149 @@ func TestStopAllForTaskNoSessions(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("StopAllForTask on a session-less task did not return immediately")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Global scope (Phase 15, GSESS-01): the third scope, additive to task/dev
+// ---------------------------------------------------------------------------
+
+// TestGlobalScopedLabels: global bash sessions get "Bash 1", "Bash 2"... from
+// a dedicated monotonic counter (never the dev "bash #N" family), the counter
+// is never reused after stops, and the dev/task families stay byte-identical.
+func TestGlobalScopedLabels(t *testing.T) {
+	m := NewManager()
+
+	g1 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	if got := g1.Info(); got.Label != "Bash 1" || !got.Global {
+		t.Errorf("global first spawn: Label=%q Global=%v, want Label=%q Global=true", got.Label, got.Global, "Bash 1")
+	}
+
+	g2 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	if got := g2.Info().Label; got != "Bash 2" {
+		t.Errorf("global second spawn: Label=%q, want %q", got, "Bash 2")
+	}
+
+	// Stop global "Bash 1": the global counter is monotonic, never reused.
+	setTestGrace(g1, 200*time.Millisecond)
+	g1.Stop()
+	g3 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	if got := g3.Info().Label; got != "Bash 3" {
+		t.Errorf("global spawn after stop: Label=%q, want %q (counter never reused)", got, "Bash 3")
+	}
+
+	// The dev counter is independent of the global counter.
+	dev := spawnForTest(t, m)
+	if got := dev.Info(); got.Label != "bash #1" || got.Global {
+		t.Errorf("dev spawn: Label=%q Global=%v, want Label=%q Global=false", got.Label, got.Global, "bash #1")
+	}
+
+	// Per-task counters are independent of the global counter.
+	task := spawnForTestOpts(t, m, SpawnOpts{TaskID: 9})
+	if got := task.Info(); got.Label != "Bash 1" || got.Global {
+		t.Errorf("task 9 spawn: Label=%q Global=%v, want Label=%q Global=false (counters are per-scope)", got.Label, got.Global, "Bash 1")
+	}
+}
+
+// TestGlobalAgentLabels: a global agent session labels "Agent" — the kind arm
+// stays first (one agent per scope, API enforces), exactly as task agents do.
+func TestGlobalAgentLabels(t *testing.T) {
+	m := NewManager()
+	stub := writeFakeClaude(t, filepath.Join(t.TempDir(), "args"))
+	m.SetAgentConfig(testAgentConfig(stub))
+	s := spawnForTestOpts(t, m, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), Global: true})
+	info := s.Info()
+	if info.Label != "Agent" {
+		t.Errorf("global agent Label = %q, want %q", info.Label, "Agent")
+	}
+	if !info.Global {
+		t.Error("global agent Info.Global = false, want true")
+	}
+}
+
+// TestInfoGlobalJSONOmitEmpty: Global serializes with omitempty — a global
+// session carries "global":true; task/dev sessions omit the key entirely.
+func TestInfoGlobalJSONOmitEmpty(t *testing.T) {
+	m := NewManager()
+	g := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	b, err := json.Marshal(g.Info())
+	if err != nil {
+		t.Fatalf("Marshal(global Info): %v", err)
+	}
+	if !strings.Contains(string(b), `"global":true`) {
+		t.Errorf("global Info JSON = %s, want it to contain \"global\":true", b)
+	}
+
+	dev := spawnForTest(t, m)
+	b, err = json.Marshal(dev.Info())
+	if err != nil {
+		t.Fatalf("Marshal(dev Info): %v", err)
+	}
+	if strings.Contains(string(b), `"global"`) {
+		t.Errorf("dev Info JSON = %s, want the global key omitted", b)
+	}
+}
+
+// TestListGlobal: returns exactly the sessions spawned with the global flag —
+// dev and task sessions never leak in.
+func TestListGlobal(t *testing.T) {
+	m := NewManager()
+	g1 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	g2 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	_ = spawnForTest(t, m)                    // dev
+	_ = spawnForTestOpts(t, m, SpawnOpts{TaskID: 7}) // task
+
+	got := m.ListGlobal()
+	if len(got) != 2 {
+		t.Fatalf("ListGlobal len = %d, want 2 (exactly the global sessions)", len(got))
+	}
+	ids := map[string]bool{g1.Info().ID: true, g2.Info().ID: true}
+	for _, info := range got {
+		if !ids[info.ID] {
+			t.Errorf("ListGlobal returned non-global session %s (%q)", info.ID, info.Label)
+		}
+		if !info.Global {
+			t.Errorf("ListGlobal entry %s has Global=false", info.ID)
+		}
+	}
+}
+
+// TestStopAllForScope: the scope stop terminates exactly the RUNNING global
+// sessions; concurrent dev and task sessions stay alive (GSESS-01 — the task
+// fan-out landmine is never used).
+func TestStopAllForScope(t *testing.T) {
+	m := NewManager()
+	g1 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	g2 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
+	dev := spawnForTest(t, m)
+	task := spawnForTestOpts(t, m, SpawnOpts{TaskID: 5})
+	setTestGrace(g1, 200*time.Millisecond)
+	setTestGrace(g2, 200*time.Millisecond)
+
+	m.StopAllForScope()
+
+	if got := g1.Info().Status; got != StatusExited {
+		t.Errorf("global session g1 Status = %q after StopAllForScope, want %q", got, StatusExited)
+	}
+	if got := g2.Info().Status; got != StatusExited {
+		t.Errorf("global session g2 Status = %q after StopAllForScope, want %q", got, StatusExited)
+	}
+	if got := dev.Info().Status; got != StatusRunning {
+		t.Errorf("dev session Status = %q after StopAllForScope, want %q (dev sessions must survive)", got, StatusRunning)
+	}
+	if got := task.Info().Status; got != StatusRunning {
+		t.Errorf("task session Status = %q after StopAllForScope, want %q (task sessions must survive)", got, StatusRunning)
+	}
+
+	// Calling again with no running global sessions is safe and fast.
+	done := make(chan struct{})
+	go func() {
+		m.StopAllForScope()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second StopAllForScope did not return promptly")
 	}
 }
