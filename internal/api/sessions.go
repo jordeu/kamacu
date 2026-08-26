@@ -518,7 +518,7 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 // WS interactive surface is unchanged.
 //
 // The message is sent to the PTY as TWO SEPARATE WriteInput calls:
-//  1. The body wrapped in ANSI bracketed paste markers (ESC[2004<body>ESC[2014).
+//  1. The body wrapped in ANSI bracketed paste markers (ESC[200~<body>ESC[201~).
 //  2. A single "\r" submit key, written AFTER the closing bracket.
 //
 // The bracketed wrap is the deterministic fix. Raw-mode TUIs (Claude Code
@@ -561,7 +561,7 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 // wrapInputForWrite decomposes a request message into the ordered pair of
 // WriteInput payloads the input handler sends to the PTY: the message (any
 // request-supplied trailing terminator stripped) wrapped in ANSI bracketed
-// paste markers (ESC[2004 ... ESC[2014) as the FIRST payload, then a single
+// paste markers (ESC[200~ ... ESC[201~) as the FIRST payload, then a single
 // "\r" submit key as the SECOND. The handler writes them as two separate
 // WriteInput calls, never one combined write.
 //
@@ -595,9 +595,15 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 func wrapInputForWrite(msg string) (body, submit string) {
 	msg = strings.TrimSuffix(msg, "\n")
 	msg = strings.TrimSuffix(msg, "\r")
+	// The xterm bracketed-paste spec: the MODE a terminal enables is CSI ?2004
+	// h, but the paste DELIMITERS it sends back are CSI 200 ~ / CSI 201 ~ —
+	// 200/201, never 2004 (the original constants confused the two, leaking a
+	// stray '~' into readline command lines — every plain-bash submission
+	// through this endpoint parsed as "~<cmd>" and failed; caught by the
+	// Phase-15 cwd-proof test).
 	const (
-		pasteStart = "\x1b[2004~" // ESC[2004~ — bracketed paste start (CSI final byte ~)
-		pasteEnd   = "\x1b[2014~" // ESC[2014~ — bracketed paste end (CSI final byte ~)
+		pasteStart = "\x1b[200~" // ESC[200~ — bracketed paste start (6 bytes)
+		pasteEnd   = "\x1b[201~" // ESC[201~ — bracketed paste end (6 bytes)
 	)
 	return pasteStart + msg + pasteEnd, "\r"
 }
