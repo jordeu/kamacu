@@ -106,7 +106,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 15-01-PLAN.md — engine global scope (Global flag, ListGlobal, StopAllForScope) + scope:"global" bash surface (D-28..D-33 gates, tmux mint, scoped reattach) + ?scope=global list/reconcile/labels + real GET /api/global counts & GCONF-04 gate widening
+- [x] 15-01-PLAN.md — engine global scope (Global flag, ListGlobal, StopAllForScope) + scope:"global" bash surface (D-28..D-33 gates, tmux mint, scoped reattach) + ?scope=global list/reconcile/labels + real GET /api/global counts & GCONF-04 gate widening
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -242,6 +242,6 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 12.1. Address Activity tech debt (WR-01..03) | v1.12 | 1/1 | Complete | 2026-08-25 |
 | 13. Global data foundation & safety net | v1.13 | 2/2 | Complete    | 2026-08-25 |
 | 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
-| 15. Global sessions backend | v1.13 | 0/? | Not started | - |
+| 15. Global sessions backend | v1.13 | 1/2 | In Progress|  |
 | 16. Global view, Settings & bar integration | v1.13 | 0/? | Not started | - |
 | 17. Hardening & E2E | v1.13 | 0/? | Not started | - |

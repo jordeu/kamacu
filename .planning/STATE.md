@@ -6,20 +6,20 @@ current_phase: 15
 current_phase_name: Global sessions backend
 status: executing
 stopped_at: Phase 15 UI-SPEC approved
-last_updated: "2026-08-26T06:26:51.766Z"
+last_updated: "2026-08-26T13:46:38.909Z"
 last_activity: 2026-08-26
-last_activity_desc: Phase 14 complete, transitioned to Phase 15
+last_activity_desc: Phase 15 execution started
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 6
+  completed_plans: 5
   percent: 40
 ---
 
 # Project State
 
-**Current focus:** Phase 14 — Global config API
+**Current focus:** Phase 15 — Global sessions backend
 
 See: .planning/PROJECT.md (updated 2026-08-25)
 
@@ -42,11 +42,11 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 ## Current Position
 
-Phase: 15 — Global sessions backend
-Plan: Not started
+Phase: 15 (Global sessions backend) — EXECUTING
+Plan: 2 of 2
 Total Plans in Phase: 2
 Status: Ready to execute
-Last activity: 2026-08-26 — Phase 14 complete, transitioned to Phase 15
+Last activity: 2026-08-26 — Phase 15 execution started
 
 Progress: [████░░░░░░] 40%
 
@@ -106,6 +106,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 13 P02 | 24 min | 3 tasks | 10 files |
 | Phase 14 P01 | 23 min | 3 tasks tasks | 3 source + 2 docs files |
 | Phase 14 P02 | 8 min | 2 tasks | 2 files |
+| Phase 15 P1 | 95 min | - tasks | - files |
 
 ## Decisions
 
@@ -157,6 +158,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase ?]: Phase 14/02: real-binary curl smoke isolates via env (HOME=sandbox + temp --db + free 127.0.0.1 port) rather than containers — every ~-relative resolution follows HOME, which is the exact fresh-install production contract
 - [Phase ?]: Phase 14/02: the managed/clone PUT variant is excluded from the curl smoke (seam-covered by 14-01 fakes; a live gh clone would be network-flaky) — reattach/no-reclone is instead proven in-package by TestPutGlobalConfigHistory
 - [Phase ?]: Phase 14/02: SC3's settable half demonstrated with agent_id=2 (opencode seed) so the agent summary observably changes engine — a same-id no-op PUT could not prove the JOIN reflects the write
+- [Phase ?]: [Phase 15 / Plan 01]: wrapInputForWrite delimiters fixed to the xterm spec (ESC[200~/ESC[201~) — the original ESC[2004~/ESC[2014~ confused the ?2004 MODE number with the paste DELIMITERS, leaking a stray '~' into readline command lines (every plain-bash input-endpoint submission parsed as '~<cmd>'); exposed by the cwd-proof test, TestInput_Happy was latently red
+- [Phase ?]: [Phase 15 / Plan 01]: deriveGlobalState/globalLiveBlockers disjoint-by-name resolution of OQ1 — KindAgent counts only under live.agent, TmuxName-empty bash only under live.bash, minted tabs only under live.tmux; blockers dedupe engine sessions against tmux rows by name so each live surface appears once
 
 ## Operator Next Steps
 
