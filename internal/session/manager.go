@@ -33,13 +33,14 @@ var ErrTmuxNotFound = errors.New("tmux not found")
 // remove) each live in a single method so Phase 4 can add DB writes inside
 // them without restructuring.
 type Manager struct {
-	mu           sync.Mutex
-	sessions     map[string]*Session
-	counter      int           // monotonic global "bash #N" label counter; never reused
-	taskCounters map[int64]int // per-task "Bash N" label counters; never reused or reset
-	seq          int           // global spawn order, List sort tiebreak
-	agentCfg     AgentConfig   // set once at startup; read (copied) at agent spawn
-	tmuxClient   *tmux.Client  // set once at startup; socket/config for tmux-backed spawns
+	mu            sync.Mutex
+	sessions      map[string]*Session
+	counter       int           // monotonic global "bash #N" label counter; never reused
+	taskCounters  map[int64]int // per-task "Bash N" label counters; never reused or reset
+	globalCounter int           // global-scope "Bash N" label counter; never reused (Phase 15)
+	seq           int           // global spawn order, List sort tiebreak
+	agentCfg      AgentConfig   // set once at startup; read (copied) at agent spawn
+	tmuxClient    *tmux.Client  // set once at startup; socket/config for tmux-backed spawns
 }
 
 // NewManager returns an empty Manager.
@@ -77,6 +78,12 @@ type SpawnOpts struct {
 	// socket instead of a plain shell. Minted and persisted by the HTTP handler
 	// (kamacu-<task>-<n>); "" = plain shell. Mutually exclusive with Shell.
 	TmuxName string
+	// Global marks the session as global-scope (Phase 15, GSESS-01): it runs
+	// in the global root, lists under ListGlobal(), and stops under
+	// StopAllForScope(). Zero value false = current task/dev behavior —
+	// the flag rides the Kind/Shell/TmuxName back-compat precedent and is
+	// opaque to the PTY/argv machinery.
+	Global bool
 }
 
 // SetAgentConfig installs the agent spawn configuration (hook receiver
@@ -335,6 +342,13 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	switch {
 	case kind == KindAgent:
 		label = "Agent" // one agent per task — no counter (API enforces)
+	case opts.Global:
+		// Global scope (Phase 15): its own "Bash N" family, NEVER the dev
+		// "bash #N" family — this arm must sit ABOVE the TaskID==0 dev arm
+		// (a global spawn is TaskID-0 too, Pitfall 2). The API layer keeps
+		// Global and TaskID mutually exclusive; here the flag simply wins.
+		m.globalCounter++
+		label = fmt.Sprintf("Bash %d", m.globalCounter)
 	case opts.TaskID == 0:
 		m.counter++
 		label = fmt.Sprintf("bash #%d", m.counter)
@@ -348,6 +362,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		id:              id,
 		label:           label,
 		taskID:          opts.TaskID,
+		global:          opts.Global,
 		kind:            kind,
 		claudeSessionID: claudeSessionID,
 		engine:          opts.AgentEngine,
@@ -422,6 +437,12 @@ func (m *Manager) ListByTask(taskID int64) []Info {
 	return m.listWhere(func(s *Session) bool { return s.taskID == taskID })
 }
 
+// ListGlobal returns Info snapshots for global-scope sessions only, newest
+// first (same ordering contract as List) — Phase 15, GSESS-01.
+func (m *Manager) ListGlobal() []Info {
+	return m.listWhere(func(s *Session) bool { return s.global })
+}
+
 // listWhere snapshots sessions matching keep, newest first. The comparator
 // lives only here — List and ListByTask share it.
 func (m *Manager) listWhere(keep func(*Session) bool) []Info {
@@ -458,6 +479,32 @@ func (m *Manager) StopAllForTask(taskID int64) {
 	targets := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		if s.taskID == taskID && s.Info().Status == StatusRunning {
+			targets = append(targets, s)
+		}
+	}
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, s := range targets {
+		wg.Add(1)
+		go func(s *Session) {
+			defer wg.Done()
+			s.Stop()
+		}(s)
+	}
+	wg.Wait()
+}
+
+// StopAllForScope stops every RUNNING global-scope session concurrently and
+// blocks until all have fully exited (same shape as StopAllForTask with the
+// predicate swapped to the global flag). Scope-targeted stop goes through
+// this method exclusively — NEVER StopAllForTask(0), which would match every
+// dev terminal (GSESS-01 landmine).
+func (m *Manager) StopAllForScope() {
+	m.mu.Lock()
+	targets := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.global && s.Info().Status == StatusRunning {
 			targets = append(targets, s)
 		}
 	}
