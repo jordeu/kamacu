@@ -396,8 +396,11 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Agents always run in a task worktree: no task means no worktree — the
-	// same gate (and copy) as a worktree-less task.
-	if kind == session.KindAgent && req.TaskID <= 0 {
+	// same gate (and copy) as a worktree-less task. The global scope is the
+	// one task-less exception (Phase 15): its worktree-equivalent is the
+	// global root, resolved + gated inside the scope branch below (D-28/D-29
+	// fire there, before this function ever reaches Spawn).
+	if kind == session.KindAgent && req.TaskID <= 0 && req.Scope != "global" {
 		writeError(w, http.StatusConflict, "task has no worktree")
 		return
 	}
@@ -469,11 +472,22 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// One-agent-per-task gate (D-38), checked BEFORE spawning. An EXITED
 	// agent never blocks — that is the "Reset session" path (D-41, revised at checkpoint).
 	// Resume rides this gate unchanged — it IS D-67's never-two-PTYs guarantee.
+	// Phase 15: the global scope has its own gate (D-34) over ListGlobal(),
+	// same RUNNING-only semantics, in the task-gate copy voice.
 	if kind == session.KindAgent {
-		for _, info := range h.mgr.ListByTask(req.TaskID) {
-			if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
-				writeError(w, http.StatusConflict, "agent session already running")
-				return
+		if req.Scope == "global" {
+			for _, info := range h.mgr.ListGlobal() {
+				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
+					writeError(w, http.StatusConflict, "global agent already running")
+					return
+				}
+			}
+		} else {
+			for _, info := range h.mgr.ListByTask(req.TaskID) {
+				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
+					writeError(w, http.StatusConflict, "agent session already running")
+					return
+				}
 			}
 		}
 	}
@@ -485,7 +499,30 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// posture, NEVER silently fork a fresh session). The claude path is unchanged
 	// byte-for-byte (csid + the transcript glob that self-heals D-56's resumable).
 	if req.Resume {
-		if agentEngine == "opencode" {
+		if req.Scope == "global" {
+			// GLOBAL resume (Phase 15, D-31): the ids live in the singleton
+			// (the scope branch above scanned csid/ocsid alongside the agent
+			// row). An engine with no persisted id is an honest 409 naming
+			// the engine — NEVER a silent fresh spawn (the user asked for a
+			// conversation back, not a blank terminal). transcriptExists is
+			// cwd-agnostic (resume.go), so the claude check works verbatim
+			// against the global root's transcripts.
+			if agentEngine == "opencode" {
+				if !ocsid.Valid {
+					writeError(w, http.StatusConflict, "no global opencode session to resume")
+					return
+				}
+				// opts.ResumeSessionID stays "" — the `-s <id>` append in the
+				// custom spawn arm below keys off ocsid, which the singleton
+				// scan already filled.
+			} else {
+				if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
+					writeError(w, http.StatusConflict, "no global claude session to resume")
+					return
+				}
+				opts.ResumeSessionID = csid.String
+			}
+		} else if agentEngine == "opencode" {
 			if !ocsid.Valid {
 				writeError(w, http.StatusConflict, "no session to resume")
 				return
@@ -657,8 +694,15 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	}
 	// Persist the Phase 5 --resume key BEFORE replying (latest spawn wins).
 	// A write failure degrades Phase 5 resume only — the session is usable.
+	// Phase 15: the persist target is scope-branched — the singleton UPDATE
+	// for global, the tasks UPDATE otherwise. Same warn-only degradation
+	// (Pattern 5).
 	if kind == session.KindAgent {
-		if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
+		if req.Scope == "global" {
+			if _, err := h.db.Exec(`UPDATE global_task SET claude_session_id = ? WHERE id = 1`, sess.ClaudeSessionID()); err != nil {
+				slog.Warn("persisting claude_session_id", "scope", "global", "error", err)
+			}
+		} else if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
 			slog.Warn("persisting claude_session_id", "task", req.TaskID, "error", err)
 		}
 		// M002/S03/T03 (Strategy B — subprocess discovery): opencode mints its
@@ -667,13 +711,19 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// until the user's first turn (a TUI boot with no input writes nothing
 		// to opencode.db — verified by a host-gated spike, MEM034), so the
 		// capture is an ASYNC bounded poll launched here, never a spawn-time
-		// read. It persists the discovered id to tasks.opencode_session_id,
-		// which is the restart-resume key (T02's resume argv reads it). Resume
-		// reuses the stored id (no discovery) — only a FRESH opencode spawn
-		// captures. Best-effort + warn-only: a capture failure costs only
-		// restart-resume, never the live session. Never block the reply.
+		// read. It persists the discovered id to the session owner's resume
+		// column (tasks.opencode_session_id, or the global_task singleton for
+		// a global spawn — T-15-06 re-target), which is the restart-resume
+		// key (T02's resume argv reads it). Resume reuses the stored id (no
+		// discovery) — only a FRESH opencode spawn captures. Best-effort +
+		// warn-only: a capture failure costs only restart-resume, never the
+		// live session. Never block the reply.
 		if agentEngine == "opencode" && !req.Resume {
-			go captureOpencodeSessionAsync(h.db, sess.Done(), req.TaskID, opts.Cwd)
+			if req.Scope == "global" {
+				go captureOpencodeSessionAsync(h.db, sess.Done(), globalPersistTarget(), opts.Cwd)
+			} else {
+				go captureOpencodeSessionAsync(h.db, sess.Done(), taskPersistTarget(req.TaskID), opts.Cwd)
+			}
 		}
 	}
 	// GAP-01: restore the survivor's persisted custom label onto the reattached
@@ -982,10 +1032,48 @@ func parseOpenCodeSessionList(out []byte, dir string) (string, error) {
 	return bestID, nil
 }
 
+// opencodePersistTarget is the parametrized persist step of the opencode
+// capture poller (Phase 15, T-15-06): WHERE a discovered ses_… id lands. Task
+// spawns use taskPersistTarget(id) — UPDATE tasks; global spawns use
+// globalPersistTarget() — UPDATE the global_task singleton. The two targets
+// are separate closures over separate SQL, so a wrong-table write is
+// structurally inexpressible (no task-id sentinel can reach the global
+// UPDATE, and vice versa) — and there is exactly ONE poller, parametrized,
+// never a forked copy.
+type opencodePersistTarget struct {
+	owner   string // log label ("task <id>" / "global")
+	persist func(db *sql.DB, opencodeSessionID string) error
+}
+
+// taskPersistTarget writes tasks.opencode_session_id for taskID — the
+// restart-resume key of a task-scoped opencode agent.
+func taskPersistTarget(taskID int64) opencodePersistTarget {
+	return opencodePersistTarget{
+		owner: fmt.Sprintf("task %d", taskID),
+		persist: func(db *sql.DB, id string) error {
+			_, err := db.Exec(`UPDATE tasks SET opencode_session_id = ? WHERE id = ?`, id, taskID)
+			return err
+		},
+	}
+}
+
+// globalPersistTarget writes global_task.opencode_session_id on the singleton
+// row — the restart-resume key of the global (Scratchpad) opencode agent.
+func globalPersistTarget() opencodePersistTarget {
+	return opencodePersistTarget{
+		owner: "global",
+		persist: func(db *sql.DB, id string) error {
+			_, err := db.Exec(`UPDATE global_task SET opencode_session_id = ? WHERE id = 1`, id)
+			return err
+		},
+	}
+}
+
 // captureOpencodeSessionAsync polls opencode's session DB until the freshly
 // spawned opencode session's ses_id appears (after the user's first turn) and
-// persists it to tasks.opencode_session_id. It runs in its own goroutine
-// launched by the create handler for a fresh opencode spawn.
+// persists it via the parametrized target (tasks.opencode_session_id for a
+// task spawn, the global_task singleton for a global one). It runs in its own
+// goroutine launched by the create handler for a fresh opencode spawn.
 //
 // Exit conditions: discovery succeeds (id persisted + return); the session
 // exits (done fires — the opencode row persists in opencode.db keyed by
@@ -996,7 +1084,7 @@ func parseOpenCodeSessionList(out []byte, dir string) (string, error) {
 // (blocked on the session's done channel) until the on-exit final attempt.
 // All failures are warn-only: capture is best-effort and must never affect the
 // live session.
-func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, taskID int64, worktreeDir string) {
+func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, target opencodePersistTarget, worktreeDir string) {
 	const (
 		pollInterval = 2 * time.Second
 		activeWindow = 10 * time.Minute // bounds polling churn; covers realistic first-turn latency
@@ -1008,17 +1096,17 @@ func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, taskID int64,
 		defer cancel()
 		id, err := discoverOpenCodeSession(ctx, worktreeDir)
 		if err != nil {
-			slog.Warn("discovering opencode session id", "task", taskID, "error", err)
+			slog.Warn("discovering opencode session id", "owner", target.owner, "error", err)
 			return false
 		}
 		if id == "" {
 			return false // no session row yet (the user hasn't run a turn)
 		}
-		if _, err := db.Exec(`UPDATE tasks SET opencode_session_id = ? WHERE id = ?`, id, taskID); err != nil {
-			slog.Warn("persisting opencode session id", "task", taskID, "error", err)
+		if err := target.persist(db, id); err != nil {
+			slog.Warn("persisting opencode session id", "owner", target.owner, "error", err)
 			return false
 		}
-		slog.Info("captured opencode session id", "task", taskID, "opencode_session_id", id)
+		slog.Info("captured opencode session id", "owner", target.owner, "opencode_session_id", id)
 		return true
 	}
 
