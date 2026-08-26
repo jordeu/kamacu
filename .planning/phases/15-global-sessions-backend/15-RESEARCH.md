@@ -481,14 +481,17 @@ if agentEngine == "opencode" && !req.Resume {
 
 All other claims in this research were verified directly against the codebase this session (see Sources).
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`globalLive{Bash}` derivation rule** — plain-bash only, or all non-agent non-tmux? The Phase-14 wire ships `{agent, bash, tmux}` as separate fields, implying bash excludes tmux (tmux has its own field). One-line decision for planning; recommend plain-bash RUNNING count with tmux separate (matches the field triple).
    - What we know: the wire shape (D-19) and the tmux derivation (already real, global.go:231).
    - What's unclear: whether "bash" was intended inclusive of tmux.
    - Recommendation: plain-bash-only; the fields are disjoint by name.
+   - **RESOLVED:** plain-bash RUNNING count only, tmux disjoint — adopted in 15-01-PLAN.md Task 3.
 2. **Bulk stop surface** — `StopAllForScope()` is a locked engine primitive with possibly ZERO Phase-15 call sites (the per-session `POST /api/sessions/{id}/stop` covers explicit-stop semantics; GCONF-04's gate counts but never stops). CONTEXT leaves "stop surface shape" to planning discretion. Recommend: ship the engine method now (locked carry-forward), let the API surface follow Phase 16's UI need — do not add an untested endpoint speculatively.
+   - **RESOLVED:** engine primitive only, no speculative endpoint — adopted in 15-01-PLAN.md Task 1.
 3. **`scope` + `task_id` mutual exclusion spelling** — `scope:"global"` with a non-zero `task_id` in one body is contradictory; 400 (the "supply either" family, global.go:288) is the obvious posture but wasn't D-numbered. Planner picks the copy.
+   - **RESOLVED:** 400 with copy "supply either scope or task_id, not both" — adopted in 15-01-PLAN.md Task 2.
 
 ## Environment Availability
 
