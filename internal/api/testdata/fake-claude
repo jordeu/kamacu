@@ -5,6 +5,7 @@
 # missing-transcript failure (error text + exit 1). Preserves the 04-05
 # contract: bracketed-paste enable at startup and the SIGTERM -> exit 143 trap.
 printf '%s\n' "$@" > "${FAKE_CLAUDE_ARGS_FILE:-/dev/null}"
+pwd > "${FAKE_CLAUDE_PWD_FILE:-/dev/null}"  # cwd proof for spawn tests (Phase 15)
 printf '\x1b[?2004h'           # bracketed paste on (like real claude)
 if [[ "$1" == "--resume" && -n "$FAKE_CLAUDE_RESUME_FAIL" ]]; then
   echo "No conversation found with session ID: $2"

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
 	"kamacu/internal/store"
@@ -686,5 +688,506 @@ func TestGlobalSessionRestartOrphan(t *testing.T) {
 	}
 	if g.Live.Agent != 0 || g.Live.Bash != 0 {
 		t.Errorf("live.agent/bash = %d/%d, want 0/0 (tmux counts only under tmux)", g.Live.Agent, g.Live.Bash)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 15 Plan 02: global AGENT spawn — one-agent gate (D-34), engine-
+// branched resume (D-31), csid persist to the singleton, and the opencode
+// capture re-target (T-15-06). The status-feed widening tests (Task 2) live
+// below them.
+// ---------------------------------------------------------------------------
+
+// newGlobalAgentServerOpt wires the surface the global-agent suite needs over
+// one DB + Manager: task Routes (worktreeTask fixtures), SessionRoutes with an
+// INJECTED globRoot (resume validation + transcript fixtures never touch the
+// real ~/.claude/projects), AgentRoutes sharing that globRoot (the status
+// feed's resumable derivation), and GlobalRoutes (the PUT /api/global seeding
+// step + the singleton the spawn branch reads read-at-use). The manager's
+// ClaudeBin points at testdata/fake-claude; the stub's argv/pwd recorders are
+// aimed at temp files via t.Setenv. sandboxHome toggles the HOME sandbox: CI
+// tests sandbox it (PUT /api/global path validation — ExpandHome + the D-27
+// ~/.kamacu block — resolves into the sandbox); the host-gated opencode e2e
+// does NOT (the real binary must resolve its own config/auth from the real
+// home — the spike-verified posture).
+func newGlobalAgentServerOpt(t *testing.T, sandboxHome bool) (*httptest.Server, *session.Manager, *sql.DB, string, string, string) {
+	t.Helper()
+	if sandboxHome {
+		t.Setenv("HOME", t.TempDir())
+	}
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+	wtDir := t.TempDir()
+	if err := settings.Set(db, settings.KeyWorktreeBase, wtDir); err != nil {
+		t.Fatalf("seed worktree_base: %v", err)
+	}
+	wt := worktree.NewService(wtDir)
+	mgr := session.NewManager()
+	mgr.SetAgentConfig(session.AgentConfig{
+		BaseURL:   "http://127.0.0.1:7333",
+		Token:     testHookToken,
+		ClaudeBin: testdataFakeClaude(t),
+	})
+	globRoot := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	pwdFile := filepath.Join(t.TempDir(), "pwd")
+	t.Setenv("FAKE_CLAUDE_ARGS_FILE", argsFile)
+	t.Setenv("FAKE_CLAUDE_PWD_FILE", pwdFile)
+
+	mux := http.NewServeMux()
+	Routes(mux, db, wt, mgr, tmux.Client{})
+	s := &sessionHandlers{mgr: mgr, db: db, globRoot: globRoot}
+	mux.HandleFunc("GET /api/sessions", s.list)
+	mux.HandleFunc("POST /api/sessions", s.create)
+	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
+	mux.HandleFunc("DELETE /api/sessions/{id}", s.delete)
+	ah := &agentHandlers{mgr: mgr, db: db, globRoot: globRoot}
+	mux.HandleFunc("GET /api/agents/status", ah.status)
+	GlobalRoutes(mux, db, mgr, tmux.Client{})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		srv.Close()
+		for _, info := range mgr.List() {
+			if sess, ok := mgr.Get(info.ID); ok {
+				sess.Stop()
+			}
+		}
+		db.Close()
+	})
+	return srv, mgr, db, globRoot, argsFile, pwdFile
+}
+
+// newGlobalAgentServer is the CI shape: HOME-sandboxed.
+func newGlobalAgentServer(t *testing.T) (*httptest.Server, *session.Manager, *sql.DB, string, string, string) {
+	t.Helper()
+	return newGlobalAgentServerOpt(t, true)
+}
+
+// globalClaudeSessionID reads the singleton's persisted claude session id —
+// the Phase 15 global --resume key.
+func globalClaudeSessionID(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var s sql.NullString
+	if err := db.QueryRow(`SELECT claude_session_id FROM global_task WHERE id = 1`).Scan(&s); err != nil {
+		t.Fatalf("query global_task.claude_session_id: %v", err)
+	}
+	if !s.Valid {
+		t.Fatalf("global_task.claude_session_id is NULL, want a uuid")
+	}
+	return s.String
+}
+
+// setGlobalClaudeSession stamps the singleton's claude session id (restart-
+// sim seeding for the resume path).
+func setGlobalClaudeSession(t *testing.T, db *sql.DB, csid string) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE global_task SET claude_session_id = ? WHERE id = 1`, csid); err != nil {
+		t.Fatalf("set global_task.claude_session_id: %v", err)
+	}
+}
+
+// globalOpencodeAgentID returns the seeded system opencode agent (00015) —
+// engine 'opencode', command 'opencode'. Used where no spawn happens (409
+// gates) or where the REAL binary is wanted (host-gated e2e).
+func globalOpencodeAgentID(t *testing.T, db *sql.DB) int64 {
+	t.Helper()
+	var id int64
+	if err := db.QueryRow(`SELECT id FROM agents WHERE engine = 'opencode' ORDER BY id LIMIT 1`).Scan(&id); err != nil {
+		t.Fatalf("find opencode agent seed: %v", err)
+	}
+	return id
+}
+
+// waitGlobalSessionExited polls the manager until the session reports exited
+// (fake-claude traps TERM and exits fast; 8s budgets the D-14 grace).
+func waitGlobalSessionExited(t *testing.T, mgr *session.Manager, sid string) {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		if s, ok := mgr.Get(sid); ok && s.Info().Status == session.StatusExited {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("global session %q never exited after stop", sid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// readStubFile polls a stub recorder file (≤3s) and returns its trimmed
+// contents — same contract as readArgv, for the pwd recorder.
+func readStubFile(t *testing.T, path string) string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+			return strings.TrimSpace(string(b))
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stub never recorded at %s", path)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// argvHasPair reports whether args contains the given consecutive tokens.
+func argvHasPair(args []string, pair ...string) bool {
+	for i := 0; i+len(pair) <= len(args); i++ {
+		match := true
+		for j, p := range pair {
+			if args[i+j] != p {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// TestGlobalAgentUnconfiguredRoot409 (D-28/D-30, agent kind): the root gates
+// cover the agent kind uniformly — an unconfigured root is the honest 409 and
+// nothing spawns.
+func TestGlobalAgentUnconfiguredRoot409(t *testing.T) {
+	srv, mgr, _, _, _, _ := newGlobalAgentServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusConflict {
+		t.Fatalf("global agent spawn, unconfigured root: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "global root not configured" {
+		t.Errorf("error = %q, want %q", body["error"], "global root not configured")
+	}
+	if got := len(mgr.List()); got != 0 {
+		t.Errorf("mgr.List() = %d sessions after the gated spawn, want 0", got)
+	}
+}
+
+// TestGlobalAgentSpawn (GVIEW-02): a configured root spawns the singleton's
+// agent 201 — label "Agent", global:true, engine read-at-use from the agent
+// row — with the fake-claude really running in the global root (pwd proof)
+// and the minted csid persisted to the singleton (never the tasks table).
+func TestGlobalAgentSpawn(t *testing.T) {
+	srv, mgr, db, _, _, pwdFile := newGlobalAgentServer(t)
+	root := putGlobalFolderRoot(t, srv)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("global agent spawn: status = %d, want 201; body=%v", status, body)
+	}
+	if body["label"] != "Agent" {
+		t.Errorf("label = %q, want %q", body["label"], "Agent")
+	}
+	if body["kind"] != "agent" {
+		t.Errorf("kind = %q, want %q", body["kind"], "agent")
+	}
+	if body["global"] != true {
+		t.Errorf("global = %v, want true on the wire", body["global"])
+	}
+	if body["engine"] != "claude" {
+		t.Errorf("engine = %v, want %q (read-at-use from the singleton's default agent)", body["engine"], "claude")
+	}
+	if body["agentStatus"] != "working" {
+		t.Errorf("agentStatus = %q, want %q (spawn -> working)", body["agentStatus"], "working")
+	}
+	sid, _ := body["id"].(string)
+	if sid == "" {
+		t.Fatalf("spawn returned empty id: %v", body)
+	}
+
+	// cwd proof: fake-claude recorded its working directory — the PTY reports
+	// the physical path, so compare against the symlink-resolved root.
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", root, err)
+	}
+	if got := readStubFile(t, pwdFile); got != resolved {
+		t.Errorf("agent cwd = %q, want the global root %q", got, resolved)
+	}
+
+	// csid persist: the singleton carries the minted uuid (warn-only target).
+	csid := globalClaudeSessionID(t, db)
+	if _, err := uuid.Parse(csid); err != nil {
+		t.Errorf("global_task.claude_session_id %q is not a parseable uuid: %v", csid, err)
+	}
+
+	// Exactly one agent session, registered under the global scope.
+	agentCount := 0
+	for _, info := range mgr.ListGlobal() {
+		if info.Kind == session.KindAgent {
+			agentCount++
+		}
+	}
+	if agentCount != 1 {
+		t.Errorf("ListGlobal() agent sessions = %d, want 1", agentCount)
+	}
+	// The persist never touched the tasks table: no task rows exist.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tasks`).Scan(&n); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("tasks rows = %d, want 0 (the csid persist targets global_task)", n)
+	}
+}
+
+// TestGlobalAgentOneAgentGate (D-34/D-33): a second CONCURRENT global agent
+// spawn is the honest 409 in the task-gate copy voice; an EXITED agent never
+// blocks — a fresh spawn replaces it.
+func TestGlobalAgentOneAgentGate(t *testing.T) {
+	srv, mgr, _, _, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("first spawn: status = %d, want 201; body=%v", status, body)
+	}
+	sid1, _ := body["id"].(string)
+
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusConflict {
+		t.Fatalf("concurrent spawn: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "global agent already running" {
+		t.Errorf("error = %q, want %q (D-34 copy voice)", body["error"], "global agent already running")
+	}
+
+	// Stop; an exited agent never blocks — fresh spawn replaces.
+	if sstatus, _ := doJSON(t, "POST", srv.URL+"/api/sessions/"+sid1+"/stop", nil); sstatus != http.StatusAccepted {
+		t.Fatalf("stop: status = %d, want 202", sstatus)
+	}
+	waitGlobalSessionExited(t, mgr, sid1)
+
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("spawn after exit: status = %d, want 201 (exited never blocks); body=%v", status, body)
+	}
+	sid2, _ := body["id"].(string)
+	if sid2 == "" || sid2 == sid1 {
+		t.Fatalf("replacement session id = %q, want a fresh id (old %q)", sid2, sid1)
+	}
+}
+
+// TestGlobalAgentResumeNoId409 (D-31): resume with no persisted engine id is
+// an honest 409 naming the ENGINE — never a silent fresh spawn. Both engine
+// branches; the opencode half doubles as the read-at-use proof (the agent PUT
+// changes the next spawn's engine with no restart).
+func TestGlobalAgentResumeNoId409(t *testing.T) {
+	srv, mgr, db, _, _, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv)
+
+	// claude engine (the default agent): no singleton csid.
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent", "resume": true})
+	if status != http.StatusConflict {
+		t.Fatalf("claude resume, no id: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "no global claude session to resume" {
+		t.Errorf("error = %q, want %q", body["error"], "no global claude session to resume")
+	}
+
+	// opencode engine (read-at-use agent switch): no singleton ocsid.
+	status, body = doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"agent_id": globalOpencodeAgentID(t, db)})
+	if status != http.StatusOK {
+		t.Fatalf("PUT agent_id: status = %d; body=%v", status, body)
+	}
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent", "resume": true})
+	if status != http.StatusConflict {
+		t.Fatalf("opencode resume, no id: status = %d, want 409; body=%v", status, body)
+	}
+	if body["error"] != "no global opencode session to resume" {
+		t.Errorf("error = %q, want %q", body["error"], "no global opencode session to resume")
+	}
+
+	// Neither 409 spawned anything.
+	if got := len(mgr.List()); got != 0 {
+		t.Errorf("mgr.List() = %d sessions after resume 409s, want 0 (never a silent fresh spawn)", got)
+	}
+}
+
+// TestGlobalAgentResumeArgv (GSESS-02, claude half): a seeded singleton csid
+// + transcript makes the resume spawn carry --resume <csid>, and the
+// latest-spawn-wins persist rewrites the SAME id.
+func TestGlobalAgentResumeArgv(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, mgr, db, globRoot, argsFile, _ := newGlobalAgentServer(t)
+	putGlobalFolderRoot(t, srv)
+
+	stored := uuid.NewString()
+	setGlobalClaudeSession(t, db, stored)
+	seedTranscript(t, globRoot, stored) // sessions_test.go helper — cwd-agnostic glob
+
+	if err := os.Remove(argsFile); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("clear argv file: %v", err)
+	}
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent", "resume": true})
+	if status != http.StatusCreated {
+		t.Fatalf("global claude resume: status = %d, want 201; body=%v", status, body)
+	}
+	args := readArgv(t, argsFile)
+	if !argvHasPair(args, "--resume", stored) {
+		t.Errorf("resume argv = %v, want it to carry --resume %q", args, stored)
+	}
+
+	// Resume keeps the id: the persist rewrites the same value.
+	if got := globalClaudeSessionID(t, db); got != stored {
+		t.Errorf("global_task.claude_session_id = %q after resume, want the SAME %q (resume never forks)", got, stored)
+	}
+
+	if sid, _ := body["id"].(string); sid != "" {
+		doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/stop", nil)
+		waitGlobalSessionExited(t, mgr, sid)
+	}
+}
+
+// TestGlobalAgentOpencodeCapture (CI, stubbed discovery — T-15-06): the
+// capture poller is RE-TARGETED, not forked. A global opencode spawn
+// persists the discovered id to global_task; a REAL task row's
+// opencode_session_id stays NULL (the wrong-table write detector).
+func TestGlobalAgentOpencodeCapture(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, _, db, _, _, _ := newGlobalAgentServer(t)
+	root := putGlobalFolderRoot(t, srv)
+
+	// A real task row: if the poller ever wrote the tasks table, THIS row's
+	// opencode_session_id would flip non-NULL.
+	tid, _ := worktreeTask(t, srv, "Wrong Table Detector")
+
+	// Singleton agent -> opencode engine, command -> the committed
+	// fake-opencode stub (the real binary is never invoked in CI).
+	var ocAgent int64
+	if err := db.QueryRow(
+		`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('global-oc-stub', ?, 'opencode', 0, 0) RETURNING id`,
+		testdataFakeOpencode(t),
+	).Scan(&ocAgent); err != nil {
+		t.Fatalf("seed opencode stub agent: %v", err)
+	}
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"agent_id": ocAgent})
+	if status != http.StatusOK {
+		t.Fatalf("PUT agent_id: status = %d; body=%v", status, body)
+	}
+
+	// Stub discovery: a fixed id + the dir it was polled with (the PWD-pin /
+	// cwd-parameterization proof — the poller must run against the root).
+	orig := discoverOpenCodeSession
+	var dirs []string
+	discoverOpenCodeSession = func(ctx context.Context, dir string) (string, error) {
+		dirs = append(dirs, dir)
+		return "ses_global_stub_1", nil
+	}
+	t.Cleanup(func() { discoverOpenCodeSession = orig })
+
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("global opencode spawn: status = %d, want 201; body=%v", status, body)
+	}
+
+	// The poller's immediate first attempt hits the stub; poll the singleton
+	// write (the goroutine races the 201 reply).
+	deadline := time.Now().Add(5 * time.Second)
+	var ocsid sql.NullString
+	for {
+		if err := db.QueryRow(`SELECT opencode_session_id FROM global_task WHERE id = 1`).Scan(&ocsid); err != nil {
+			t.Fatalf("query global_task.opencode_session_id: %v", err)
+		}
+		if ocsid.Valid {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("global_task.opencode_session_id never captured (stub should return instantly)")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if ocsid.String != "ses_global_stub_1" {
+		t.Errorf("global_task.opencode_session_id = %q, want the stub id %q", ocsid.String, "ses_global_stub_1")
+	}
+	if len(dirs) == 0 || dirs[0] != root {
+		t.Errorf("discovery dirs = %v, want the first poll against the global root %q", dirs, root)
+	}
+
+	// The re-target proof: the tasks table gained NO opencode id.
+	var taskOc sql.NullString
+	if err := db.QueryRow(`SELECT opencode_session_id FROM tasks WHERE id = ?`, tid).Scan(&taskOc); err != nil {
+		t.Fatalf("query tasks.opencode_session_id: %v", err)
+	}
+	if taskOc.Valid {
+		t.Errorf("tasks.opencode_session_id = %q for task %d — the capture poller persisted to the WRONG table", taskOc.String, tid)
+	}
+}
+
+// TestGlobalOpencodeCaptureHost (host-gated e2e, Spike 2): the REAL opencode
+// binary in a temp-git-repo global root — after a first turn the capture
+// poller persists the ses_… id to global_task. Skips where opencode is
+// absent. NOT HOME-sandboxed: the real binary resolves its own config/auth
+// from the real home; the session row it writes is keyed by the temp root
+// directory, which is exactly what the capture filter matches on.
+func TestGlobalOpencodeCaptureHost(t *testing.T) {
+	if _, err := exec.LookPath("opencode"); err != nil {
+		t.Skip("opencode not on PATH")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, mgr, db, _, _, _ := newGlobalAgentServerOpt(t, false)
+	root := putGlobalFolderRoot(t, srv)
+
+	// Singleton agent -> the seeded system opencode agent (command
+	// 'opencode' — the real binary), via the real D-24 PUT surface.
+	status, body := doJSON(t, "PUT", srv.URL+"/api/global", map[string]any{"agent_id": globalOpencodeAgentID(t, db)})
+	if status != http.StatusOK {
+		t.Fatalf("PUT agent_id: status = %d; body=%v", status, body)
+	}
+
+	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"})
+	if status != http.StatusCreated {
+		t.Fatalf("global opencode spawn: status = %d, want 201; body=%v", status, body)
+	}
+	sid, _ := body["id"].(string)
+
+	// Drive the first turn out-of-band: `opencode run` in the root is the
+	// manual-terminal-session analog (the row is keyed by directory; the
+	// capture's most-recently-updated-wins rule owns shared directories).
+	// The model call may error — the session row is created regardless
+	// (probe-verified on opencode 1.18.22).
+	runCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, "opencode", "run", "Reply with just: ok")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PWD="+root)
+	out, rerr := cmd.CombinedOutput()
+	t.Logf("opencode run: err=%v output=%s", rerr, out)
+
+	// The capture poller (2s interval) picks the row up.
+	deadline := time.Now().Add(60 * time.Second)
+	var ocsid sql.NullString
+	for {
+		if err := db.QueryRow(`SELECT opencode_session_id FROM global_task WHERE id = 1`).Scan(&ocsid); err != nil {
+			t.Fatalf("query global_task.opencode_session_id: %v", err)
+		}
+		if ocsid.Valid {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("global_task.opencode_session_id never captured; opencode run err=%v out=%s", rerr, out)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !strings.HasPrefix(ocsid.String, "ses_") {
+		t.Errorf("captured id = %q, want a ses_… id", ocsid.String)
+	}
+	t.Logf("captured global opencode session id: %s", ocsid.String)
+
+	if s, ok := mgr.Get(sid); ok {
+		s.Stop()
 	}
 }
