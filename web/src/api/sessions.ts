@@ -167,3 +167,114 @@ export function useDeleteSession() {
     },
   });
 }
+
+// --- Global-scope variants (Phase 16, GVIEW-01) --------------------------------
+//
+// Keyed ["sessions", "global"] — a CHILD of the ["sessions"] prefix, so every
+// existing prefix invalidation (useStopSession / useDeleteSession are
+// scope-blind) keeps matching the scoped list unchanged. Bodies follow the
+// POST grammar shipped in Phase 15 (sessions.go): scope "global" is mutually
+// exclusive with task_id. Every mutation's onSuccess mirrors the task-scoped
+// contracts: the spawn-select race fix (setQueryData writing the returned
+// TermSession FIRST), then the prefix invalidation; agent variants also
+// invalidate ["agent-statuses"] (useSpawnAgent precedent).
+
+/** The /global view's tab strip: the scoped list GET (?scope=global) —
+ *  exactly the global sessions plus the scoped tmux reconcile (orphaned
+ *  ghosts included). 5s poll parity with the task-scoped hooks. */
+export function useGlobalSessions() {
+  return useQuery({
+    queryKey: ["sessions", "global"],
+    queryFn: () => get<TermSession[]>("/api/sessions?scope=global"),
+    refetchInterval: 5000,
+  });
+}
+
+export function useSpawnGlobalSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => post<TermSession>("/api/sessions", { scope: "global" }),
+    onSuccess: (session) => {
+      // Spawn-select race fix, global spelling (useSpawnSession precedent).
+      queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
+        old ? [session, ...old] : [session],
+      );
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+export function useSpawnGlobalAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      post<TermSession>("/api/sessions", { scope: "global", kind: "agent" }),
+    onSuccess: (session) => {
+      queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
+        old ? [session, ...old] : [session],
+      );
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      // The bar's Global · Scratchpad row appears without waiting a poll.
+      queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
+    },
+  });
+}
+
+export function useResumeGlobalAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      post<TermSession>("/api/sessions", {
+        scope: "global",
+        kind: "agent",
+        resume: true,
+      }),
+    onSuccess: (session) => {
+      queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
+        old ? [session, ...old] : [session],
+      );
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
+    },
+  });
+}
+
+// useReattachGlobalTmux fires the one-shot reattach spawn for an orphaned
+// global tmux ghost — the global spelling of useReattachTmux (TMUX-05, D-88):
+// the server runs new-session -A (attach-or-create) under scope "global" and
+// returns a REAL session that replaces the ghost. The mutate arg is the
+// persisted tmux name.
+export function useReattachGlobalTmux() {
+  const queryClient = useQueryClient();
+  return useMutation<TermSession, ApiError, string>({
+    mutationFn: (name: string) =>
+      post<TermSession>("/api/sessions", {
+        scope: "global",
+        reattach_tmux_name: name,
+      }),
+    onSuccess: (session) => {
+      queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
+        old ? [session, ...old] : [session],
+      );
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+// useRenameGlobalSession mirrors useRenameSession with cache writes keyed to
+// the global list: the returned TermSession (label already resolved
+// server-side) is merged into ["sessions", "global"] for an immediate
+// render, then the prefix invalidation keeps the 5s poll authoritative.
+export function useRenameGlobalSession() {
+  const queryClient = useQueryClient();
+  return useMutation<TermSession, ApiError, { id: string; label: string }>({
+    mutationFn: ({ id, label }) =>
+      patch<TermSession>(`/api/sessions/${id}`, { label }),
+    onSuccess: (session) => {
+      queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
+        old ? old.map((s) => (s.id === session.id ? session : s)) : old,
+      );
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
