@@ -19,6 +19,11 @@ export interface TermSession {
   // invisible (D-77).
   orphaned?: boolean;
   tmuxName?: string;
+  // Mirrors session.Info.Global (session.go:73): true on global-scope
+  // sessions — the orphaned global tmux ghosts are synthesized with it after
+  // a restart (sessions.go). Type-honesty only, not load-bearing for
+  // rendering: the ?scope=global list is already all-global.
+  global?: boolean;
 }
 
 export function useSessions(taskId?: number) {
