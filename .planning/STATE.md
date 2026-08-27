@@ -5,15 +5,15 @@ milestone_name: Global Task
 current_phase: 16
 current_phase_name: global-view-settings-bar-integration
 status: executing
-stopped_at: Completed 16-01-PLAN.md
-last_updated: "2026-08-27T07:50:43.907Z"
+stopped_at: Completed 16-02-PLAN.md
+last_updated: "2026-08-27T11:19:28.689Z"
 last_activity: 2026-08-27
 last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 60
 ---
 
@@ -43,7 +43,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 ## Current Position
 
 Phase: 16 (global-view-settings-bar-integration) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Total Plans in Phase: 3
 Status: Ready to execute
 Last activity: 2026-08-27 — Phase 16 execution started
@@ -75,8 +75,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-27T07:50:43.897Z
-**Stopped at:** Completed 16-01-PLAN.md
+**Last session:** 2026-08-27T11:19:28.676Z
+**Stopped at:** Completed 16-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -109,6 +109,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 15 P1 | 95 min | - tasks | - files |
 | Phase 15 P2 | 42 min | - tasks | - files |
 | Phase 16 P01 | 10 min | 3 tasks | 6 files |
+| Phase 16 P02 | 38 min | 2 tasks tasks | 5 files files |
 
 ## Decisions
 
@@ -165,6 +166,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase ?]: [Phase 16 / Plan 01]: ApiErrorReason exported as a named interface on client.ts so 16-03's Change-root dialog imports the exact {kind, target} shape it renders verbatim (D-45 mechanics — additive field, single-message callers untouched)
 - [Phase ?]: [Phase 16 / Plan 01]: GlobalConfig.agent.engine typed as plain string mirroring the Go wire (claude|custom|opencode) — the stale types.ts Agent.engine union deliberately NOT widened (Pitfall 2; deferred to Phase 17)
 - [Phase ?]: [Phase 16 / Plan 01]: GINT-01/GVIEW-01 left unchecked in REQUIREMENTS.md — this plan ships the wire/data halves per its success criteria; the requirements close when 16-02 lands the /global route + Phase 17 UAT
+- [Phase 16]: 16-02: AgentTab task-branch worktree metadata reads the shared ["task", id] cache via useTask (NaN-disabled on global) — keeps the locked AgentTabScope shape and scope/description/seed prop surface; global branch symmetrically reads useGlobal() (research Pattern 4) — The plan locks the scope type and documents the prop surface without naming a worktree-prop source; the cached-query read preserves byte-for-byte task behavior (TaskPage resolved the query before mounting the tab) with zero new fetches
+- [Phase 16]: 16-02: keepExited accumulator uses adjust-state-during-render (AddProjectDialog prevOpen tracker, research Pitfall 8) instead of TaskPage's effect idiom — new files must lint clean in isolation — The copied wholesale effect trips react-hooks/set-state-in-effect, violating the plan's own eslint-clean acceptance gate; the guarded render-phase union is behaviorally identical and converges
 
 ## Operator Next Steps
 
