@@ -357,9 +357,9 @@ export default function TaskPage() {
       content: (
         <div className="flex h-full min-h-[320px] w-full flex-col">
           <AgentTab
-            task={task}
+            scope={{ kind: "task", taskId: task.id }}
             agentSession={agentSession}
-            projectId={projectId}
+            description={task.description}
             seed={seed}
           />
         </div>
