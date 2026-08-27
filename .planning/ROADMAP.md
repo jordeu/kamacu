@@ -127,7 +127,19 @@ Plans:
   4. The Settings Global section configures the root (folder path or GitHub repo) and the default agent with server errors surfaced inline (clone failures leave the dialog open, no half-configured state), and provides an "Open Global Task" affordance so the view is reachable when idle.
   5. A live global agent session appears as a row in the global Active Sessions bar (synthesized label, non-nullable wire contract) with click-through to `/global` and current-page highlight.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 16-01-PLAN.md — wire layer & bar: TS widenings (`source:"global"`, `TermSession.global`, `ApiError.reasons`), `web/src/api/global.ts` config client, scope-aware session hooks (`["sessions","global"]`), the ActiveSessionsBar three surgical GINT-01 edits (P6)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 16-02-PLAN.md — the `/global` view: AgentTab scope loosening (task behavior byte-identical), GlobalTaskPage (7-state matrix, D-38/D-42 banners, D-39/D-40 heroes), App.tsx route
+- [ ] 16-03-PLAN.md — Settings Scratchpad section: summary card (root row + instant-save agent selector + Open Scratchpad CTA, GCONF-05) + AddProjectDialog-derived Change-root dialog with verbatim 409 reasons + gated Clear root
+
 **UI hint**: yes
 
 ### Phase 17: Hardening & E2E
@@ -243,5 +255,5 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 13. Global data foundation & safety net | v1.13 | 2/2 | Complete    | 2026-08-25 |
 | 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 15. Global sessions backend | v1.13 | 2/2 | Complete    | 2026-08-26 |
-| 16. Global view, Settings & bar integration | v1.13 | 0/? | Not started | - |
+| 16. Global view, Settings & bar integration | v1.13 | 0/3 | Not started | - |
 | 17. Hardening & E2E | v1.13 | 0/? | Not started | - |
