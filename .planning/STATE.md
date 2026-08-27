@@ -5,8 +5,8 @@ milestone_name: Global Task
 current_phase: 16
 current_phase_name: Global view, Settings & bar integration
 status: executing
-stopped_at: Phase 16 context gathered
-last_updated: "2026-08-27T06:01:37.916Z"
+stopped_at: Phase 16 UI-SPEC approved
+last_updated: "2026-08-27T07:31:01.890Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 15 complete, transitioned to Phase 16
 progress:
@@ -44,7 +44,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 Phase: 16 — Global view, Settings & bar integration
 Plan: Not started
-Total Plans in Phase: 2
+Total Plans in Phase: 3
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 15 complete, transitioned to Phase 16
 
@@ -75,9 +75,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-27T06:01:37.900Z
-**Stopped at:** Phase 16 context gathered
-**Resume file:** .planning/phases/16-global-view-settings-bar-integration/16-CONTEXT.md
+**Last session:** 2026-08-27T06:20:06.365Z
+**Stopped at:** Phase 16 UI-SPEC approved
+**Resume file:** .planning/phases/16-global-view-settings-bar-integration/16-UI-SPEC.md
 
 ## Performance Metrics
 
