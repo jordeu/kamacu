@@ -446,20 +446,25 @@ const save = useSaveGlobal();
 
 **All other claims in this research were verified in-repo at file:line level** (the milestone research's own PRIMARY confidence standard) or cited from the approved 16-UI-SPEC.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **D-37 engine-rule conflict resolution**
+All three questions were resolved during Phase-16 planning — each recommendation below was adopted into a phase plan task.
+
+1. **D-37 engine-rule conflict resolution — RESOLVED (adopted: 16-02-PLAN Task 2)**
    - What we know: TaskPage's predicate (`!== "custom"`) shows the quota for opencode; D-37/UI-SPEC's stated outcome hides it; `types.ts`'s union is stale.
    - What's unclear: whether "same rule as TaskPage" means the predicate or the outcome.
    - Recommendation: implement the OUTCOME (`engine === "claude"`) on `/global`; do not touch TaskPage (out of scope). Flag the TaskPage predicate for the Phase 17 UAT/deferred list.
-2. **409 reasons surfacing mechanics**
+   - Resolution: the OUTCOME rule ships in 16-02-PLAN Task 2 — QuotaIndicator on `/global` renders iff `engine === "claude"` resolved from the `["global"]` query; TaskPage's predicate and the stale `types.ts` union stay untouched (flagged for Phase 17).
+2. **409 reasons surfacing mechanics — RESOLVED (adopted: 16-01-PLAN Task 1; `<ul>` rendering in 16-03-PLAN Task 2)**
    - What we know: `ApiError` drops `reasons`; the wire emits `{kind, target}` objects.
    - What's unclear: additive `ApiError.reasons` extension vs message-only rendering.
    - Recommendation: additive extension (one optional field, populated in `client.ts` when the body carries reasons) + `<ul>` of targets — satisfies UI-SPEC row 22 with ~5 lines.
-3. **Shell factoring depth**
+   - Resolution: adopted verbatim — 16-01-PLAN Task 1 adds the additive `ApiError.reasons` field in `client.ts`; 16-03-PLAN Task 2 renders the `<ul>` of mono-span targets inside the Change-root dialog.
+3. **Shell factoring depth — RESOLVED (adopted: 16-02-PLAN Task 2)**
    - What we know: CONTEXT discretion; research prescribes the trimmed-page lean.
    - What's unclear: extract a shared bash-tab-lifecycle hook vs duplicate-then-trim inside GlobalTaskPage.
    - Recommendation: duplicate-then-trim (zero TaskPage churn); extract only if the duplicated block exceeds ~80 lines unchanged.
+   - Resolution: duplicate-then-trim — 16-02-PLAN Task 2 copies the TaskPage bash-tab lifecycle wholesale into GlobalTaskPage then deletes the task-only branches; no shared-shell extraction (a 16-02 prohibition).
 
 ## Environment Availability
 
