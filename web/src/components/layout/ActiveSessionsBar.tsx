@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { ChevronUp, ChevronDown } from "lucide-react";
 import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
 import { dotMeta } from "@/components/StatusDot";
@@ -72,6 +72,9 @@ export function ActiveSessionsBar() {
   const { data } = useAgentStatuses();
   const navigate = useNavigate();
   const { taskId: openTaskId } = useParams(); // current-task highlight (D-07)
+  // Global-route highlight (Pitfall 6): no taskId param exists on /global, so
+  // a global row's currency is derived from the pathname instead.
+  const location = useLocation();
 
   // --- LIVE filter (D-09): working / waiting / idle (claude) AND running
   // (custom-engine, M001). `exited` (incl. the DB-derived/post-restart
@@ -126,13 +129,29 @@ export function ActiveSessionsBar() {
             <div className="flex flex-col gap-0.5">
               {sorted.map((entry) => (
                 <SessionRow
-                  key={entry.taskId}
+                  // Keyed by sessionId (P6): a global entry's taskId is 0, so
+                  // taskId keying would collide across rows. Empty sessionIds
+                  // occur only on DB-derived exited rows, which the LIVE
+                  // filter above removes before render — live rows always
+                  // carry unique sessionIds (16-RESEARCH Pitfall 5).
+                  key={entry.sessionId}
                   entry={entry}
-                  isCurrent={String(entry.taskId) === openTaskId}
+                  isCurrent={
+                    entry.source === "global"
+                      ? location.pathname === "/global"
+                      : String(entry.taskId) === openTaskId
+                  }
                   onOpen={() => {
-                    navigate(
-                      `/projects/${entry.projectId}/tasks/${entry.taskId}`,
-                    );
+                    if (entry.source === "global") {
+                      // GINT-01: the global row targets the Scratchpad view
+                      // (route lands in 16-02) — replaces the Phase-15
+                      // interim dead-route artifact.
+                      navigate("/global");
+                    } else {
+                      navigate(
+                        `/projects/${entry.projectId}/tasks/${entry.taskId}`,
+                      );
+                    }
                     collapse();
                   }}
                 />
