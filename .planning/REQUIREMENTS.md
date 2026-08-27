@@ -23,10 +23,10 @@ A single global scratchpad — a task-like view with agent + bash tabs running d
 
 ### Global View
 
-- [ ] **GVIEW-01**: A `/global` route renders a task-like view with ONLY the Agent tab + bash tabs (no description tab, no diff tab, never on a kanban board) — the full TaskPage-derived shell with explicit Start and ⋯ Stop parity
+- [x] **GVIEW-01**: A `/global` route renders a task-like view with ONLY the Agent tab + bash tabs (no description tab, no diff tab, never on a kanban board) — the full TaskPage-derived shell with explicit Start and ⋯ Stop parity
 - [x] **GVIEW-02**: The Agent tab starts the configured default agent in the global root cwd (no worktree, no branch); one agent per global task is enforced (409 on a second concurrent spawn)
 - [x] **GVIEW-03**: Bash tabs spawn in the global root cwd with the same shell options as tasks (plain bash + invisible tmux)
-- [ ] **GVIEW-04**: With no root configured, the global view shows an honest unconfigured state pointing to Settings — never a silent `$HOME` or cwd fallback
+- [x] **GVIEW-04**: With no root configured, the global view shows an honest unconfigured state pointing to Settings — never a silent `$HOME` or cwd fallback
 
 ### Global Sessions
 
@@ -37,7 +37,7 @@ A single global scratchpad — a task-like view with agent + bash tabs running d
 
 ### Integrations
 
-- [ ] **GINT-01**: A live global agent session appears as a row in the global Active Sessions bar (server-synthesized label, non-nullable wire contract preserved) with click-through to `/global` and current-page highlight
+- [x] **GINT-01**: A live global agent session appears as a row in the global Active Sessions bar (server-synthesized label, non-nullable wire contract preserved) with click-through to `/global` and current-page highlight
 - [x] **GINT-02**: MCP session tools (`list_sessions` / `get_session` / `get_session_output` / `subscribe_session_output`) handle task-less global sessions with honest labels — never 404 or garbled; the read-only terminal contract is unchanged
 - [x] **GINT-03**: Global sessions are excluded from Activity stats and lists (the v1.12 task-keyed surface is unchanged by the global scope)
 
@@ -84,15 +84,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GCONF-03 | Phase 14 | Complete |
 | GCONF-04 | Phase 14 | Complete |
 | GCONF-05 | Phase 16 | Complete |
-| GVIEW-01 | Phase 16 | Pending |
+| GVIEW-01 | Phase 16 | Complete |
 | GVIEW-02 | Phase 15 | Complete |
 | GVIEW-03 | Phase 15 | Complete |
-| GVIEW-04 | Phase 16 | Pending |
+| GVIEW-04 | Phase 16 | Complete |
 | GSESS-01 | Phase 15 | Complete |
 | GSESS-02 | Phase 15 | Complete |
 | GSESS-03 | Phase 15 | Complete |
 | GSESS-04 | Phase 15 | Complete |
-| GINT-01 | Phase 16 | Pending |
+| GINT-01 | Phase 16 | Complete |
 | GINT-02 | Phase 15 | Complete |
 | GINT-03 | Phase 15 | Complete |
 

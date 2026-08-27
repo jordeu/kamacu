@@ -1,28 +1,34 @@
 ---
 phase: 16-global-view-settings-bar-integration
 verified: 2026-08-27T14:05:00Z
-status: human_needed
+status: passed
 score: 10/12 must-haves verified
 behavior_unverified: 2 # truths present + wired, runtime behavior not exercised by any test
 behavior_unverified_items:
+
   - truth: "The Agent tab starts the configured default agent in the global root and bash tabs spawn with the same shell options as tasks — through the Phase-15 session surface (SC2)"
     test: "With a configured folder root, open /global, click Start agent, then the trailing + for a bash tab"
     expected: "Agent terminal streams a session whose cwd is the global root; a bash tab spawns with task-parity shell options (plain bash + invisible tmux); the running agent's ⋯ menu shows only Stop; Stop ends the session; a second concurrent agent spawn 409s"
     why_human: "The click→mutate→POST→PTY→WS-attach chain is an interactive runtime flow; grep proves both halves wired (AgentTab global branch → useSpawnGlobalAgent/useSpawnGlobalSession → POST /api/sessions {scope:'global'} handlers) and the backend halves are API-tested (TestGlobalSessionPlainBashSpawn et al., all passing), but no test drives the browser flow"
+
   - truth: "A live global agent session appears as a row in the global Active Sessions bar with click-through to /global and current-page highlight (SC5 / GINT-01)"
     test: "Spawn a global agent (curl POST /api/sessions {\"scope\":\"global\",\"kind\":\"agent\"} or via Start), expand the Active Sessions bar, click the Global · Scratchpad row"
     expected: "A standard bar row renders (synthesized server label), clicking it navigates to /global and collapses the bar, and the row stays highlighted while location.pathname === '/global'"
     why_human: "Live row appearance, click-through, and highlight are runtime rendering of the 5s status feed; wiring is fully present (sessionId keying, source===\"global\" nav + pathname-highlight branches, server Source:\"global\" synthesis shipped and tested in Phase 15) but observable only in a running app"
 human_verification:
+
   - test: "Live bar row + click-through + highlight (GINT-01)"
     expected: "A live global agent session renders as a Global · Scratchpad bar row; clicking navigates to /global; the row highlights while /global is the current page; task rows keep their existing navigation/highlight"
     why_human: "Runtime rendering of the status feed in a running app; the plans defer this smoke to end-of-phase UAT (16-01 D4 rationale)"
+
   - test: "/global interactive session parity (GVIEW-01 behavior half)"
     expected: "Start agent spawns the configured default agent in the global root (terminal streams); ⋯ menu renders exactly Stop (destructive, no Insert items, no separator); Stop works; trailing + spawns bash tabs with task-parity options; 409 on a second concurrent agent"
     why_human: "Interactive PTY/WS flow — no automated test drives the browser click path"
+
   - test: "7-state matrix walkthrough (GVIEW-04)"
     expected: "unconfigured → D-39 hero with Open Settings; folder root → shell + persistent D-38 banner; repo root → shell with NO banner; root renamed on disk while live → D-42 advisory banner with terminals still streaming; all stopped + vanished → distinct D-40 hero naming the path in mono"
     why_human: "State transitions driven by real config/disk changes against a running server"
+
   - test: "Settings Scratchpad flows (GCONF-05 observable closure)"
     expected: "Open Scratchpad reaches /global; default-agent Select instant-saves (hint 'Applies at the next Start.'); Change root with a repo shows the blocking Cloning spinner then the managed badge; with a live session, Save root/Clear root surface the 409 lead sentence + mono reasons list with the dialog still open; Clear root (all stopped) returns to 'No root configured yet.'"
     why_human: "Dialog interaction flows against real clone/409 failures; 16-03 D3 explicitly defers to end-of-phase UAT"

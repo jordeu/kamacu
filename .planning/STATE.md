@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: Global Task
-current_phase: 16
-current_phase_name: global-view-settings-bar-integration
-status: verifying
-stopped_at: Completed 16-02-PLAN.md
-last_updated: "2026-08-27T11:31:53.101Z"
+current_phase: 17
+current_phase_name: Hardening & E2E
+status: planning
+stopped_at: Phase 16 complete, ready to plan Phase 17
+last_updated: "2026-08-27T15:05:00.000Z"
 last_activity: 2026-08-27
-last_activity_desc: Phase 16 execution started
+last_activity_desc: Phase 16 complete, transitioned to Phase 17
 progress:
   total_phases: 5
   completed_phases: 4
@@ -19,9 +19,9 @@ progress:
 
 # Project State
 
-**Current focus:** Phase 16 — global-view-settings-bar-integration
+**Current focus:** Phase 17 — Hardening & E2E
 
-See: .planning/PROJECT.md (updated 2026-08-25)
+See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent agent session you can open, leave, and reattach to from the browser.
 
@@ -42,13 +42,13 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 ## Current Position
 
-Phase: 16 (global-view-settings-bar-integration) — EXECUTING
-Plan: 3 of 3
-Total Plans in Phase: 3
-Status: Phase complete — ready for verification
-Last activity: 2026-08-27 — Phase 16 execution started
+Phase: 17 — Hardening & E2E
+Plan: Not started
+Total Plans in Phase: Not yet planned
+Status: Ready to plan
+Last activity: 2026-08-27 — Phase 16 complete (UAT 4/4, verification passed), transitioned to Phase 17
 
-Progress: [████░░░░░░] 40%
+Progress: [████████████████████] 9/9 plans (100%)
 
 ### v1.13 Roadmap Snapshot
 
@@ -75,8 +75,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-27T11:31:27.777Z
-**Stopped at:** Completed 16-02-PLAN.md
+**Last session:** 2026-08-27T15:05:00.000Z
+**Stopped at:** Phase 16 complete, ready to plan Phase 17
 **Resume file:** None
 
 ## Performance Metrics
