@@ -5,10 +5,10 @@ milestone_name: Global Task
 current_phase: 17
 current_phase_name: Hardening & E2E
 status: planning
-stopped_at: Phase 16 complete, ready to plan Phase 17
-last_updated: "2026-08-27T15:05:00.000Z"
+stopped_at: Phase 17 context gathered
+last_updated: "2026-08-27T13:17:00.126Z"
 last_activity: 2026-08-27
-last_activity_desc: Phase 16 complete, transitioned to Phase 17
+last_activity_desc: Phase 16 complete (UAT 4/4, verification passed), transitioned to Phase 17
 progress:
   total_phases: 5
   completed_phases: 4
@@ -75,9 +75,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-27T15:05:00.000Z
-**Stopped at:** Phase 16 complete, ready to plan Phase 17
-**Resume file:** None
+**Last session:** 2026-08-27T13:16:59.941Z
+**Stopped at:** Phase 17 context gathered
+**Resume file:** .planning/phases/17-hardening-e2e/17-CONTEXT.md
 
 ## Performance Metrics
 
