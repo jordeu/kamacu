@@ -1,10 +1,11 @@
 ---
 phase: 16
 slug: global-view-settings-bar-integration
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-08-27
+reviewed_at: 2026-08-27
 ---
 
 # Phase 16 — UI Design Contract
