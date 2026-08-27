@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: Global Task
 current_phase: 16
-current_phase_name: Global view, Settings & bar integration
+current_phase_name: global-view-settings-bar-integration
 status: executing
-stopped_at: Phase 16 UI-SPEC approved
-last_updated: "2026-08-27T07:31:01.890Z"
-last_activity: 2026-08-26
-last_activity_desc: Phase 15 complete, transitioned to Phase 16
+stopped_at: Completed 16-01-PLAN.md
+last_updated: "2026-08-27T07:50:43.907Z"
+last_activity: 2026-08-27
+last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 9
+  completed_plans: 7
   percent: 60
 ---
 
 # Project State
 
-**Current focus:** Phase 15 — Global sessions backend
+**Current focus:** Phase 16 — global-view-settings-bar-integration
 
 See: .planning/PROJECT.md (updated 2026-08-25)
 
@@ -42,11 +42,11 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 ## Current Position
 
-Phase: 16 — Global view, Settings & bar integration
-Plan: Not started
+Phase: 16 (global-view-settings-bar-integration) — EXECUTING
+Plan: 2 of 3
 Total Plans in Phase: 3
 Status: Ready to execute
-Last activity: 2026-08-26 — Phase 15 complete, transitioned to Phase 16
+Last activity: 2026-08-27 — Phase 16 execution started
 
 Progress: [████░░░░░░] 40%
 
@@ -75,9 +75,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-27T06:20:06.365Z
-**Stopped at:** Phase 16 UI-SPEC approved
-**Resume file:** .planning/phases/16-global-view-settings-bar-integration/16-UI-SPEC.md
+**Last session:** 2026-08-27T07:50:43.897Z
+**Stopped at:** Completed 16-01-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -108,6 +108,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 14 P02 | 8 min | 2 tasks | 2 files |
 | Phase 15 P1 | 95 min | - tasks | - files |
 | Phase 15 P2 | 42 min | - tasks | - files |
+| Phase 16 P01 | 10 min | 3 tasks | 6 files |
 
 ## Decisions
 
@@ -161,6 +162,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase ?]: Phase 14/02: SC3's settable half demonstrated with agent_id=2 (opencode seed) so the agent summary observably changes engine — a same-id no-op PUT could not prove the JOIN reflects the write
 - [Phase ?]: [Phase 15 / Plan 01]: wrapInputForWrite delimiters fixed to the xterm spec (ESC[200~/ESC[201~) — the original ESC[2004~/ESC[2014~ confused the ?2004 MODE number with the paste DELIMITERS, leaking a stray '~' into readline command lines (every plain-bash input-endpoint submission parsed as '~<cmd>'); exposed by the cwd-proof test, TestInput_Happy was latently red
 - [Phase ?]: [Phase 15 / Plan 01]: deriveGlobalState/globalLiveBlockers disjoint-by-name resolution of OQ1 — KindAgent counts only under live.agent, TmuxName-empty bash only under live.bash, minted tabs only under live.tmux; blockers dedupe engine sessions against tmux rows by name so each live surface appears once
+- [Phase ?]: [Phase 16 / Plan 01]: ApiErrorReason exported as a named interface on client.ts so 16-03's Change-root dialog imports the exact {kind, target} shape it renders verbatim (D-45 mechanics — additive field, single-message callers untouched)
+- [Phase ?]: [Phase 16 / Plan 01]: GlobalConfig.agent.engine typed as plain string mirroring the Go wire (claude|custom|opencode) — the stale types.ts Agent.engine union deliberately NOT widened (Pitfall 2; deferred to Phase 17)
+- [Phase ?]: [Phase 16 / Plan 01]: GINT-01/GVIEW-01 left unchecked in REQUIREMENTS.md — this plan ships the wire/data halves per its success criteria; the requirements close when 16-02 lands the /global route + Phase 17 UAT
 
 ## Operator Next Steps
 

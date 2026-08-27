@@ -133,7 +133,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 16-01-PLAN.md — wire layer & bar: TS widenings (`source:"global"`, `TermSession.global`, `ApiError.reasons`), `web/src/api/global.ts` config client, scope-aware session hooks (`["sessions","global"]`), the ActiveSessionsBar three surgical GINT-01 edits (P6)
+- [x] 16-01-PLAN.md — wire layer & bar: TS widenings (`source:"global"`, `TermSession.global`, `ApiError.reasons`), `web/src/api/global.ts` config client, scope-aware session hooks (`["sessions","global"]`), the ActiveSessionsBar three surgical GINT-01 edits (P6)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -255,5 +255,5 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 13. Global data foundation & safety net | v1.13 | 2/2 | Complete    | 2026-08-25 |
 | 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 15. Global sessions backend | v1.13 | 2/2 | Complete    | 2026-08-26 |
-| 16. Global view, Settings & bar integration | v1.13 | 0/3 | Not started | - |
+| 16. Global view, Settings & bar integration | v1.13 | 1/3 | In Progress|  |
 | 17. Hardening & E2E | v1.13 | 0/? | Not started | - |
