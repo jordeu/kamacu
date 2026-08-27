@@ -4,17 +4,17 @@ milestone: v1.13
 milestone_name: Global Task
 current_phase: 16
 current_phase_name: global-view-settings-bar-integration
-status: executing
+status: verifying
 stopped_at: Completed 16-02-PLAN.md
-last_updated: "2026-08-27T11:19:28.689Z"
+last_updated: "2026-08-27T11:31:53.101Z"
 last_activity: 2026-08-27
 last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 9
-  completed_plans: 8
-  percent: 60
+  completed_plans: 9
+  percent: 80
 ---
 
 # Project State
@@ -45,7 +45,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 Phase: 16 (global-view-settings-bar-integration) — EXECUTING
 Plan: 3 of 3
 Total Plans in Phase: 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-27 — Phase 16 execution started
 
 Progress: [████░░░░░░] 40%
@@ -75,7 +75,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-27T11:19:28.676Z
+**Last session:** 2026-08-27T11:31:27.777Z
 **Stopped at:** Completed 16-02-PLAN.md
 **Resume file:** None
 
@@ -110,6 +110,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 15 P2 | 42 min | - tasks | - files |
 | Phase 16 P01 | 10 min | 3 tasks | 6 files |
 | Phase 16 P02 | 38 min | 2 tasks tasks | 5 files files |
+| Phase 16 P03 | 9 min | 2 tasks tasks | 3 files files |
 
 ## Decisions
 
@@ -168,6 +169,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase ?]: [Phase 16 / Plan 01]: GINT-01/GVIEW-01 left unchecked in REQUIREMENTS.md — this plan ships the wire/data halves per its success criteria; the requirements close when 16-02 lands the /global route + Phase 17 UAT
 - [Phase 16]: 16-02: AgentTab task-branch worktree metadata reads the shared ["task", id] cache via useTask (NaN-disabled on global) — keeps the locked AgentTabScope shape and scope/description/seed prop surface; global branch symmetrically reads useGlobal() (research Pattern 4) — The plan locks the scope type and documents the prop surface without naming a worktree-prop source; the cached-query read preserves byte-for-byte task behavior (TaskPage resolved the query before mounting the tab) with zero new fetches
 - [Phase 16]: 16-02: keepExited accumulator uses adjust-state-during-render (AddProjectDialog prevOpen tracker, research Pitfall 8) instead of TaskPage's effect idiom — new files must lint clean in isolation — The copied wholesale effect trips react-hooks/set-state-in-effect, violating the plan's own eslint-clean acceptance gate; the guarded render-phase union is behaviorally identical and converges
+- [Phase 16]: 16-03: Clear root placed in the DialogFooter with sm:mr-auto (destructive variant, left of Cancel/Save) — resolves the UI-SPEC planner-discretion placement to the footer-left slot
+- [Phase 16]: 16-03: the 409 error box is one element (message + reasons ul) rendered below the active input for both Save-root and Clear-root failures — keeps the exactly-one-of help/error idiom while guaranteeing clear-root 409s surface since the dialog stays open on failure
 
 ## Operator Next Steps
 

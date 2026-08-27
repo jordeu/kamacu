@@ -19,7 +19,7 @@ A single global scratchpad — a task-like view with agent + bash tabs running d
 - [x] **GCONF-02**: User can configure the global root as a GitHub repo (`owner/name`) — Kamacu gh-validates and clones it (v1.4 managed-clone pattern) into a separate global namespace that a project's gated delete can never touch; clone failures surface inline leaving no half-configured state
 - [x] **GCONF-03**: User can pick the global task's default agent from the configured agents (v1.10 agents CRUD)
 - [x] **GCONF-04**: Changing or clearing the root while global sessions are live is refused with a 409 + reasons list; on success the persisted resume ids are cleared
-- [ ] **GCONF-05**: Settings provides an "Open Global Task" affordance so the global view is reachable when idle (the Active Sessions bar covers the live case)
+- [x] **GCONF-05**: Settings provides an "Open Global Task" affordance so the global view is reachable when idle (the Active Sessions bar covers the live case)
 
 ### Global View
 
@@ -83,7 +83,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GCONF-02 | Phase 14 | Complete |
 | GCONF-03 | Phase 14 | Complete |
 | GCONF-04 | Phase 14 | Complete |
-| GCONF-05 | Phase 16 | Pending |
+| GCONF-05 | Phase 16 | Complete |
 | GVIEW-01 | Phase 16 | Pending |
 | GVIEW-02 | Phase 15 | Complete |
 | GVIEW-03 | Phase 15 | Complete |
