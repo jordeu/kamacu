@@ -5,8 +5,8 @@ milestone_name: Global Task
 current_phase: 16
 current_phase_name: Global view, Settings & bar integration
 status: executing
-stopped_at: Phase 15 UI-SPEC approved
-last_updated: "2026-08-26T14:59:04.658Z"
+stopped_at: Phase 16 context gathered
+last_updated: "2026-08-27T06:01:37.916Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 15 complete, transitioned to Phase 16
 progress:
@@ -75,9 +75,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-26T05:54:00.431Z
-**Stopped at:** Phase 15 UI-SPEC approved
-**Resume file:** .planning/phases/15-global-sessions-backend/15-UI-SPEC.md
+**Last session:** 2026-08-27T06:01:37.900Z
+**Stopped at:** Phase 16 context gathered
+**Resume file:** .planning/phases/16-global-view-settings-bar-integration/16-CONTEXT.md
 
 ## Performance Metrics
 
