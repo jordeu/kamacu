@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { ChevronUp, ChevronDown, Globe } from "lucide-react";
 import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
 import { dotMeta } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,14 @@ import { cn } from "@/lib/utils";
  * > 0. Expanded (SBAR-04/05): a flat list across all projects, attention-first
  * (waiting -> working -> idle), each row a clickable [state dot · project · task/
  * PR title] navigating cross-project to that task's agent view (SBAR-06).
+ *
+ * D-12 flip (2026-08-28, supersedes the KEEP settlement): the Scratchpad has NO
+ * list row — a row reading `Global · Scratchpad` looked like "another active
+ * session". Instead an always-visible globe icon sits AHEAD of the counters;
+ * clicking it opens /global. It carries the live global agent's status dot when
+ * one runs, and highlights while /global is open (GINT-01's substance kept:
+ * live-global visibility + click-through, without the confusing row). The list
+ * and the counters are task-scoped.
  *
  * The expanded panel floats UP over content as an overlay (the whole component is
  * `fixed inset-x-0 bottom-0`), so main content and the height-sensitive xterm
@@ -87,22 +95,44 @@ export function ActiveSessionsBar() {
       e.status === "running",
   );
 
-  const working = live.filter((e) => e.status === "working").length;
-  const waiting = live.filter((e) => e.status === "waiting").length;
-  const idle = live.filter((e) => e.status === "idle").length;
-  const running = live.filter((e) => e.status === "running").length;
-  const total = live.length;
+  // --- D-12 flip: the global entry is NOT a list row — it drives the globe
+  // icon's status dot instead. List + counters are task-scoped. ---
+  const globalLive = live.find((e) => e.source === "global");
+  const taskLive = live.filter((e) => e.source !== "global");
+
+  const working = taskLive.filter((e) => e.status === "working").length;
+  const waiting = taskLive.filter((e) => e.status === "waiting").length;
+  const idle = taskLive.filter((e) => e.status === "idle").length;
+  const running = taskLive.filter((e) => e.status === "running").length;
+  const total = taskLive.length;
 
   // --- Sorted list (SBAR-05 / D-05), attention-first, STABLE within a state
   // (Array.prototype.sort is stable in modern engines, so equal-rank rows keep
   // feed order — avoids 5s jitter). ---
   const rank = { waiting: 0, working: 1, running: 2, idle: 3 } as const;
-  const sorted = [...live].sort(
+  const sorted = [...taskLive].sort(
     (a, b) =>
       rank[a.status as keyof typeof rank] - rank[b.status as keyof typeof rank],
   );
 
   const loading = data === undefined;
+
+  // --- Globe icon (D-12 flip): the Scratchpad's single bar surface. Carries
+  // the live global agent's status dot (same dotMeta palette as every other
+  // status surface — never hardcoded) and highlights while /global is open.
+  // dotMeta is called only when a live entry exists so the no-global case
+  // costs nothing. ---
+  const onGlobal = location.pathname === "/global";
+  const globalDot = globalLive
+    ? dotMeta({
+        status: globalLive.status,
+        exitCode: null,
+        stopRequested: false,
+      }).className
+    : null;
+  const globeAria = globalLive
+    ? `Open the Scratchpad — global agent ${globalLive.status}`
+    : "Open the Scratchpad — global session";
 
   // --- Collapsed-bar aria-label describing current counts (mirror ReviewColumn /
   // ProjectSidebar pluralized count aria). ---
@@ -129,29 +159,17 @@ export function ActiveSessionsBar() {
             <div className="flex flex-col gap-0.5">
               {sorted.map((entry) => (
                 <SessionRow
-                  // Keyed by sessionId (P6): a global entry's taskId is 0, so
-                  // taskId keying would collide across rows. Empty sessionIds
-                  // occur only on DB-derived exited rows, which the LIVE
-                  // filter above removes before render — live rows always
-                  // carry unique sessionIds (16-RESEARCH Pitfall 5).
+                  // Keyed by sessionId (P6). Empty sessionIds occur only on
+                  // DB-derived exited rows, which the LIVE filter above
+                  // removes before render — live rows always carry unique
+                  // sessionIds (16-RESEARCH Pitfall 5).
                   key={entry.sessionId}
                   entry={entry}
-                  isCurrent={
-                    entry.source === "global"
-                      ? location.pathname === "/global"
-                      : String(entry.taskId) === openTaskId
-                  }
+                  isCurrent={String(entry.taskId) === openTaskId}
                   onOpen={() => {
-                    if (entry.source === "global") {
-                      // GINT-01: the global row targets the Scratchpad view
-                      // (route lands in 16-02) — replaces the Phase-15
-                      // interim dead-route artifact.
-                      navigate("/global");
-                    } else {
-                      navigate(
-                        `/projects/${entry.projectId}/tasks/${entry.taskId}`,
-                      );
-                    }
+                    navigate(
+                      `/projects/${entry.projectId}/tasks/${entry.taskId}`,
+                    );
                     collapse();
                   }}
                 />
@@ -169,6 +187,36 @@ export function ActiveSessionsBar() {
         onClick={toggle}
         className="flex h-9 cursor-pointer items-center gap-2 border-t border-border bg-[#101013] px-3"
       >
+        {/* Globe — ALWAYS visible, ahead of every counter (D-12 flip): opens
+            /global. stopPropagation keeps the click from toggling the bar
+            (same idiom as the chevron). */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={globeAria}
+          title="Scratchpad"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate("/global");
+          }}
+          className={cn(
+            "text-muted-foreground",
+            onGlobal && "bg-sidebar-accent text-sidebar-accent-foreground",
+          )}
+        >
+          <span className="relative inline-flex">
+            <Globe className="size-3.5" />
+            {globalDot && (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "absolute -right-1 -top-1 size-1.5 rounded-full",
+                  globalDot,
+                )}
+              />
+            )}
+          </span>
+        </Button>
         {loading ? (
           <Skeleton className="h-3 w-24" />
         ) : total === 0 ? (

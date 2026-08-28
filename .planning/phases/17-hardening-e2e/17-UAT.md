@@ -81,6 +81,7 @@ result: pass
 expected: with a task row AND the global row live simultaneously in the expanded Active Sessions bar, confirm the text-only `Global · Scratchpad` row is distinguishable from a task's project · task pair (scope slot says `Global`, name slot says `Scratchpad`); record the keep-or-flip decision below — the default is KEEP (no globe badge, no icon, no tint; any flip is future work riding existing Badge/lucide idioms, never a new hue)
 result: pass
 decision: KEEP (settled with the live bar — text-only `Global · Scratchpad` row distinguishable as-is)
+decision-reversed: 2026-08-28 — user flipped D-12 after living with the KEEP: the row "seems another active session" and confuses. The Scratchpad now has NO bar row; an always-visible globe icon ahead of the counters opens /global (live status dot + /global highlight keep GINT-01's substance). Logged as a follow-up change on task/add-global-session-301, not a Phase-17 scope change.
 
 ## Summary
 

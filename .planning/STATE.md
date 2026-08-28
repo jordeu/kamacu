@@ -118,6 +118,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Decisions
 
+- [D-12 flip 2026-08-28]: the Active Sessions bar's `Global · Scratchpad` row is REMOVED (read as 'another active session'); an always-visible globe icon ahead of the counters opens /global, carries the live global agent's status dot, highlights on /global — bar list + counters are task-scoped; GINT-01's substance (live-global visibility + click-through) kept
 - [Roadmap]: v1.13 phase order is dependency-locked (data → config API → sessions backend → UI → hardening) with two research-mandated co-phasing rules: sweepOrphanTmux fix ships WITH the tmux migration (Phase 13); status-feed widening ships WITH the spawn path (Phase 15).
 - [Roadmap]: GVIEW-02/GVIEW-03 map to Phase 15 (backend) not 16 — their observable behaviors (agent runs in root cwd, 409 on concurrent spawn, bash shell options) are API-testable and land with the spawn path; the tab UI is covered by GVIEW-01 in Phase 16.
 - [Roadmap]: Phase 17 owns no requirements — it closes E2E verification gates for GCONF-04, GSESS-02/03, GINT-02/03 and the sentinel-leak invariant (research P2/P5 verification halves).
