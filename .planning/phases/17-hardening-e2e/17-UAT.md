@@ -1,14 +1,14 @@
 ---
-status: pending
+status: complete
 phase: 17-hardening-e2e
 source: [17-04-PLAN.md, 17-UI-SPEC.md §UAT Walkthrough Copy Contract, 17-CONTEXT.md D-59..D-61]
 started: 2026-08-28T11:55:00Z
-updated: 2026-08-28T11:55:00Z
+updated: 2026-08-28T16:20:00Z
 ---
 
 ## Current Test
 
-[pending — authored by 17-04; the human executes these flows at verify time and records each `result:` line]
+[testing complete]
 
 ## Preamble — read before running
 
@@ -54,40 +54,40 @@ the clone — same flows, zero risk. This is a suggestion, not a requirement.
 ### 1. Folder-mode lifecycle against a real repo (SC5 / D-59)
 
 expected: Settings → Scratchpad → `Configure root…` with your picked repo folder (the root summary shows the mono path; folder roots show the persistent amber banner, repo roots do not) → on `/global` the agent tab shows the `Start agent` CTA → clicking it streams a live agent terminal in the root; the trailing `+` spawns a bash tab labeled `Bash <n>`; navigating away and back reattaches both with prior scrollback (bash tab: invisible reattach, label byte-for-byte, no resume affordance); the agent's ⋯ menu renders exactly `Stop` (destructive) and stopping works; a second `Start agent` while live surfaces `global agent already running` inline; finally, with everything stopped, Clear root returns the summary to `No root configured yet.` with the button flipped back to `Configure root…` — reconfigure before test 2
-result:
+result: pass
 
 ### 2. Claude same-conversation resume across a restart (D-53 / SC2 claude leg)
 
 expected: with the default Claude agent live in the Scratchpad, ask it something identifiable (e.g. "remember the passphrase is blue-kangent-17", get its reply); stop the serve process (Ctrl-C/kill — hard death is the restart semantic) and start it again on the same DB; the bar's `Global · Scratchpad` row is absent until resume (the bar's live filter drops the DB-derived exited entry — locked, not a bug); on `/global` the agent tab shows the heading `Agent session ended.` with the `Reset session` / `Resume session` pair; clicking `Resume session` shows `Resuming…` then streams the SAME conversation, and the agent remembers the identifiable thing when asked (this memory judgment is the point of the flow — a fresh terminal that forgot it is a fail)
-result:
+result: pass
 
 ### 3. Opencode same-conversation resume across a restart (D-53 / SC2 opencode leg)
 
 expected: Settings → Scratchpad → default-agent Select set to OpenCode (instant-save, applies at next Start); same flow as test 2 with the opencode agent — identifiable thing, stop/restart the serve process, heading `Agent session ended.`, `Resume session` → `Resuming…` → same conversation, agent remembers (the engine-branched `-s <session>` resume path proven at API level by 17-04's E2E; this is its browser half)
-result:
+result: pass
 
 ### 4. Interlock sanity — project delete keeps the managed Scratchpad root (SC3 / D-58)
 
 expected: with a managed project clone AND a managed Scratchpad root of the SAME repo (`owner/name` in both places), delete the project from the board → the Settings Scratchpad root row still shows the mono `owner/name` + `managed` badge unchanged, `/global` still loads and its terminals still work; then clearing the Scratchpad root (all stopped) leaves the project-side clone alone in the other direction
-result:
+result: pass
 
 ### 5. Sentinel-leak visual sanity — the global appears nowhere it shouldn't (SC4 / D-55)
 
 expected: with a live global agent + live global bash tab: kanban columns show no foreign card, the project sidebar lists no new project, an empty workspace still deletes, Activity lists/stats show no `Scratchpad`/`Global` rows; the global appears ONLY on the Active Sessions bar row (`Global · Scratchpad`), `/global`, Settings → Scratchpad, and — if you have an MCP client attached — the MCP session tools listing it with its honest `Scratchpad`/`Global` labels
-result:
+result: pass
 
 ### 6. D-12 bar-row settlement with the live bar (D-61)
 
 expected: with a task row AND the global row live simultaneously in the expanded Active Sessions bar, confirm the text-only `Global · Scratchpad` row is distinguishable from a task's project · task pair (scope slot says `Global`, name slot says `Scratchpad`); record the keep-or-flip decision below — the default is KEEP (no globe badge, no icon, no tint; any flip is future work riding existing Badge/lucide idioms, never a new hue)
-result:
-decision: (record `KEEP` or `FLIP — <what confused you>`; a FLIP entry becomes a logged decision + follow-up task, not a Phase-17 change)
+result: pass
+decision: KEEP (settled with the live bar — text-only `Global · Scratchpad` row distinguishable as-is)
 
 ## Summary
 
 total: 6
-passed: 0
+passed: 6
 issues: 0
-pending: 6
+pending: 0
 skipped: 0
 blocked: 0
 
