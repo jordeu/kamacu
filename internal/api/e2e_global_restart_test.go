@@ -79,6 +79,15 @@ type e2eServer struct {
 	argsFile   string
 	pwdFile    string
 
+	// realHomeEnv (17-04 opencode leg, 17-RESEARCH Pitfall 3): when true,
+	// childEnv INHERITS the real HOME and XDG_CONFIG_HOME instead of
+	// sandboxing them — the real opencode binary, the capture poller's
+	// `opencode session list`, and the test's out-of-band first turn must
+	// all resolve the SAME real config/auth/session storage, exactly like a
+	// real install. The leg's actual confinement is unchanged: temp --db,
+	// temp root, sandboxed TMUX_TMPDIR.
+	realHomeEnv bool
+
 	cmd      *exec.Cmd
 	logFiles []string // one combined-output log file per server generation
 }
@@ -232,13 +241,23 @@ func (e *e2eServer) waitGlobalTmuxName() string {
 // and the KAMACU_ trio (SESSION_ID / HOOK_TOKEN / HOOK_BASE) scrubbed — a
 // Kamacu terminal exports all three and the hook token is a secret
 // (T-17-04, Pitfall 2).
+//
+// The ONE posture exception (17-04 opencode leg, Pitfall 3): with
+// realHomeEnv set, HOME and XDG_CONFIG_HOME are INHERITED (real) instead
+// of sandboxed — see the field doc. TMUX_TMPDIR, the recorder pair, the
+// KAMACU_ scrub and the PATH shim are identical in both postures.
 func (e *e2eServer) childEnv() []string {
+	homeOverride := !e.realHomeEnv
 	env := []string{
-		"HOME=" + e.sandbox,
 		"TMUX_TMPDIR=" + e.tmuxDir,
-		"XDG_CONFIG_HOME=" + filepath.Join(e.sandbox, ".config"),
 		"FAKE_CLAUDE_ARGS_FILE=" + e.argsFile,
 		"FAKE_CLAUDE_PWD_FILE=" + e.pwdFile,
+	}
+	if homeOverride {
+		env = append(env,
+			"HOME="+e.sandbox,
+			"XDG_CONFIG_HOME="+filepath.Join(e.sandbox, ".config"),
+		)
 	}
 	for _, kv := range os.Environ() {
 		key := kv
@@ -247,8 +266,15 @@ func (e *e2eServer) childEnv() []string {
 			key, val = kv[:i], kv[i+1:]
 		}
 		switch key {
-		case "HOME", "TMUX_TMPDIR", "XDG_CONFIG_HOME", "FAKE_CLAUDE_ARGS_FILE", "FAKE_CLAUDE_PWD_FILE":
+		case "TMUX_TMPDIR", "FAKE_CLAUDE_ARGS_FILE", "FAKE_CLAUDE_PWD_FILE":
 			continue // overridden by the sandbox entries above
+		case "HOME", "XDG_CONFIG_HOME":
+			if homeOverride {
+				continue // overridden by the sandbox entries above
+			}
+			// realHomeEnv: inherit the real value — the spawned opencode,
+			// the capture poller and the test's out-of-band turn must agree
+			// on the real config/auth/session storage (17-04, Pitfall 3).
 		case "KAMACU_SESSION_ID", "KAMACU_HOOK_TOKEN", "KAMACU_HOOK_BASE":
 			continue // never inherited — secret/nesting hygiene (Pitfall 2)
 		case "PATH":
