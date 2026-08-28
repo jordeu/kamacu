@@ -5,8 +5,8 @@ milestone_name: Global Task
 current_phase: 17
 current_phase_name: hardening-e2e
 status: executing
-stopped_at: Completed 17-02-PLAN.md
-last_updated: "2026-08-28T10:47:24.791Z"
+stopped_at: Completed 17-03-PLAN.md
+last_updated: "2026-08-28T11:15:32.390Z"
 last_activity: 2026-08-28
 last_activity_desc: Phase 17 execution started
 progress:
@@ -43,7 +43,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 ## Current Position
 
 Phase: 17 (hardening-e2e) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Total Plans in Phase: 4
 Status: Ready to execute
 Last activity: 2026-08-28 — Phase 17 execution started
@@ -75,8 +75,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-28T10:47:24.777Z
-**Stopped at:** Completed 17-02-PLAN.md
+**Last session:** 2026-08-28T11:15:32.370Z
+**Stopped at:** Completed 17-03-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -113,6 +113,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 16 P03 | 9 min | 2 tasks tasks | 3 files files |
 | Phase 17 P01 | 91 min | 2 tasks tasks | 2 files files |
 | Phase 17 P02 | 32 min | 3 tasks | 3 test files + 2 docs files |
+| Phase 17 P03 | 22 min | 2 tasks | 6 files |
 
 ## Decisions
 
@@ -179,6 +180,10 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase 17]: 17-02: leak checks on path-carrying bodies assert decoded row fields, not raw bytes — t.TempDir embeds the test name and 'TestGlobalNoLeak' contains 'Global', so raw-byte negative checks false-positive on every list surface; the raw-bytes posture is kept for Activity (path-free body)
 - [Phase 17]: 17-02: the MCP orphaned+global row is locked as FILTERED by the D-13 operable-ids contract (id="" rows are SPA reattach affordances, scope-agnostic) — the plan's 'survives the passthrough' wording contradicted the shipped filter and the plan forbids production changes; the LIVE global row is the honest-direction surface (labels intact, never 404)
 - [Phase 17]: 17-02: interlock fake clones need origin/HEAD + a committed clean tree (not the plain init+remote-add fakeGitClone) or the gated project delete 409s on the conservative DefaultBranch blocker — the richer shape keeps Direction 1 at 204
+- [Phase ?]: 17-03: D-63 root-caused as production env-inheritance — the custom/opencode spawn arm now strips inherited KAMACU_SESSION_ID/KAMACU_HOOK_TOKEN/KAMACU_HOOK_BASE from os.Environ() (stripKamacuEnv) before the opencode gate re-injects its own; the parent's hook token (a secret) no longer propagates into custom-agent children under nested Kamacu (T-17-08 mitigated)
+- [Phase ?]: 17-03: TestCustomEngineDoesNotGetHookEnv self-exports the KAMACU_ trio (os.Setenv + t.Cleanup restore) so the D014 absence assertion holds in EVERY environment, not just clean shells
+- [Phase ?]: 17-03: PTY marker-wait deadlines raised 2s->10s in TestSpawnPumpFillsRing + TestInput_Happy_WritesAndAppendsCR (17-01/17-02 deferred items 2/3, the cross-package host-load flake class); polls return on condition so only the failure path gets headroom
+- [Phase ?]: 17-03: Agent.engine union widened to claude|custom|opencode + TaskPage isClaudeAgent flipped to strict === 'claude' (D-62); BoardPage.tsx:21-22 carries the identical stale predicate — recorded as the known consistency site for future scoping (out of contract this phase)
 
 ## Operator Next Steps
 
