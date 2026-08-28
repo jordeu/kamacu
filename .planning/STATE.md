@@ -5,16 +5,16 @@ milestone_name: Global Task
 current_phase: 17
 current_phase_name: hardening-e2e
 status: executing
-stopped_at: Completed 17-01-PLAN.md
-last_updated: "2026-08-28T07:23:16.314Z"
+stopped_at: Completed 17-02-PLAN.md
+last_updated: "2026-08-28T10:47:24.791Z"
 last_activity: 2026-08-28
 last_activity_desc: Phase 17 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 13
-  completed_plans: 10
-  percent: 77
+  completed_plans: 11
+  percent: 80
 ---
 
 # Project State
@@ -43,7 +43,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 ## Current Position
 
 Phase: 17 (hardening-e2e) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Total Plans in Phase: 4
 Status: Ready to execute
 Last activity: 2026-08-28 — Phase 17 execution started
@@ -75,8 +75,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-28T07:23:16.306Z
-**Stopped at:** Completed 17-01-PLAN.md
+**Last session:** 2026-08-28T10:47:24.777Z
+**Stopped at:** Completed 17-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -112,6 +112,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 16 P02 | 38 min | 2 tasks tasks | 5 files files |
 | Phase 16 P03 | 9 min | 2 tasks tasks | 3 files files |
 | Phase 17 P01 | 91 min | 2 tasks tasks | 2 files files |
+| Phase 17 P02 | 32 min | 3 tasks | 3 test files + 2 docs files |
 
 ## Decisions
 
@@ -175,6 +176,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase ?]: 17-01: real-binary E2E isolates the tmux socket via a sandbox PATH wrapper — production's tmux spawn env allow-list (TMUX/TMUX_PANE leak scrub) drops TMUX_TMPDIR, so tabs would land on the user's real socket while probes honor the sandbox; the wrapper re-arms it for every server-side invocation and the production seam is deferred to 17-03's D-63 env work
 - [Phase ?]: 17-01: fake-claude gained an additive --version fast path (before the recorders) — serve's boot-time quota.DetectVersion probe would otherwise hang ~300s on the stub's orphaned sleep grandchild holding the probe's stdout pipe; no existing test passes --version
 - [Phase ?]: 17-01: real-binary harness captures server output in FILES never pipes/buffers — the daemonized tmux server inherits stdio and holds the pipe open, deadlocking cmd.Wait on an already-dead process
+- [Phase 17]: 17-02: leak checks on path-carrying bodies assert decoded row fields, not raw bytes — t.TempDir embeds the test name and 'TestGlobalNoLeak' contains 'Global', so raw-byte negative checks false-positive on every list surface; the raw-bytes posture is kept for Activity (path-free body)
+- [Phase 17]: 17-02: the MCP orphaned+global row is locked as FILTERED by the D-13 operable-ids contract (id="" rows are SPA reattach affordances, scope-agnostic) — the plan's 'survives the passthrough' wording contradicted the shipped filter and the plan forbids production changes; the LIVE global row is the honest-direction surface (labels intact, never 404)
+- [Phase 17]: 17-02: interlock fake clones need origin/HEAD + a committed clean tree (not the plain init+remote-add fakeGitClone) or the gated project delete 409s on the conservative DefaultBranch blocker — the richer shape keeps Direction 1 at 204
 
 ## Operator Next Steps
 
