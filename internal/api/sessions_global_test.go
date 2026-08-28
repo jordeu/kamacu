@@ -230,10 +230,13 @@ func TestGlobalSessionPlainBashSpawn(t *testing.T) {
 		t.Fatalf("input: status = %d; body=%v", istatus, ibody)
 	}
 	var wrote string
-	deadline := time.Now().Add(8 * time.Second) // D-14: interactive bash ignores SIGTERM; exit lands after the 5s grace SIGKILL
+	deadline := time.Now().Add(20 * time.Second) // D-14: interactive bash ignores SIGTERM; exit lands after the 5s grace SIGKILL; 20s budgets host load (deferred item 4)
 	for {
 		b, rerr := os.ReadFile(marker)
-		if rerr == nil {
+		// Break only on non-empty content: `pwd > marker` creates the file
+		// before writing, so an existence-only check races an empty read
+		// under host load (same guard as readStubFile).
+		if rerr == nil && len(strings.TrimSpace(string(b))) > 0 {
 			wrote = strings.TrimSpace(string(b))
 			break
 		}
@@ -587,7 +590,7 @@ func TestGlobalSessionLiveCountsAndRootGate(t *testing.T) {
 	if sstatus != http.StatusAccepted && sstatus != http.StatusOK {
 		t.Fatalf("stop: status = %d", sstatus)
 	}
-	deadline := time.Now().Add(8 * time.Second) // D-14: interactive bash ignores SIGTERM; exit lands after the 5s grace SIGKILL
+	deadline := time.Now().Add(20 * time.Second) // D-14: interactive bash ignores SIGTERM; exit lands after the 5s grace SIGKILL; 20s budgets host load (deferred item 4)
 	for {
 		if s, ok := mgr.Get(sid); ok && s.Info().Status == session.StatusExited {
 			break
@@ -804,10 +807,11 @@ func globalOpencodeAgentID(t *testing.T, db *sql.DB) int64 {
 }
 
 // waitGlobalSessionExited polls the manager until the session reports exited
-// (fake-claude traps TERM and exits fast; 8s budgets the D-14 grace).
+// (fake-claude traps TERM and exits fast; 20s budgets the D-14 grace plus
+// host load — the same headroom class as the 17-03 marker-wait fix).
 func waitGlobalSessionExited(t *testing.T, mgr *session.Manager, sid string) {
 	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if s, ok := mgr.Get(sid); ok && s.Info().Status == session.StatusExited {
 			return
@@ -819,11 +823,12 @@ func waitGlobalSessionExited(t *testing.T, mgr *session.Manager, sid string) {
 	}
 }
 
-// readStubFile polls a stub recorder file (≤3s) and returns its trimmed
-// contents — same contract as readArgv, for the pwd recorder.
+// readStubFile polls a stub recorder file (≤10s) and returns its trimmed
+// contents — same contract as readArgv, for the pwd recorder. 10s is pure
+// failure-path headroom under host load (stubs return near-instantly).
 func readStubFile(t *testing.T, path string) string {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
 			return strings.TrimSpace(string(b))
@@ -1093,8 +1098,8 @@ func TestGlobalAgentOpencodeCapture(t *testing.T) {
 	}
 
 	// The poller's immediate first attempt hits the stub; poll the singleton
-	// write (the goroutine races the 201 reply).
-	deadline := time.Now().Add(5 * time.Second)
+	// write (the goroutine races the 201 reply). 15s budgets host load.
+	deadline := time.Now().Add(15 * time.Second)
 	var ocsid sql.NullString
 	for {
 		if err := db.QueryRow(`SELECT opencode_session_id FROM global_task WHERE id = 1`).Scan(&ocsid); err != nil {

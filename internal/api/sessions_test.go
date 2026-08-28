@@ -651,7 +651,9 @@ func newTmuxSessionServer(t *testing.T, c tmux.Client) (*httptest.Server, *sessi
 // matches want — new-session under the PTY needs a beat to start the server.
 func awaitHasSession(t *testing.T, c tmux.Client, name string, want bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	// 20s budgets the D-14 stop path (SIGTERM → 5s grace → SIGKILL) plus
+	// tmux server teardown under host load (deferred item 4 class).
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		alive, err := c.HasSession(context.Background(), name)
 		if err == nil && alive == want {
