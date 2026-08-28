@@ -1,10 +1,11 @@
 ---
 phase: 17
 slug: hardening-e2e
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova
 created: 2026-08-28
+reviewed_at: 2026-08-28
 ---
 
 # Phase 17 — UI Design Contract
