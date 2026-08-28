@@ -2,26 +2,21 @@
 
 ## What This Is
 
-A local-only web app for organizing agent sessions around projects and tasks. A left sidebar lists projects — grouped into switchable named workspaces — each pointing at a local git repo checkout and assigned a configurable agent (Claude Code, opencode, or a custom CLI); the main area is a kanban board of tasks. Clicking a task expands a view with the main agent session (the configured agent CLI running in a PTY, rendered in a browser terminal) plus optional tabs with bash sessions. Single user, runs locally, accessed from a browser at localhost.
+A local-only web app for organizing agent sessions around projects and tasks. A left sidebar lists projects — grouped into switchable named workspaces — each pointing at a local git repo checkout and assigned a configurable agent (Claude Code, opencode, or a custom CLI); the main area is a kanban board of tasks. Clicking a task expands a view with the main agent session (the configured agent CLI running in a PTY, rendered in a browser terminal) plus optional tabs with bash sessions. A global scratchpad (`/global`) offers the same agent + bash tabs running directly in a configured repo/folder, decoupled from any project. Single user, runs locally, accessed from a browser at localhost.
 
 ## Core Value
 
 One place to see and drive all agent work: every task gets its own isolated worktree and a persistent agent session you can open, leave, and reattach to from the browser.
 
-## Current Milestone: v1.13 Global Task
+## Current Milestone: none — planning next
 
-**Goal:** Give the user a single global scratchpad — a task-like view with agent + bash tabs running directly in a configured repo/folder — for small checks unrelated to any project, without creating a task for it.
-
-**Target features:**
-- Single global task: a task-like view with ONLY the agent tab + bash tabs (no description, no diff, no kanban) — not linked to any workspace or project
-- Sessions run directly in the configured repo/folder (no worktree, no branch — a true scratchpad)
-- Global Settings section to configure the global root (a local folder path, or a GitHub repo cloned like a managed project per the v1.4 pattern) and its default agent (v1.10 agents)
-- Reachable from the Active Sessions bar when a session is live; from Settings when idle
-- Same session semantics as tasks: persistent server-side PTYs, restart reconciliation/resume, live agent status
+**v1.13 Global Task shipped 2026-08-28.** Next milestone is not yet scoped — run `/gsd-new-milestone` to define it (questioning → research → requirements → roadmap). Banked follow-up candidates live in "Next Milestone" below.
 
 ## Milestone Status
 
-**Current: v1.13 Global Task — in progress (started 2026-08-25; Phases 13–14 complete).**
+**Current: planning next milestone.**
+
+**Shipped: v1.13 Global Task (2026-08-28).** 5 phases (13–17), 13 plans, 24 tasks; 19/19 requirements (GDATA·GCONF·GVIEW·GSESS·GINT). Milestone audit: `tech_debt` status — zero critical gaps, integration 25/26, 6/6 E2E flows, UAT 6/6; debt items acknowledged (see v1.13-MILESTONE-AUDIT.md). Archived to `milestones/v1.13-*`; tag v1.13. Post-UAT user decision: the D-12 bar row was replaced by an always-visible globe icon opening /global (commit 2dae604).
 
 **Shipped: v1.12 Activity & Statistics (2026-08-25).** 4 phases (10–12 + 12.1-inserted), 9 plans, 20 tasks; 21/21 requirements incl. the audit's TD-ACT-01..03 hardening closed by Phase 12.1 (UAT 3/3). Milestone audit `tech_debt` status resolved — the three WR items were the debt. Archived to `milestones/v1.12-*`; tag v1.12.
 
@@ -287,19 +282,18 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 
 ### Active
 
-**v1.13 Global Task** — a single global scratchpad for small checks unrelated to any project:
-- A task-like view with ONLY the agent tab + bash tabs (no description, no diff, no kanban board) — not linked to any workspace or project
-- Sessions run directly in the configured repo/folder (no worktree, no branch)
-- Global Settings section configures the global root — a local folder path OR a GitHub repo cloned like a managed project (v1.4 pattern) — plus its default agent (v1.10 agents)
-- Reachable from the Active Sessions bar when a session is live; from Settings when idle
-- Same session semantics as tasks: persistent PTYs, restart reconciliation/resume, live agent status in the bar
+Next milestone not yet scoped — run `/gsd-new-milestone`. Parked candidates in "Next Milestone" below.
 
 ### Recently Validated
+
+**v1.13 Global Task (Phases 14–15, backends)** — the config + sessions backends that made the scratchpad real:
+- ✓ **Global config API (GCONF-01..04)** — `GET/PUT /api/global` over the Phase-13 singleton: validated folder root, gh-validated managed clone into the untouchable `repos/global/` namespace (atomic, reattach), settable default agent, and the live-session 409 reconfigure gate with resume-id clearing — proven by 17/17 tests plus a real-binary curl round-trip — Phase 14
+- ✓ **Global sessions backend (GSESS-01..04, GVIEW-02/03, GINT-02/03)** — the session engine's additive global scope (`SpawnOpts.Global`, `ListGlobal`, scope-targeted stop), `POST /api/sessions {scope:"global"}` spawn with root gates + `kamacu-global-<n>` tmux mint, restart reconcile with engine-branched resume keyed on the singleton ids, immortal-by-construction sessions (reaper structurally task-keyed), MCP honest-label parity, Activity exclusion — task paths byte-identical under full-suite `-p 1` — Phase 15
 
 **v1.13 Global Task (Phase 16)** — the user-facing global scratchpad on the Phase 14–15 backends:
 - ✓ **/global view (GVIEW-01, GVIEW-04)** — a GlobalTaskPage sibling (copy-then-trim; TaskPage untouched but the call site) rendering agent + bash tabs only off the shared `["global"]` query, with the full 7-state matrix (unconfigured D-39 hero, folder D-38 banner, repo no-banner, vanished-while-live D-42, vanished-idle D-40) — Phase 16
 - ✓ **Settings Scratchpad section (GCONF-05)** — summary card (server-truth root row, instant-save default-agent Select, Open Scratchpad CTA) + AddProjectDialog-derived Change-root dialog (blocking Cloning spinner, verbatim 409 reasons, gated Clear root) — Phase 16
-- ✓ **Active Sessions bar integration (GINT-01)** — bar rows re-keyed by sessionId, `source==="global"` click-through to /global + current-page pathname highlight, riding the existing 5s status feed — Phase 16
+- ✓ **Active Sessions bar integration (GINT-01)** — bar rows re-keyed by sessionId, `source==="global"` click-through to /global + current-page pathname highlight, riding the existing 5s status feed — Phase 16 *(post-UAT flip 2026-08-28: the row was replaced by an always-visible globe icon ahead of the counters carrying the live status dot + /global highlight — GINT-01's substance kept; see Key Decisions)*
 
 **v1.13 Global Task (Phase 13)** — the data foundation every later v1.13 phase builds on:
 - ✓ **`global_task` singleton (GDATA-01)** — DB-enforced id=1 row (`CHECK (id = 1)`), agent FK `ON DELETE RESTRICT`, resume-id columns, seeded from the default agent (never a hardcoded id); idempotent `BackfillGlobalTask` boot hook re-arms it every start; agents delete-guard 409 "reassign the Scratchpad agent first" ahead of the FK backstop — Phase 13
@@ -325,6 +319,7 @@ _v1.5 Sharper Review Column shipped 2026-06-17 (audited, archived to `milestones
 - Non-GitHub forges (GitLab, Bitbucket, Gitea) — GitHub-only for v1.3
 - Custom kanban columns, labels, priorities — fixed columns and lean task cards for v1
 - Auto-starting agents on task creation — sessions start only via explicit Start button
+- TTL / auto-cleanup / reaping of global scratch sessions — immortal until explicitly stopped (GSESS-04, v1.13); sentinel project/task row representation of the scratchpad — rejected by research (leaks into ~10 enumeration surfaces)
 - **MCP write to live PTYs (keystroke injection)** — v1.11 deliberately exposes read + subscribe only; an agent observing a sibling session must never inject bytes into its PTY (would conflict with the browser-attached user and the other agent's intent). PTY write stays browser-only
 - **MCP server for external AI editors (Claude Desktop / Cursor / VS Code)** — v1.11 targets agents running inside Kamacu; an external-editor MCP surface (with its own auth + transport considerations) is a separate future milestone
 
@@ -400,9 +395,13 @@ Kangent v1 does the whole loop: create a project on a local git repo → add a t
 
 **v1.13 Global Task — Phase 17 (Hardening & E2E) complete (2026-08-28) — final phase, milestone v1.13 fully implemented** — 4 plans, 2 waves (E2E harness + leak/interlock/parity + carried debts → opencode resume leg + UAT authoring), zero production API changes and a 2-line web diff. 17-01 built the repo's first real-binary lifecycle E2E harness (in-test `go build` of cmd/kamacu, spawned under a fully sandboxed HOME/TMUX_TMPDIR/XDG env with the KAMACU_* secret trio scrubbed) and drove SC1 (the full reconfigure-while-live gate cycle over real HTTP — concurrent 409, root change/clear 409s with the reasons grammar, clear-after-stops 200, resume-refusal 409) and SC2's claude leg (real SIGTERM → second real process on the same DB → exactly one resumable entry, tmux row survival with byte-identical label, resume 201 carrying `--resume <same csid>`, transcript-vanished 409). 17-02 locked the invariants as permanent in-package tests: the `TestGlobalNoLeak` family across every enumeration surface (7 subtests + DB structural COUNT), the managed-root ↔ project-delete interlock in both directions (same `owner/name` cloned into both namespaces), and MCP both-direction parity through the real bridge — plus the 10-row D-55 audit table. 17-03 closed the carried debts: D-63 root-caused as production env-inheritance (the custom/opencode spawn arm now strips inherited `KAMACU_*` — the parent's hook-token secret no longer propagates into children under nested Kamacu; TDD red→green, suite green in both postures) and D-62 (the stale `Agent.engine` union widened + claude-only quota predicate). 17-04 proved the opencode restart-resume leg through a REAL restart (wrapper-agent argv `-s <same ses_id>` on the resume 201) and authored the 17-UAT walkthrough. Post-merge gate root-caused the deferred marker-wait flake deeper than deadlines (an empty-file race in the pwd-marker poll — `pwd > file` creates before writing; fixed with the non-empty-content guard + D-14 teardown headroom). UAT 6/6 on an isolated instance (`--addr 127.0.0.1:7334` + empty temp DB): folder-mode lifecycle, claude AND opencode same-conversation resume across hard restarts (the "it remembers" judgments), interlock both directions in the browser, sentinel-leak visual sweep, and the D-12 bar-row settlement — **KEEP** (the text-only `Global · Scratchpad` row is distinguishable as-is; any flip is future work). **Phase 17 was the last phase of v1.13. v1.13 (Global Task) fully implemented 2026-08-28** — 5 phases (13–17), 13 plans; run `/gsd-complete-milestone` to audit and archive.
 
+**v1.13 Global Task shipped (2026-08-28)** — 5 phases (13–17), 13 plans, 24 tasks, 115 commits over 4 days (220 files, +21k/−19k). Phase 14 delivered the curl-configurable `GET/PUT /api/global` surface (folder/managed-clone/agent/clear dispatch, the untouchable `repos/global/` namespace, the forward-wired 409 gate); Phase 15 delivered the engine's additive global scope + `scope:"global"` spawn + the widened two-pass status feed with zero task-path drift (the milestone's risk center — full suite `-p 1` green). Milestone audit: 19/19 requirements, integration 25/26 (one warning: `StopAllForScope` reserve export), 6/6 E2E flows, `tech_debt` status with acknowledged items. Post-UAT user decision (D-12 reversed): the bar row became an always-visible globe icon opening /global (2dae604) — GINT-01's substance kept. The 4 pre-existing red tests inherited at Phase 13 were root-caused and fixed within the milestone (bracketed-paste delimiter, KAMACU_* env strip, marker-race guards) — full suite 15/15 green in both env postures. Archived to `milestones/v1.13-*`; tag v1.13.
+
 ## Next Milestone
 
-**v1.13 Global Task scoped 2026-08-25 — see Current Milestone above.** Prior-milestone candidates remain parked below.
+**Not yet scoped — v1.13 shipped 2026-08-28; run `/gsd-new-milestone` to define the next.** Prior-milestone candidates remain parked below.
+
+**v1.13 Global Task follow-ups** (scoped in `milestones/v1.13-REQUIREMENTS.md` "v2 Requirements"): root-path legibility line (GT-FUT-01), `git status --short` summary (GT-FUT-02), scratch→task promotion (GT-FUT-03), multiple/per-workspace scratchpads (GT-FUT-04/05), MCP write parity + `scope` filter (GT-FUT-06), sidebar entry (GT-FUT-07). Plus the audit's open items: TMUX_TMPDIR spawn-allow-list inconsistency (one-line fix, quick task), the accepted CR-01/WR-01/WR-02 pre-existing risks, and `StopAllForScope` as an unwired reserve export.
 
 Banked forward investments worth a future milestone:
 - **v1.11 MCP follow-ups** (scoped in `milestones/v1.11-REQUIREMENTS.md` "v1.12+ Requirements"): per-task auto-scoping convenience tools (`get_my_task`/`get_my_session`, ToolFilter — MCPAUTO-01..03); agent-CLI auto-registration at spawn (`.mcp.json` / `opencode.json` writers — MCPREG-01..03); additional tool categories — agents CRUD, settings, worktree-cleanup ops (MCPMORE-01..03); quality/hardening — typed JSON-RPC error taxonomy, stdout-pollution guards, real-binary e2e harness (MCPHARD-01..03).
@@ -413,7 +412,7 @@ Banked forward investments worth a future milestone:
 - The background-goroutine reaper pattern (Done-TTL + PR reconcile passes) that future periodic maintenance (e.g. MAINT-01 stale-worktree purge) can model on.
 - Deferred v1.3 GitHub follow-ups already scoped in the archived `milestones/v1.3-REQUIREMENTS.md` "Future Requirements": richer PR cards (diff size, fork pill, head→base line, review-decision/labels — GHCARD-01..04), filter options (team review requests, draft PRs — GHFILT-01/02), and broader surfaces (cross-project review inbox, author-side PRs — GHWIDE-01/02).
 
-**Known tech debt (non-blocking):** ~29 pre-existing `react-hooks` eslint errors (primarily `set-state-in-effect` in TaskPage.tsx) — logged in `milestones/v1.12-phases/12-activity-chart-tooltips/deferred-items.md`; a dedicated lint-cleanup pass is the right home. The v1.12 audit's WR-01..03 tech debt is CLOSED (Phase 12.1).
+**Known tech debt (non-blocking):** ~29 pre-existing `react-hooks` eslint errors (primarily `set-state-in-effect` in TaskPage.tsx) — logged in `milestones/v1.12-phases/12-activity-chart-tooltips/deferred-items.md`; a dedicated lint-cleanup pass is the right home. The v1.12 audit's WR-01..03 tech debt is CLOSED (Phase 12.1). The v1.13 audit's debt: TMUX_TMPDIR allow-list inconsistency (open, quick task), CR-01/WR-01/WR-02 accepted-as-is pre-existing risks, StopAllForScope reserve export, gofmt drift (serve.go, agents_crud.go) — see `milestones/v1.13-MILESTONE-AUDIT.md`.
 
 ## Deferred (post-v1.1)
 
@@ -437,6 +436,10 @@ Parked candidates: browser notifications on waiting/finished (NOTF-01), one-clic
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Global scratchpad = a `global_task` singleton table + task-free "global scope" sessions — never a sentinel project/task row, never `TaskID = 0` (v1.13, Phase 13, research-locked) | A sentinel row leaks into ~10 enumeration surfaces (boards, listings, stats, MCP tools) each needing bespoke exclusion; a dedicated singleton + `tmux_sessions.scope` discriminator with an XOR CHECK gives task-free sessions with zero task-path drift | ✓ Good — `TestGlobalNoLeak` 7/7 proves every surface clean; the upgrade path was rehearsed byte-for-byte on the live v1.12 DB |
+| The session engine's global scope is purely additive (`SpawnOpts.Global` zero-value = task/dev behavior byte-identical); scope-aware surfaces use scoped SQL (`scope='global'`), never `StopAllForTask(0)` or 0-keyed maps (v1.13, Phase 15) | The milestone's risk center was task-path regression; a zero-value discriminator + `joinSessionContext` skipping `TaskID <= 0` means global support cannot change a single task byte — full suite `-p 1` green with task JOINs byte-identical | ✓ Good — 17/17 phase truths; task paths diff clean; the one task-path edit (bracketed-paste delimiter) was a spec-correct bug fix |
+| Global sessions are immortal — never auto-reaped (no Done-TTL analog, no PR reconcile pass), stopped only explicitly (v1.13, GSESS-04) | A scratchpad has no lifecycle states to key a reaper on; killing idle scratch sessions would silently destroy the user's open shells. The reaper's task-keyed SQL makes global rows structurally unreachable | ✓ Good — `reaper.go` untouched; exclusion pinned by test |
+| The global view is a copy-then-trim TaskPage sibling with an `AgentTabScope` discriminator on one AgentTab file — not a fork (v1.13, Phase 16) | Scratch is a first-class citizen built from the same machinery, not a degraded task; one AgentTab keeps the terminal/PTY behavior from drifting between scopes while the task path stays byte-identical | ✓ Good — TaskPage diff provably call-site-only; 7-state matrix shipped; UAT 4/4 |
 | D-12 settled KEEP: the Active Sessions bar's global row stays text-only `Global · Scratchpad` — no globe badge, no icon, no tint (v1.13, Phase 17 UAT, D-61) | Judged live against a simultaneous task row at the human-verify gate: the scope/name slot split (`Global` · `Scratchpad` vs project · task) already disambiguates; any visual flip would be future work riding existing Badge/lucide idioms, never a new hue | ✗ Reversed 2026-08-28 — after living with it, the row read as "another active session". Superseded by: NO global row; an always-visible globe icon ahead of the counters opens /global, carries the live global agent's status dot, and highlights on /global (task-scoped list + counters) |
 | The E2E lifecycle harness drives the REAL binary in a fully sandboxed env (isolated HOME/TMUX_TMPDIR/XDG + KAMACU_* secret scrub), host-gated, inline in `go test ./...` (v1.13, Phase 17, D-47/D-50) | The gates that matter (reconfigure-while-live, restart-resume, tmux survival) only exist across a real process death — no httptest can kill and restart a server; the sandbox keeps the user's real tmux socket/HOME provably untouched while the in-test `go build` keeps the suite dependency-free | ✓ Good — three `TestE2EGlobal*` legs green at canonical suite speed (~250s full-package); user's real socket untouched |
 | The sentinel-leak guarantee is held by permanent in-package regression tests on every enumeration surface + a DB structural COUNT, not by the one-off E2E legs (v1.13, Phase 17, D-55/D-56) | The Phase-13 architecture invariant (global rows visible ONLY through scope-aware surfaces) has N leak paths (tasks, activity, workspaces, sessions JOINs, MCP listings) — each needs its own deterministic guard that runs on every `go test`, not a host-gated E2E | ✓ Good — `TestGlobalNoLeak` 7/7 + interlock both directions + MCP parity; the 10-row D-55 audit table records every guard line |
@@ -496,7 +499,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-28 after Phase 17 (v1.13 Hardening & E2E) completion — final phase, milestone v1.13 fully implemented. New Current State entry for Phase 17 (real-binary E2E harness + SC1/SC2 legs; sentinel-leak/interlock/MCP-parity regression families; D-63 env-hygiene + D-62 type debt closed; opencode restart-resume E2E; UAT 6/6 with the D-12 bar-row settlement KEEP). Three Key Decisions logged (D-12 KEEP; sandboxed real-binary E2E posture; leak guarantee via per-surface regression tests). Phase 17 owned no requirements — it closed the E2E verification gates for GCONF-04, GSESS-02/03, GINT-02/03 and the sentinel-leak invariant. Next: `/gsd-complete-milestone` to audit and archive v1.13.*
+*Last updated: 2026-08-28 after v1.13 Global Task milestone close. Full evolution review: "What This Is" now names the global scratchpad; Current Milestone + Active reset to "not yet scoped"; Phase 14–15 validated blocks added and the GINT-01 entry annotated with the D-12 flip; consolidated v1.13 shipped entry in Current State; three new Key Decisions logged (singleton-not-sentinel architecture, additive engine scope, immortal global sessions) plus the copy-then-trim view decision; Next Milestone refreshed with v1.13 follow-ups (GT-FUT-01..07 + audit debt); Out of Scope extended with GSESS-04 immortality + sentinel rejection. v1.13 shipped 2026-08-28 — 5 phases (13–17), 13 plans, 19/19 requirements, audit tech_debt (no blockers); archived to `milestones/v1.13-*`; tag v1.13; 6 prior-milestone quick tasks acknowledged as deferred (STATE.md).*
 
 *Last updated: 2026-08-25 after Phase 13 (v1.13 Global Task data foundation) completion. Three GDATA requirements validated and logged in Recently Validated; new Current State entry for Phase 13 (migrations 00017/00018 + boot backfill + scope-aware sweep + delete-guard, proven on staged, rehearsal, and verifier-run evidence); CR-01 pre-existing risk and 4 pre-existing red tests adjudicated in UAT and documented for Phase 15. Next: Phase 14 (Global config API).*
 

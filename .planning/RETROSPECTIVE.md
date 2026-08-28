@@ -473,6 +473,49 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 
 ---
 
+## Milestone: v1.13 — Global Task
+
+**Shipped:** 2026-08-28
+**Phases:** 5 (13–17) | **Plans:** 13 | **Tasks:** 24
+
+### What Was Built
+- (Phase 13) The data foundation: migrations 00017 (`global_task` singleton — CHECK id=1, agent FK RESTRICT, seeded from the movable is_default flag) + 00018 (`tmux_sessions` scope rebuild under the NO TRANSACTION FK-off discipline), `BackfillGlobalTask`, the co-phased scope-aware orphan-sweep fix (RED-first), and the agents delete-guard — proven byte-for-byte on a `.backup` of the live v1.12 install.
+- (Phase 14) `GET/PUT /api/global`: folder/managed-clone/agent/clear dispatch, the untouchable `~/.kamacu/repos/global/<owner>/<name>` namespace (atomic clone, reattach), the live-session 409 gate with the `{kind,target}` reasons grammar, resume-id clearing — independently curl-verified against the real binary before any frontend existed.
+- (Phase 15) The engine's additive global scope (`SpawnOpts.Global` zero-value back-compat, `ListGlobal`, `StopAllForScope`), `POST /api/sessions {scope:"global"}` spawn with root gates + `kamacu-global-<n>` mint, restart reconcile with engine-branched resume keyed on singleton ids, the two-pass widened `/api/agents/status`, MCP honest labels, Activity exclusion — task paths byte-identical.
+- (Phase 16) The `/global` view (copy-then-trim GlobalTaskPage, 7-state matrix, AgentTabScope discriminator), the Settings Scratchpad section (summary card + Change-root dialog with verbatim 409 reasons), and bar reachability.
+- (Phase 17) The repo's first real-binary lifecycle E2E harness (in-test `go build`, sandboxed HOME/TMUX_TMPDIR/XDG, SIGTERM→restart→resume over real HTTP for BOTH engines), the `TestGlobalNoLeak` sentinel-leak family (7 surfaces + DB COUNT), the managed-root ↔ project-delete interlock both directions, MCP parity, the D-63 KAMACU_* env-hygiene fix, and the 6-flow UAT walkthrough.
+
+### What Worked
+- **The research-locked architecture call (singleton + task-free scope, never a sentinel row) eliminated the leak problem at design time.** The Phase-17 sweep then proved it with permanent tests rather than hoping — `TestGlobalNoLeak` 7/7 across every enumeration surface, zero bespoke exclusions needed anywhere.
+- **Zero-value additive scope kept the risk center boring.** The milestone's stated risk (task-path regression in the session engine) never materialized: `SpawnOpts.Global`'s zero-value contract + `joinSessionContext` skipping `TaskID <= 0` meant full-suite `-p 1` green with task JOINs byte-identical; the only task-path edit was a spec-correct bracketed-paste bug fix the phase's own cwd-proof spec required.
+- **Co-phasing mandates written into the ROADMAP held.** The sweep fix shipped with the migration (Phase 13) and the status-feed widening with the spawn path (Phase 15) — both "non-negotiable" pairings landed as specified because the roadmap named them explicitly.
+- **The real-binary E2E harness changed the verification ceiling.** Restart-resume, the reconfigure gate, and tmux survival are only observable across a real process death; the sandboxed in-test `go build` harness proved them at canonical suite speed (~250s full-package) without new infra — and the harness immediately paid for itself by exposing the empty-marker race and the TMUX_TMPDIR inconsistency.
+- **Red-first TDD on the killer bug.** The sweep fix landed its regression test while the old INNER JOIN was still in place (commit 8ad3b23 → 7debf89) — the test empirically killed a live global tab before the fix, which is the only kind of proof that matters for a startup-kill bug.
+
+### What Was Inefficient
+- **The 4 pre-existing red tests were carried through three phases (13→15) before root-cause.** They were correctly quarantined (baseline-verified, deferred-items.md) but consumed verification attention in every phase's full-suite run until Phase 17 finally fixed them (delimiter, env-strip, marker-race). A dedicated investigation task at Phase-13-close would have been cheaper.
+- **PROJECT.md phase-transition entries for Phases 14/15/16 were partial** (Current State entries and some Recently-Validated blocks missing until this close backfilled them) — the milestone close had to reconstruct rather than consolidate.
+- **Phase 15's DEV-1 override was never formalized** — the verifier suggested a countersigned overrides YAML; it stayed a suggestion in the VERIFICATION file instead.
+
+### Patterns Established
+- **Singleton-not-sentinel for out-of-band entities** — a dedicated one-row table + scope discriminator on the join table, with XOR CHECK and per-surface leak regression tests, is the template for any future entity that must not appear on existing surfaces.
+- **Scoped SQL over scope-mismatch branching** — cross-scope lookups 404 both directions naturally because the WHERE clause carries the scope; no oracle branching.
+- **Real-binary E2E as an in-test sandboxed harness** — in-test `go build` + isolated HOME/socket/env + SIGTERM/restart, host-gated but suite-speed; the pattern for every future lifecycle gate (the v1.8 GAP-01 regression replayed for the global scope in Phase 17 proves it generalizes).
+- **Honest 409 gates at the singleton resolution point** — one gate block before kind dispatch covers every session kind; liveness (not row existence) blocks, and the reasons grammar renders verbatim in the UI.
+
+### Key Lessons
+1. **A post-UAT reversal can be healthier than the settled decision.** D-12 was settled KEEP at the gate with the live bar in front of the user — and still flipped days later after living with it ("seems another active session"). Some judgments need days of use, not minutes; the decision slot + follow-up-change discipline (not a phase scope change) absorbed the flip at zero process cost.
+2. **Verify the byte-for-byte upgrade story on a copy of the REAL database, not just a staged fixture.** The Phase-13 rehearsal (goose 16→18, empty diff, 147 tasks) found nothing the staged tests hadn't — but it converted "should be safe" into "was safe on my data", which is what lets a migration ship.
+3. **Env inheritance is a production security surface.** D-63: the parent's `KAMACU_HOOK_TOKEN` secret propagated into arbitrary custom-agent children under nested Kamacu. The strip-fixed allow-list + suite-green in BOTH postures (vars exported and scrubbed) is now the standard for any env-touching spawn change.
+4. **`pwd > marker` creates the file before writing** — an empty-read race that no deadline increase can fix; content-non-empty guards on every marker poll. (Cost: three phases of intermittent flake diagnosis.)
+
+### Cost Observations
+- 115 commits over 4 days (2026-08-25 → 2026-08-28), 220 files, +21k/−19k — the densest milestone per wall-clock day to date.
+- Model mix: inherit.
+- Notable: 2 migrations (00017/00018), zero new Go modules, zero new npm deps (carry-forward locked and held across all 5 phases). Full suite 15/15 green in both env postures at close.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -490,6 +533,7 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 | v1.8 | 5 | 26 | _(retrospective section not recorded at close — backfilled facts only)_ Largest post-v1.0 milestone; a risk-split rebrand (code identity in Phase 20, the gated on-disk `~/.kangent`→`~/.kamacu` data migration deferred to Phase 21 as a one-shot idempotent recoverable startup migration); UAT-directed diff-view sticky/scroll redesign; a post-approval WTREE-01 refinement from "list every worktree" to a cleanup queue; renamed-tmux-tab-survives-restart caught at the human gate |
 | v1.9 | 2 | 9 | Backend-data → frontend-render split again; reuse-before-invent (transfer via optional `workspace_id` on the existing PATCH — no new route; one `.filter` scopes both sidebar surfaces; `BackfillWorkspaces` mirrors `BackfillProjectIcons`); one shared active-workspace context (no per-component desync); the human gate caught a framework-timing bug (React-Router-v7 `startTransition` lag defeating URL-wins reconciliation) needing 2 post-gate fixes; first milestone shipped without a formal audit (all-internal, 12/12 requirements + human-verify) |
 | v1.12 | 4 | 9 | Formal milestone audit BEFORE close drove an inserted tech-debt phase (12.1, WR-01..03) — the audit→insert→verify loop; one combined always-200 activity endpoint with state-carrying degrade; pure-helper wave-1 parallelism (stdlib-only, negative-grep gates); milestone reopened once to add Phase 12 (chart) post-ship; byte-level nil-slice wire regression tests as the JSON-array contract |
+| v1.13 | 5 | 13 | Singleton-not-sentinel architecture (research-locked) + zero-value additive engine scope kept the leak and regression risks dead by construction; co-phasing mandates named in the ROADMAP held; first real-binary lifecycle E2E harness (in-test `go build`, sandboxed, both engines); RED-first sweep regression; real-install migration rehearsal; post-UAT D-12 reversal absorbed as a task-branch follow-up, not a scope change |
 
 ### Cumulative Quality
 
@@ -506,6 +550,7 @@ Headline: full kangent→kamacu rename (code identity + brand + README) with a o
 | v1.8 | 13 (+`migrate`; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps across 5 phases; 1 migration (00011 `diff_viewed`); new `internal/migrate` package for the gated data-dir migration; pre-existing react-hooks advisories still carried |
 | v1.9 | 13 (api `workspaces` CRUD + backfill tested; full suite green) | tsc + vite build green | Held — zero new Go modules and zero new npm deps; 1 migration (00012 workspaces table + FK); new `/api/workspaces` surface + frontend switcher/dialogs/context; pre-existing react-hooks advisories still carried |
 | v1.12 | 13 (api `activity` handler + helpers tested; full suite green) | tsc + vite build green | One sanctioned npm dep (recharts ^3.8.0 via `shadcn add chart` — the planned sole-new-dep contract held); zero new Go modules; no migrations (rode 00006 timestamps); pre-existing react-hooks advisories grew to ~29 — deferred twice, cleanup pass overdue |
+| v1.13 | 15 (+e2e/noleak/interlock/mcp-parity test families; full suite green in BOTH env postures) | tsc + vite build green; dist byte-identical to fresh build at close | Held — zero new Go modules and zero new npm deps (carry-forward locked); 2 migrations (00017/00018); the 4 inherited pre-existing red tests FIXED in-milestone (delimiter, env-strip, marker-race) — suite fully green at close for the first time since v1.9 |
 
 ### Top Lessons (Verified Across Milestones)
 
