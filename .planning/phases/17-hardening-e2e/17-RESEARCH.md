@@ -522,23 +522,25 @@ defer github.SetAvailableForTest(true)()
 
 **All other claims in this document were verified this session** — by direct file reads (file:line cited), live test runs, an empirical tmux probe, or env reproduction. `[CITED]`-grade: the man7 tmux(1) cross-validation.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Harness file placement + helper sharing (agent's discretion, decide at planning)**
+All four questions were substantively resolved at planning; each tag below records the adopted disposition and where it landed.
+
+1. **Harness file placement + helper sharing (agent's discretion, decide at planning)** — RESOLVED: adopted by 17-01 — one new file `internal/api/e2e_global_restart_test.go`, helpers stay unexported (duplicated where trivial), NO refactor of the existing suite (Phase-15's "byte-for-byte untouched" posture preserved).
    - What we know: `internal/api` has the adjacent helpers (`doJSON`, `gitRepo`, `worktreeTask`); `cmd/kamacu` is the SUT's package; both are viable homes; the binary build needs the module root (`../..` from `internal/api`, `..` from `cmd/kamacu`).
    - What's unclear: whether extracting shared helpers out of `sessions_global_test.go` is worth the churn.
    - Recommendation: one new file in `internal/api` (helpers stay unexported, duplicated where trivial); do NOT refactor the existing suite — Phase-15's "byte-for-byte untouched" posture is worth preserving.
 
-2. **Whether the opencode leg's out-of-band `opencode run` needs the wrapper too**
+2. **Whether the opencode leg's out-of-band `opencode run` needs the wrapper too** — RESOLVED: adopted by 17-04 Task 1 — the capture block is copied verbatim from `TestGlobalOpencodeCaptureHost`; only the SPAWNED session goes through the wrapper agent.
    - What we know: the capture poller discovers sessions by directory (PWD-pin); `opencode run` in the root creates the row (host-proven at 1.18.22).
    - What's unclear: nothing material — run it exactly as `TestGlobalOpencodeCaptureHost` does (:1162-1168).
    - Recommendation: copy that block verbatim; only the SPAWNED session goes through the wrapper agent.
 
-3. **D-63 production-fix vs test-fix (locked: "investigation decides")**
+3. **D-63 production-fix vs test-fix (locked: "investigation decides")** — RESOLVED: locked by D-63 as the production fix; 17-03 Task 1 implements it baseline-first (full-suite baseline run recorded in the SUMMARY before the fix lands).
    - What we know: the root cause is fully characterized (Pitfall 2); the production fix is small (strip 3 vars in the custom arm before the opencode gate re-adds them) and closes a secret-propagation hole; the test fix is smaller but leaves the hole.
    - Recommendation: production fix + a comment in the test documenting the under-Kamacu context; keep the test asserting absence (it then passes everywhere).
 
-4. **Does the E2E run in CI?** No CI config exists in-repo (no .github/workflows found); D-50 says "inline in `go test ./...`" — host-gating makes it self-selecting (skips where tmux/git/opencode absent). No action needed; noted so the planner doesn't invent a CI story.
+4. **Does the E2E run in CI?** — RESOLVED: explicit no-action. No CI config exists in-repo (no .github/workflows found); D-50 says "inline in `go test ./...`" — host-gating makes it self-selecting (skips where tmux/git/opencode absent). No action needed; noted so the planner doesn't invent a CI story.
 
 ## Environment Availability
 
