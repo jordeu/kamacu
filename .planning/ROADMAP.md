@@ -155,7 +155,18 @@ Plans:
   4. Sentinel-leak sweep: no global entity appears on any enumeration surface (kanban boards, project/task listings, workspace non-empty delete guard, Activity stats/lists, MCP task tools) — each surface enumerated and asserted.
   5. A UAT script exercises a folder-mode root against a real repo checkout end-to-end (configure → agent → bash → reattach → stop), documenting the no-worktree safety posture (skip-permissions agent in a real checkout).
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 17-01-PLAN.md — real-binary restart E2E harness: the SC1 reconfigure-gate + SC2 restart-resume curl story (claude + tmux legs) — closes GCONF-04, GSESS-02 (claude), GSESS-03
+- [ ] 17-02-PLAN.md — sentinel-leak sweep (TestGlobalNoLeak* + audit table) + managed-root ↔ project-delete interlock + MCP both-direction parity — closes GINT-02, GINT-03
+- [ ] 17-03-PLAN.md — carried-forward debt: suite-green baseline + D-63 KAMACU_* env-strip fix + D-62 engine-union/predicate pair
+
+**Wave 2** *(blocked on Wave 1 / 17-01 harness)*
+
+- [ ] 17-04-PLAN.md — real-opencode restart-resume leg (D-52 wrapper-agent argv proof) + the 17-UAT.md walkthrough doc (D-59..D-61) — closes GSESS-02 (opencode)
 
 </details>
 
