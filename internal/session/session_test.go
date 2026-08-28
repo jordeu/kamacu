@@ -145,7 +145,13 @@ func TestSpawnPumpFillsRing(t *testing.T) {
 	if err := s.WriteInput([]byte("echo kangent-marker\n")); err != nil {
 		t.Fatalf("WriteInput: %v", err)
 	}
-	eventually(t, 2*time.Second, "snapshot to contain kangent-marker", func() bool {
+	// D-63 baseline: 10s headroom (was 2s). The PTY echo round-trip is
+	// sub-second on a quiet host, but `go test ./...` runs packages in
+	// parallel and this marker poll has flaked at 2s under that load
+	// (17-01/17-02 deferred items #2/#3, same class as the api package's
+	// TestInput_Happy marker wait). The poll returns as soon as the marker
+	// arrives — the budget only matters on failure.
+	eventually(t, 10*time.Second, "snapshot to contain kangent-marker", func() bool {
 		return bytes.Contains(s.Snapshot(), []byte("kangent-marker"))
 	})
 }

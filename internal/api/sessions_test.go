@@ -2148,7 +2148,12 @@ func TestInput_Happy_WritesAndAppendsCR(t *testing.T) {
 
 	// Round-trip: the marker must appear in the PTY output (PTY echoes the
 	// typed line AND echo prints it again, so Contains is sufficient).
-	deadline := time.Now().Add(2 * time.Second)
+	// D-63 baseline: 10s headroom (was 2s) — this poll has flaked twice
+	// under `go test ./...` cross-package host load (17-01/17-02 deferred
+	// items #2/#3; the marker arrives in well under a second when quiet).
+	// The loop returns as soon as the marker appears, so the budget only
+	// extends the failure path.
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output")
 		if gstatus != http.StatusOK {
