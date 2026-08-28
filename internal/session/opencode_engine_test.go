@@ -133,9 +133,36 @@ func TestOpencodeSpawnInjectsHookEnv(t *testing.T) {
 
 // TestCustomEngineDoesNotGetHookEnv proves the D014 injection is opencode-
 // gated: a custom-engine spawn (same stub, same AgentConfig) receives NONE
-// of the KAMACU_* vars. This is the R017 regression guard — the custom arm
-// is byte-for-byte unchanged.
+// of the KAMACU_* vars. This is the R017 regression guard.
+//
+// D-63 context: a Kamacu terminal (this repo's own dogfooding surface)
+// exports all three KAMACU_* vars into every child shell — including the
+// `go test` process itself. Rather than depending on whichever shell happens
+// to run the suite, the test EXPORTS all three itself (os.Setenv with
+// t.Cleanup restore) so the under-Kamacu parent state is simulated in every
+// environment: the custom spawn arm must strip the inherited values before
+// the opencode gate re-injects its own, keeping the D014 absence assertion
+// below green in clean shells AND under Kamacu (and keeping the parent's
+// HOOK_TOKEN secret out of arbitrary custom-agent children).
 func TestCustomEngineDoesNotGetHookEnv(t *testing.T) {
+	for _, kv := range [][2]string{
+		{"KAMACU_SESSION_ID", "parent-session-id"},
+		{"KAMACU_HOOK_TOKEN", "parent-hook-token"},
+		{"KAMACU_HOOK_BASE", "http://parent-hook-base.invalid"},
+	} {
+		old, had := os.LookupEnv(kv[0])
+		if err := os.Setenv(kv[0], kv[1]); err != nil {
+			t.Fatalf("set %s: %v", kv[0], err)
+		}
+		t.Cleanup(func() {
+			if had {
+				os.Setenv(kv[0], old)
+				return
+			}
+			os.Unsetenv(kv[0])
+		})
+	}
+
 	m := NewManager()
 	m.SetAgentConfig(AgentConfig{
 		BaseURL: "http://127.0.0.1:7999",
