@@ -162,7 +162,7 @@ Plans:
 
 - [x] 17-01-PLAN.md — real-binary restart E2E harness: the SC1 reconfigure-gate + SC2 restart-resume curl story (claude + tmux legs) — closes GCONF-04, GSESS-02 (claude), GSESS-03
 - [x] 17-02-PLAN.md — sentinel-leak sweep (TestGlobalNoLeak* + audit table) + managed-root ↔ project-delete interlock + MCP both-direction parity — closes GINT-02, GINT-03
-- [ ] 17-03-PLAN.md — carried-forward debt: suite-green baseline + D-63 KAMACU_* env-strip fix + D-62 engine-union/predicate pair
+- [x] 17-03-PLAN.md — carried-forward debt: suite-green baseline + D-63 KAMACU_* env-strip fix + D-62 engine-union/predicate pair
 
 **Wave 2** *(blocked on Wave 1 / 17-01 harness)*
 
@@ -267,4 +267,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 15. Global sessions backend | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 16. Global view, Settings & bar integration | v1.13 | 3/3 | Complete    | 2026-08-27 |
-| 17. Hardening & E2E | v1.13 | 2/4 | In Progress|  |
+| 17. Hardening & E2E | v1.13 | 3/4 | In Progress|  |
