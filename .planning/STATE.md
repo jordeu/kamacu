@@ -4,9 +4,9 @@ milestone: v1.13
 milestone_name: Global Task
 current_phase: 17
 current_phase_name: Hardening & E2E
-status: planning
-stopped_at: Phase 17 context gathered
-last_updated: "2026-08-27T13:17:00.126Z"
+status: executing
+stopped_at: Phase 17 UI-SPEC approved
+last_updated: "2026-08-28T05:26:49.973Z"
 last_activity: 2026-08-27
 last_activity_desc: Phase 16 complete (UAT 4/4, verification passed), transitioned to Phase 17
 progress:
@@ -44,8 +44,8 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 Phase: 17 — Hardening & E2E
 Plan: Not started
-Total Plans in Phase: Not yet planned
-Status: Ready to plan
+Total Plans in Phase: 4
+Status: Ready to execute
 Last activity: 2026-08-27 — Phase 16 complete (UAT 4/4, verification passed), transitioned to Phase 17
 
 Progress: [████████████████████] 9/9 plans (100%)
@@ -75,9 +75,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-27T13:16:59.941Z
-**Stopped at:** Phase 17 context gathered
-**Resume file:** .planning/phases/17-hardening-e2e/17-CONTEXT.md
+**Last session:** 2026-08-28T04:35:26.117Z
+**Stopped at:** Phase 17 UI-SPEC approved
+**Resume file:** .planning/phases/17-hardening-e2e/17-UI-SPEC.md
 
 ## Performance Metrics
 
