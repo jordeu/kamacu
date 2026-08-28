@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,38 @@ var ErrNotFound = errors.New("session not found")
 // but the tmux binary no longer resolves on PATH. The API layer maps it to the
 // honest D-84 error copy — never a silent fallback to plain bash.
 var ErrTmuxNotFound = errors.New("tmux not found")
+
+// kamacuEnvNames are the D014 hook-contract names the custom/opencode spawn
+// arm must own exclusively: the opencode engine gets fresh values injected at
+// spawn, and every other custom agent gets NONE — including the values a
+// parent Kamacu process may have exported.
+var kamacuEnvNames = map[string]bool{
+	"KAMACU_SESSION_ID": true,
+	"KAMACU_HOOK_TOKEN": true,
+	"KAMACU_HOOK_BASE":  true,
+}
+
+// stripKamacuEnv returns env with the KAMACU_* hook-contract names removed.
+// D-63: a Kamacu terminal exports KAMACU_SESSION_ID / KAMACU_HOOK_TOKEN /
+// KAMACU_HOOK_BASE into every child process — including a nested kamacu
+// server (or `go test`) and everything IT spawns. Without this filter the
+// custom spawn arm's verbatim os.Environ() inheritance would carry the
+// parent's values — the HOOK_TOKEN is a secret — into arbitrary
+// custom-agent children, breaking the D014 "custom agents get none of
+// these" contract outside clean shells. The opencode gate re-injects its
+// OWN values on top of the filtered base (append-last-value-wins), so
+// opencode spawns are unaffected.
+func stripKamacuEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if kamacuEnvNames[name] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
 
 // Manager owns every live Session. Lifecycle transitions (spawn / exit /
 // remove) each live in a single method so Phase 4 can add DB writes inside
@@ -184,8 +217,10 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			// plugin), but additionally gets the D014 env contract
 			// (KAMACU_SESSION_ID / KAMACU_HOOK_TOKEN / KAMACU_HOOK_BASE) so that
 			// plugin can curl the hook receiver back with claude-compatible event
-			// names. Custom agents get none of these — the injection is
-			// opencode-gated, so the custom path is byte-for-byte unchanged.
+			// names. Custom agents get none of these: the injection is
+			// opencode-gated, and the inherited base is filtered first (D-63) so a
+			// parent Kamacu process's exported values — HOOK_TOKEN is a secret —
+			// never leak into arbitrary custom-agent children.
 			envExtra := []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
 			if opts.AgentEngine == "opencode" {
 				envExtra = append(envExtra,
@@ -206,7 +241,13 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 					"PWD="+dir,
 				)
 			}
-			cmd.Env = append(os.Environ(), envExtra...)
+			// D-63: strip inherited KAMACU_* BEFORE the opencode gate's
+			// envExtra injection above — see stripKamacuEnv. The
+			// append-last-value-wins idiom is preserved: when the opencode
+			// gate supplied fresh values they still win over anything
+			// inherited; custom agents see neither the parent's values nor
+			// injected ones.
+			cmd.Env = append(stripKamacuEnv(os.Environ()), envExtra...)
 		} else {
 		// Resume reuses the stored id (verified v2.1.173: --resume keeps the
 		// same session id, never forks); a fresh spawn mints a new one
