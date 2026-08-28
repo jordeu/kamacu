@@ -12,3 +12,9 @@
 | # | Item | Discovered | Suggested Home | Evidence |
 |---|------|-----------|----------------|----------|
 | 3 | ~~**Recurrence of deferred item 2 during 17-02**~~ **RESOLVED by 17-03 (commit 8ed08ad)** — see item 2 above; the same class also fired once on `TestSpawnPumpFillsRing` in 17-03's own baseline run, confirming the diagnosis before the fix landed. | 2026-08-28, during 17-02 full-package regression runs | closed | 17-03-SUMMARY "D-63 Baseline Evidence" |
+
+## From 17-04 (opencode restart-resume E2E + UAT)
+
+| # | Item | Discovered | Suggested Home | Evidence |
+|---|------|-----------|----------------|----------|
+| 4 | **Third site of the PTY marker-wait flake class: `TestGlobalSessionPlainBashSpawn`** (sessions_global_test.go:233 — an 8s pwd-marker deadline, never previously recurred). Failed once at 10.22s under 4 consecutive full-package runs on this host; the identical class 17-03 absorbed at the two recurred sites (10s headroom). Pre-existing, untouched by 17-04's diff (e2e_* files + docs only; this is an in-process Phase-15 httptest). Run pattern: FAIL(run1, test name not captured) → PASS → FAIL(this test) → PASS. All three `TestE2EGlobal*` legs passed in every run that reported them. | 2026-08-28, during 17-04 full-package regressions | quick task (same 10s-headroom one-liner as 8ed08ad applied to the remaining fixed marker deadlines in sessions_global_test.go, or a load-tolerant marker poll helper) | 17-04-SUMMARY "Verification Results" |

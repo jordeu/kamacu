@@ -166,7 +166,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 / 17-01 harness)*
 
-- [ ] 17-04-PLAN.md — real-opencode restart-resume leg (D-52 wrapper-agent argv proof) + the 17-UAT.md walkthrough doc (D-59..D-61) — closes GSESS-02 (opencode)
+- [x] 17-04-PLAN.md — real-opencode restart-resume leg (D-52 wrapper-agent argv proof) + the 17-UAT.md walkthrough doc (D-59..D-61) — closes GSESS-02 (opencode)
 
 </details>
 
@@ -267,4 +267,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 15. Global sessions backend | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 16. Global view, Settings & bar integration | v1.13 | 3/3 | Complete    | 2026-08-27 |
-| 17. Hardening & E2E | v1.13 | 3/4 | In Progress|  |
+| 17. Hardening & E2E | v1.13 | 4/4 | Complete   | 2026-08-28 |

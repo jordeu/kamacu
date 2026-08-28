@@ -4,17 +4,17 @@ milestone: v1.13
 milestone_name: Global Task
 current_phase: 17
 current_phase_name: hardening-e2e
-status: executing
-stopped_at: Completed 17-03-PLAN.md
-last_updated: "2026-08-28T11:15:32.390Z"
+status: verifying
+stopped_at: Completed 17-04-PLAN.md
+last_updated: "2026-08-28T12:01:15.835Z"
 last_activity: 2026-08-28
 last_activity_desc: Phase 17 execution started
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 13
-  completed_plans: 11
-  percent: 80
+  completed_plans: 13
+  percent: 100
 ---
 
 # Project State
@@ -45,7 +45,7 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 Phase: 17 (hardening-e2e) — EXECUTING
 Plan: 4 of 4
 Total Plans in Phase: 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-28 — Phase 17 execution started
 
 Progress: [████████████████████] 9/9 plans (100%)
@@ -75,8 +75,8 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-28T11:15:32.370Z
-**Stopped at:** Completed 17-03-PLAN.md
+**Last session:** 2026-08-28T12:00:57.957Z
+**Stopped at:** Completed 17-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -114,6 +114,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 17 P01 | 91 min | 2 tasks tasks | 2 files files |
 | Phase 17 P02 | 32 min | 3 tasks | 3 test files + 2 docs files |
 | Phase 17 P03 | 22 min | 2 tasks | 6 files |
+| Phase 17 P04 | 30 min | 2 tasks | 3 files |
 
 ## Decisions
 
@@ -184,6 +185,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase ?]: 17-03: TestCustomEngineDoesNotGetHookEnv self-exports the KAMACU_ trio (os.Setenv + t.Cleanup restore) so the D014 absence assertion holds in EVERY environment, not just clean shells
 - [Phase ?]: 17-03: PTY marker-wait deadlines raised 2s->10s in TestSpawnPumpFillsRing + TestInput_Happy_WritesAndAppendsCR (17-01/17-02 deferred items 2/3, the cross-package host-load flake class); polls return on condition so only the failure path gets headroom
 - [Phase ?]: 17-03: Agent.engine union widened to claude|custom|opencode + TaskPage isClaudeAgent flipped to strict === 'claude' (D-62); BoardPage.tsx:21-22 carries the identical stale predicate — recorded as the known consistency site for future scoping (out of contract this phase)
+- [Phase 17]: 17-04: the E2E harness gained a test-only realHomeEnv posture knob (REAL HOME + inherited XDG, sandboxed TMUX_TMPDIR/--db/root) — the opencode leg's mandated posture was unreachable through childEnv() as shipped, and duplicating start() would violate the no-duplicated-spawn-logic criterion; the honest consequence (boot's idempotent plugin install may refresh the user's real kamacu-managed file) is documented in-file — 17-04: the E2E harness gained a test-only realHomeEnv posture knob (REAL HOME + inherited XDG, sandboxed TMUX_TMPDIR/--db/root) — the opencode leg's mandated posture was unreachable through childEnv() as shipped, and duplicating start() would violate the no-duplicated-spawn-logic criterion; the honest consequence (boot's idempotent plugin install may refresh the user's real kamacu-managed file) is documented in-file
+- [Phase 17]: 17-04: the D-54 opencode refusal needs the D-33 root re-PUT between clear and resume (a bare post-clear resume returns 'global root not configured' first) — 17-01's step-10 precedent applied to the opencode branch; the captured ses_ id is additionally read from the temp DB in the quiescent window so the resume argv asserts the EXACT id (HTTP resumable flip stays the primary observable) — 17-04: the D-54 opencode refusal needs the D-33 root re-PUT between clear and resume (a bare post-clear resume returns 'global root not configured' first) — 17-01's step-10 precedent applied to the opencode branch; the captured ses_ id is additionally read from the temp DB in the quiescent window so the resume argv asserts the EXACT id (HTTP resumable flip stays the primary observable)
+- [Phase 17]: 17-04: 17-UAT.md authored-pending in the 16-UAT shape — six locked flows, verbatim locked strings kept unwrapped on one line (grep gates are line-based), 'No root configured yet.' rides flow 1's clear ending, D-12 decision slot defaults KEEP; TestGlobalSessionPlainBashSpawn's first marker-flake recurrence logged as deferred-items item 4 (not fixed — scope boundary) — 17-04: 17-UAT.md authored-pending in the 16-UAT shape — six locked flows, verbatim locked strings kept unwrapped on one line (grep gates are line-based), 'No root configured yet.' rides flow 1's clear ending, D-12 decision slot defaults KEEP; TestGlobalSessionPlainBashSpawn's first marker-flake recurrence logged as deferred-items item 4 (not fixed — scope boundary)
 
 ## Operator Next Steps
 
