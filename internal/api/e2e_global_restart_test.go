@@ -616,3 +616,165 @@ func TestE2EGlobalReconfigureGate(t *testing.T) {
 		t.Errorf("resume-after-clear error = %q, want %q", got, "no global claude session to resume")
 	}
 }
+
+// TestE2EGlobalRestartResume (SC2, D-49/D-51/D-54 / GSESS-02+GSESS-03): the
+// restart narrative against the same --db file — configure → spawn agent
+// (capture csid, seed transcript) → mint tmux tab (record label+name) →
+// SIGTERM the REAL process → boot a second REAL process → the status feed
+// offers exactly one resumable global entry → the tmux row survives
+// (orphaned, label byte-identical, tab alive on the sandbox socket) →
+// reattach preserves the label → resume 201 with --resume <SAME csid> →
+// transcript deleted → resume 409 (the D-54 claude-transcript-vanished
+// edge; the no-persisted-id edge is SC1 step 10 above).
+func TestE2EGlobalRestartResume(t *testing.T) {
+	e := newE2EServer(t)
+	e.start()
+
+	// 1. Configure a folder root and the tmux shell.
+	root := gitRepo(t)
+	if status, body := doJSON(t, "PUT", e.baseURL+"/api/global", map[string]any{"root_path": root}); status != http.StatusOK {
+		t.Fatalf("PUT /api/global folder root: status = %d, want 200; body=%v", status, body)
+	}
+	if status, body := doJSON(t, "PUT", e.baseURL+"/api/settings/shell", map[string]any{"value": "tmux"}); status != http.StatusOK {
+		t.Fatalf("PUT /api/settings/shell tmux: status = %d, want 200; body=%v", status, body)
+	}
+
+	// 2. Fresh agent spawn: capture the csid from the argv recorder, then
+	// write the transcript fixture BEFORE any resumable assertion (Pitfall
+	// 5 — resumable keys on the transcriptExists glob; without the fixture
+	// the post-restart offer looks like a restart bug).
+	if status, body := doJSON(t, "POST", e.baseURL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent"}); status != http.StatusCreated {
+		t.Fatalf("global agent spawn: status = %d, want 201; body=%v", status, body)
+	}
+	csid := e2eArgvValue(e2eWaitArgvFlag(t, e.argsFile, "--session-id"), "--session-id")
+	if _, err := uuid.Parse(csid); err != nil {
+		t.Fatalf("fresh --session-id value %q is not a uuid: %v", csid, err)
+	}
+	transcript := e2eSeedTranscript(t, e.sandbox, csid)
+
+	// 3. Tmux tab. Record the wire label (the bash row of the scoped list)
+	// and the live socket name verbatim for the byte-identical
+	// post-restart comparison — the two halves of the GAP-01 replay.
+	if status, body := doJSON(t, "POST", e.baseURL+"/api/sessions", map[string]any{"scope": "global", "kind": "bash"}); status != http.StatusCreated {
+		t.Fatalf("global bash spawn: status = %d, want 201; body=%v", status, body)
+	}
+	tmuxName := e.waitGlobalTmuxName()
+	_, rows := doJSONList(t, e.baseURL+"/api/sessions?scope=global")
+	recordedLabel := ""
+	for _, row := range rows {
+		if row["kind"] == "bash" && row["global"] == true {
+			recordedLabel, _ = row["label"].(string)
+		}
+	}
+	if recordedLabel == "" {
+		t.Fatalf("no live global bash row pre-restart to record the label from; rows=%v", rows)
+	}
+
+	// 4. Hard death: SIGTERM the real process (serve registers no handler)
+	// and wait out the exit within the deadline.
+	if err := e.stop(); err != nil {
+		t.Fatalf("SIGTERM server A: %v\nserver logs:\n%s", err, e.dumpLogs())
+	}
+	// Stale keep-alive connections to the dead process must not poison
+	// the second leg.
+	http.DefaultClient.CloseIdleConnections()
+
+	// 5. Boot the second process with IDENTICAL args and env against the
+	// same --db file: the boot sequence (migrate → backfills → opencode
+	// plugin install → tmux conf → sweepOrphanTmux) must reconcile the
+	// global agent row and the global tmux row WITHOUT killing the tab.
+	e.start()
+
+	// 6. Exactly ONE global status entry (GSESS-02): honest exited +
+	// resumable + Scratchpad/Global labels (the Phase-15 wire contract).
+	// The engine rides the singleton's agent summary on GET /api/global —
+	// the same engine read that keys the resume branch below.
+	entries := e2eGlobalStatusEntries(t, e.baseURL)
+	if len(entries) != 1 {
+		t.Fatalf("global status entries after restart = %d, want exactly 1: %v", len(entries), entries)
+	}
+	entry := entries[0]
+	if entry["source"] != "global" {
+		t.Errorf("post-restart source = %v, want %q", entry["source"], "global")
+	}
+	if entry["status"] != "exited" {
+		t.Errorf("post-restart status = %v, want %q", entry["status"], "exited")
+	}
+	if entry["resumable"] != true {
+		t.Errorf("post-restart resumable = %v, want true (transcript fixture seeded)", entry["resumable"])
+	}
+	if entry["taskTitle"] != "Scratchpad" || entry["projectName"] != "Global" {
+		t.Errorf("post-restart labels = %v/%v, want Scratchpad/Global", entry["taskTitle"], entry["projectName"])
+	}
+	if got, _ := entry["sessionId"].(string); got != "" {
+		t.Errorf("post-restart sessionId = %q, want \"\" (DB-derived pass — no live session)", got)
+	}
+	_, gbody := doJSON(t, "GET", e.baseURL+"/api/global", nil)
+	agent, _ := gbody["agent"].(map[string]any)
+	if agent == nil || agent["engine"] != "claude" {
+		t.Errorf("GET /api/global agent = %v, want engine \"claude\"", gbody["agent"])
+	}
+
+	// 7. The tmux row survived the restart (D-49 / GSESS-03): orphaned,
+	// global, name unchanged, label byte-identical to the pre-SIGTERM row.
+	survivor := e2eScopedTmuxRow(t, e.baseURL, tmuxName)
+	if survivor["orphaned"] != true {
+		t.Errorf("survivor orphaned = %v, want true", survivor["orphaned"])
+	}
+	if survivor["global"] != true {
+		t.Errorf("survivor global = %v, want true", survivor["global"])
+	}
+	if got, _ := survivor["label"].(string); got != recordedLabel {
+		t.Errorf("survivor label = %q, want the pre-SIGTERM label %q byte-identical", got, recordedLabel)
+	}
+
+	// 8. Liveness: the tab is alive on the sandbox socket, probed from the
+	// harness with the same socket dir in the probe's env.
+	alive, err := e.sandboxTmux().HasSession(context.Background(), tmuxName)
+	if err != nil || !alive {
+		t.Errorf("tmux has-session %q = alive=%v err=%v, want alive on the sandbox socket", tmuxName, alive, err)
+	}
+
+	// 9. Reattach (GSESS-03 API half): 201 with the persisted label kept.
+	status, body := doJSON(t, "POST", e.baseURL+"/api/sessions", map[string]any{"scope": "global", "kind": "bash", "reattach_tmux_name": tmuxName})
+	if status != http.StatusCreated {
+		t.Fatalf("reattach %s: status = %d, want 201; body=%v", tmuxName, status, body)
+	}
+	if got, _ := body["label"].(string); got != recordedLabel {
+		t.Errorf("reattach label = %q, want the preserved %q", got, recordedLabel)
+	}
+
+	// 10. Resume (GSESS-02, claude half / D-51): 201, and the argv now
+	// carries --resume <csid> with the SAME csid the fresh spawn minted —
+	// resume never forks the id.
+	status, body = doJSON(t, "POST", e.baseURL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent", "resume": true})
+	if status != http.StatusCreated {
+		t.Fatalf("global agent resume: status = %d, want 201; body=%v", status, body)
+	}
+	args := e2eWaitArgvPair(t, e.argsFile, "--resume", csid)
+	if got := e2eArgvValue(args, "--resume"); got != csid {
+		t.Errorf("resume argv --resume value = %q, want the SAME csid %q (never forked)", got, csid)
+	}
+
+	// 11. The D-54 transcript-vanished edge: stop the resumed agent first
+	// (else the D-34 one-agent 409 fires before the resume validation),
+	// delete the fixture, and the refusal names the missing conversation.
+	resumedID, _ := body["id"].(string)
+	if resumedID == "" {
+		t.Fatalf("resume spawn returned no id: %v", body)
+	}
+	if s, b := doJSON(t, "POST", e.baseURL+"/api/sessions/"+resumedID+"/stop", nil); s != http.StatusAccepted {
+		t.Fatalf("stop resumed agent: status = %d, want 202; body=%v", s, b)
+	}
+	e2eWaitGlobalSessionStatus(t, e.baseURL, resumedID, "exited")
+	if err := os.Remove(transcript); err != nil {
+		t.Fatalf("delete transcript fixture %s: %v", transcript, err)
+	}
+	status, body = doJSON(t, "POST", e.baseURL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent", "resume": true})
+	if status != http.StatusConflict {
+		t.Fatalf("resume after transcript delete: status = %d, want 409; body=%v", status, body)
+	}
+	if got, _ := body["error"].(string); got != "no global claude session to resume" {
+		t.Errorf("resume-after-transcript-delete error = %q, want %q", got, "no global claude session to resume")
+	}
+}
