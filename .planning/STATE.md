@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: Global Task
 current_phase: 17
-current_phase_name: Hardening & E2E
+current_phase_name: hardening-e2e
 status: executing
-stopped_at: Phase 17 UI-SPEC approved
-last_updated: "2026-08-28T05:26:49.973Z"
-last_activity: 2026-08-27
-last_activity_desc: Phase 16 complete (UAT 4/4, verification passed), transitioned to Phase 17
+stopped_at: Completed 17-01-PLAN.md
+last_updated: "2026-08-28T07:23:16.314Z"
+last_activity: 2026-08-28
+last_activity_desc: Phase 17 execution started
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 9
-  completed_plans: 9
-  percent: 80
+  total_plans: 13
+  completed_plans: 10
+  percent: 77
 ---
 
 # Project State
 
-**Current focus:** Phase 17 — Hardening & E2E
+**Current focus:** Phase 17 — hardening-e2e
 
 See: .planning/PROJECT.md (updated 2026-08-27)
 
@@ -42,11 +42,11 @@ Known verification overrides: 6 (all prior-milestone quick tasks — see table a
 
 ## Current Position
 
-Phase: 17 — Hardening & E2E
-Plan: Not started
+Phase: 17 (hardening-e2e) — EXECUTING
+Plan: 2 of 4
 Total Plans in Phase: 4
 Status: Ready to execute
-Last activity: 2026-08-27 — Phase 16 complete (UAT 4/4, verification passed), transitioned to Phase 17
+Last activity: 2026-08-28 — Phase 17 execution started
 
 Progress: [████████████████████] 9/9 plans (100%)
 
@@ -75,9 +75,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 
 ## Session
 
-**Last session:** 2026-08-28T04:35:26.117Z
-**Stopped at:** Phase 17 UI-SPEC approved
-**Resume file:** .planning/phases/17-hardening-e2e/17-UI-SPEC.md
+**Last session:** 2026-08-28T07:23:16.306Z
+**Stopped at:** Completed 17-01-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -111,6 +111,7 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 | Phase 16 P01 | 10 min | 3 tasks | 6 files |
 | Phase 16 P02 | 38 min | 2 tasks tasks | 5 files files |
 | Phase 16 P03 | 9 min | 2 tasks tasks | 3 files files |
+| Phase 17 P01 | 91 min | 2 tasks tasks | 2 files files |
 
 ## Decisions
 
@@ -171,6 +172,9 @@ Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wir
 - [Phase 16]: 16-02: keepExited accumulator uses adjust-state-during-render (AddProjectDialog prevOpen tracker, research Pitfall 8) instead of TaskPage's effect idiom — new files must lint clean in isolation — The copied wholesale effect trips react-hooks/set-state-in-effect, violating the plan's own eslint-clean acceptance gate; the guarded render-phase union is behaviorally identical and converges
 - [Phase 16]: 16-03: Clear root placed in the DialogFooter with sm:mr-auto (destructive variant, left of Cancel/Save) — resolves the UI-SPEC planner-discretion placement to the footer-left slot
 - [Phase 16]: 16-03: the 409 error box is one element (message + reasons ul) rendered below the active input for both Save-root and Clear-root failures — keeps the exactly-one-of help/error idiom while guaranteeing clear-root 409s surface since the dialog stays open on failure
+- [Phase ?]: 17-01: real-binary E2E isolates the tmux socket via a sandbox PATH wrapper — production's tmux spawn env allow-list (TMUX/TMUX_PANE leak scrub) drops TMUX_TMPDIR, so tabs would land on the user's real socket while probes honor the sandbox; the wrapper re-arms it for every server-side invocation and the production seam is deferred to 17-03's D-63 env work
+- [Phase ?]: 17-01: fake-claude gained an additive --version fast path (before the recorders) — serve's boot-time quota.DetectVersion probe would otherwise hang ~300s on the stub's orphaned sleep grandchild holding the probe's stdout pipe; no existing test passes --version
+- [Phase ?]: 17-01: real-binary harness captures server output in FILES never pipes/buffers — the daemonized tmux server inherits stdio and holds the pipe open, deadlocking cmd.Wait on an already-dead process
 
 ## Operator Next Steps
 
