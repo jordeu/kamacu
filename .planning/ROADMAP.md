@@ -35,7 +35,7 @@
 - [x] **Phase 14: Global config API** - `GET/PUT /api/global` — root as validated folder or gh-cloned managed repo (v1.4 pattern), default-agent picker, and the live-session 409 gate on root reconfiguration (completed 2026-08-26)
 - [x] **Phase 15: Global sessions backend** - Session-engine scope + `scope:"global"` spawn (agent + bash + resume + tmux) + the widened status feed — the milestone's risk center (completed 2026-08-26)
 - [x] **Phase 16: Global view, Settings & bar integration** - The `/global` route (TaskPage shell, agent + bash tabs only), the Settings Global section, and the Active Sessions bar row (completed 2026-08-27)
-- [ ] **Phase 17: Hardening & E2E** - Reconfigure-gate + restart-resume E2E, managed-root ↔ project-delete interlock, sentinel-leak sweep, folder-mode UAT — closing the gates invisible until a restart or a delete happens
+- [x] **Phase 17: Hardening & E2E** - Reconfigure-gate + restart-resume E2E, managed-root ↔ project-delete interlock, sentinel-leak sweep, folder-mode UAT — closing the gates invisible until a restart or a delete happens (completed 2026-08-28)
 
 ## Phase Details
 
@@ -267,4 +267,4 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 14. Global config API | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 15. Global sessions backend | v1.13 | 2/2 | Complete    | 2026-08-26 |
 | 16. Global view, Settings & bar integration | v1.13 | 3/3 | Complete    | 2026-08-27 |
-| 17. Hardening & E2E | v1.13 | 4/4 | Complete   | 2026-08-28 |
+| 17. Hardening & E2E | v1.13 | 4/4 | Complete    | 2026-08-28 |

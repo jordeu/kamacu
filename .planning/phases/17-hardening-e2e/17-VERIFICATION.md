@@ -1,32 +1,39 @@
 ---
 phase: 17-hardening-e2e
 verified: 2026-08-28T13:55:00Z
-status: human_needed
+status: passed
 score: 12/14 must-haves verified
 behavior_unverified: 2 # truths present + wired whose runtime behavior no automated test exercises (the SC2 same-conversation memory judgment and the SC5 walkthrough execution — both owned by 17-UAT.md, intentionally deferred to /gsd-verify-work)
 overrides_applied: 0
 behavior_unverified_items:
+
   - truth: "SC2 browser half — after a restart, a global claude/opencode session resumes the SAME conversation (the agent remembers the identifiable thing)"
     test: "Execute 17-UAT.md flows 2 and 3: ask the live agent something identifiable, SIGTERM/kill the serve process, restart on the same DB, click 'Resume session', ask the agent to recall it"
     expected: "Heading 'Agent session ended.' with the 'Reset session'/'Resume session' pair; after 'Resuming…' the same conversation streams and the agent recalls the identifiable thing (a fresh terminal that forgot it is a fail)"
     why_human: "The E2E legs prove the resume plumbing carries the persisted id end-to-end (claude: fake-claude argv '--resume <same csid>'; opencode: REAL binary, captured 'ses_fb760fae…' resumed with '-s <same id>') — but 'it remembers' is a real-binary conversation-memory judgment no fake can assert"
+
   - truth: "SC5 — a UAT script exercises a folder-mode root against a real repo checkout end-to-end (configure → agent → bash → reattach → stop), documenting the no-worktree safety posture"
     test: "Execute 17-UAT.md flows 1-6 in the browser (including the D-12 bar-row settlement decision in flow 6) and record every result:/decision: line + Summary counters"
     expected: "All six flows pass as written; flow 1 covers the full folder-mode lifecycle incl. invisible bash reattach and the 'No root configured yet.' post-clear state; flow 6 records KEEP or FLIP — <reason>"
     why_human: "Auth, quota, visual-reattach invisibility, bar-row distinguishability and the keep-or-flip settlement are inherently human judgments; the doc is authored-pending by design (17-04 output spec) and the orchestrator confirmed the walkthrough runs via /gsd-verify-work after this verification"
 human_verification:
+
   - test: "Run /gsd-verify-work 17 and execute 17-UAT.md flow 1 (SC5 folder-mode lifecycle against a real repo)"
     expected: "Configure root → 'Start agent' CTA → live terminal → 'Bash <n>' tab → navigate away/back reattaches both with scrollback (bash reattach invisible, label byte-for-byte) → ⋯ menu 'Stop' works → concurrent 'Start agent' surfaces 'global agent already running' → Clear root returns 'No root configured yet.'"
     why_human: "Browser walkthrough with a real repo, real auth and visual reattach behavior; automation proved the API lifecycle gates but not the browser surfacing"
+
   - test: "Execute 17-UAT.md flows 2-3 (D-53 same-conversation resume, both engines, across a real serve restart)"
     expected: "'Agent session ended.' + 'Resume session' → 'Resuming…' → same conversation; the agent remembers the identifiable thing for BOTH claude and opencode"
     why_human: "Real-binary conversation memory is the point of the flow; the E2E argv proofs cannot see past the id plumbing"
+
   - test: "Execute 17-UAT.md flow 4 (SC3 interlock browser sanity)"
     expected: "Deleting the project leaves the Settings Scratchpad managed root row unchanged and /global functional; the reverse clear leaves the project clone alone"
     why_human: "Visual confirmation of the machine-proven interlock through the shipped UI surfaces"
+
   - test: "Execute 17-UAT.md flow 5 (SC4 sentinel-leak visual sanity)"
     expected: "With a live global agent + bash tab: no foreign card on kanban columns, no new project in the sidebar, empty workspace still deletes, Activity shows no Scratchpad/Global rows; the global appears only on the bar row, /global, Settings Scratchpad and MCP session-tool labels"
     why_human: "Visual sweep across surfaces in the shipped UI; the per-surface API/DB/MCP exclusions are machine-proven (TestGlobalNoLeak/TestGlobalParity)"
+
   - test: "Execute 17-UAT.md flow 6 (D-12 bar-row settlement) and record the decision"
     expected: "With a task row and the global row live simultaneously, confirm 'Global · Scratchpad' is distinguishable from a task's project · task pair; record KEEP (default) or FLIP — <what confused you>; a FLIP becomes a logged follow-up, not a Phase-17 change"
     why_human: "The settlement is an explicit human decision made with the live bar in front of the user (prohibition P3 forbids implementing any flip this phase)"
