@@ -9,12 +9,13 @@
 //     modes (255 vs 128 observed) and stderr is chatty on success
 //     ("Preparing worktree…"), so neither is a signal.
 //   - This package NEVER deletes branches (D-34) and never fetches (D-24) —
-//     EXCEPT CheckoutPR/FetchRef, deliberate scoped exceptions to the
-//     never-fetch invariant: (1) PR-head/PR-base retrieval (Phase 12,
-//     ARCHITECTURE §4) — a PR review's whole point is fetching someone else's
-//     branch; (2) the per-new-task default-branch fetch on a MANAGED checkout
-//     (Phase 14, CKOUT-02/D-04) — driven by provisionWorktree, gated on the
-//     project's managed marker so folder projects keep D-24 byte-for-byte.
+//     EXCEPT CheckoutPR/FetchRef and ResolveBaseFresh, deliberate scoped
+//     exceptions to the never-fetch invariant: (1) PR-head/PR-base retrieval
+//     (Phase 12, ARCHITECTURE §4) — a PR review's whole point is fetching
+//     someone else's branch; (2) ResolveBaseFresh (Phase 14, CKOUT-02/D-04)
+//     fetches origin's default branch and returns origin/<default> as the
+//     base for a MANAGED checkout — callers gate on the project's managed
+//     marker so folder projects keep D-24 byte-for-byte.
 package worktree
 
 import (
@@ -166,6 +167,35 @@ func (s *Service) DefaultBranch(ctx context.Context, repo string) (string, error
 		return "", err
 	}
 	return strings.TrimPrefix(strings.TrimSpace(out), "origin/"), nil
+}
+
+// ResolveBaseFresh returns a commit-ish to branch from on a MANAGED checkout:
+// it first runs the CKOUT-02 best-effort default-branch fetch, then returns
+// the remote-tracking ref origin/<default> when it resolves. The LOCAL
+// default branch is deliberately never preferred here: nothing in Kamacu
+// ever updates it, so in a managed clone it is frozen at clone time — leg 1
+// of ResolveBase would silently base every new task on that outdated tip
+// even after a successful fetch (the exact bug this method exists to fix).
+// Basing work on origin/<default> also keeps the diff tab honest: it diffs
+// against the same ref, so it shows exactly what a PR targeting the default
+// branch will show.
+//
+// The fetch is the same deliberate, scoped D-24 exception CheckoutPR and
+// FetchRef carry — callers gate on the project's managed marker; folder
+// projects never reach this method. Best-effort (D-05): a failed fetch is
+// discarded and the still-resolvable (clone-time) origin/<default> is
+// returned. Only when origin/HEAD is absent or origin/<default> does not
+// resolve at all does the full ResolveBase local chain answer — a merely
+// stale base is never an error.
+func (s *Service) ResolveBaseFresh(ctx context.Context, repo string) (string, error) {
+	if name, err := s.DefaultBranch(ctx, repo); err == nil {
+		_ = s.FetchRef(ctx, repo, name) // best-effort (D-05): failure falls through
+		remote := "origin/" + name
+		if _, err := gitRun(ctx, repo, "show-ref", "--verify", "--quiet", "refs/remotes/"+remote); err == nil {
+			return remote, nil
+		}
+	}
+	return s.ResolveBase(ctx, repo)
 }
 
 // Create makes a worktree at path on branch, branching from base.

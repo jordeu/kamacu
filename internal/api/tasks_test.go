@@ -176,9 +176,21 @@ func TestManagedTaskWorktreeFetchesLatest(t *testing.T) {
 	}
 
 	// The managed pre-task fetch advanced the clone's origin/main to the tip
-	// pushed after the clone — proving the fetch ran before ResolveBase.
+	// pushed after the clone — proving the fetch ran before base resolution.
 	if got := cloneOriginMainSHA(t, clone); got != newTip {
 		t.Errorf("clone origin/main = %s, want fetched tip %s (managed pre-task fetch did not run)", got, newTip)
+	}
+
+	// The new branch must be BASED on the fetched tip: with no commits of its
+	// own yet, its SHA IS its base. Pre-fix, it landed on the clone's stale
+	// local main even though the fetch ran (ResolveBase's first leg preferred
+	// refs/heads/main) — the exact outdated-master bug CKOUT-02 targets.
+	branch, _ := body["branch"].(string)
+	if branch == "" {
+		t.Fatalf("no branch in create response: %v", body)
+	}
+	if sha := gitOut(t, clone, "rev-parse", branch); sha != newTip {
+		t.Errorf("task branch %s = %s, want fetched tip %s — branched from a stale base", branch, sha, newTip)
 	}
 }
 
