@@ -15,8 +15,22 @@
 - ✅ **v1.10 Configurable Agents** — Phases 01–05 (shipped 2026-07-11) — see [milestones/v1.10-ROADMAP.md](milestones/v1.10-ROADMAP.md)
 - ✅ **v1.11 Kamacu MCP Server** — Phases 06–09 (shipped 2026-07-29) — see [milestones/v1.11-ROADMAP.md](milestones/v1.11-ROADMAP.md)
 - ✅ **v1.12 Activity & Statistics** — Phases 10–12.1 (shipped 2026-08-25) — see [milestones/v1.12-ROADMAP.md](milestones/v1.12-ROADMAP.md)
+- ✅ **v1.13 Global Task** — Phases 13–17 (shipped 2026-08-28) — see [milestones/v1.13-ROADMAP.md](milestones/v1.13-ROADMAP.md)
 
 ## Phases
+
+<details>
+<summary>✅ v1.13 Global Task (Phases 13–17) — SHIPPED 2026-08-28</summary>
+
+- [x] Phase 13: Global data foundation & safety net (2/2 plans) — completed 2026-08-25
+- [x] Phase 14: Global config API (2/2 plans) — completed 2026-08-26
+- [x] Phase 15: Global sessions backend (2/2 plans) — completed 2026-08-26
+- [x] Phase 16: Global view, Settings & bar integration (3/3 plans) — completed 2026-08-27
+- [x] Phase 17: Hardening & E2E (4/4 plans) — completed 2026-08-28
+
+Full details: [milestones/v1.13-ROADMAP.md](milestones/v1.13-ROADMAP.md)
+
+</details>
 
 <details>
 <summary>✅ v1.12 Activity & Statistics (Phases 10–12.1) — SHIPPED 2026-08-25</summary>
@@ -94,7 +108,7 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 
 ## Progress
 
-**Execution Order:** Phases execute in numeric order: 06 → 07 → 08 → 09 (v1.11, shipped) → 10 → 11 → 12 → 12.1 (v1.12, shipped).
+**Execution Order:** Phases execute in numeric order: 06 → 07 → 08 → 09 (v1.11, shipped) → 10 → 11 → 12 → 12.1 (v1.12, shipped) → 13 → 14 → 15 → 16 → 17 (v1.13, shipped). Next milestone starts fresh via `/gsd-new-milestone`.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -111,3 +125,8 @@ Full details: [milestones/v1.8-ROADMAP.md](milestones/v1.8-ROADMAP.md)
 | 11. Activity Page & Controls | v1.12 | 3/3 | Complete | 2026-07-31 |
 | 12. Activity Chart & Stat Tooltips | v1.12 | 2/2 | Complete | 2026-08-01 |
 | 12.1. Address Activity tech debt (WR-01..03) | v1.12 | 1/1 | Complete | 2026-08-25 |
+| 13. Global data foundation & safety net | v1.13 | 2/2 | Complete | 2026-08-25 |
+| 14. Global config API | v1.13 | 2/2 | Complete | 2026-08-26 |
+| 15. Global sessions backend | v1.13 | 2/2 | Complete | 2026-08-26 |
+| 16. Global view, Settings & bar integration | v1.13 | 3/3 | Complete | 2026-08-27 |
+| 17. Hardening & E2E | v1.13 | 4/4 | Complete | 2026-08-28 |

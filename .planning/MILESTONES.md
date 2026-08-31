@@ -1,5 +1,30 @@
 # Milestones
 
+## v1.13 Global Task (Shipped: 2026-08-28)
+
+**Phases completed:** 5 phases (13–17), 13 plans, 24 tasks
+
+**Delivered:** A single global scratchpad — a `/global` view with agent + bash tabs running directly in a configured repo/folder, fully decoupled from projects, workspaces, and boards. 115 commits over 4 days (2026-08-25 → 2026-08-28), 220 files, +21k/−19k LOC. Milestone audit: 19/19 requirements, integration 25/26, 6/6 E2E flows (see milestones/v1.13-MILESTONE-AUDIT.md).
+
+Known verification overrides: 6 (all prior-milestone carried-over quick tasks, none v1.13 — see STATE.md Deferred Items)
+
+**Key accomplishments:**
+
+- Two goose migrations — the `global_task` singleton (CHECK id=1, agent FK RESTRICT, seeded from the movable is_default flag) and the `tmux_sessions` scope rebuild (nullable task_id + XOR CHECK via CREATE-copy-drop-rename under NO TRANSACTION) — proven byte-for-byte-safe by staged-upgrade tests on the real goose runner
+- BackfillGlobalTask (idempotent boot re-arm of the singleton), the scope-aware one-query orphan-sweep fix (RED-proven to kill a live global tab before the fix, GREEN after), the D-09 Scratchpad delete-guard 409, and a byte-for-byte real-install rehearsal of the real binary against a .backup copy of the live v1.12 database
+- GET/PUT /api/global over the Phase-13 singleton: validated folder root, gh-validated managed clone into ~/.kamacu/repos/global/&lt;owner&gt;/&lt;name&gt; with reattach and atomic failure, settable default agent, and the forward-wired live-session 409 gate with resume-id clearing — zero new dependencies
+- Live-tmux 409 gate + config-history invariants proven in-package, and the real `kamacu serve` binary driven through the complete /api/global curl contract on a fresh isolated install
+- Global agent spawns behind the D-33/D-34/D-31 gates with singleton csid persist, a closure-parametrized opencode capture re-target, and /api/agents/status widened to ONE source:"global" entry in both passes — closing the SC3 co-phasing mandate with the task paths byte-for-byte clean.
+- TS wire widenings (source union, TermSession.global, ApiError.reasons), the new global config client (["global"] query + partial PUT), six scope-aware session hooks keyed ["sessions","global"], and the Active Sessions bar's three GINT-01 edits (sessionId re-key, /global navigation branch, pathname highlight)
+- The /global Scratchpad view: a copy-then-trim GlobalTaskPage rendering the 7-state matrix off the shared ["global"] query (D-39/D-40 heroes, D-38/D-42 banner slot), AgentTab loosened behind an AgentTabScope discriminator (task path byte-for-byte unchanged), and the /global route registered as the bar's click-through destination
+- The Settings Scratchpad section: a server-truth summary card (root row with managed badge, instant-save default-agent Select, Open Scratchpad CTA to /global) plus the AddProjectDialog-derived Change-root dialog with segmented capture, blocking clone spinner, verbatim 409-reasons surfacing, and the gated no-confirm Clear root action
+- The repo's first real-binary lifecycle E2E — builds cmd/kamacu in-test, spawns it in a fully isolated sandbox, drives the SC1 reconfigure-gate cycle and the SC2 SIGTERM→restart→resume narrative over real HTTP, and proves tmux tab survival with byte-identical labels.
+- Permanent regression proofs that the global entity cannot leak onto any enumeration surface (live-agent + live-tmux harness, DB structural counts), that the managed-root ↔ project-delete interlock holds in both directions (same-ref clone into both namespaces + os.Stat), and that the MCP bridge is leak-free and honestly labeled — plus the 10-row D-55 audit table for 17-VERIFICATION.md.
+- Full-suite green restored in both environment postures by stripping inherited `KAMACU_*` (incl. the hook-token secret) from the custom-agent spawn env, absorbing the documented PTY marker flake via 10s deadlines, and making the frontend honest about the opencode engine (union widening + claude-only quota chip).
+- GSESS-02's opencode half proven through a real serve restart with the real binary — a command-PATCHed wrapper agent records the argv while capture, the resumable flip and the `-s ses_<id>` resume append run verbatim — plus the authored-pending 17-UAT.md walkthrough (six locked flows, honest safety posture, D-12 settlement procedure).
+
+---
+
 ## v1.12 Activity & Statistics (Shipped: 2026-08-25)
 
 **Phases completed:** 4 phases (10, 11, 12, 12.1-inserted), 9 plans, 20 tasks

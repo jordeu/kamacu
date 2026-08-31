@@ -57,6 +57,14 @@ func TestBackfillAgents(t *testing.T) {
 	// permits dropping the default row, leaving the table without the Claude seed;
 	// BackfillAgents re-creates the Claude seed (is_default=1, is_system=1,
 	// engine='claude'). The opencode system seed (M002) is untouched by this hook.
+	// v1.13 ordering: the global_task singleton (00017) REFERENCES the default
+	// agent ON DELETE RESTRICT, so a hand-wiped-agents install must drop the
+	// singleton FIRST — the raw agent DELETE is (correctly) refused otherwise.
+	// BackfillGlobalTask re-arms the singleton on the next boot (proven separately
+	// in TestBackfillGlobalTask).
+	if _, err := db.Exec(`DELETE FROM global_task`); err != nil {
+		t.Fatalf("delete global_task singleton: %v", err)
+	}
 	if _, err := db.Exec(`DELETE FROM agents WHERE is_default = 1`); err != nil {
 		t.Fatalf("delete default agent: %v", err)
 	}

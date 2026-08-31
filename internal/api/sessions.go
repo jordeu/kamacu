@@ -60,11 +60,20 @@ type sessionHandlers struct {
 // exited-ghost handling is client-side per D-28). ?project_id=N (Phase 08,
 // MCPSESS-01) filters to sessions whose task belongs to that project. The two
 // filters are mutually exclusive; project_id never triggers the tmux reconcile
-// pass (dev lists have no orphaned rows). Every entry now also carries
-// taskTitle/projectName/agentName via the D-10 JOIN (empty for dev sessions).
+// pass (dev lists have no orphaned rows). ?scope=global (Phase 15) returns
+// exactly the global sessions plus the scoped tmux reconcile — the /global
+// view's tab strip. Every entry also carries taskTitle/projectName/agentName
+// via the D-10 JOIN (empty for dev sessions); global entries get their honest
+// synthesized Scratchpad/Global labels instead (GINT-02).
 func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 	var infos []session.Info
-	if q := r.URL.Query().Get("task_id"); q == "" {
+	if r.URL.Query().Get("scope") == "global" {
+		// GLOBAL branch (Phase 15): exactly the engine's global sessions,
+		// then the scoped reconcile — the reconcileTmux survivor/lazy-GC
+		// logic with the WHERE clause on the 00018 scope discriminator
+		// instead of task_id.
+		infos = h.reconcileGlobalTmux(r, h.mgr.ListGlobal())
+	} else if q := r.URL.Query().Get("task_id"); q == "" {
 		// Phase 08 project_id filter (MCPSESS-01): scope to sessions whose
 		// task belongs to the project. One query builds the task-ID set, then
 		// an in-memory filter narrows mgr.List() (D-11: never N round-trips).
@@ -123,14 +132,113 @@ func (h *sessionHandlers) list(w http.ResponseWriter, r *http.Request) {
 	}
 	// Attach the D-10 task->project->agent JOIN (taskTitle/projectName/
 	// agentName) and serialize as sessionDetail. Dev sessions (TaskID==0)
-	// keep empty JOIN fields (omitted on the wire via omitempty).
+	// keep empty JOIN fields (omitted on the wire via omitempty). Global
+	// entries are synthesized per-entry (GINT-02, D-09/D-10): taskTitle
+	// "Scratchpad", projectName "Global", agentName from ONE singleton agent
+	// JOIN read per request — and NEVER a zero-keyed ctxByTask entry (the
+	// map is keyed by the field global sessions don't have; key 0 would leak
+	// the Scratchpad labels onto every dev session — Pitfall 3).
 	ctxByTask := h.joinSessionContext(infos)
+	var gctx *sessionContext
 	out := make([]sessionDetail, len(infos))
 	for i, info := range infos {
+		if info.Global {
+			if gctx == nil {
+				c := h.globalSessionContext()
+				gctx = &c
+			}
+			out[i] = sessionDetail{Info: info, TaskTitle: "Scratchpad", ProjectName: "Global", AgentName: gctx.agentName}
+			continue
+		}
 		ctx := ctxByTask[info.TaskID]
 		out[i] = sessionDetail{Info: info, TaskTitle: ctx.taskTitle, ProjectName: ctx.projectName, AgentName: ctx.agentName}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// reconcileGlobalTmux is the scoped sibling of reconcileTmux (Phase 15,
+// GSESS-03): the same survivor/lazy-GC pass over the scope='global' rows.
+// A row is a survivor iff (a) NO live in-memory session is bound to its name
+// AND (b) tmux has-session reports it alive; dead rows are lazily GC'd
+// (D-89); inconclusive probes surface nothing (Pitfall 6). The synthesized
+// orphaned Info gains Global:true (the /global view keys off it) and the
+// empty-label fallback goes through defaultTmuxLabel exactly as tasks do
+// ("kamacu-global-3" already yields "Bash 3").
+func (h *sessionHandlers) reconcileGlobalTmux(r *http.Request, infos []session.Info) []session.Info {
+	rows, err := h.db.Query(`SELECT name, label, created_at FROM tmux_sessions WHERE scope = 'global'`)
+	if err != nil {
+		slog.Warn("reconcile global tmux sessions: query", "error", err)
+		return infos
+	}
+	type row struct {
+		name, label, createdAt string
+	}
+	var candidates []row
+	for rows.Next() {
+		var rw row
+		if err := rows.Scan(&rw.name, &rw.label, &rw.createdAt); err != nil {
+			rows.Close()
+			slog.Warn("reconcile global tmux sessions: scan", "error", err)
+			return infos
+		}
+		candidates = append(candidates, rw)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		slog.Warn("reconcile global tmux sessions: rows", "error", err)
+		return infos
+	}
+	rows.Close()
+
+	for _, rw := range candidates {
+		if h.mgr.HasLiveTmux(rw.name) {
+			continue
+		}
+		alive, err := h.tmuxClient.HasSession(r.Context(), rw.name)
+		switch {
+		case err != nil:
+			continue
+		case alive:
+			label := rw.label
+			if label == "" {
+				label = defaultTmuxLabel(rw.name)
+			}
+			created, perr := time.Parse(time.RFC3339, rw.createdAt)
+			if perr != nil {
+				created = time.Now()
+			}
+			infos = append(infos, session.Info{
+				Label:     label,
+				Status:    session.StatusRunning,
+				Kind:      session.KindBash,
+				Global:    true,
+				CreatedAt: created,
+				Orphaned:  true,
+				TmuxName:  rw.name,
+			})
+		default:
+			if _, derr := h.db.Exec(`DELETE FROM tmux_sessions WHERE name = ?`, rw.name); derr != nil {
+				slog.Warn("reconcile global tmux sessions: GC dead row", "name", rw.name, "error", derr)
+			}
+		}
+	}
+	return infos
+}
+
+// globalSessionContext reads the singleton's agent name — the ONE per-request
+// JOIN behind the honest global labels (GINT-02). Degrades to an empty
+// agentName (never fails the read path); ErrNoRows is unreachable (00017
+// seed + BackfillGlobalTask) and also degrades — the labels Scratchpad/
+// Global stay honest even if the agent JOIN hiccups.
+func (h *sessionHandlers) globalSessionContext() sessionContext {
+	var agentName string
+	if err := h.db.QueryRow(
+		`SELECT a.name FROM global_task g JOIN agents a ON a.id = g.agent_id WHERE g.id = 1`,
+	).Scan(&agentName); err != nil {
+		slog.Warn("globalSessionContext: query", "error", err)
+		return sessionContext{}
+	}
+	return sessionContext{taskTitle: "Scratchpad", projectName: "Global", agentName: agentName}
 }
 
 // reconcileTmux appends orphaned (restored) tmux survivor entries to infos for
@@ -220,11 +328,19 @@ func (h *sessionHandlers) reconcileTmux(r *http.Request, taskID int64, infos []s
 // (the /terminal dev route sends none) spawns an unscoped dev session exactly
 // as before. Agents require a task worktree and are limited to ONE running
 // per task (D-38) — the API enforces both.
+//
+// Phase 15: {"scope":"global"} (mutually exclusive with task_id) spawns in
+// the global Scratchpad root behind the D-28/D-29 gates — plain bash and
+// tmux tabs ("kamacu-global-<n>") with the same shell options as tasks.
 func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TaskID int64  `json:"task_id"`
 		Kind   string `json:"kind"`
 		Resume bool   `json:"resume"` // RCVR-02: resume the task's stored claude session (agent-only)
+		// Scope is the Phase 15 global discriminator: "" (default — task/dev
+		// behavior unchanged) or "global" — the session spawns in the global
+		// root behind the D-28/D-29 gates. Mutually exclusive with task_id.
+		Scope string `json:"scope"`
 		// ReattachTmuxName, when set, reattaches to an EXISTING persisted tmux
 		// session by name instead of minting a new one (TMUX-05, D-88). The
 		// frontend fires it for a restored orphaned entry; new-session -A is
@@ -245,6 +361,18 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid kind")
 		return
 	}
+	// Scope is a closed set (T-15-05): "" or "global", anything else is the
+	// invalid-kind family of 400.
+	if req.Scope != "" && req.Scope != "global" {
+		writeError(w, http.StatusBadRequest, "invalid scope")
+		return
+	}
+	// Mutual exclusion (the global.go repo/root_path family): the global
+	// scope is task-less by construction — a body carrying both is ambiguous.
+	if req.Scope == "global" && req.TaskID != 0 {
+		writeError(w, http.StatusBadRequest, "supply either scope or task_id, not both")
+		return
+	}
 	// Resume is a variant of the agent spawn only — never a bash session.
 	if req.Resume && kind != session.KindAgent {
 		writeError(w, http.StatusBadRequest, "resume requires kind agent")
@@ -259,14 +387,20 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "reattach requires a bash session")
 			return
 		}
-		if req.TaskID <= 0 {
+		// Global scope is the one task-less context tmux rows exist for
+		// (00018 scope discriminator); every other task-less reattach is the
+		// dev route, which keeps its honest 409.
+		if req.TaskID <= 0 && req.Scope != "global" {
 			writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
 			return
 		}
 	}
 	// Agents always run in a task worktree: no task means no worktree — the
-	// same gate (and copy) as a worktree-less task.
-	if kind == session.KindAgent && req.TaskID <= 0 {
+	// same gate (and copy) as a worktree-less task. The global scope is the
+	// one task-less exception (Phase 15): its worktree-equivalent is the
+	// global root, resolved + gated inside the scope branch below (D-28/D-29
+	// fire there, before this function ever reaches Spawn).
+	if kind == session.KindAgent && req.TaskID <= 0 && req.Scope != "global" {
 		writeError(w, http.StatusConflict, "task has no worktree")
 		return
 	}
@@ -301,15 +435,59 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		opts.Cwd, opts.TaskID = path.String, req.TaskID
+	} else if req.Scope == "global" {
+		// GLOBAL branch (Phase 15, D-24/D-28..D-33): the singleton read-at-use —
+		// root + agent + resume ids resolved fresh per request, exactly where
+		// the task worktree query feeds every kind above. ErrNoRows is a
+		// corrupted invariant (00017 seed + BackfillGlobalTask) → 500, the
+		// loadGlobalConfig fail-loud posture.
+		var rootPath string
+		err := h.db.QueryRow(
+			`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, a.engine, a.command, a.extra_params
+			 FROM global_task g
+			 JOIN agents a ON a.id = g.agent_id
+			 WHERE g.id = 1`,
+		).Scan(&rootPath, &csid, &ocsid, &agentEngine, &agentCommand, &agentExtraParams)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "global task row missing")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// One gate block for every kind (D-30), order per D-33: unconfigured
+		// root first (D-28) — never a silent home/cwd fallback; then the
+		// vanished-root stat (D-29) with the stored path verbatim.
+		if rootPath == "" {
+			writeError(w, http.StatusConflict, "global root not configured")
+			return
+		}
+		if fi, serr := os.Stat(rootPath); serr != nil || !fi.IsDir() {
+			writeError(w, http.StatusConflict, "global root no longer exists on disk: "+rootPath)
+			return
+		}
+		opts.Cwd, opts.Global = rootPath, true
 	}
 	// One-agent-per-task gate (D-38), checked BEFORE spawning. An EXITED
 	// agent never blocks — that is the "Reset session" path (D-41, revised at checkpoint).
 	// Resume rides this gate unchanged — it IS D-67's never-two-PTYs guarantee.
+	// Phase 15: the global scope has its own gate (D-34) over ListGlobal(),
+	// same RUNNING-only semantics, in the task-gate copy voice.
 	if kind == session.KindAgent {
-		for _, info := range h.mgr.ListByTask(req.TaskID) {
-			if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
-				writeError(w, http.StatusConflict, "agent session already running")
-				return
+		if req.Scope == "global" {
+			for _, info := range h.mgr.ListGlobal() {
+				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
+					writeError(w, http.StatusConflict, "global agent already running")
+					return
+				}
+			}
+		} else {
+			for _, info := range h.mgr.ListByTask(req.TaskID) {
+				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
+					writeError(w, http.StatusConflict, "agent session already running")
+					return
+				}
 			}
 		}
 	}
@@ -321,7 +499,30 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// posture, NEVER silently fork a fresh session). The claude path is unchanged
 	// byte-for-byte (csid + the transcript glob that self-heals D-56's resumable).
 	if req.Resume {
-		if agentEngine == "opencode" {
+		if req.Scope == "global" {
+			// GLOBAL resume (Phase 15, D-31): the ids live in the singleton
+			// (the scope branch above scanned csid/ocsid alongside the agent
+			// row). An engine with no persisted id is an honest 409 naming
+			// the engine — NEVER a silent fresh spawn (the user asked for a
+			// conversation back, not a blank terminal). transcriptExists is
+			// cwd-agnostic (resume.go), so the claude check works verbatim
+			// against the global root's transcripts.
+			if agentEngine == "opencode" {
+				if !ocsid.Valid {
+					writeError(w, http.StatusConflict, "no global opencode session to resume")
+					return
+				}
+				// opts.ResumeSessionID stays "" — the `-s <id>` append in the
+				// custom spawn arm below keys off ocsid, which the singleton
+				// scan already filled.
+			} else {
+				if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
+					writeError(w, http.StatusConflict, "no global claude session to resume")
+					return
+				}
+				opts.ResumeSessionID = csid.String
+			}
+		} else if agentEngine == "opencode" {
 			if !ocsid.Valid {
 				writeError(w, http.StatusConflict, "no session to resume")
 				return
@@ -376,13 +577,22 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// Reattach variant (TMUX-05, D-88): reconnect to a surviving tmux row by
 		// name instead of minting a new one. The worktree query above already set
 		// opts.Cwd/TaskID (and rejected a missing worktree with 409 "task has no
-		// worktree"). Verify the row belongs to THIS task so a client can never
-		// reattach to an arbitrary name, then reuse the persisted name — no
-		// mint, no INSERT (the row already exists; MAX(n)+1 stays correct because
-		// it persists). Spawn runs new-session -A against the live session. The
-		// persisted label is captured into reattachLabel and reapplied after Spawn
-		// (GAP-01) so a renamed survivor keeps its custom name.
-		err := h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&reattachLabel)
+		// worktree"); the global branch likewise set opts.Cwd/Global behind the
+		// root gates. The lookup itself is SCOPE-SCOPED (D-32): task scope reads
+		// its task rows, global scope reads scope='global' rows — a foreign row
+		// simply does not exist in this scope, so both directions get the same
+		// honest 404 with no scope-mismatch oracle and no information leak.
+		// Reuse the persisted name — no mint, no INSERT (the row already exists;
+		// MAX(n)+1 stays correct because it persists). Spawn runs new-session -A
+		// against the live session. The persisted label is captured into
+		// reattachLabel and reapplied after Spawn (GAP-01) so a renamed survivor
+		// keeps its custom name.
+		var err error
+		if req.Scope == "global" {
+			err = h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE scope = 'global' AND name = ?`, req.ReattachTmuxName).Scan(&reattachLabel)
+		} else {
+			err = h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&reattachLabel)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "no session to reattach")
 			return
@@ -393,43 +603,70 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 		opts.TmuxName = req.ReattachTmuxName
 	} else {
-		// Covers task bash tabs AND the unscoped /terminal dev spawn — one
-		// code path (SHELL-02).
+		// Covers task bash tabs, global bash tabs, AND the unscoped /terminal
+		// dev spawn — one code path (SHELL-02); the global scope reads the
+		// same settings shell as tasks (GVIEW-03).
 		sh, err := settings.Get(h.db, settings.KeyShell)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "couldn't start a session")
 			return
 		}
 		if sh == "tmux" {
-			// tmux shells are task-scoped: the name embeds the task id and the row
-			// references tasks(id). The unscoped /terminal dev route gets an honest
-			// 409 (D-56 posture) — NEVER a bare `tmux` exec, which would open an
-			// unnamed session on the user's DEFAULT socket.
-			if req.TaskID <= 0 {
-				writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
-				return
+			if req.Scope == "global" {
+				// GLOBAL mint (D-11/D-02): the scope-scoped counter, name
+				// kamacu-global-<n>. The 00018 XOR CHECK requires (NULL
+				// task_id, scope 'global') to agree; the real mint-race
+				// backstop is name UNIQUE — NULL task_ids are DISTINCT under
+				// UNIQUE(task_id,n), so that composite never protects global
+				// rows (same single-user localhost window the task path
+				// accepts). n from the DB, NEVER the in-memory counter (it
+				// resets on restart); insert BEFORE Spawn, exactly the task
+				// posture.
+				var n int64
+				if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE scope = 'global'`).Scan(&n); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				name := fmt.Sprintf("kamacu-global-%d", n)
+				// D-04 belt-and-braces: persist the default "Bash N" label at
+				// INSERT (same two-writes-agree posture as the task mint).
+				label := fmt.Sprintf("Bash %d", n)
+				if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, scope, n, name, label) VALUES (NULL, 'global', ?, ?, ?)`, n, name, label); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				opts.TmuxName = name
+			} else {
+				// tmux shells are task-scoped: the name embeds the task id and the row
+				// references tasks(id). The unscoped /terminal dev route gets an honest
+				// 409 (D-56 posture) — NEVER a bare `tmux` exec, which would open an
+				// unnamed session on the user's DEFAULT socket.
+				if req.TaskID <= 0 {
+					writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
+					return
+				}
+				// n from the DB, NEVER the in-memory counter (it resets on restart; a
+				// collision would make new-session -A silently attach a second tab to a
+				// surviving shell — research Pitfall 4). Insert BEFORE Spawn reserves n
+				// under UNIQUE(task_id,n); single-user localhost makes the read-then-
+				// insert race window acceptable, with the constraint as backstop.
+				var n int64
+				if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE task_id = ?`, req.TaskID).Scan(&n); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				name := fmt.Sprintf("kamacu-%d-%d", req.TaskID, n)
+				// D-04 belt-and-braces: persist the default "Bash N" label at INSERT so
+				// the column is never transiently '' even if the later sess.Info().Label
+				// back-fill UPDATE (below) fails. The two writes agree (both "Bash N"),
+				// so the back-fill is idempotent reconciliation, not a conflict.
+				label := fmt.Sprintf("Bash %d", n)
+				if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, ?, ?, ?)`, req.TaskID, n, name, label); err != nil {
+					writeError(w, http.StatusInternalServerError, "couldn't start a session")
+					return
+				}
+				opts.TmuxName = name
 			}
-			// n from the DB, NEVER the in-memory counter (it resets on restart; a
-			// collision would make new-session -A silently attach a second tab to a
-			// surviving shell — research Pitfall 4). Insert BEFORE Spawn reserves n
-			// under UNIQUE(task_id,n); single-user localhost makes the read-then-
-			// insert race window acceptable, with the constraint as backstop.
-			var n int64
-			if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE task_id = ?`, req.TaskID).Scan(&n); err != nil {
-				writeError(w, http.StatusInternalServerError, "couldn't start a session")
-				return
-			}
-			name := fmt.Sprintf("kamacu-%d-%d", req.TaskID, n)
-			// D-04 belt-and-braces: persist the default "Bash N" label at INSERT so
-			// the column is never transiently '' even if the later sess.Info().Label
-			// back-fill UPDATE (below) fails. The two writes agree (both "Bash N"),
-			// so the back-fill is idempotent reconciliation, not a conflict.
-			label := fmt.Sprintf("Bash %d", n)
-			if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, ?, ?, ?)`, req.TaskID, n, name, label); err != nil {
-				writeError(w, http.StatusInternalServerError, "couldn't start a session")
-				return
-			}
-			opts.TmuxName = name
 		} else {
 			opts.Shell = sh
 		}
@@ -457,8 +694,15 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	}
 	// Persist the Phase 5 --resume key BEFORE replying (latest spawn wins).
 	// A write failure degrades Phase 5 resume only — the session is usable.
+	// Phase 15: the persist target is scope-branched — the singleton UPDATE
+	// for global, the tasks UPDATE otherwise. Same warn-only degradation
+	// (Pattern 5).
 	if kind == session.KindAgent {
-		if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
+		if req.Scope == "global" {
+			if _, err := h.db.Exec(`UPDATE global_task SET claude_session_id = ? WHERE id = 1`, sess.ClaudeSessionID()); err != nil {
+				slog.Warn("persisting claude_session_id", "scope", "global", "error", err)
+			}
+		} else if _, err := h.db.Exec(`UPDATE tasks SET claude_session_id = ? WHERE id = ?`, sess.ClaudeSessionID(), req.TaskID); err != nil {
 			slog.Warn("persisting claude_session_id", "task", req.TaskID, "error", err)
 		}
 		// M002/S03/T03 (Strategy B — subprocess discovery): opencode mints its
@@ -467,13 +711,19 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// until the user's first turn (a TUI boot with no input writes nothing
 		// to opencode.db — verified by a host-gated spike, MEM034), so the
 		// capture is an ASYNC bounded poll launched here, never a spawn-time
-		// read. It persists the discovered id to tasks.opencode_session_id,
-		// which is the restart-resume key (T02's resume argv reads it). Resume
-		// reuses the stored id (no discovery) — only a FRESH opencode spawn
-		// captures. Best-effort + warn-only: a capture failure costs only
-		// restart-resume, never the live session. Never block the reply.
+		// read. It persists the discovered id to the session owner's resume
+		// column (tasks.opencode_session_id, or the global_task singleton for
+		// a global spawn — T-15-06 re-target), which is the restart-resume
+		// key (T02's resume argv reads it). Resume reuses the stored id (no
+		// discovery) — only a FRESH opencode spawn captures. Best-effort +
+		// warn-only: a capture failure costs only restart-resume, never the
+		// live session. Never block the reply.
 		if agentEngine == "opencode" && !req.Resume {
-			go captureOpencodeSessionAsync(h.db, sess.Done(), req.TaskID, opts.Cwd)
+			if req.Scope == "global" {
+				go captureOpencodeSessionAsync(h.db, sess.Done(), globalPersistTarget(), opts.Cwd)
+			} else {
+				go captureOpencodeSessionAsync(h.db, sess.Done(), taskPersistTarget(req.TaskID), opts.Cwd)
+			}
 		}
 	}
 	// GAP-01: restore the survivor's persisted custom label onto the reattached
@@ -518,7 +768,7 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 // WS interactive surface is unchanged.
 //
 // The message is sent to the PTY as TWO SEPARATE WriteInput calls:
-//  1. The body wrapped in ANSI bracketed paste markers (ESC[2004<body>ESC[2014).
+//  1. The body wrapped in ANSI bracketed paste markers (ESC[200~<body>ESC[201~).
 //  2. A single "\r" submit key, written AFTER the closing bracket.
 //
 // The bracketed wrap is the deterministic fix. Raw-mode TUIs (Claude Code
@@ -561,7 +811,7 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 // wrapInputForWrite decomposes a request message into the ordered pair of
 // WriteInput payloads the input handler sends to the PTY: the message (any
 // request-supplied trailing terminator stripped) wrapped in ANSI bracketed
-// paste markers (ESC[2004 ... ESC[2014) as the FIRST payload, then a single
+// paste markers (ESC[200~ ... ESC[201~) as the FIRST payload, then a single
 // "\r" submit key as the SECOND. The handler writes them as two separate
 // WriteInput calls, never one combined write.
 //
@@ -595,9 +845,15 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 func wrapInputForWrite(msg string) (body, submit string) {
 	msg = strings.TrimSuffix(msg, "\n")
 	msg = strings.TrimSuffix(msg, "\r")
+	// The xterm bracketed-paste spec: the MODE a terminal enables is CSI ?2004
+	// h, but the paste DELIMITERS it sends back are CSI 200 ~ / CSI 201 ~ —
+	// 200/201, never 2004 (the original constants confused the two, leaking a
+	// stray '~' into readline command lines — every plain-bash submission
+	// through this endpoint parsed as "~<cmd>" and failed; caught by the
+	// Phase-15 cwd-proof test).
 	const (
-		pasteStart = "\x1b[2004~" // ESC[2004~ — bracketed paste start (CSI final byte ~)
-		pasteEnd   = "\x1b[2014~" // ESC[2014~ — bracketed paste end (CSI final byte ~)
+		pasteStart = "\x1b[200~" // ESC[200~ — bracketed paste start (6 bytes)
+		pasteEnd   = "\x1b[201~" // ESC[201~ — bracketed paste end (6 bytes)
 	)
 	return pasteStart + msg + pasteEnd, "\r"
 }
@@ -776,10 +1032,48 @@ func parseOpenCodeSessionList(out []byte, dir string) (string, error) {
 	return bestID, nil
 }
 
+// opencodePersistTarget is the parametrized persist step of the opencode
+// capture poller (Phase 15, T-15-06): WHERE a discovered ses_… id lands. Task
+// spawns use taskPersistTarget(id) — UPDATE tasks; global spawns use
+// globalPersistTarget() — UPDATE the global_task singleton. The two targets
+// are separate closures over separate SQL, so a wrong-table write is
+// structurally inexpressible (no task-id sentinel can reach the global
+// UPDATE, and vice versa) — and there is exactly ONE poller, parametrized,
+// never a forked copy.
+type opencodePersistTarget struct {
+	owner   string // log label ("task <id>" / "global")
+	persist func(db *sql.DB, opencodeSessionID string) error
+}
+
+// taskPersistTarget writes tasks.opencode_session_id for taskID — the
+// restart-resume key of a task-scoped opencode agent.
+func taskPersistTarget(taskID int64) opencodePersistTarget {
+	return opencodePersistTarget{
+		owner: fmt.Sprintf("task %d", taskID),
+		persist: func(db *sql.DB, id string) error {
+			_, err := db.Exec(`UPDATE tasks SET opencode_session_id = ? WHERE id = ?`, id, taskID)
+			return err
+		},
+	}
+}
+
+// globalPersistTarget writes global_task.opencode_session_id on the singleton
+// row — the restart-resume key of the global (Scratchpad) opencode agent.
+func globalPersistTarget() opencodePersistTarget {
+	return opencodePersistTarget{
+		owner: "global",
+		persist: func(db *sql.DB, id string) error {
+			_, err := db.Exec(`UPDATE global_task SET opencode_session_id = ? WHERE id = 1`, id)
+			return err
+		},
+	}
+}
+
 // captureOpencodeSessionAsync polls opencode's session DB until the freshly
 // spawned opencode session's ses_id appears (after the user's first turn) and
-// persists it to tasks.opencode_session_id. It runs in its own goroutine
-// launched by the create handler for a fresh opencode spawn.
+// persists it via the parametrized target (tasks.opencode_session_id for a
+// task spawn, the global_task singleton for a global one). It runs in its own
+// goroutine launched by the create handler for a fresh opencode spawn.
 //
 // Exit conditions: discovery succeeds (id persisted + return); the session
 // exits (done fires — the opencode row persists in opencode.db keyed by
@@ -790,7 +1084,7 @@ func parseOpenCodeSessionList(out []byte, dir string) (string, error) {
 // (blocked on the session's done channel) until the on-exit final attempt.
 // All failures are warn-only: capture is best-effort and must never affect the
 // live session.
-func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, taskID int64, worktreeDir string) {
+func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, target opencodePersistTarget, worktreeDir string) {
 	const (
 		pollInterval = 2 * time.Second
 		activeWindow = 10 * time.Minute // bounds polling churn; covers realistic first-turn latency
@@ -802,17 +1096,17 @@ func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, taskID int64,
 		defer cancel()
 		id, err := discoverOpenCodeSession(ctx, worktreeDir)
 		if err != nil {
-			slog.Warn("discovering opencode session id", "task", taskID, "error", err)
+			slog.Warn("discovering opencode session id", "owner", target.owner, "error", err)
 			return false
 		}
 		if id == "" {
 			return false // no session row yet (the user hasn't run a turn)
 		}
-		if _, err := db.Exec(`UPDATE tasks SET opencode_session_id = ? WHERE id = ?`, id, taskID); err != nil {
-			slog.Warn("persisting opencode session id", "task", taskID, "error", err)
+		if err := target.persist(db, id); err != nil {
+			slog.Warn("persisting opencode session id", "owner", target.owner, "error", err)
 			return false
 		}
-		slog.Info("captured opencode session id", "task", taskID, "opencode_session_id", id)
+		slog.Info("captured opencode session id", "owner", target.owner, "opencode_session_id", id)
 		return true
 	}
 
@@ -973,6 +1267,18 @@ func (h *sessionHandlers) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := sess.Info()
+	// Global entries get the honest synthesized labels (GINT-02) — same
+	// per-entry gating as the list loop, never a 0-keyed ctxByTask lookup.
+	if info.Global {
+		gctx := h.globalSessionContext()
+		writeJSON(w, http.StatusOK, sessionDetail{
+			Info:        info,
+			TaskTitle:   "Scratchpad",
+			ProjectName: "Global",
+			AgentName:   gctx.agentName,
+		})
+		return
+	}
 	ctxByTask := h.joinSessionContext([]session.Info{info})
 	ctx := ctxByTask[info.TaskID]
 	writeJSON(w, http.StatusOK, sessionDetail{

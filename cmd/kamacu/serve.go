@@ -188,6 +188,19 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 
+	// v1.13 (GDATA-01): one-shot idempotent global_task guard. Migration 00017
+	// seeds the singleton, but a migration runs exactly once -- a hand-deleted
+	// row would stay missing forever while every later v1.13 phase reads it
+	// unconditionally. BackfillGlobalTask re-arms id=1 on every boot, seeded
+	// from the is_default agent. Ordering is load-bearing: it MUST run after
+	// BackfillAgents/BackfillOpenCodeAgent -- the seed reads the default agent,
+	// so wiring it before BackfillAgents would garble boot on an agents-wiped
+	// install (13-RESEARCH Pitfall 6).
+	if err := api.BackfillGlobalTask(db); err != nil {
+		slog.Error("backfilling global task", "error", err)
+		return subcommands.ExitFailure
+	}
+
 	// M002 (opencode built-in agent engine): ship + idempotently install the
 	// env-gated opencode status plugin. opencode cannot take a per-instance hook
 	// command via argv (unlike claude's --settings overlay), so it loads this
@@ -273,6 +286,11 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// no new construction; it drives PR merged/closed eligibility + display and
 	// degrades cleanly when gh is absent.
 	api.WorktreeCleanupRoutes(mux, db, wtSvc, mgr, tmuxClient, ghSvc)
+	// v1.13 (GCONF-01..04): the global Scratchpad config surface —
+	// GET/PUT /api/global (folder/managed-clone root, default agent, and
+	// the live-session 409 gate on root change/clear). No wt dependency:
+	// no worktrees exist for the global scope.
+	api.GlobalRoutes(mux, db, mgr, tmuxClient)
 	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns, c.insecureAllowRemote))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -362,11 +380,13 @@ func sweepOrphanTmux(parent context.Context, db *sql.DB, tmuxClient tmux.Client)
 		return // no server running -> no sessions
 	}
 
-	// Known = a tmux_sessions row whose task STILL exists. The JOIN drops rows
-	// whose task was deleted while down, so those sessions get swept too.
+	// Known = a tmux_sessions row whose task STILL exists, OR any global-scoped
+	// row (task-less by design — GDATA-03). The task subquery drops rows whose
+	// task was deleted while down, so those sessions get swept too; globals are
+	// known WITHOUT a task JOIN and must never be swept.
 	known := make(map[string]bool)
 	rows, err := db.QueryContext(ctx,
-		`SELECT ts.name FROM tmux_sessions ts JOIN tasks t ON t.id = ts.task_id`)
+		`SELECT name FROM tmux_sessions WHERE scope = 'global' OR task_id IN (SELECT id FROM tasks)`)
 	if err != nil {
 		slog.Warn("orphan sweep: loading known tmux sessions", "error", err)
 		return // can't tell orphan from live -> never kill blindly (Pitfall 6)

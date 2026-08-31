@@ -1,36 +1,36 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.12
-milestone_name: Activity & Statistics
-current_phase: 12
+milestone: v1.13
+milestone_name: Global Task
+current_phase: 13
 status: Awaiting next milestone
-stopped_at: Phase 12.1 complete — milestone v1.12 ready to archive
-last_updated: "2026-08-25T05:24:38.157Z"
-last_activity: 2026-08-25
-last_activity_desc: Milestone v1.12 completed and archived
+stopped_at: Phase 17 complete (UAT 6/6, verification passed), v1.13 fully implemented — ready for /gsd-complete-milestone
+last_updated: "2026-08-28T16:12:49.686Z"
+last_activity: 2026-08-28
+last_activity_desc: Milestone v1.13 completed and archived
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
+  total_phases: 5
+  completed_phases: 5
+  total_plans: 13
+  completed_plans: 13
   percent: 100
-current_phase_name: Address Activity tech debt (WR-01..03
+current_phase_name: hardening-e2e
 ---
 
 # Project State
 
-**Current focus:** v1.12 archived — planning next milestone (`/gsd-new-milestone`)
+**Current focus:** Planning next milestone — v1.13 Global Task shipped 2026-08-28 (5/5 phases, 19/19 requirements, audit tech_debt with no blockers, archived + tagged)
 
-See: .planning/PROJECT.md (updated 2026-08-01)
+See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** One place to see and drive all agent work: every task gets its own isolated worktree and a persistent agent session you can open, leave, and reattach to from the browser.
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-07-29 (carried over from prior milestones — none are v1.11 work):
+Items acknowledged and deferred at milestone close on 2026-08-28 (carried over from prior milestones — none are v1.13 work):
 
-| Category | Item | Status |
-|----------|------|--------|
+| Category | Item | Status | Deferred At |
+|----------|------|--------|-------------|
 | quick_task | 260613-osu-warn-when-a-linked-github-repo-cannot-be | unknown |
 | quick_task | 260613-ph5-make-github-repo-link-validation-mandato | unknown |
 | quick_task | 260616-8l7-the-refresh-button-at-review-column-seem | awaiting-human-verify |
@@ -38,14 +38,26 @@ Items acknowledged and deferred at milestone close on 2026-07-29 (carried over f
 | quick_task | 260625-9db-the-bottom-status-bar-is-hidding-the-bot | unknown |
 | quick_task | 260626-hwd-add-an-opt-in-insecure-allow-remote-flag | unknown |
 
-Known verification overrides: 6 (all prior-milestone quick tasks, none v1.11 — see STATE.md Deferred Items)
+Known verification overrides: 6 (all prior-milestone quick tasks — see table above)
 
 ## Current Position
 
-Phase: Milestone v1.12 complete
+Phase: Milestone v1.13 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-25 — Milestone v1.12 completed and archived
+Last activity: 2026-08-28 — Milestone v1.13 completed and archived
+
+### v1.13 Roadmap Snapshot
+
+| Phase | Focus | Requirements |
+|-------|-------|--------------|
+| 13 | Data foundation & safety net (singleton + tmux rebuild + sweep fix, co-phased) | GDATA-01..03 |
+| 14 | Global config API (folder + managed-clone root, agent, 409 gate) | GCONF-01..04 |
+| 15 | Sessions backend (scope, spawn, status widening — risk center) | GSESS-01..04, GVIEW-02/03, GINT-02/03 |
+| 16 | View, Settings & bar (UI) | GCONF-05, GVIEW-01/04, GINT-01 |
+| 17 | Hardening & E2E (restart, interlock, sentinel-leak, UAT) | gate-closer (no owned reqs) |
+
+Research flags: Phase 13 (tmux table-rebuild rehearsal) and Phase 15 (status-wire widening + opencode capture spikes) should run with `--research-phase`.
 
 ### Quick Tasks Completed
 
@@ -60,8 +72,8 @@ Last activity: 2026-08-25 — Milestone v1.12 completed and archived
 
 ## Session
 
-**Last session:** 2026-08-25
-**Stopped at:** Milestone v1.12 archived (tag v1.12) — awaiting /gsd-new-milestone
+**Last session:** 2026-08-28T16:30:00Z
+**Stopped at:** Phase 17 complete (UAT 6/6, verification passed), v1.13 fully implemented — ready for /gsd-complete-milestone
 **Resume file:** None
 
 ## Performance Metrics
@@ -87,9 +99,26 @@ Last activity: 2026-08-25 — Milestone v1.12 completed and archived
 | Phase 12 P01 | 5 min | 3 tasks | 5 files |
 | Phase Phase 12 P02 | 6 min | 2 tasks tasks | 4 files files |
 | Phase 12.1 P01 | 4 min | 3 tasks tasks | 4 files files |
+| Phase 13 P01 | 5 min | 2 tasks | 3 files |
+| Phase 13 P02 | 24 min | 3 tasks | 10 files |
+| Phase 14 P01 | 23 min | 3 tasks tasks | 3 source + 2 docs files |
+| Phase 14 P02 | 8 min | 2 tasks | 2 files |
+| Phase 15 P1 | 95 min | - tasks | - files |
+| Phase 15 P2 | 42 min | - tasks | - files |
+| Phase 16 P01 | 10 min | 3 tasks | 6 files |
+| Phase 16 P02 | 38 min | 2 tasks tasks | 5 files files |
+| Phase 16 P03 | 9 min | 2 tasks tasks | 3 files files |
+| Phase 17 P01 | 91 min | 2 tasks tasks | 2 files files |
+| Phase 17 P02 | 32 min | 3 tasks | 3 test files + 2 docs files |
+| Phase 17 P03 | 22 min | 2 tasks | 6 files |
+| Phase 17 P04 | 30 min | 2 tasks | 3 files |
 
 ## Decisions
 
+- [D-12 flip 2026-08-28]: the Active Sessions bar's `Global · Scratchpad` row is REMOVED (read as 'another active session'); an always-visible globe icon ahead of the counters opens /global, carries the live global agent's status dot, highlights on /global — bar list + counters are task-scoped; GINT-01's substance (live-global visibility + click-through) kept
+- [Roadmap]: v1.13 phase order is dependency-locked (data → config API → sessions backend → UI → hardening) with two research-mandated co-phasing rules: sweepOrphanTmux fix ships WITH the tmux migration (Phase 13); status-feed widening ships WITH the spawn path (Phase 15).
+- [Roadmap]: GVIEW-02/GVIEW-03 map to Phase 15 (backend) not 16 — their observable behaviors (agent runs in root cwd, 409 on concurrent spawn, bash shell options) are API-testable and land with the spawn path; the tab UI is covered by GVIEW-01 in Phase 16.
+- [Roadmap]: Phase 17 owns no requirements — it closes E2E verification gates for GCONF-04, GSESS-02/03, GINT-02/03 and the sentinel-leak invariant (research P2/P5 verification halves).
 - [Phase ?]: Phase 07 / Plan 01: Extracted bridge.call as the shared response-handling helper (chosen YES over inline — halves per-tool line count for the 13 Phase 07 tools; structurally enforces the every-tool-is-the-same-shape invariant)
 - [Phase ?]: Phase 07 / Plan 01: list_projects InputSchema declared workspace_id (integer, optional) as the ONLY property; stale project_id no-op arg REMOVED per 07-RESEARCH Pitfall 6
 - [Phase ?]: Phase 07 / Plan 02: Widened bridge.call from HTTP 200-only to full 2xx range — Kamacu POST returns 201 (Created), DELETE returns 204 (No Content); 200-only would have surfaced every successful create_task / delete_task as an error to the agent
@@ -97,8 +126,8 @@ Last activity: 2026-08-25 — Milestone v1.12 completed and archived
 - [Phase ?]: Phase 07 / Plan 02: update_task uses *string pointer fields (Title, Description) per D-03 — nil = omitted (leave untouched), "" = explicit clear (legal for description); body map built conditionally so omitted keys never reach Kamacu's partial-PATCH
 - [Phase ?]: Phase 07 / Plan 03: create_project body marshals {name, repo_path, repo} unconditionally and workspace_id only when non-nil (D-04) - Kamacu's strings.TrimSpace(req.Repo) != empty check is the canonical dispatch; the bridge sends every field as-is with ZERO type detection
 - [Phase ?]: Phase 07 / Plan 03: update_project args struct has NO WorkspaceID and NO AgentID fields (D-03 / 07-RESEARCH Pitfall 3) - workspace transfer has its own tool in a later plan; agent reassignment is Out of Scope (MCPMORE-01). Double-lock ensures excluded fields never reach Kamacu
-- [Phase 07]: Phase 07 / Plan 04: registerWorkspaceTools owns move_project_to_workspace even though the handler PATCHes /api/projects/{id} (NOT a /api/workspaces route). D-07 per-resource ownership tracks the resource being acted on (transferring a project INTO a workspace), not the route being called. The InputSchema exposes {project_id, workspace_id}; the body contains ONLY workspace_id (D-03 excludes workspace_id from update_project specifically because this tool owns the transfer). — Cross-route resource ownership — the D-07 split tracks the resource being acted on. move_project_to_workspace is conceptually a workspace-management action even though it touches the project route.
-- [Phase 07]: Phase 07 / Plan 04: update_workspace uses *string pointer for the lone Name field (D-03 single-field rename). InputSchema declares name as optional (only workspace_id is required). When name is omitted the body is {} and Kamacu returns 400 "nothing to update" verbatim; when supplied (incl. explicit "") the rename triggers. The bridge performs NO validation — Kamacu's empty-trim/dup/default-renamable gates apply unchanged. — D-03 single-field rename pattern — pointer field distinguishes omitted (nil) from supplied (incl. ""), matching Kamacu's PATCH *string decode.
+- [Phase 07]: Phase 07 / Plan 04: registerWorkspaceTools owns move_project_to_workspace even though the handler PATCHes /api/projects/{id} (NOT a /api/workspaces route). D-07 per-resource ownership tracks the resource being acted on (transferring a project INTO a workspace), not the route being called. — Cross-route resource ownership — the D-07 split tracks the resource acted on. move_project_to_workspace is conceptually a workspace-management action even though it touches the project route.
+- [Phase 07]: Phase 07 / Plan 04: update_workspace uses *string pointer for the lone Name field (D-03 single-field rename). InputSchema declares name as optional (only workspace_id is required). When name is omitted the body is {} and Kamacu returns 400 "nothing to update" verbatim; when supplied (incl. explicit "") the rename triggers. — D-03 single-field rename pattern — pointer field distinguishes omitted (nil) from supplied (incl. ""), matching Kamacu's PATCH *string decode.
 - [Phase ?]: [Phase 08 / Plan 01]: sessionDetail embeds session.Info so every existing JSON tag flows through unchanged; taskTitle/projectName/agentName ride as additional top-level fields (omitempty for dev sessions) — D-10 JOIN wired into list + get_session
 - [Phase ?]: [Phase 08 / Plan 01]: subscribe drains the Attach replay (D-02) when include_history is absent — one <-q read atomically removes the replay; streams application/octet-stream (not text); duration clamped to [1s, 300s] server-side (T-08-03); defer Detach on every return path (SC3)
 - [Phase ?]: [Phase 08 / Plan 01]: Type-level read-only contract (D-14) enforced — handlers consume ONLY Info/Snapshot/Attach/Detach/Done; scoped grep gate proves zero references to the PTY-write primitive and zero references to WS FrameData
@@ -112,11 +141,11 @@ Last activity: 2026-08-25 — Milestone v1.12 completed and archived
 - [Phase 10]: [Phase 10/Plan 01]: 5min TTL (mergedClosedTTL) for the merged/closed reviews cache, fully decoupled from the 60s review-column cacheTTL (D-03/D-04). Coupling onto the 5s-poll hot path would 3x the gh load for data the column never renders. — Mirrors Service.Get/cacheTTL=60s with a separate map+TTL; the gate-ladder (in-flight dedup + attemptFloor + drop-after-N) is reused verbatim.
 - [Phase 10]: [Phase 10/Plan 01]: is:closed SEARCH QUALIFIER is the authoritative merged+closed filter (GitHub docs #5599); --state closed is belt-and-suspenders only since cli/cli #8102 is a filed unfixed bug. — Verified against local gh 2.82.0 + cli/cli #475/#8102. A future gh fix to #8102 would silently drop merged PRs if we relied on the flag alone.
 - [Phase 10]: [Phase 10/Plan 01]: classifyGhListError extracted as a PURE helper shared by listPRs + listCompletedReviews (Pattern 3) — one classification path, no drift on exit-code-4 + stderr-substring sniff (cli/cli#9338). — Pure (no I/O, no logging) so unit-testable directly; callers slog.Debug the state only (T-10-03: never log stderr body).
-- [Phase ?]: [Phase 10/Plan 03]: parseActivityTime is the shared mismatched-precision ISO parser (tries ms layout '2006-01-02T15:04:05.000Z' then bare-Z) — consumed by buildDurationSlices here AND plan 10-02's reviews-window cutoff; never string-compare timestamps across precisions. The .000Z layout requires the fraction, so the bare-Z fallback is what makes one comparison correct for reaper ms timestamps vs gh second-precision closedAt.
-- [Phase ?]: [Phase 10/Plan 03]: buildDurationSlices implements the Open Q3 dwellInProgress semantic (USER-CONFIRMED) — in_review_at set -> dwellInProgress = inReview - inProgress; absent -> fallback done - inProgress. cycle is always done - inProgress; dwellInReview is always done - inReview.
-- [Phase ?]: [Phase 10/Plan 03]: activity_helpers.go is stdlib-only (fmt/sort/strconv/strings/time) — no *sql.DB, no internal/github — so it ran as a wave-1 sibling parallel to plan 10-01. Negative-grep gate (internal/github==0, database/sql==0) is the purity contract; all gh/DB coupling lives in plan 10-02's handler.
-- [Phase 10]: [Phase 10/Plan 02]: GET /api/activity is ONE combined endpoint ({tasks,reviews,stats}) so Phase 11 issues ONE TanStack query with ONE loading state; degradation rides in reviews.state and the whole response is always 200 (D-01, REVIEWS-04). GATE 1 (github_integration != 'on') short-circuits to reviews.state='disabled' with zero gh spawns before any aggregateReviews call.
-- [Phase 10]: [Phase 10/Plan 02]: aggregateReviews uses errgroup (SetLimit 5, promoted indirect→direct v0.20.0) with per-repo 12s timeout; closures return nil on EVERY outcome so a degrade rides in the per-repo state and NEVER cancels the group (Pitfall 4). The reviews WINDOW FILTER compares time.Time-vs-time.Time via parseActivityTime — never a string compare across the ms cutoff vs second-precision gh closedAt (REVIEWS-01/STATS-01). Two cutoff representations (cutoffStr ms-ISO for lexical SQL, cutoffTime time.Time for reviews) derive from one now.Add(-window).
+- [Phase ?]: [Phase 10 / Plan 03]: parseActivityTime is the shared mismatched-precision ISO parser (tries ms layout '2006-01-02T15:04:05.000Z' then bare-Z) — consumed by buildDurationSlices here AND plan 10-02's reviews-window cutoff; never string-compare timestamps across precisions. The .000Z layout requires the fraction, so the bare-Z fallback is what makes one comparison correct for reaper ms timestamps vs gh second-precision closedAt.
+- [Phase ?]: [Phase 10 / Plan 03]: buildDurationSlices implements the Open Q3 dwellInProgress semantic (USER-CONFIRMED) — in_review_at set -> dwellInProgress = inReview - inProgress; absent -> fallback done - inProgress. cycle is always done - inProgress; dwellInReview is always done - inReview.
+- [Phase ?]: [Phase 10 / Plan 03]: activity_helpers.go is stdlib-only (fmt/sort/strconv/strings/time) — no *sql.DB, no internal/github — so it ran as a wave-1 sibling parallel to plan 10-01. Negative-grep gate (internal/github==0, database/sql==0) is the purity contract; all gh/DB coupling lives in plan 10-02's handler.
+- [Phase 10]: [Phase 10 / Plan 02]: GET /api/activity is ONE combined endpoint ({tasks,reviews,stats}) so Phase 11 issues ONE TanStack query with ONE loading state; degradation rides in reviews.state and the whole response is always 200 (D-01, REVIEWS-04). GATE 1 (github_integration != 'on') short-circuits to reviews.state='disabled' with zero gh spawns before any aggregateReviews call.
+- [Phase 10]: [Phase 10 / Plan 02]: aggregateReviews uses errgroup (SetLimit 5, promoted indirect→direct v0.20.0) with per-repo 12s timeout; closures return nil on EVERY outcome so a degrade rides in the per-repo state and NEVER cancels the group (Pitfall 4). The reviews WINDOW FILTER compares time.Time-vs-time.Time via parseActivityTime — never a string compare across the ms cutoff vs second-precision gh closedAt (REVIEWS-01/STATS-01). Two cutoff representations (cutoffStr ms-ISO for lexical SQL, cutoffTime time.Time for reviews) derive from one now.Add(-window).
 - [Phase Phase 11]: Split Task 1 (tdd=true) into 3 commits: non-TDD parts (types+query) first, then RED→GREEN for formatDuration — keeps TDD discipline clean for the behavior-specified function — Only formatDuration has a behavior block (TDD candidate); wire types and query are declarations/glue code (Skip TDD per tdd.md guidance). Splitting avoids forcing type declarations into a test commit.
 - [Phase ?]: [Phase 11 / Plan 02]: Per-child collapsed-rail visibility — removed SidebarFooter's wholesale group-data-[collapsible=icon]:hidden and re-applied it per-child (Add project + Settings gear keep hiding; Activity stays reachable) rather than lifting Activity into a separate sidebar menu. Generalizes the project-row dual-surface idiom to footer utility buttons and satisfies D-02 (Activity always reachable in both states).
 - [Phase 11]: [Phase 11 / Plan 03]: Non-nil-slice wire contract — Go nil slices marshal to JSON null, violating the ActivityTask[]/ReviewDoneSummary[] contract the frontend iterates without null guards (empty-instance black page). Canonical fix is backend `make([]T, 0)` / `[]T{}` on every path (happy-empty, query-error, gate-disabled, settings-error, empty-repos, all-filtered); frontend `?? []` guards are defense-in-depth. The regression test asserts on RAW body bytes (`"tasks":[]` / `"prs":[]`) because json.Unmarshal accepts null for a slice — a decoded `len==0` check cannot catch a nil-slice regression.
@@ -126,6 +155,37 @@ Last activity: 2026-08-25 — Milestone v1.12 completed and archived
 - [Phase Phase 12]: [Phase 12 / Plan 02]: ZeroDayStub passed as a function reference (shape={ZeroDayStub}) rather than an element — RESEARCH documents both as equivalent; the function form is type-safe against recharts BarShapeProps (the element form would require Partial weakening). Same D-05 zero-day-stub behavior.
 - [Phase Phase 12]: [Phase 12 / Plan 02]: bucketByDay(now) defaults to Date.now() internally; ActivityChart does not pass now — buckets recomputed every render from useActivity data, so scope/window change rebuckets without a new fetch (Phase 10 D-01).
 - [Phase ?]: [Phase 12.1 / Plan 01]: scopeResolved computed via useMemo over [activeWorkspaceId] (not the audit state+effect snippet) — avoids the react-hooks/set-state-in-effect lint-debt class; effective Activity scope computed via useMemo over [savedScope, workspaces, projects] mirroring useActiveWorkspace.tsx:57-66 so D-06 (do not persist the demotion) is structurally satisfied (the useMemo returns the literal global without calling any setter)
+- [Phase ?]: [Phase 13 / Plan 01]: Two-migration split (00017 plain transaction + 00018 NO TRANSACTION rebuild) — keeps the FK-off discipline scoped to the one migration that needs it; the exact split the research rehearsal validated
+- [Phase ?]: [Phase 13 / Plan 01]: global_task seed via SELECT 1, id FROM agents WHERE is_default = 1 (never a literal id) — the default flag is movable on real installs; FK ON DELETE RESTRICT is the DB backstop behind the 13-02 handler guard
+- [Phase ?]: [Phase 13 / Plan 01]: tmux scope XOR CHECK spelling (task_id IS NULL) = (scope = 'global') with both rejection directions test-asserted — inverted or OR spellings fail loudly or protect nothing
+- [Phase 13 / Plan 02]: Sweep fix shipped as the research-verified subquery form (WHERE scope='global' OR task_id IN (SELECT id FROM tasks)); the LEFT-JOIN equivalent deliberately not used (planner resolution) — Both shapes verified equivalent on real data; the subquery form is what the research validated
+- [Phase 13 / Plan 02]: The agents delete-guard 409 message is count-free ('reassign the Scratchpad agent first') — the singleton references exactly one agent, always; D-09 locked string, the 00017 FK RESTRICT stays the backstop
+- [Phase 13 / Plan 02]: TestBackfillAgents wipe simulation updated to drop the global_task singleton first — under 00017 the raw agent DELETE is correctly refused by ON DELETE RESTRICT; BackfillGlobalTask re-arms the row next boot
+- [Phase ?]: Phase 14/02: real-binary curl smoke isolates via env (HOME=sandbox + temp --db + free 127.0.0.1 port) rather than containers — every ~-relative resolution follows HOME, which is the exact fresh-install production contract
+- [Phase ?]: Phase 14/02: the managed/clone PUT variant is excluded from the curl smoke (seam-covered by 14-01 fakes; a live gh clone would be network-flaky) — reattach/no-reclone is instead proven in-package by TestPutGlobalConfigHistory
+- [Phase ?]: Phase 14/02: SC3's settable half demonstrated with agent_id=2 (opencode seed) so the agent summary observably changes engine — a same-id no-op PUT could not prove the JOIN reflects the write
+- [Phase ?]: [Phase 15 / Plan 01]: wrapInputForWrite delimiters fixed to the xterm spec (ESC[200~/ESC[201~) — the original ESC[2004~/ESC[2014~ confused the ?2004 MODE number with the paste DELIMITERS, leaking a stray '~' into readline command lines (every plain-bash input-endpoint submission parsed as '~<cmd>'); exposed by the cwd-proof test, TestInput_Happy was latently red
+- [Phase ?]: [Phase 15 / Plan 01]: deriveGlobalState/globalLiveBlockers disjoint-by-name resolution of OQ1 — KindAgent counts only under live.agent, TmuxName-empty bash only under live.bash, minted tabs only under live.tmux; blockers dedupe engine sessions against tmux rows by name so each live surface appears once
+- [Phase ?]: [Phase 16 / Plan 01]: ApiErrorReason exported as a named interface on client.ts so 16-03's Change-root dialog imports the exact {kind, target} shape it renders verbatim (D-45 mechanics — additive field, single-message callers untouched)
+- [Phase ?]: [Phase 16 / Plan 01]: GlobalConfig.agent.engine typed as plain string mirroring the Go wire (claude|custom|opencode) — the stale types.ts Agent.engine union deliberately NOT widened (Pitfall 2; deferred to Phase 17)
+- [Phase ?]: [Phase 16 / Plan 01]: GINT-01/GVIEW-01 left unchecked in REQUIREMENTS.md — this plan ships the wire/data halves per its success criteria; the requirements close when 16-02 lands the /global route + Phase 17 UAT
+- [Phase 16]: 16-02: AgentTab task-branch worktree metadata reads the shared ["task", id] cache via useTask (NaN-disabled on global) — keeps the locked AgentTabScope shape and scope/description/seed prop surface; global branch symmetrically reads useGlobal() (research Pattern 4) — The plan locks the scope type and documents the prop surface without naming a worktree-prop source; the cached-query read preserves byte-for-byte task behavior (TaskPage resolved the query before mounting the tab) with zero new fetches
+- [Phase 16]: 16-02: keepExited accumulator uses adjust-state-during-render (AddProjectDialog prevOpen tracker, research Pitfall 8) instead of TaskPage's effect idiom — new files must lint clean in isolation — The copied wholesale effect trips react-hooks/set-state-in-effect, violating the plan's own eslint-clean acceptance gate; the guarded render-phase union is behaviorally identical and converges
+- [Phase 16]: 16-03: Clear root placed in the DialogFooter with sm:mr-auto (destructive variant, left of Cancel/Save) — resolves the UI-SPEC planner-discretion placement to the footer-left slot
+- [Phase 16]: 16-03: the 409 error box is one element (message + reasons ul) rendered below the active input for both Save-root and Clear-root failures — keeps the exactly-one-of help/error idiom while guaranteeing clear-root 409s surface since the dialog stays open on failure
+- [Phase ?]: 17-01: real-binary E2E isolates the tmux socket via a sandbox PATH wrapper — production's tmux spawn env allow-list (TMUX/TMUX_PANE leak scrub) drops TMUX_TMPDIR, so tabs would land on the user's real socket while probes honor the sandbox; the wrapper re-arms it for every server-side invocation and the production seam is deferred to 17-03's D-63 env work
+- [Phase ?]: 17-01: fake-claude gained an additive --version fast path (before the recorders) — serve's boot-time quota.DetectVersion probe would otherwise hang ~300s on the stub's orphaned sleep grandchild holding the probe's stdout pipe; no existing test passes --version
+- [Phase ?]: 17-01: real-binary harness captures server output in FILES never pipes/buffers — the daemonized tmux server inherits stdio and holds the pipe open, deadlocking cmd.Wait on an already-dead process
+- [Phase 17]: 17-02: leak checks on path-carrying bodies assert decoded row fields, not raw bytes — t.TempDir embeds the test name and 'TestGlobalNoLeak' contains 'Global', so raw-byte negative checks false-positive on every list surface; the raw-bytes posture is kept for Activity (path-free body)
+- [Phase 17]: 17-02: the MCP orphaned+global row is locked as FILTERED by the D-13 operable-ids contract (id="" rows are SPA reattach affordances, scope-agnostic) — the plan's 'survives the passthrough' wording contradicted the shipped filter and the plan forbids production changes; the LIVE global row is the honest-direction surface (labels intact, never 404)
+- [Phase 17]: 17-02: interlock fake clones need origin/HEAD + a committed clean tree (not the plain init+remote-add fakeGitClone) or the gated project delete 409s on the conservative DefaultBranch blocker — the richer shape keeps Direction 1 at 204
+- [Phase ?]: 17-03: D-63 root-caused as production env-inheritance — the custom/opencode spawn arm now strips inherited KAMACU_SESSION_ID/KAMACU_HOOK_TOKEN/KAMACU_HOOK_BASE from os.Environ() (stripKamacuEnv) before the opencode gate re-injects its own; the parent's hook token (a secret) no longer propagates into custom-agent children under nested Kamacu (T-17-08 mitigated)
+- [Phase ?]: 17-03: TestCustomEngineDoesNotGetHookEnv self-exports the KAMACU_ trio (os.Setenv + t.Cleanup restore) so the D014 absence assertion holds in EVERY environment, not just clean shells
+- [Phase ?]: 17-03: PTY marker-wait deadlines raised 2s->10s in TestSpawnPumpFillsRing + TestInput_Happy_WritesAndAppendsCR (17-01/17-02 deferred items 2/3, the cross-package host-load flake class); polls return on condition so only the failure path gets headroom
+- [Phase ?]: 17-03: Agent.engine union widened to claude|custom|opencode + TaskPage isClaudeAgent flipped to strict === 'claude' (D-62); BoardPage.tsx:21-22 carries the identical stale predicate — recorded as the known consistency site for future scoping (out of contract this phase)
+- [Phase 17]: 17-04: the E2E harness gained a test-only realHomeEnv posture knob (REAL HOME + inherited XDG, sandboxed TMUX_TMPDIR/--db/root) — the opencode leg's mandated posture was unreachable through childEnv() as shipped, and duplicating start() would violate the no-duplicated-spawn-logic criterion; the honest consequence (boot's idempotent plugin install may refresh the user's real kamacu-managed file) is documented in-file — 17-04: the E2E harness gained a test-only realHomeEnv posture knob (REAL HOME + inherited XDG, sandboxed TMUX_TMPDIR/--db/root) — the opencode leg's mandated posture was unreachable through childEnv() as shipped, and duplicating start() would violate the no-duplicated-spawn-logic criterion; the honest consequence (boot's idempotent plugin install may refresh the user's real kamacu-managed file) is documented in-file
+- [Phase 17]: 17-04: the D-54 opencode refusal needs the D-33 root re-PUT between clear and resume (a bare post-clear resume returns 'global root not configured' first) — 17-01's step-10 precedent applied to the opencode branch; the captured ses_ id is additionally read from the temp DB in the quiescent window so the resume argv asserts the EXACT id (HTTP resumable flip stays the primary observable) — 17-04: the D-54 opencode refusal needs the D-33 root re-PUT between clear and resume (a bare post-clear resume returns 'global root not configured' first) — 17-01's step-10 precedent applied to the opencode branch; the captured ses_ id is additionally read from the temp DB in the quiescent window so the resume argv asserts the EXACT id (HTTP resumable flip stays the primary observable)
+- [Phase 17]: 17-04: 17-UAT.md authored-pending in the 16-UAT shape — six locked flows, verbatim locked strings kept unwrapped on one line (grep gates are line-based), 'No root configured yet.' rides flow 1's clear ending, D-12 decision slot defaults KEEP; TestGlobalSessionPlainBashSpawn's first marker-flake recurrence logged as deferred-items item 4 (not fixed — scope boundary) — 17-04: 17-UAT.md authored-pending in the 16-UAT shape — six locked flows, verbatim locked strings kept unwrapped on one line (grep gates are line-based), 'No root configured yet.' rides flow 1's clear ending, D-12 decision slot defaults KEEP; TestGlobalSessionPlainBashSpawn's first marker-flake recurrence logged as deferred-items item 4 (not fixed — scope boundary)
 
 ## Operator Next Steps
 
@@ -136,3 +196,4 @@ Last activity: 2026-08-25 — Milestone v1.12 completed and archived
 ### Roadmap Evolution
 
 - Phase 12.1 inserted after Phase 12: Address Activity tech debt (WR-01..03) (URGENT)
+- v1.13 roadmap created 2026-08-25: Phases 13–17, 19/19 requirements mapped

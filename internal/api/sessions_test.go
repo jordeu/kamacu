@@ -651,7 +651,9 @@ func newTmuxSessionServer(t *testing.T, c tmux.Client) (*httptest.Server, *sessi
 // matches want — new-session under the PTY needs a beat to start the server.
 func awaitHasSession(t *testing.T, c tmux.Client, name string, want bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	// 20s budgets the D-14 stop path (SIGTERM → 5s grace → SIGKILL) plus
+	// tmux server teardown under host load (deferred item 4 class).
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		alive, err := c.HasSession(context.Background(), name)
 		if err == nil && alive == want {
@@ -2112,10 +2114,11 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 
 // TestInput_Happy_WritesAndAppendsCR is the POST /api/sessions/{id}/input
 // happy path: a known live session id + {"message":"echo qsf-input-marker"}
-// returns 200 {"bytes_written":N} where N == len(message)+11 (the message
-// wrapped in bracketed paste markers — 5 prefix bytes + body + 5 suffix
-// bytes — as ONE WriteInput call, then a standalone "\r" submit key as a
-// SECOND WriteInput call), AND the marker actually reaches the PTY —
+// returns 200 {"bytes_written":N} where N == len(message)+13 (the message
+// wrapped in bracketed paste markers — 6 prefix bytes (ESC[200~) + body +
+// 6 suffix bytes (ESC[201~) — as ONE WriteInput call, then a standalone
+// "\r" submit key as a SECOND WriteInput call), AND the marker actually
+// reaches the PTY —
 // verified by polling the output endpoint. Proves WriteInput was called, not
 // just that 200 returned. (See TestWrapInputForWrite for the byte-exact
 // two-write + bracket assertion — bash's cooked-mode line discipline makes
@@ -2147,7 +2150,12 @@ func TestInput_Happy_WritesAndAppendsCR(t *testing.T) {
 
 	// Round-trip: the marker must appear in the PTY output (PTY echoes the
 	// typed line AND echo prints it again, so Contains is sufficient).
-	deadline := time.Now().Add(2 * time.Second)
+	// D-63 baseline: 10s headroom (was 2s) — this poll has flaked twice
+	// under `go test ./...` cross-package host load (17-01/17-02 deferred
+	// items #2/#3; the marker arrives in well under a second when quiet).
+	// The loop returns as soon as the marker appears, so the budget only
+	// extends the failure path.
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output")
 		if gstatus != http.StatusOK {
@@ -2245,7 +2253,7 @@ func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 // TestWrapInputForWrite is the byte-exact regression guard for the
 // POST /api/sessions/{id}/input TWO-WRITE contract. The input handler calls
 // wrapInputForWrite to obtain an ORDERED pair of WriteInput payloads — the
-// body wrapped in ANSI bracketed paste markers (ESC[2004<body>ESC[2014)
+// body wrapped in ANSI bracketed paste markers (ESC[200~<body>ESC[201~)
 // first, then a single "\r" submit key — and writes them as two separate
 // sess.WriteInput calls.
 //
@@ -2274,8 +2282,8 @@ func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
 // a paste and never submitted.
 func TestWrapInputForWrite(t *testing.T) {
 	const (
-		pasteStart = "\x1b[2004~" // ESC[2004~ — bracketed paste start
-		pasteEnd   = "\x1b[2014~" // ESC[2014~ — bracketed paste end
+		pasteStart = "\x1b[200~" // ESC[200~ — bracketed paste start (6 bytes)
+		pasteEnd   = "\x1b[201~" // ESC[201~ — bracketed paste end (6 bytes)
 	)
 	// wantBody is the trimmed body wrapped in bracketed paste markers.
 	wrap := func(s string) string { return pasteStart + s + pasteEnd }
@@ -2310,9 +2318,11 @@ func TestWrapInputForWrite(t *testing.T) {
 				t.Errorf("submit key = %q (%d bytes), want exactly \"\\r\" (0x0d, 1 byte)", gotSubmit, len(gotSubmit))
 			}
 			// The body MUST be wrapped in the bracketed paste markers: it
-			// starts with ESC[2004 and ends with ESC[2014. Dropping either
+			// starts with ESC[200~ and ends with ESC[201~. Dropping either
 			// bracket defeats the heuristic bypass — the load-bearing fix
-			// from 260728-t4c.
+			// from 260728-t4c. (The delimiters are 200/201 per the xterm
+			// spec; 2004 is the MODE number — the original constants used it
+			// by mistake and leaked a stray '~' into readline command lines.)
 			if !strings.HasPrefix(gotBody, pasteStart) {
 				t.Errorf("body %q missing bracketed-paste start %q", gotBody, pasteStart)
 			}

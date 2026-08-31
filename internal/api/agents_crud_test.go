@@ -230,6 +230,50 @@ func TestAgentDeleteInUse(t *testing.T) {
 	}
 }
 
+// TestAgentDeleteInUseByGlobal proves the global_task.agent_id reference
+// blocks agent deletion 409 with the locked D-09 string (count-free — the
+// singleton references exactly one agent, always), and that moving the
+// reference away unblocks the delete (block-until-reassigned). The friendly
+// COUNT guard runs ahead of the 00017 ON DELETE RESTRICT backstop.
+func TestAgentDeleteInUseByGlobal(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	_, created := doJSON(t, "POST", srv.URL+"/api/agents",
+		map[string]string{"name": "Scratch", "command": "x"})
+	agentID := int64(created["id"].(float64))
+
+	// Point the singleton at the custom agent directly (no global config API
+	// exists until Phase 14; the FK row is the delete handler's only input).
+	if _, err := db.Exec(`UPDATE global_task SET agent_id = ? WHERE id = 1`, agentID); err != nil {
+		t.Fatalf("point global_task at custom agent: %v", err)
+	}
+
+	// Referenced -> 409 with the exact D-09 message.
+	status, out := doJSON(t, http.MethodDelete, srv.URL+"/api/agents/"+itoa(agentID), nil)
+	if status != http.StatusConflict {
+		t.Errorf("delete agent referenced by global_task: status=%d, want 409", status)
+	}
+	if msg, _ := out["error"].(string); msg != "reassign the Scratchpad agent first" {
+		t.Errorf("409 body error = %q, want the D-09 string %q", msg, "reassign the Scratchpad agent first")
+	}
+
+	// Reassigned back to the default agent -> the same delete succeeds 204
+	// (block-until-reassigned semantics).
+	if _, err := db.Exec(
+		`UPDATE global_task SET agent_id = (SELECT id FROM agents WHERE is_default = 1) WHERE id = 1`,
+	); err != nil {
+		t.Fatalf("reassign global_task to default agent: %v", err)
+	}
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/agents/"+itoa(agentID), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE after reassign: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("delete after reassign: status=%d, want 204", resp.StatusCode)
+	}
+}
+
 // TestAgentSetDefault proves the default flag moves to the target and the
 // exactly-one invariant holds.
 func TestAgentSetDefault(t *testing.T) {
