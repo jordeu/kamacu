@@ -376,6 +376,97 @@ func TestDiffManualTaskUnchangedAlongsidePR(t *testing.T) {
 	}
 }
 
+// TestDiffManagedTaskUsesOriginDefault (CKOUT-02 parity): a MANUAL task on a
+// MANAGED project diffs against origin/main — fetched fresh at request time —
+// so the tab shows exactly what a PR against the default branch will show.
+// Origin advancing AFTER task creation must be chased by the diff-open fetch,
+// and the stale local main must never win.
+func TestDiffManagedTaskUsesOriginDefault(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newDiffServerDB(t)
+	origin, clone := makeOriginAndClone(t)
+	pid := insertProjectRow(t, db, clone, true) // managed
+
+	body := createTask(t, srv, pid, "Fresh Diff")
+	id := taskID(t, body)
+	wtPath, _ := body["worktree_path"].(string)
+	if wtPath == "" {
+		t.Fatalf("no worktree_path: %v", body)
+	}
+	// A task change, so the diff is non-empty.
+	if err := os.WriteFile(filepath.Join(wtPath, "taskchange.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write taskchange.txt: %v", err)
+	}
+
+	// Origin advances AFTER task creation; the diff-open fetch must chase it.
+	newTip := advanceOrigin(t, origin)
+
+	status, dbody := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d/diff", srv.URL, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET managed diff status = %d, want 200; body=%v", status, dbody)
+	}
+	if base, _ := dbody["base"].(string); base != "origin/main" {
+		t.Errorf("base = %q, want origin/main (managed: diff exactly what the PR will show)", base)
+	}
+	if got := cloneOriginMainSHA(t, clone); got != newTip {
+		t.Errorf("clone origin/main = %s, want fetched tip %s (diff-open fetch did not run)", got, newTip)
+	}
+	// Sanity: the task's own change is in the diff (merge-base = the branch's
+	// fork point, three-dot semantics — same as GitHub Files-changed).
+	files, _ := dbody["files"].([]any)
+	found := false
+	for _, f := range files {
+		fm, _ := f.(map[string]any)
+		if p, _ := fm["path"].(string); p == "taskchange.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("taskchange.txt missing from managed diff; files=%v", dbody["files"])
+	}
+}
+
+// TestDiffFolderTaskKeepsLocalBase: a FOLDER project's manual diff keeps the
+// LOCAL default branch as its base even though origin advanced — the
+// best-effort diff-open fetch refreshes origin/main for the merge-base, but
+// folder projects never rebase their base resolution onto the remote ref
+// (that is the managed path's behavior).
+func TestDiffFolderTaskKeepsLocalBase(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newDiffServerDB(t)
+	origin, clone := makeOriginAndClone(t)
+	pid := insertProjectRow(t, db, clone, false) // folder
+
+	body := createTask(t, srv, pid, "Local Diff")
+	id := taskID(t, body)
+	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+		t.Fatalf("no worktree_path: %v", body)
+	}
+
+	newTip := advanceOrigin(t, origin)
+
+	status, dbody := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d/diff", srv.URL, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET folder diff status = %d, want 200; body=%v", status, dbody)
+	}
+	if base, _ := dbody["base"].(string); base != "main" {
+		t.Errorf("base = %q, want main (folder: local default branch stays the base)", base)
+	}
+	// The diff-open fetch is best-effort for folder projects too — it only
+	// refreshes the remote-tracking ref for the merge-base.
+	if got := cloneOriginMainSHA(t, clone); got != newTip {
+		t.Errorf("clone origin/main = %s, want fetched tip %s (diff-open fetch did not run)", got, newTip)
+	}
+}
+
 func TestDiffMissingWorktreeDir(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

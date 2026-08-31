@@ -80,10 +80,13 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 // On git failure: UPDATE worktree_error only; returns the git error so the
 // caller can populate the response without re-reading.
 //
-// managed (CKOUT-02/D-04) gates a best-effort default-branch fetch before the
-// base is resolved: a managed checkout (the app cloned and owns the dir) starts
-// new work from the freshest origin tip; a folder project (managed=false) keeps
-// ResolveBase's D-24 "no network, ever" guarantee untouched (Pitfall 5).
+// managed (CKOUT-02/D-04) selects the base resolution: a managed checkout
+// (the app cloned and owns the dir) resolves its base via ResolveBaseFresh —
+// best-effort default-branch fetch, then origin/<default> — so new work
+// starts from the freshest origin tip AND the task's diff tab (which uses the
+// same resolution) shows exactly what a PR against the default branch will
+// show; a folder project (managed=false) keeps ResolveBase's D-24 "no
+// network, ever" guarantee untouched (Pitfall 5).
 func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, taskID int64, title, repoPath string, managed bool) (branch, path string, provErr error) {
 	slug := worktree.Slug(title)
 
@@ -127,25 +130,21 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 	// never a crashed create.
 	err = settings.CheckRefFormat(wctx, branch)
 	if err == nil {
+		var base string
 		if managed {
 			// CKOUT-02/D-04: start new work from the freshest default branch.
-			// This is the SECOND deliberate, scoped exception to worktree's
-			// never-fetch invariant (the first is PR-head/base fetch in
-			// CheckoutPR/FetchRef): a managed checkout's whole point is that
-			// Kamacu owns the dir and keeps it current.
-			//
-			// Best-effort (D-05): a failed fetch is DISCARDED — provisioning
-			// proceeds from the local base and NEVER blocks task creation. The
-			// error is deliberately NOT routed through the D-25
-			// worktree_error/fail path; it is a freshness convenience, not a
-			// provisioning gate. Managed-only — folder projects skip this entirely
-			// and keep ResolveBase's D-24 "no network, ever" guarantee byte-for-byte.
-			if defaultBranch, derr := defaultBranchName(wctx, wt, repoPath); derr == nil {
-				_ = wt.FetchRef(wctx, repoPath, defaultBranch) // ignore error (best-effort, D-05)
-			}
+			// ResolveBaseFresh carries the SECOND deliberate, scoped exception
+			// to worktree's never-fetch invariant (the first is PR-head/base
+			// fetch in CheckoutPR/FetchRef): a managed checkout's whole point
+			// is that Kamacu owns the dir and keeps it current. The fetch
+			// inside is best-effort (D-05) — a failure is discarded and the
+			// local ResolveBase chain answers, so task creation NEVER blocks
+			// on the network. Folder projects never reach this call and keep
+			// D-24 byte-for-byte.
+			base, err = wt.ResolveBaseFresh(wctx, repoPath)
+		} else {
+			base, err = wt.ResolveBase(wctx, repoPath)
 		}
-		var base string
-		base, err = wt.ResolveBase(wctx, repoPath)
 		if err == nil {
 			err = wt.Create(wctx, repoPath, branch, path, base)
 		}
@@ -166,17 +165,6 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 		slog.Error("recording worktree error on task", "task", taskID, "error", dbErr)
 	}
 	return "", "", err
-}
-
-// defaultBranchName resolves the managed clone's default branch name (e.g.
-// "main") for the CKOUT-02 pre-task fetch, reading the same origin/HEAD
-// symbolic ref ResolveBase reads (refs/remotes/origin/HEAD, minus the
-// "origin/" prefix). An error means origin/HEAD is absent: the caller skips the
-// fetch (do NOT fall back to a costly all-refs `fetch origin` — D-04 wants the
-// targeted default branch; a skipped fetch is fine, ResolveBase still works on
-// the local base).
-func defaultBranchName(ctx context.Context, wt *worktree.Service, repo string) (string, error) {
-	return wt.DefaultBranch(ctx, repo)
 }
 
 // list handles GET /api/tasks — the UNSCOPED task list. It is the bridge

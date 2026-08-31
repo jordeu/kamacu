@@ -192,6 +192,57 @@ func TestResolveBaseOriginHeadWithoutLocalBranch(t *testing.T) {
 	}
 }
 
+// TestResolveBaseFreshPrefersFetchedOriginTip (CKOUT-02 regression): on a
+// managed clone whose origin advanced after clone time, ResolveBaseFresh
+// fetches the default branch and returns origin/main — the FETCHED tip — not
+// the stale local main that ResolveBase's first leg prefers. This is the
+// exact pre-fix bug: the pre-task fetch ran, then base resolution ignored it
+// and branched off the clone-time tip.
+func TestResolveBaseFreshPrefersFetchedOriginTip(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	src := makeRepo(t)
+	clone := cloneRepo(t, src) // origin/HEAD set, local "main" at clone tip
+
+	// Advance origin AFTER the clone; both local main and origin/main are stale.
+	if err := os.WriteFile(filepath.Join(src, "file.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("write src file.txt: %v", err)
+	}
+	gitCmd(t, src, "add", "file.txt")
+	gitCmd(t, src, "commit", "-m", "c2")
+	newTip := strings.TrimSpace(gitCmd(t, src, "rev-parse", "HEAD"))
+
+	got, err := svc.ResolveBaseFresh(ctx, clone)
+	if err != nil {
+		t.Fatalf("ResolveBaseFresh: %v", err)
+	}
+	if got != "origin/main" {
+		t.Errorf("ResolveBaseFresh = %q, want %q (fetched remote-tracking ref, not stale local main)", got, "origin/main")
+	}
+	// The returned commit-ish must resolve to the FETCHED tip, proving a new
+	// branch based on it carries the latest origin work.
+	if sha := strings.TrimSpace(gitCmd(t, clone, "rev-parse", got)); sha != newTip {
+		t.Errorf("rev-parse %q = %s, want fetched tip %s", got, sha, newTip)
+	}
+}
+
+// TestResolveBaseFreshFallsBackToLocalChain: no origin/HEAD (not a clone) →
+// the best-effort fetch is discarded and the local ResolveBase chain answers
+// — folder-posture degradation, never an error.
+func TestResolveBaseFreshFallsBackToLocalChain(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	repo := makeRepoOn(t, "trunk") // no remote → no origin/HEAD
+
+	got, err := svc.ResolveBaseFresh(ctx, repo)
+	if err != nil {
+		t.Fatalf("ResolveBaseFresh: %v", err)
+	}
+	if got != "trunk" {
+		t.Errorf("ResolveBaseFresh = %q, want %q (local chain fallback)", got, "trunk")
+	}
+}
+
 func TestResolveBaseLocalMainOrMaster(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(t.TempDir())
