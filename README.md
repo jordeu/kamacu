@@ -5,7 +5,7 @@ tasks. The name is an acronym: **KA**nban **M**ulti-**A**gent **C**ontrol **U**n
 Kamacu is the control unit that drives your kanban of parallel agents, and the
 ember-spark logo is that animating force made visible.
 
-![Kamacu board with a task's agent terminal](docs/kamacu-board.png)
+![Kamacu agent view of a task](docs/kamacu_agent_view.png)
 
 ## What it is
 
