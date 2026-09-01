@@ -1,8 +1,8 @@
 # Kamacu
 
 A local-only web app for organizing Claude Code agent sessions around projects and
-tasks. The name comes from the Quechua _kamaq / kamacu_ — "the one who animates, the
-giver of life-force." Kamacu is the thing that animates your parallel agents, and the
+tasks. The name is an acronym: **KA**nban **M**ulti-**A**gent **C**ontrol **U**nit —
+Kamacu is the control unit that drives your kanban of parallel agents, and the
 ember-spark logo is that animating force made visible.
 
 ![Kamacu board with a task's agent terminal](docs/kamacu-board.png)
@@ -12,7 +12,8 @@ ember-spark logo is that animating force made visible.
 A left sidebar lists your projects, each pointing at a local git repo checkout. The main
 area is a kanban board of tasks. Click a task to expand a full-page view with the main
 agent session — the real `claude` CLI running in a PTY, rendered live in a browser
-terminal — plus optional tabs for extra bash sessions.
+terminal — plus optional tabs for extra bash sessions. Claude Code is the default agent;
+other CLI agents can be configured per project.
 
 It runs entirely on your machine, single user, accessed from a browser at localhost. The
 whole point is one place to see and drive all your agent work: every task gets its own
@@ -41,8 +42,9 @@ make build      # builds the React frontend, then the Go binary → bin/kamacu
 `make build` runs the Vite production build and embeds the output into a single
 `bin/kamacu` binary — no separate frontend server to run in production.
 
-For frontend development with hot-reload, run the Vite dev server and let it proxy `/api`
-and `/ws` through to a locally running backend:
+For frontend development with hot-reload, run the Vite dev server and let it proxy
+`/api` (JSON API and WebSocket terminal streams) through to a locally running
+backend:
 
 ```sh
 make dev-backend    # Go server on its own port
@@ -63,7 +65,9 @@ Kamacu drives one loop, from an idea to a reviewed change:
    keeps running server-side and replays on reconnect.
 4. **Review** — watch the board as a dispatcher: status dots tell you which agents are
    working, idle, or waiting on you. When an agent is done, review the diff against the
-   base branch, then merge or open a PR from your terminal.
+   base branch, then merge or open a PR. Incoming PRs work too: link a repo and Kamacu
+   lists PRs awaiting your review, each one opening in its own detached PR-head
+   worktree so you can review and approve without leaving the board.
 
 ## Scope
 
