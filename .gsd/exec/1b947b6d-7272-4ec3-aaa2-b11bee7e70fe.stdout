@@ -1,7 +1,0 @@
---- FAIL: TestAgentList (0.02s)
---- FAIL: TestAgentCreate (0.02s)
---- FAIL: TestAgentDeleteUnused (0.03s)
-FAIL
-FAIL	kamacu/internal/api	87.242s
-FAIL
-EXIT=1
