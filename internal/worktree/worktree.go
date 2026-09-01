@@ -9,13 +9,15 @@
 //     modes (255 vs 128 observed) and stderr is chatty on success
 //     ("Preparing worktree…"), so neither is a signal.
 //   - This package NEVER deletes branches (D-34) and never fetches (D-24) —
-//     EXCEPT CheckoutPR/FetchRef and ResolveBaseFresh, deliberate scoped
-//     exceptions to the never-fetch invariant: (1) PR-head/PR-base retrieval
-//     (Phase 12, ARCHITECTURE §4) — a PR review's whole point is fetching
-//     someone else's branch; (2) ResolveBaseFresh (Phase 14, CKOUT-02/D-04)
-//     fetches origin's default branch and returns origin/<default> as the
-//     base for a MANAGED checkout — callers gate on the project's managed
-//     marker so folder projects keep D-24 byte-for-byte.
+//     EXCEPT CheckoutPR/FetchRef, ResolveBaseFresh, and FastForwardDefault,
+//     deliberate scoped exceptions to the never-fetch invariant: (1)
+//     PR-head/PR-base retrieval (Phase 12, ARCHITECTURE §4) — a PR review's
+//     whole point is fetching someone else's branch; (2) ResolveBaseFresh
+//     (Phase 14, CKOUT-02/D-04) fetches origin's default branch and returns
+//     origin/<default> as the base for a MANAGED checkout, and
+//     FastForwardDefault follows it with a local `fetch .` to fast-forward
+//     the local default branch to that same tip — callers gate both on the
+//     project's managed marker so folder projects keep D-24 byte-for-byte.
 package worktree
 
 import (
@@ -196,6 +198,58 @@ func (s *Service) ResolveBaseFresh(ctx context.Context, repo string) (string, er
 		}
 	}
 	return s.ResolveBase(ctx, repo)
+}
+
+// FastForwardDefault advances the local refs/heads/<defaultBranch> to the
+// fetched refs/remotes/origin/<defaultBranch> tip. ResolveBaseFresh bases new
+// task branches on origin/<default> and deliberately never prefers the local
+// branch — which therefore stays frozen at clone time unless something moves
+// it. This method is that something, and the point is the LOCAL readers: the
+// cleanup panel's unpushed counts resolve their base via ResolveBase
+// (local-first), so against a frozen tip they overcount every upstream
+// commit since the clone. Managed-only (gated by provisionWorktree, same
+// D-24 exception family as FetchRef) and STRICTLY non-destructive:
+//
+//   - No local <defaultBranch> → no-op nil (ResolveBaseFresh's origin/ leg
+//     covers that shape already).
+//   - origin/<defaultBranch> is not a DESCENDANT of the local tip
+//     (merge-base --is-ancestor fails: diverged history, an origin rewrite,
+//     or a git error — indistinguishable at exit-code granularity) → no-op
+//     nil. NEVER a force move; the local tip is left exactly where it is.
+//   - <defaultBranch> checked out at the repo root (the normal managed
+//     clone): `merge --ff-only origin/<defaultBranch>`. git itself is the
+//     safety gate — it advances branch+index+worktree atomically on a clean
+//     fast-forward and refuses outright ("local changes would be
+//     overwritten") rather than clobbering any local modification, so no
+//     pre-clean check is needed.
+//   - <defaultBranch> not the root's current branch (detached root or root
+//     on another branch): `fetch . <src>:refs/heads/<defaultBranch>` — the
+//     plain (non-'+') refspec makes git enforce ff-only natively, and the
+//     ref-only update touches no worktree files.
+//
+// Callers run it right AFTER ResolveBaseFresh, so the remote-tracking ref it
+// reads is the one that fetch just advanced (including a still-resolvable
+// tip from an earlier fetch when this provisioning's fetch failed). Real git
+// failures are returned for the caller to LOG only — this is branch hygiene,
+// never a provisioning gate (D-05 spirit).
+func (s *Service) FastForwardDefault(ctx context.Context, repo, defaultBranch string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := gitRun(ctx, repo, "show-ref", "--verify", "--quiet", "refs/heads/"+defaultBranch); err != nil {
+		return nil // no local default branch — nothing to advance
+	}
+	if _, err := gitRun(ctx, repo, "merge-base", "--is-ancestor",
+		"refs/heads/"+defaultBranch, "refs/remotes/origin/"+defaultBranch); err != nil {
+		return nil // not a fast-forward (or git error) — never force
+	}
+	if out, err := gitRun(ctx, repo, "symbolic-ref", "--short", "HEAD"); err == nil &&
+		strings.TrimSpace(out) == defaultBranch {
+		_, err := gitRun(ctx, repo, "merge", "--ff-only", "origin/"+defaultBranch)
+		return err
+	}
+	_, err := gitRun(ctx, repo, "fetch", ".",
+		"refs/remotes/origin/"+defaultBranch+":refs/heads/"+defaultBranch)
+	return err
 }
 
 // Create makes a worktree at path on branch, branching from base.

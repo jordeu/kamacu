@@ -85,8 +85,12 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 // best-effort default-branch fetch, then origin/<default> — so new work
 // starts from the freshest origin tip AND the task's diff tab (which uses the
 // same resolution) shows exactly what a PR against the default branch will
-// show; a folder project (managed=false) keeps ResolveBase's D-24 "no
-// network, ever" guarantee untouched (Pitfall 5).
+// show. The managed path then ALSO fast-forwards the clone's LOCAL default
+// branch to the fetched tip (FastForwardDefault, ff-only, best-effort), so
+// consumers that still read the local branch (the cleanup panel's unpushed
+// counts via ResolveBase) measure against the real tip instead of one frozen
+// at clone time; a folder project (managed=false) keeps ResolveBase's D-24
+// "no network, ever" guarantee untouched (Pitfall 5).
 func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, taskID int64, title, repoPath string, managed bool) (branch, path string, provErr error) {
 	slug := worktree.Slug(title)
 
@@ -142,6 +146,21 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 			// on the network. Folder projects never reach this call and keep
 			// D-24 byte-for-byte.
 			base, err = wt.ResolveBaseFresh(wctx, repoPath)
+			if err == nil {
+				// The branch base above comes from origin/<default>, but the
+				// clone's LOCAL default branch is still frozen at clone time
+				// (nothing else ever updates it) — local-reading consumers
+				// (the cleanup panel's unpushed counts via ResolveBase) would
+				// measure against that stale tip. Advance it to the
+				// just-fetched origin tip: ff-only inside, best-effort here
+				// (D-05) — a warn, never a block, never a worktree_error.
+				if defaultBranch, derr := wt.DefaultBranch(wctx, repoPath); derr == nil {
+					if fferr := wt.FastForwardDefault(wctx, repoPath, defaultBranch); fferr != nil {
+						slog.Warn("default-branch fast-forward failed; local branch stays at its current tip",
+							"repo", repoPath, "branch", defaultBranch, "error", fferr)
+					}
+				}
+			}
 		} else {
 			base, err = wt.ResolveBase(wctx, repoPath)
 		}
