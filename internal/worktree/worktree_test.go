@@ -793,6 +793,67 @@ func TestFetchRefError(t *testing.T) {
 	}
 }
 
+// TestFastForwardDefaultNotCheckedOut (CKOUT-02): when the default branch is
+// NOT the root's current branch, FastForwardDefault advances refs/heads/main
+// via the `fetch .` ref-only path — the ref moves to the fetched tip while
+// HEAD and the working tree stay untouched on the other branch.
+func TestFastForwardDefaultNotCheckedOut(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote := makeRepoOn(t, "main")
+	clone := cloneRepo(t, remote)
+
+	// Advance the remote and fetch, so origin/main is ahead of the clone.
+	if err := os.WriteFile(filepath.Join(remote, "file.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("write remote file.txt: %v", err)
+	}
+	gitCmd(t, remote, "add", "file.txt")
+	gitCmd(t, remote, "commit", "-m", "second")
+	tip := strings.TrimSpace(gitCmd(t, remote, "rev-parse", "HEAD"))
+	if err := svc.FetchRef(ctx, clone, "main"); err != nil {
+		t.Fatalf("FetchRef: %v", err)
+	}
+
+	// Move the root OFF main: the default branch is no longer checked out.
+	gitCmd(t, clone, "checkout", "-b", "other")
+
+	if err := svc.FastForwardDefault(ctx, clone, "main"); err != nil {
+		t.Fatalf("FastForwardDefault: %v", err)
+	}
+	if got := strings.TrimSpace(gitCmd(t, clone, "rev-parse", "refs/heads/main")); got != tip {
+		t.Errorf("refs/heads/main = %q, want fetched tip %q", got, tip)
+	}
+	if got := strings.TrimSpace(gitCmd(t, clone, "symbolic-ref", "--short", "HEAD")); got != "other" {
+		t.Errorf("root HEAD = %q, want other (HEAD must not move)", got)
+	}
+	// The ref-only update touched no files — the root still carries the
+	// pre-fetch content of file.txt.
+	if b, err := os.ReadFile(filepath.Join(clone, "file.txt")); err != nil || string(b) != "hello\n" {
+		t.Errorf("root file.txt = %q (err %v), want untouched %q", string(b), err, "hello\n")
+	}
+}
+
+// TestFastForwardDefaultNoLocalBranch (CKOUT-02): a repo with NO local
+// default branch (detached root, branch deleted — the shape ResolveBase's
+// origin/ leg handles) is a no-op nil, never an error and never a ref
+// creation.
+func TestFastForwardDefaultNoLocalBranch(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	remote := makeRepoOn(t, "main")
+	clone := cloneRepo(t, remote)
+
+	gitCmd(t, clone, "checkout", "--detach")
+	gitCmd(t, clone, "branch", "-D", "main")
+
+	if err := svc.FastForwardDefault(ctx, clone, "main"); err != nil {
+		t.Fatalf("FastForwardDefault with no local main: %v", err)
+	}
+	if got := strings.TrimSpace(gitCmd(t, clone, "branch", "--list", "main")); got != "" {
+		t.Errorf("branch --list main = %q, want empty (must not create branches)", got)
+	}
+}
+
 // entryByPath returns the parsed Entry whose Path (filepath.Clean-matched)
 // equals want, or fails the test.
 func entryByPath(t *testing.T, entries []Entry, want string) Entry {

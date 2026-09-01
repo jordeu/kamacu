@@ -192,6 +192,17 @@ func TestManagedTaskWorktreeFetchesLatest(t *testing.T) {
 	if sha := gitOut(t, clone, "rev-parse", branch); sha != newTip {
 		t.Errorf("task branch %s = %s, want fetched tip %s — branched from a stale base", branch, sha, newTip)
 	}
+
+	// FastForwardDefault's half: the clone's LOCAL main advanced to the same
+	// fetched tip — local-reading consumers (the cleanup panel's unpushed
+	// counts via ResolveBase) must not measure against a clone-time tip.
+	if got := gitOut(t, clone, "rev-parse", "main"); got != newTip {
+		t.Errorf("clone local main = %s, want fast-forwarded tip %s (local default branch never advanced)", got, newTip)
+	}
+	wtPath, _ := body["worktree_path"].(string)
+	if got := gitOut(t, wtPath, "rev-parse", "HEAD"); got != newTip {
+		t.Errorf("task worktree HEAD = %s, want origin tip %s (branch cut from a stale base)", got, newTip)
+	}
 }
 
 // TestFolderTaskWorktreeNoFetch (D-24): creating a task on a FOLDER project
@@ -222,8 +233,9 @@ func TestFolderTaskWorktreeNoFetch(t *testing.T) {
 
 // TestManagedFetchBestEffortDoesNotBlock (D-05): a managed project whose origin
 // is unreachable still provisions a worktree — the failed best-effort fetch is
-// discarded and ResolveBase proceeds from the local base. Task creation never
-// blocks on a failed fetch.
+// discarded and task creation never blocks on it. With a fresher tip already
+// fetched, the fast-forward must still run (it is NOT gated on the fetch's
+// success): the task branches from the freshest KNOWN tip.
 func TestManagedFetchBestEffortDoesNotBlock(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -231,8 +243,15 @@ func TestManagedFetchBestEffortDoesNotBlock(t *testing.T) {
 	origin, clone := makeOriginAndClone(t)
 	pid := insertProjectRow(t, db, clone, true) // managed → fetch attempted
 
+	// Pre-stage a fresher tip: advance origin, then fetch it MANUALLY in the
+	// clone — origin/main is now ahead while local main still lags.
+	newTip := advanceOrigin(t, origin)
+	gitIn(t, clone, "fetch", "origin", "main")
+
 	// Make origin unreachable: remove it. The clone's `fetch origin main` now
-	// fails, but provisioning must still succeed from the local base.
+	// fails, but provisioning must still succeed — and the fast-forward must
+	// still run (tasks.go: a previously fetched origin/<default> is the
+	// freshest KNOWN tip), branching the task from it.
 	if err := os.RemoveAll(origin); err != nil {
 		t.Fatalf("remove origin: %v", err)
 	}
@@ -243,8 +262,109 @@ func TestManagedFetchBestEffortDoesNotBlock(t *testing.T) {
 	if body["worktree_error"] != nil {
 		t.Errorf("worktree_error = %v, want null — a failed best-effort fetch must not block (D-05)", body["worktree_error"])
 	}
-	if wtPath, _ := body["worktree_path"].(string); wtPath == "" {
+	wtPath, _ := body["worktree_path"].(string)
+	if wtPath == "" {
 		t.Fatalf("worktree_path empty — a failed fetch blocked provisioning (D-05 violated): %v", body)
+	}
+
+	// The ff ran despite the failed fetch: local main advanced to the
+	// pre-fetched tip and the task branch sits on it. Pins the call-site
+	// ordering (FastForwardDefault is NOT gated on FetchRef's success).
+	if got := gitOut(t, clone, "rev-parse", "main"); got != newTip {
+		t.Errorf("clone local main = %s, want pre-fetched tip %s (ff skipped on a failed fetch)", got, newTip)
+	}
+	if got := gitOut(t, wtPath, "rev-parse", "HEAD"); got != newTip {
+		t.Errorf("task worktree HEAD = %s, want pre-fetched tip %s (branched from a stale local base)", got, newTip)
+	}
+}
+
+// TestManagedFastForwardSkippedWhenCloneDirty (CKOUT-02): a dirty managed
+// clone root makes `merge --ff-only` refuse (git's own no-clobber gate), so
+// the local branch is left untouched and the local modification survives
+// byte-for-byte — never destructive. The branch BASE is unaffected: it comes
+// from ResolveBaseFresh's origin/<default>, so the task still starts at the
+// fetched tip even though the ff was skipped.
+func TestManagedFastForwardSkippedWhenCloneDirty(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newTestServer(t)
+	origin, clone := makeOriginAndClone(t)
+	pid := insertProjectRow(t, db, clone, true)
+
+	localTip := gitOut(t, clone, "rev-parse", "main")
+	// Dirty the root with a modification that CONFLICTS upstream (file.txt is
+	// what advanceOrigin rewrites) — a fast-forward would have to overwrite it.
+	if err := os.WriteFile(filepath.Join(clone, "file.txt"), []byte("local edit\n"), 0o644); err != nil {
+		t.Fatalf("dirty clone root: %v", err)
+	}
+	newTip := advanceOrigin(t, origin)
+
+	body := createTask(t, srv, pid, "Dirty Root Work")
+	if body["worktree_error"] != nil {
+		t.Fatalf("worktree_error = %v, want null — a skipped ff must not block provisioning", body["worktree_error"])
+	}
+	wtPath, _ := body["worktree_path"].(string)
+	if wtPath == "" {
+		t.Fatalf("worktree_path empty — provisioning failed: %v", body)
+	}
+
+	// The fetch ran (origin/main advanced) and the task branches from that
+	// fetched tip (ResolveBaseFresh is blind to the dirty root), but the ff
+	// was refused: local main stays at its pre-fetch tip.
+	if got := cloneOriginMainSHA(t, clone); got != newTip {
+		t.Errorf("clone origin/main = %s, want fetched tip %s (fetch did not run)", got, newTip)
+	}
+	if got := gitOut(t, clone, "rev-parse", "main"); got != localTip {
+		t.Errorf("clone local main = %s, want untouched %s (ff forced under a dirty root)", got, localTip)
+	}
+	if got := gitOut(t, wtPath, "rev-parse", "HEAD"); got != newTip {
+		t.Errorf("task worktree HEAD = %s, want fetched tip %s (branch base must ignore the dirty root)", got, newTip)
+	}
+	// The local edit was not clobbered.
+	if b, err := os.ReadFile(filepath.Join(clone, "file.txt")); err != nil || string(b) != "local edit\n" {
+		t.Errorf("clone root file.txt = %q (err %v), want the preserved local edit", string(b), err)
+	}
+}
+
+// TestManagedFastForwardNeverForcesDivergedHistory (CKOUT-02): when the
+// clone's local main has DIVERGED from origin (local commit + independent
+// origin commit), the ff-only guard skips the update — local history is never
+// rewritten, never discarded — while the task still branches from the fetched
+// origin tip.
+func TestManagedFastForwardNeverForcesDivergedHistory(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newTestServer(t)
+	origin, clone := makeOriginAndClone(t)
+	pid := insertProjectRow(t, db, clone, true)
+
+	// Diverge: an independent commit in the clone root (tree stays clean —
+	// only the histories diverge) while origin advances separately.
+	if err := os.WriteFile(filepath.Join(clone, "local.txt"), []byte("diverged\n"), 0o644); err != nil {
+		t.Fatalf("write local.txt: %v", err)
+	}
+	gitIn(t, clone, "add", "local.txt")
+	gitIn(t, clone, "commit", "-m", "local divergence")
+	localTip := gitOut(t, clone, "rev-parse", "main")
+	newTip := advanceOrigin(t, origin)
+
+	body := createTask(t, srv, pid, "Diverged Work")
+	if body["worktree_error"] != nil {
+		t.Fatalf("worktree_error = %v, want null — a skipped ff must not block provisioning", body["worktree_error"])
+	}
+	wtPath, _ := body["worktree_path"].(string)
+	if wtPath == "" {
+		t.Fatalf("worktree_path empty — provisioning failed: %v", body)
+	}
+
+	if got := cloneOriginMainSHA(t, clone); got != newTip {
+		t.Errorf("clone origin/main = %s, want fetched tip %s (fetch did not run)", got, newTip)
+	}
+	if got := gitOut(t, clone, "rev-parse", "main"); got != localTip {
+		t.Errorf("clone local main = %s, want %s — a diverged history was force-moved (ff-only violated)", got, localTip)
+	}
+	if got := gitOut(t, wtPath, "rev-parse", "HEAD"); got != newTip {
+		t.Errorf("task worktree HEAD = %s, want fetched tip %s (branch base must be origin's, not the diverged local)", got, newTip)
 	}
 }
 
