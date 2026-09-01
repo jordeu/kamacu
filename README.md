@@ -1,7 +1,7 @@
 # Kamacu
 
 A local-only web app for organizing Claude Code agent sessions around projects and
-tasks. The name is an acronym: **K**Anban **M**ulti-**A**gent **C**ontrol **U**nit —
+tasks. The name is an acronym: **KA**nban **M**ulti-**A**gent **C**ontrol **U**nit —
 Kamacu is the control unit that drives your kanban of parallel agents, and the
 ember-spark logo is that animating force made visible.
 
