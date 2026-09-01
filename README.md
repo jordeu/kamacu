@@ -5,7 +5,7 @@ tasks. The name comes from the Quechua _kamaq / kamacu_ — "the one who animate
 giver of life-force." Kamacu is the thing that animates your parallel agents, and the
 ember-spark logo is that animating force made visible.
 
-![Kamacu board with a task's agent terminal](docs/kamacu-board.png)
+![Kamacu agent view of a task](docs/kamacu_agent_view.png)
 
 ## What it is
 
