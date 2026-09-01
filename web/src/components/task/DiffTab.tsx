@@ -141,7 +141,7 @@ export function DiffTab({ taskId }: { taskId: number }) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Totals bar is a FIXED header OUTSIDE the scroll pane below — nothing
             can scroll above it. Per-file headers pin to the scroll pane's top
             (DiffFileSection sticky top-0), tucked right under this bar. */}
@@ -202,7 +202,7 @@ export function DiffTab({ taskId }: { taskId: number }) {
 
         <div
           ref={scrollRef}
-          className="relative min-h-0 flex-1 overflow-y-auto"
+          className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
         >
           <div className="flex flex-col">
             {files.map((file) => (

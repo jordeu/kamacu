@@ -10,7 +10,11 @@ export interface AgentStatusEntry {
   stopRequested: boolean;
   resumable: boolean;
   prNumber: number | null; // null for source='manual' (D-15)
-  source: "manual" | "github_pr";
+  // "global" = the Scratchpad agent entry the server synthesizes since
+  // Phase 15 (agents.go — taskId 0, "Scratchpad"/"Global" labels). The only
+  // runtime branch on this field is the PR badge (=== "github_pr"), which a
+  // global value flows through harmlessly (Pitfall 7 audit).
+  source: "manual" | "github_pr" | "global";
   taskTitle: string; // tasks.title — bar row label (SBAR-10)
   projectName: string; // projects.name — bar row label (SBAR-10)
 }

@@ -4,7 +4,20 @@
 # --session-id; FAKE_CLAUDE_RESUME_FAIL mirrors the verified v2.1.173
 # missing-transcript failure (error text + exit 1). Preserves the 04-05
 # contract: bracketed-paste enable at startup and the SIGTERM -> exit 143 trap.
+# The --version fast path answers serve's boot-time quota probe
+# (quota.DetectVersion runs `<claude-bin> --version` once per process). It
+# exits BEFORE the recorders so the probe never clobbers the argv file, and
+# it must exit fast: the probe's 5s context kill only reaps this bash, so
+# the idle `sleep 300` below would otherwise hold the probe's stdout pipe
+# open and block server boot for the whole sleep (hit by the Phase 17
+# real-binary E2E; the in-process suites never boot the binary, so they
+# never see the probe).
+if [[ "$1" == "--version" ]]; then
+  echo "2.1.174-fake"
+  exit 0
+fi
 printf '%s\n' "$@" > "${FAKE_CLAUDE_ARGS_FILE:-/dev/null}"
+pwd > "${FAKE_CLAUDE_PWD_FILE:-/dev/null}"  # cwd proof for spawn tests (Phase 15)
 printf '\x1b[?2004h'           # bracketed paste on (like real claude)
 if [[ "$1" == "--resume" && -n "$FAKE_CLAUDE_RESUME_FAIL" ]]; then
   echo "No conversation found with session ID: $2"

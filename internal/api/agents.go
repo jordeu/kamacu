@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -59,9 +60,15 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 
 	// taskMeta carries the per-task DB columns the resumable derivation needs,
 	// plus the PR linkage (pr_number/source, D-15) joined onto every entry.
+	// engine + ocsid (M002/S03) drive the engine-branched resumable gate:
+	// opencode keys off the persisted opencode_session_id alone (NO transcript
+	// glob — opencode has no transcript files); claude keys off csid + transcript
+	// unchanged.
 	type taskMeta struct {
 		projectID   int64
+		engine      string
 		csid        sql.NullString
+		ocsid       sql.NullString
 		wtp         sql.NullString
 		prNumber    sql.NullInt64
 		source      string
@@ -90,8 +97,11 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for i, id := range order {
 			args[i] = id
 		}
-		rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, tasks.claude_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
-			FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id IN (`+placeholders+`)`, args...)
+		rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
+			FROM tasks
+			JOIN projects ON projects.id = tasks.project_id
+			JOIN agents ON agents.id = projects.agent_id
+			WHERE tasks.id IN (`+placeholders+`)`, args...)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -100,7 +110,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var id int64
 			var m taskMeta
-			if err := rows.Scan(&id, &m.projectID, &m.csid, &m.wtp, &m.prNumber, &m.source, &m.title, &m.projectName); err != nil {
+			if err := rows.Scan(&id, &m.projectID, &m.engine, &m.csid, &m.ocsid, &m.wtp, &m.prNumber, &m.source, &m.title, &m.projectName); err != nil {
 				rows.Close()
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -119,7 +129,13 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 				continue // task deleted under a still-tracked session
 			}
 			info := newest[tid]
-			resumable := info.AgentStatus == "exited" && m.csid.Valid && m.wtp.Valid && transcriptExists(a.globRoot, m.csid.String)
+			// Engine-branched resumable derivation (M002/S03): opencode keys off
+			// the persisted opencode_session_id alone (NO transcript glob —
+			// opencode has no transcript files, so the claude-only glob is always
+			// false for it); claude keys off csid + the transcript glob unchanged.
+			resumable := info.AgentStatus == "exited" && m.wtp.Valid &&
+				(m.engine == "opencode" && m.ocsid.Valid ||
+					m.engine != "opencode" && m.csid.Valid && transcriptExists(a.globRoot, m.csid.String))
 			entries = append(entries, agentStatusEntry{
 				TaskID:        tid,
 				ProjectID:     m.projectID,
@@ -136,17 +152,64 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// GLOBAL half (Phase 15, GSESS-02/SC3 — the co-phasing mandate): ONE
+	// singleton read shared by both global passes, loaded HERE — before the
+	// task DB pass opens its rows (the store runs MaxOpenConns(1), so a
+	// second concurrent query on the single SQLite connection would
+	// deadlock). ErrNoRows is a corrupted invariant (00017 seed +
+	// BackfillGlobalTask) — fail loud, the loadGlobalConfig posture.
+	gstate, err := a.loadGlobalResumeState()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Pass 1b — manager-derived live entry: the newest global agent session,
+	// collected OUTSIDE the newest[TaskID] map (Pitfall 3: that map is
+	// task-keyed; a 0 key would collide with the dev scope). mgr.List() is
+	// newest-first, so the FIRST global agent seen is the newest. Zero ids
+	// keep the TS contract non-nullable (Spike 1 — zero never equals a real
+	// rowid); labels are the locked D-09/D-10 strings; every field is
+	// server-synthesized (T-15-07 — nothing client-controllable).
+	var globalAgent session.Info
+	hasGlobalAgent := false
+	for _, info := range a.mgr.List() {
+		if info.Kind != session.KindAgent || !info.Global {
+			continue
+		}
+		globalAgent, hasGlobalAgent = info, true
+		break
+	}
+	if hasGlobalAgent {
+		entries = append(entries, agentStatusEntry{
+			TaskID:        0,
+			ProjectID:     0,
+			SessionID:     globalAgent.ID,
+			Status:        globalAgent.AgentStatus,
+			ExitCode:      globalAgent.ExitCode,
+			StopRequested: globalAgent.StopRequested,
+			Resumable:     globalAgent.AgentStatus == "exited" && gstate.resumable(a.globRoot),
+			PRNumber:      nil,
+			Source:        "global",
+			TaskTitle:     "Scratchpad",
+			ProjectName:   "Global",
+		})
+	}
+
 	// DB-derived pass (RCVR-01 reconciliation, research Pattern 2): tasks with
 	// a persisted session id + worktree but NO manager entry of any state —
 	// i.e. post-restart survivors. The DB never records "running" (verified
 	// across migrations 00001-00003), so an empty manager + these derived
 	// entries is the whole reconciliation story: no startup mutation pass, no
-	// migration. Emit ONLY when resumable (transcript exists) — non-resumable
-	// past sessions get no dot and the plain pre-start state (D-57 only
-	// constrains resumable tasks).
-	rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, tasks.claude_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
-		FROM tasks JOIN projects ON projects.id = tasks.project_id
-		WHERE tasks.claude_session_id IS NOT NULL AND tasks.worktree_path IS NOT NULL`)
+	// migration. Emit ONLY when resumable — non-resumable past sessions get no
+	// dot and the plain pre-start state (D-57 only constrains resumable tasks).
+	// M002/S03: widened to surface EITHER a persisted claude_session_id OR a
+	// persisted opencode_session_id, and engine-gates the resumability check
+	// (opencode: ocsid alone, NO transcript glob; claude: csid + transcript).
+	rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
+		FROM tasks
+		JOIN projects ON projects.id = tasks.project_id
+		JOIN agents ON agents.id = projects.agent_id
+		WHERE (tasks.claude_session_id IS NOT NULL OR tasks.opencode_session_id IS NOT NULL) AND tasks.worktree_path IS NOT NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -154,18 +217,25 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var id, pid int64
-		var csid, wtp sql.NullString
+		var engine string
+		var csid, ocsid, wtp sql.NullString
 		var prNumber sql.NullInt64
 		var source string
 		var title, projectName string
-		if err := rows.Scan(&id, &pid, &csid, &wtp, &prNumber, &source, &title, &projectName); err != nil {
+		if err := rows.Scan(&id, &pid, &engine, &csid, &ocsid, &wtp, &prNumber, &source, &title, &projectName); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if _, hasManagerEntry := newest[id]; hasManagerEntry {
 			continue // already covered by the manager-derived pass
 		}
-		if !transcriptExists(a.globRoot, csid.String) {
+		// Engine-branched resumability check (M002/S03): opencode keys off the
+		// persisted opencode_session_id alone (NO transcript glob); claude keys
+		// off csid + the transcript glob unchanged. A non-resumable row (e.g. an
+		// exited claude task whose transcript was deleted) surfaces nothing.
+		resumable := engine == "opencode" && ocsid.Valid ||
+			engine != "opencode" && csid.Valid && transcriptExists(a.globRoot, csid.String)
+		if !resumable {
 			continue
 		}
 		// A post-restart PR-review session (github_pr task carrying a
@@ -190,5 +260,71 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Pass 2b — DB-derived post-restart global entry (GSESS-02): NO live
+	// manager entry, but the singleton carries a resumable engine id. Emitted
+	// only when resumable (the task pass's D-57 posture — non-resumable past
+	// sessions surface nothing), and skipped whenever the manager pass already
+	// listed the global agent: at most ONE global entry in the feed at any
+	// time (Pitfall 1). Same synthesized shape as Pass 1b with sessionId ""
+	// and the honest exited state.
+	if !hasGlobalAgent && gstate.resumable(a.globRoot) {
+		entries = append(entries, agentStatusEntry{
+			TaskID:        0,
+			ProjectID:     0,
+			SessionID:     "",
+			Status:        "exited",
+			ExitCode:      nil,
+			StopRequested: false,
+			Resumable:     true,
+			PRNumber:      nil,
+			Source:        "global",
+			TaskTitle:     "Scratchpad",
+			ProjectName:   "Global",
+		})
+	}
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// globalResumeState is the global_task singleton read behind both global
+// status passes (Phase 15, GSESS-02/SC3): the configured root, the singleton
+// agent's engine, and the persisted resume ids. ONE query per status call,
+// shared by the manager-derived and DB-derived passes.
+type globalResumeState struct {
+	rootPath string
+	engine   string
+	csid     sql.NullString
+	ocsid    sql.NullString
+}
+
+// loadGlobalResumeState reads the singleton + its agent's engine (read-at-use
+// — an agent change applies to the next status read, D-24 parity). ErrNoRows
+// is a corrupted invariant (00017 seed + BackfillGlobalTask) — surfaced as a
+// fail-loud error, the loadGlobalConfig posture (global.go).
+func (a *agentHandlers) loadGlobalResumeState() (globalResumeState, error) {
+	var g globalResumeState
+	err := a.db.QueryRow(
+		`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, a.engine
+		 FROM global_task g JOIN agents a ON a.id = g.agent_id
+		 WHERE g.id = 1`,
+	).Scan(&g.rootPath, &g.csid, &g.ocsid, &g.engine)
+	if errors.Is(err, sql.ErrNoRows) {
+		return g, errors.New("global task row missing")
+	}
+	return g, err
+}
+
+// resumable is the engine-branched global resumable derivation (M002/S03
+// posture, Pitfall 10): the configured root plays the worktree's
+// directory-exists role — NEVER worktree_path, which the singleton does not
+// have (the D-29 vanished-root stat at spawn time covers the pathological
+// case). opencode keys off the persisted opencode_session_id alone (no
+// transcript files); claude keys off csid + the cwd-agnostic transcript glob.
+func (g globalResumeState) resumable(globRoot string) bool {
+	if g.rootPath == "" {
+		return false
+	}
+	if g.engine == "opencode" {
+		return g.ocsid.Valid
+	}
+	return g.csid.Valid && transcriptExists(globRoot, g.csid.String)
 }

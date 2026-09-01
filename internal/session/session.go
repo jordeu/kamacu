@@ -65,6 +65,12 @@ type Info struct {
 	// sessions and tmux stays invisible (D-77).
 	Orphaned bool   `json:"orphaned,omitempty"`
 	TmuxName string `json:"tmuxName,omitempty"`
+
+	// Global marks a global-scope session (Phase 15, GSESS-01): spawned in the
+	// global root, listed under ListGlobal, stopped via StopAllForScope. Zero
+	// value false omits the key for task/dev sessions — the TaskID/Kind/
+	// Orphaned omitempty precedent.
+	Global bool `json:"global,omitempty"`
 }
 
 // Session is a single shell running on its own PTY. The PTY's lifetime is
@@ -80,6 +86,7 @@ type Session struct {
 	id              string
 	label           string
 	taskID          int64        // 0 = unscoped dev session; immutable after Spawn
+	global          bool         // global scope (Phase 15); immutable after Spawn
 	kind            Kind         // KindBash or KindAgent; immutable after Spawn
 	claudeSessionID string       // agent only ("" for bash); the --session-id uuid, immutable after Spawn
 	engine          string       // agent only: the resolved agent's engine ("claude" | "custom" | "" ); custom agents skip the working/waiting/idle heuristics (D-M001-2)
@@ -209,6 +216,7 @@ func (s *Session) Info() Info {
 		Status:    s.status,
 		CreatedAt: s.createdAt,
 		TaskID:    s.taskID,
+		Global:    s.global,
 		Kind:      kind,
 	}
 	if s.kind == KindAgent {
@@ -318,8 +326,10 @@ func (s *Session) agentStatusLocked() string {
 	// working/waiting/idle heuristics below are claude-hook-driven (and a
 	// fallback activity estimate); applying them to a custom agent TUI we
 	// don't understand would be the unreliable heuristic this milestone
-	// explicitly rejected. claude (and "" back-compat) keeps the full states.
-	if s.engine != "" && s.engine != "claude" {
+	// explicitly rejected. claude (and "" back-compat) and opencode (D013:
+	// opencode runs in a PTY like claude and its on-disk plugin drives the
+	// same SessionStart/Stop/Notification hooks) keep the full states.
+	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" {
 		return "running"
 	}
 	if s.waiting {

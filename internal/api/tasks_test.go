@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -175,9 +176,21 @@ func TestManagedTaskWorktreeFetchesLatest(t *testing.T) {
 	}
 
 	// The managed pre-task fetch advanced the clone's origin/main to the tip
-	// pushed after the clone — proving the fetch ran before ResolveBase.
+	// pushed after the clone — proving the fetch ran before base resolution.
 	if got := cloneOriginMainSHA(t, clone); got != newTip {
 		t.Errorf("clone origin/main = %s, want fetched tip %s (managed pre-task fetch did not run)", got, newTip)
+	}
+
+	// The new branch must be BASED on the fetched tip: with no commits of its
+	// own yet, its SHA IS its base. Pre-fix, it landed on the clone's stale
+	// local main even though the fetch ran (ResolveBase's first leg preferred
+	// refs/heads/main) — the exact outdated-master bug CKOUT-02 targets.
+	branch, _ := body["branch"].(string)
+	if branch == "" {
+		t.Fatalf("no branch in create response: %v", body)
+	}
+	if sha := gitOut(t, clone, "rev-parse", branch); sha != newTip {
+		t.Errorf("task branch %s = %s, want fetched tip %s — branched from a stale base", branch, sha, newTip)
 	}
 }
 
@@ -1061,5 +1074,72 @@ func TestMoveDoneAtLastEntryWins(t *testing.T) {
 	}
 	if second <= first {
 		t.Fatalf("re-entering Done did not overwrite done_at (last-entry-wins): first=%q second=%q", first, second)
+	}
+}
+
+// TestTaskList_All_ReturnsOnlyManualTasksOrderedByStatusPosition (D-01 /
+// MCPTASK-01): the unscoped GET /api/tasks endpoint returns ONLY
+// source='manual' tasks (PR-review rows stay off the board — GHREV-04) and
+// orders them by status, position ASC. The status sort is a plain string
+// comparison, so done < in_progress < in_review < todo alphabetically. Seeds
+// one manual + one github_pr row in the same project and asserts only the
+// manual row appears.
+func TestTaskList_All_ReturnsOnlyManualTasksOrderedByStatusPosition(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+
+	// Insert a "done" manual task first by creating it (defaults to todo) then
+	// moving it to done. Then create a second manual task (stays todo). The
+	// unscoped list sorts by status ASC (string compare), so done < todo. Then
+	// insert a github_pr row that must NEVER appear in the unscoped list.
+	doneID := taskID(t, createTask(t, srv, pid, "Done First"))
+	moveTask(t, srv, doneID, "done", nil)
+	todoID := taskID(t, createTask(t, srv, pid, "Todo Second"))
+	_ = todoID
+	insertPRRow(t, db, pid, 99, "main", "todo")
+
+	status, list := doJSONList(t, srv.URL+"/api/tasks")
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/tasks: status=%d, want 200", status)
+	}
+	if len(list) != 2 {
+		t.Fatalf("GET /api/tasks returned %d rows, want 2 (manual only — PR row excluded by GHREV-04)", len(list))
+	}
+	// Ordering: status ASC (string compare) → "done" sorts before "todo".
+	if list[0]["status"] != "done" {
+		t.Errorf("row 0 status = %v, want done (status ASC string-compare ordering)", list[0]["status"])
+	}
+	if list[1]["status"] != "todo" {
+		t.Errorf("row 1 status = %v, want todo (status ASC string-compare ordering)", list[1]["status"])
+	}
+	// No row should be a PR-review source.
+	for i, row := range list {
+		if row["source"] != "manual" {
+			t.Errorf("row %d source = %v, want manual (PR rows must not leak)", i, row["source"])
+		}
+	}
+}
+
+// TestTaskList_EmptyReturnsEmptyArray (D-01): on an empty DB the unscoped
+// GET /api/tasks returns [] (not null) — matches listByProject's
+// tasks := []Task{} initialization.
+func TestTaskList_EmptyReturnsEmptyArray(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	resp, err := http.Get(srv.URL + "/api/tasks")
+	if err != nil {
+		t.Fatalf("GET /api/tasks: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, raw)
+	}
+	// Empty array, NOT null.
+	if strings.TrimSpace(string(raw)) != "[]" {
+		t.Errorf("GET /api/tasks empty body = %q, want %q", strings.TrimSpace(string(raw)), "[]")
 	}
 }

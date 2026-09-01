@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,12 @@ import (
 // hermetic — the git half (CheckoutPR) runs against a real local repo, the gh
 // half is injected. Production wiring leaves it as github.ViewPR.
 var viewPR = github.ViewPR
+
+// postReview is the review-posting seam (defaults to github.PostReview). Package
+// var so the reviews-endpoint tests can stub the live gh write and stay
+// hermetic — mirrors viewPR above. Production wiring leaves it as
+// github.PostReview.
+var postReview = github.PostReview
 
 // PullRequestRoutes registers:
 //   - GET  /api/projects/{id}/pull-requests[?refresh=1]   — the review-queue list
@@ -265,6 +272,89 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 		t.WorktreeError = nil
 
 		writeReview(w, t, detail)
+	})
+
+	// POST .../pull-requests/{n}/reviews (PLURAL — distinct from the singular
+	// /review open-workspace route above) — post a PR review to GitHub
+	// (v1.3 no-writes REVERSAL for the agent delegate surface; the browser
+	// offers no review-posting UI). Same two-gate ladder as /review; instead
+	// of provisioning a worktree, it shells out via github.PostReview.
+	mux.HandleFunc("POST /api/projects/{id}/pull-requests/{n}/reviews", func(w http.ResponseWriter, r *http.Request) {
+		pid, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		n, perr := strconv.ParseInt(r.PathValue("n"), 10, 64)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid PR number")
+			return
+		}
+
+		// GATE 1 (GHSET-02): integration off -> 409, never spawn gh.
+		val, err := settings.Get(db, settings.KeyGithubIntegration)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if val != "on" {
+			writeError(w, http.StatusConflict, "GitHub integration is off")
+			return
+		}
+
+		// GATE 2: project not linked / unknown -> 409, never spawn gh. Uses ONLY
+		// github_repo (no repo_path) — the plural route does NOT provision a
+		// worktree, mirroring the GET detail handler rather than /review.
+		var repo sql.NullString
+		qerr := db.QueryRow(`SELECT github_repo FROM projects WHERE id = ?`, pid).Scan(&repo)
+		if errors.Is(qerr, sql.ErrNoRows) {
+			writeError(w, http.StatusConflict, "project is not linked to a GitHub repo")
+			return
+		}
+		if qerr != nil {
+			writeError(w, http.StatusInternalServerError, qerr.Error())
+			return
+		}
+		if !repo.Valid || strings.TrimSpace(repo.String) == "" {
+			writeError(w, http.StatusConflict, "project is not linked to a GitHub repo")
+			return
+		}
+
+		// Decode the request body.
+		var req struct {
+			Verdict        string `json:"verdict"`
+			Body           string `json:"body"`
+			InlineComments []struct {
+				Path string `json:"path"`
+				Line int    `json:"line"`
+				Body string `json:"body"`
+			} `json:"inline_comments"`
+		}
+		if derr := json.NewDecoder(r.Body).Decode(&req); derr != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+
+		// Map to the github.InlineComment shape + call PostReview (which owns
+		// the verdict→event taxonomy + the gh spawn).
+		comments := make([]github.InlineComment, len(req.InlineComments))
+		for i, c := range req.InlineComments {
+			comments[i] = github.InlineComment{Path: c.Path, Line: c.Line, Body: c.Body}
+		}
+		out, perr := postReview(r.Context(), repo.String, int(n), req.Verdict, req.Body, comments)
+		if perr != nil {
+			msg := perr.Error()
+			if strings.HasPrefix(msg, "unknown verdict") {
+				writeError(w, http.StatusBadRequest, msg) // 400 on a bad verdict
+				return
+			}
+			writeError(w, http.StatusBadGateway, "couldn't post this review: "+msg) // 502 on gh failure
+			return
+		}
+
+		// 201 Created with the gh JSON response verbatim.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write(out)
 	})
 }
 

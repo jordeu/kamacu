@@ -23,7 +23,9 @@ func defaultAgentID(t *testing.T, srvURL string) int64 {
 }
 
 // TestAgentList proves GET /api/agents returns the seeded Claude agent with
-// is_default + is_system true and engine='claude' on a fresh migrated DB.
+// is_default + is_system true and engine='claude' on a fresh migrated DB. A
+// fresh DB now seeds TWO system agents (claude + opencode, M002 migration 00015),
+// so the test locates the CLAUDE seed by engine rather than assuming list[0].
 func TestAgentList(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
@@ -31,10 +33,19 @@ func TestAgentList(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status=%d, want 200", status)
 	}
-	if len(list) != 1 {
-		t.Fatalf("agents = %d, want 1 (seeded Claude)", len(list))
+	if len(list) < 1 {
+		t.Fatalf("agents = %d, want >= 1 (seeded system agents)", len(list))
 	}
-	a := list[0]
+	var a map[string]any
+	for _, x := range list {
+		if x["engine"] == "claude" {
+			a = x
+			break
+		}
+	}
+	if a == nil {
+		t.Fatalf("no claude agent in list %v", list)
+	}
 	if a["name"] != "Claude Code" {
 		t.Errorf("name = %v, want \"Claude Code\"", a["name"])
 	}
@@ -72,10 +83,11 @@ func TestAgentCreate(t *testing.T) {
 		t.Errorf("command = %v, want \"gemini\"", a["command"])
 	}
 
-	// The list now has the seed + the new agent.
+	// The list now has the system seeds (claude + opencode) + the new custom
+	// agent = 3.
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 2 {
-		t.Errorf("agents after create = %d, want 2", len(list))
+	if len(list) != 3 {
+		t.Errorf("agents after create = %d, want 3", len(list))
 	}
 }
 
@@ -165,10 +177,10 @@ func TestAgentDeleteUnused(t *testing.T) {
 		t.Errorf("delete unused custom: status=%d, want 204", resp.StatusCode)
 	}
 
-	// Back to one agent (the seed).
+	// Back to the two system seeds (claude + opencode).
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 1 {
-		t.Errorf("agents after delete = %d, want 1", len(list))
+	if len(list) != 2 {
+		t.Errorf("agents after delete = %d, want 2 (system seeds only)", len(list))
 	}
 }
 
@@ -215,6 +227,50 @@ func TestAgentDeleteInUse(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("delete in-use agent: status=%d, want 409", resp.StatusCode)
+	}
+}
+
+// TestAgentDeleteInUseByGlobal proves the global_task.agent_id reference
+// blocks agent deletion 409 with the locked D-09 string (count-free — the
+// singleton references exactly one agent, always), and that moving the
+// reference away unblocks the delete (block-until-reassigned). The friendly
+// COUNT guard runs ahead of the 00017 ON DELETE RESTRICT backstop.
+func TestAgentDeleteInUseByGlobal(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	_, created := doJSON(t, "POST", srv.URL+"/api/agents",
+		map[string]string{"name": "Scratch", "command": "x"})
+	agentID := int64(created["id"].(float64))
+
+	// Point the singleton at the custom agent directly (no global config API
+	// exists until Phase 14; the FK row is the delete handler's only input).
+	if _, err := db.Exec(`UPDATE global_task SET agent_id = ? WHERE id = 1`, agentID); err != nil {
+		t.Fatalf("point global_task at custom agent: %v", err)
+	}
+
+	// Referenced -> 409 with the exact D-09 message.
+	status, out := doJSON(t, http.MethodDelete, srv.URL+"/api/agents/"+itoa(agentID), nil)
+	if status != http.StatusConflict {
+		t.Errorf("delete agent referenced by global_task: status=%d, want 409", status)
+	}
+	if msg, _ := out["error"].(string); msg != "reassign the Scratchpad agent first" {
+		t.Errorf("409 body error = %q, want the D-09 string %q", msg, "reassign the Scratchpad agent first")
+	}
+
+	// Reassigned back to the default agent -> the same delete succeeds 204
+	// (block-until-reassigned semantics).
+	if _, err := db.Exec(
+		`UPDATE global_task SET agent_id = (SELECT id FROM agents WHERE is_default = 1) WHERE id = 1`,
+	); err != nil {
+		t.Fatalf("reassign global_task to default agent: %v", err)
+	}
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/agents/"+itoa(agentID), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE after reassign: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("delete after reassign: status=%d, want 204", resp.StatusCode)
 	}
 }
 

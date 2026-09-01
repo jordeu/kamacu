@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -485,8 +487,13 @@ func TestSessionFreshSpawnUnchangedByResumeField(t *testing.T) {
 // agent spawn carries the default --dangerously-skip-permissions AFTER the
 // fixed flags (AGENT-01/02 default-on — the deliberate D-51 reversal).
 func TestSessionAgentDefaultExtraParamsInArgv(t *testing.T) {
-	srv, _, _, _, argsFile := newResumeServer(t)
+	srv, _, db, _, argsFile := newResumeServer(t)
 	id, _ := worktreeTask(t, srv, "Default Extras")
+	// M001 gate follow-up: extras now come from the agent row; populate the
+	// default via the BackfillAgentExtraParams startup hook before spawning.
+	if err := BackfillAgentExtraParams(db); err != nil {
+		t.Fatalf("BackfillAgentExtraParams: %v", err)
+	}
 
 	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
 	if status != http.StatusCreated {
@@ -510,12 +517,16 @@ func TestSessionAgentDefaultExtraParamsInArgv(t *testing.T) {
 // removability + SET-03 next-spawn semantics; Pitfall 1: stored "" is a real
 // value, never re-defaulted).
 func TestSessionAgentExtraParamsRemovable(t *testing.T) {
-	srv, _, _, _, argsFile := newResumeServer(t)
+	srv, _, db, _, argsFile := newResumeServer(t)
 	id, _ := worktreeTask(t, srv, "No Extras")
-
-	status, body := doJSON(t, "PUT", srv.URL+"/api/settings/agent_extra_params", map[string]any{"value": ""})
+	// Populate the default first (production startup path), then clear it via
+	// the agent edit dialog (PATCH the claude seed extra_params to "").
+	if err := BackfillAgentExtraParams(db); err != nil {
+		t.Fatalf("BackfillAgentExtraParams: %v", err)
+	}
+	status, body := doJSON(t, "PATCH", srv.URL+"/api/agents/1", map[string]any{"extra_params": ""})
 	if status != http.StatusOK {
-		t.Fatalf("PUT agent_extra_params \"\": status = %d, want 200; body=%v", status, body)
+		t.Fatalf("PATCH agent extra_params \"\": status = %d, want 200; body=%v", status, body)
 	}
 
 	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
@@ -539,6 +550,11 @@ func TestSessionAgentExtraParamsRemovable(t *testing.T) {
 func TestSessionAgentResumeCarriesExtraParams(t *testing.T) {
 	srv, _, db, globRoot, argsFile := newResumeServer(t)
 	id, _ := worktreeTask(t, srv, "Resume Extras")
+	// M001 gate follow-up: extras now come from the agent row; populate the
+	// default via the startup hook before resuming.
+	if err := BackfillAgentExtraParams(db); err != nil {
+		t.Fatalf("BackfillAgentExtraParams: %v", err)
+	}
 
 	stored := uuid.NewString()
 	setTaskClaudeSession(t, db, id, stored)
@@ -635,7 +651,9 @@ func newTmuxSessionServer(t *testing.T, c tmux.Client) (*httptest.Server, *sessi
 // matches want — new-session under the PTY needs a beat to start the server.
 func awaitHasSession(t *testing.T, c tmux.Client, name string, want bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	// 20s budgets the D-14 stop path (SIGTERM → 5s grace → SIGKILL) plus
+	// tmux server teardown under host load (deferred item 4 class).
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		alive, err := c.HasSession(context.Background(), name)
 		if err == nil && alive == want {
@@ -1428,5 +1446,895 @@ func TestReconcileNeverShowsBashQuestion(t *testing.T) {
 	}
 	if (*found)["label"] == "Bash ?" {
 		t.Errorf("reconciled label surfaced the forbidden sentinel: %q", (*found)["label"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 08 read-only endpoints (MCPSESS-01/02/03 server-side): get_session,
+// get_session_output, list ?project_id filter, and the D-10 JOIN wire shape.
+// ---------------------------------------------------------------------------
+
+// getJSON issues a GET and returns the raw body bytes + status (needed for the
+// output envelope whose base64 payload is awkward to assert via doJSON).
+func getJSON(t *testing.T, url string) (int, []byte) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp.StatusCode, raw
+}
+
+// waitForOutput polls the session's snapshot until want appears (≤5s).
+func waitForOutput(t *testing.T, sess *session.Session, want []byte) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if bytes.Contains(sess.Snapshot(), want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("marker %q never appeared in snapshot:\n%s", want, sess.Snapshot())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestGetSession_Happy is MCPSESS-02 server-side: GET /api/sessions/{id} for a
+// live task-scoped bash session returns 200 with id, status, and the D-10 JOIN
+// fields taskTitle/projectName/agentName.
+func TestGetSession_Happy(t *testing.T) {
+	srv, mgr := newTaskSessionServer(t)
+	id, _ := worktreeTask(t, srv, "Read My Status")
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid, _ := body["id"].(string)
+	if sid == "" {
+		t.Fatalf("no id in create response: %v", body)
+	}
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// GET /api/sessions/{id} returns the live snapshot + JOIN fields.
+	gstatus, gbody := doJSON(t, "GET", srv.URL+"/api/sessions/"+sid, nil)
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session: status = %d, want 200; body=%v", gstatus, gbody)
+	}
+	if gbody["id"] != sid {
+		t.Errorf("get_session id = %v, want %q", gbody["id"], sid)
+	}
+	if gbody["status"] != "running" {
+		t.Errorf("get_session status = %v, want %q", gbody["status"], "running")
+	}
+	if gbody["taskId"] != float64(id) {
+		t.Errorf("get_session taskId = %v, want %d", gbody["taskId"], id)
+	}
+	// D-10 JOIN fields: title matches the task; projectName matches the project
+	// repo dir basename; agentName is the default Claude Code seed (migration 00013).
+	if gbody["taskTitle"] != "Read My Status" {
+		t.Errorf("get_session taskTitle = %v, want %q", gbody["taskTitle"], "Read My Status")
+	}
+	if gbody["projectName"] == "" {
+		t.Errorf("get_session projectName empty for task-scoped session: %v", gbody)
+	}
+	if gbody["agentName"] == "" {
+		t.Errorf("get_session agentName empty for task-scoped session: %v", gbody)
+	}
+}
+
+// TestGetSession_UnknownID_404 is D-12 / D-13: an unknown/gone id returns 404
+// with the {"error"} contract — never a 200 with empty fields, never a 500.
+func TestGetSession_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "GET", srv.URL+"/api/sessions/"+uuid.NewString(), nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+// TestGetSession_ExitedStillWorks is D-12: an EXITED in-memory session still
+// returns 200 with its final Info (Snapshot/Info survive exit). The handler
+// does not race the exit path.
+func TestGetSession_ExitedStillWorks(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	exitSession(t, sess)
+
+	gstatus, gbody := doJSON(t, "GET", srv.URL+"/api/sessions/"+sid, nil)
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session exited: status = %d, want 200; body=%v", gstatus, gbody)
+	}
+	if gbody["status"] != "exited" {
+		t.Errorf("get_session exited status = %v, want %q", gbody["status"], "exited")
+	}
+	if gbody["id"] != sid {
+		t.Errorf("get_session exited id = %v, want %q", gbody["id"], sid)
+	}
+}
+
+// TestGetSessionOutput_Happy is MCPSESS-03 server-side: the default bytes
+// (4096) returns a base64 envelope with bytes <= requested and a tail that
+// matches the live snapshot.
+func TestGetSessionOutput_Happy(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// Drive real output: echo a marker, wait for it to land in the ring.
+	const marker = "kamacu-output-marker-12345"
+	if err := sess.WriteInput([]byte("echo " + marker + "\n")); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	waitForOutput(t, sess, []byte(marker))
+
+	// Default bytes (no query) and an explicit small bytes both work.
+	for _, q := range []string{"", "?bytes=1024"} {
+		gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output"+q)
+		if gstatus != http.StatusOK {
+			t.Fatalf("get_session_output%s: status = %d, want 200; body=%s", q, gstatus, raw)
+		}
+		var env struct {
+			Encoding string `json:"encoding"`
+			Output   string `json:"output"`
+			Bytes    int    `json:"bytes"`
+			Clamped  bool   `json:"clamped"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			t.Fatalf("decode envelope: %v\n%s", err, raw)
+		}
+		if env.Encoding != "base64" {
+			t.Errorf("encoding = %q, want %q", env.Encoding, "base64")
+		}
+		wantMax := 1024
+		if q == "" {
+			wantMax = 4096
+		}
+		if env.Bytes <= 0 {
+			t.Errorf("bytes = %d, want > 0", env.Bytes)
+		}
+		if env.Bytes > wantMax {
+			t.Errorf("bytes = %d, want <= %d", env.Bytes, wantMax)
+		}
+		if env.Clamped {
+			t.Errorf("clamped = true, want false for a request under the cap")
+		}
+		// Decoded payload is the ring tail → must contain the marker.
+		decoded, err := base64.StdEncoding.DecodeString(env.Output)
+		if err != nil {
+			t.Fatalf("decode base64 output: %v", err)
+		}
+		if !bytes.Contains(decoded, []byte(marker)) {
+			t.Errorf("decoded output missing marker %q:\n%s", marker, decoded)
+		}
+	}
+}
+
+// TestGetSessionOutput_Clamp is D-06 / T-08-02: bytes=999999 clamps to
+// maxOutputBytes (512*1024) and sets clamped=true; the returned bytes never
+// exceed the cap.
+func TestGetSessionOutput_Clamp(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+
+	gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output?bytes=999999")
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session_output clamp: status = %d, want 200; body=%s", gstatus, raw)
+	}
+	var env struct {
+		Bytes   int  `json:"bytes"`
+		Clamped bool `json:"clamped"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, raw)
+	}
+	if !env.Clamped {
+		t.Errorf("clamped = false, want true (bytes=999999 must clamp)")
+	}
+	if env.Bytes > 524288 {
+		t.Errorf("bytes = %d, want <= 524288 (maxOutputBytes)", env.Bytes)
+	}
+}
+
+// TestGetSessionOutput_UnknownID_404 mirrors the get_session 404 contract.
+func TestGetSessionOutput_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "GET", srv.URL+"/api/sessions/"+uuid.NewString()+"/output", nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+// TestGetSessionOutput_BadBytes_400: a non-numeric bytes value is an honest 400.
+func TestGetSessionOutput_BadBytes_400(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+
+	status, body = doJSON(t, "GET", srv.URL+"/api/sessions/"+sid+"/output?bytes=abc", nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("bad bytes: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != "invalid bytes" {
+		t.Errorf("error = %q, want %q", body["error"], "invalid bytes")
+	}
+}
+
+// TestListSessions_ProjectID is MCPSESS-01 server-side: ?project_id=N returns
+// only sessions whose task belongs to that project. A project with no tasks
+// returns JSON [] (never null); a project with one task and a task-scoped
+// session returns exactly that one entry; a dev session is never included
+// (TaskID==0 can't match any project's task set).
+func TestListSessions_ProjectID(t *testing.T) {
+	srv, _ := newTaskSessionServer(t)
+	// Create the project + a provisioned task on it so we can filter by project
+	// id (worktreeTask only returns taskID + worktreePath — we need the project).
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	tid := taskID(t, createTask(t, srv, pid, "P1 Task"))
+
+	// Empty project (no tasks, no sessions) → JSON [].
+	pid2 := createProject(t, srv, gitRepo(t))
+	status, raw := getJSON(t, fmt.Sprintf("%s/api/sessions?project_id=%d", srv.URL, pid2))
+	if status != http.StatusOK {
+		t.Fatalf("empty project: status = %d, want 200; body=%s", status, raw)
+	}
+	if got := strings.TrimSpace(string(raw)); got != "[]" {
+		t.Errorf("empty project list body = %q, want %q", got, "[]")
+	}
+
+	// Invalid project_id → 400 (same posture as the existing task_id filter).
+	status, body := doJSON(t, "GET", srv.URL+"/api/sessions?project_id=abc", nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("bad project_id: status = %d, want 400; body=%v", status, body)
+	}
+	if body["error"] != "invalid project_id" {
+		t.Errorf("error = %q, want %q", body["error"], "invalid project_id")
+	}
+
+	// A task-scoped session is included; a dev session is not.
+	taskStatus, taskBody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": tid})
+	if taskStatus != http.StatusCreated {
+		t.Fatalf("task spawn: status = %d; body=%v", taskStatus, taskBody)
+	}
+	taskSid, _ := taskBody["id"].(string)
+	devStatus, _ := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if devStatus != http.StatusCreated {
+		t.Fatalf("dev spawn: status = %d", devStatus)
+	}
+
+	status, list := doJSONList(t, fmt.Sprintf("%s/api/sessions?project_id=%d", srv.URL, pid))
+	if status != http.StatusOK {
+		t.Fatalf("project list: status = %d, want 200", status)
+	}
+	if len(list) != 1 {
+		t.Fatalf("project list len = %d, want 1 (only the task session): %v", len(list), list)
+	}
+	if list[0]["id"] != taskSid {
+		t.Errorf("project list entry id = %v, want %q", list[0]["id"], taskSid)
+	}
+}
+
+// TestListSessions_JoinFields is D-10 regression: the unfiltered list response
+// entries include taskTitle/projectName/agentName for task-scoped sessions and
+// omit them (omitempty) for dev sessions.
+func TestListSessions_JoinFields(t *testing.T) {
+	srv, _ := newTaskSessionServer(t)
+	tid, _ := worktreeTask(t, srv, "Join Me")
+
+	// One task session + one dev session.
+	taskStatus, taskBody := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": tid})
+	if taskStatus != http.StatusCreated {
+		t.Fatalf("task spawn: status = %d; body=%v", taskStatus, taskBody)
+	}
+	devStatus, devBody := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if devStatus != http.StatusCreated {
+		t.Fatalf("dev spawn: status = %d; body=%v", devStatus, devBody)
+	}
+
+	status, list := doJSONList(t, srv.URL+"/api/sessions")
+	if status != http.StatusOK {
+		t.Fatalf("list: status = %d, want 200", status)
+	}
+	var taskEntry, devEntry map[string]any
+	for _, e := range list {
+		switch e["id"] {
+		case taskBody["id"]:
+			taskEntry = e
+		case devBody["id"]:
+			devEntry = e
+		}
+	}
+	if taskEntry == nil {
+		t.Fatalf("task session %q missing from list: %v", taskBody["id"], list)
+	}
+	if devEntry == nil {
+		t.Fatalf("dev session %q missing from list: %v", devBody["id"], list)
+	}
+	if taskEntry["taskTitle"] != "Join Me" {
+		t.Errorf("task entry taskTitle = %v, want %q", taskEntry["taskTitle"], "Join Me")
+	}
+	if taskEntry["projectName"] == "" {
+		t.Errorf("task entry projectName empty: %v", taskEntry)
+	}
+	if taskEntry["agentName"] == "" {
+		t.Errorf("task entry agentName empty: %v", taskEntry)
+	}
+	if _, present := devEntry["taskTitle"]; present {
+		t.Errorf("dev entry should omit taskTitle (omitempty), got %v", devEntry["taskTitle"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 08 subscribe endpoint (MCPSESS-04 server-side): raw PTY octets as
+// application/octet-stream, duration-capped, drain-on-attach (D-02), and
+// Detach-on-every-return-path (SC3 Kamacu half — T-08-05).
+// ---------------------------------------------------------------------------
+
+// TestSubscribe_Happy_ReturnsOctets is MCPSESS-04: subscribe streams real PTY
+// output as application/octet-stream (not JSON, not WS), include_history=1
+// delivers the ring replay, and the session stays operable after the request
+// ends (a second get_session returns 200).
+func TestSubscribe_Happy_ReturnsOctets(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// Drive real output so the subscribe stream has something to deliver.
+	const marker = "kamacu-subscribe-marker"
+	if err := sess.WriteInput([]byte("echo " + marker + "\n")); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	waitForOutput(t, sess, []byte(marker))
+
+	// Subscribe with include_history=1 for a short duration.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=1&include_history=1", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("subscribe: status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/octet-stream")
+	}
+ streamed, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if len(streamed) == 0 {
+		t.Errorf("subscribe body empty — expected at least the ring replay")
+	}
+	if !bytes.Contains(streamed, []byte(marker)) {
+		t.Errorf("subscribe body missing marker %q:\n%s", marker, streamed)
+	}
+
+	// Session is still operable: a follow-up get_session returns 200.
+	gstatus, gbody := doJSON(t, "GET", srv.URL+"/api/sessions/"+sid, nil)
+	if gstatus != http.StatusOK {
+		t.Fatalf("get_session after subscribe: status = %d, want 200; body=%v", gstatus, gbody)
+	}
+	if gbody["status"] != "running" {
+		t.Errorf("status after subscribe = %v, want %q", gbody["status"], "running")
+	}
+}
+
+// TestSubscribe_UnknownID_404 is D-13: a subscribe against an unknown id
+// returns 404 BEFORE writing any stream body — the bridge reads status + body.
+func TestSubscribe_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+uuid.NewString()+"/subscribe?duration_seconds=1", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404", resp.StatusCode)
+	}
+	// Body must be the JSON error envelope, NOT a stream of octets.
+	raw, _ := io.ReadAll(resp.Body)
+	var errBody map[string]any
+	if err := json.Unmarshal(raw, &errBody); err != nil {
+		t.Fatalf("decode error body: %v\n%s", err, raw)
+	}
+	if errBody["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", errBody["error"], "session not found")
+	}
+}
+
+// TestSubscribe_ClientCancel_DetachesPromptly is SC3 (T-08-05): cancelling the
+// request context makes the handler return promptly (no hang), the attach is
+// cleaned up (a second subscribe on the same session works), and goroutine
+// count does not grow across the cycle (no leak). The production target is
+// <100ms; the test asserts promptness + no-hang, not the exact latency.
+func TestSubscribe_ClientCancel_DetachesPromptly(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=60&include_history=1", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	// Baseline goroutine count (after the bash PTY + read goroutines settle).
+	runtime.Gosched()
+	time.Sleep(50 * time.Millisecond)
+	baseline := runtime.NumGoroutine()
+
+	returned := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			returned <- err
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		returned <- nil
+	}()
+
+	// Give the handler a beat to attach + start streaming.
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("subscribe returned error after cancel: %v", err)
+		}
+		elapsed := time.Since(start)
+		// Assert promptness (no hang). The production target is <100ms; allow
+		// generous slack for CI scheduling — the test proves no-hang, not exact latency.
+		if elapsed > 5*time.Second {
+			t.Errorf("subscribe took %v to return after request cancel — expected prompt", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("subscribe did not return within 10s of cancel — handler hung (SC3 detach leak)")
+	}
+
+	// No goroutine leak: the request-scoped handler goroutine has exited.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		now := runtime.NumGoroutine()
+		if now <= baseline+1 { // allow 1 slack for transient ticker/timer goroutines
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("goroutine leak: baseline=%d, now=%d (expected ≤%d)", baseline, now, baseline+1)
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// The attach was cleaned up: a SECOND subscribe on the same session works
+	// cleanly (no queue collision; the first connID is gone from the conns map).
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	req2, err := http.NewRequestWithContext(ctx2, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=1&include_history=1", nil)
+	if err != nil {
+		t.Fatalf("new second request: %v", err)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("second subscribe: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("second subscribe: status = %d, want 200 (attach not cleaned up)", resp2.StatusCode)
+	}
+}
+
+// TestSubscribe_DurationCap is T-08-03: duration_seconds clamps to
+// maxSubscribeDuration (300s). The test uses duration_seconds=1 to prove the
+// handler returns near the requested duration (not hanging), and trusts the
+// clamp logic for the cap (asserted by reading the constant, not by waiting
+// 300s in CI).
+func TestSubscribe_DurationCap(t *testing.T) {
+	// Sanity: the constant the handler clamps to.
+	if maxSubscribeDuration != 300*time.Second {
+		t.Fatalf("maxSubscribeDuration = %v, want 300s", maxSubscribeDuration)
+	}
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// duration_seconds=1 → returns near 1s (proves the timer backstop works).
+	start := time.Now()
+	resp, err := http.Get(srv.URL + "/api/sessions/" + sid + "/subscribe?duration_seconds=1&include_history=1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	elapsed := time.Since(start)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("subscribe: status = %d, want 200", resp.StatusCode)
+	}
+	// Should return near 1s; allow generous slack. The point is it returns at
+	// all (no hang), proving the timer backstop terminates the stream.
+	if elapsed > 5*time.Second {
+		t.Errorf("duration_seconds=1 took %v to return — expected near 1s", elapsed)
+	}
+}
+
+// TestSubscribe_DrainsReplayByDefault is D-02: with no include_history, the
+// ring replay is drained before live streaming. The body should NOT contain
+// pre-attach output (the marker written before subscribe started) — only
+// post-attach output (the marker written after).
+func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatal("session not in manager")
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	// Write BEFORE subscribing — this lands in the ring (the replay that
+	// include_history absent should drain).
+	const preMarker = "PRE-ATTACH-MARKER"
+	if err := sess.WriteInput([]byte("echo " + preMarker + "\n")); err != nil {
+		t.Fatalf("write pre: %v", err)
+	}
+	waitForOutput(t, sess, []byte(preMarker))
+
+	// Subscribe with duration=2s, NO include_history (the default).
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		srv.URL+"/api/sessions/"+sid+"/subscribe?duration_seconds=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Write a NEW marker AFTER subscribe attached — this is live output that
+	// MUST appear (the handler streams it after draining the replay).
+	time.Sleep(100 * time.Millisecond) // let Attach register
+	const postMarker = "POST-ATTACH-MARKER"
+	if err := sess.WriteInput([]byte("echo " + postMarker + "\n")); err != nil {
+		t.Fatalf("write post: %v", err)
+	}
+
+	streamed, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	// D-02: the pre-attach marker should NOT appear (replay drained).
+	if bytes.Contains(streamed, []byte(preMarker)) {
+		t.Errorf("D-02 violation: pre-attach marker appeared in live-only stream:\n%s", streamed)
+	}
+	// The post-attach marker MUST appear (live output is delivered).
+	if !bytes.Contains(streamed, []byte(postMarker)) {
+		t.Errorf("post-attach marker missing from live stream:\n%s", streamed)
+	}
+}
+
+// TestInput_Happy_WritesAndAppendsCR is the POST /api/sessions/{id}/input
+// happy path: a known live session id + {"message":"echo qsf-input-marker"}
+// returns 200 {"bytes_written":N} where N == len(message)+13 (the message
+// wrapped in bracketed paste markers — 6 prefix bytes (ESC[200~) + body +
+// 6 suffix bytes (ESC[201~) — as ONE WriteInput call, then a standalone
+// "\r" submit key as a SECOND WriteInput call), AND the marker actually
+// reaches the PTY —
+// verified by polling the output endpoint. Proves WriteInput was called, not
+// just that 200 returned. (See TestWrapInputForWrite for the byte-exact
+// two-write + bracket assertion — bash's cooked-mode line discipline makes
+// \r and \n indistinguishable in this round-trip, so the count is the
+// load-bearing claim here, not the terminator byte nor the write split.)
+func TestInput_Happy_WritesAndAppendsCR(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	const marker = "qsf-input-marker"
+	istatus, ibody := doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/input", map[string]any{"message": "echo " + marker})
+	if istatus != http.StatusOK {
+		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
+	}
+	wantBytes := len("echo "+marker) + 13 // 6 (ESC[2004) + body + 6 (ESC[2014) + 1 ("\r")
+	if ibody["bytes_written"] != float64(wantBytes) {
+		t.Errorf("bytes_written = %v, want %d", ibody["bytes_written"], wantBytes)
+	}
+
+	// Round-trip: the marker must appear in the PTY output (PTY echoes the
+	// typed line AND echo prints it again, so Contains is sufficient).
+	// D-63 baseline: 10s headroom (was 2s) — this poll has flaked twice
+	// under `go test ./...` cross-package host load (17-01/17-02 deferred
+	// items #2/#3; the marker arrives in well under a second when quiet).
+	// The loop returns as soon as the marker appears, so the budget only
+	// extends the failure path.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		gstatus, raw := getJSON(t, srv.URL+"/api/sessions/"+sid+"/output")
+		if gstatus != http.StatusOK {
+			t.Fatalf("output: status = %d, want 200; body=%s", gstatus, raw)
+		}
+		var env struct {
+			Encoding string `json:"encoding"`
+			Output   string `json:"output"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			t.Fatalf("decode envelope: %v\n%s", err, raw)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(env.Output)
+		if err != nil {
+			t.Fatalf("decode base64: %v", err)
+		}
+		if bytes.Contains(decoded, []byte(marker)) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("marker %q never appeared in output:\n%s", marker, decoded)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestInput_UnknownID_404 mirrors getSession/stop: an unknown id returns 404
+// {"error":"session not found"} — never a 500, never a 200 with empty fields.
+func TestInput_UnknownID_404(t *testing.T) {
+	srv, _ := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions/"+uuid.NewString()+"/input", map[string]any{"message": "hi"})
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body=%v", status, body)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+// TestInput_TrailingLF_TranslatedToCR: a message already ending in "\n" has
+// its LF terminator stripped, then the body is wrapped in bracketed paste
+// markers and a standalone "\r" submit key written after the closing bracket
+// — bytes_written == 15 for {"message":"hi\n"} (6 + "hi" (2) + 6 + "\r" (1)).
+func TestInput_TrailingLF_TranslatedToCR(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	istatus, ibody := doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/input", map[string]any{"message": "hi\n"})
+	if istatus != http.StatusOK {
+		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
+	}
+	if ibody["bytes_written"] != float64(15) {
+		t.Errorf("bytes_written = %v, want 15 (\"hi\\n\" -> ESC[2004hiESC[2014 + \"\\r\")", ibody["bytes_written"])
+	}
+}
+
+// TestInput_EmptyMessage_WritesBareCR: an empty message still performs BOTH
+// writes — the 12-byte bracket pair (ESC[2004 + ESC[2014, back-to-back, no
+// body in between), then a 1-byte "\r" submit WriteInput — a bare Enter, a
+// legitimate default-prompt answer. bytes_written == 13.
+func TestInput_EmptyMessage_WritesBareCR(t *testing.T) {
+	srv, mgr := newSessionServer(t)
+
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create: status = %d; body=%v", status, body)
+	}
+	sid := body["id"].(string)
+	sess, ok := mgr.Get(sid)
+	if !ok {
+		t.Fatalf("session %q not in manager", sid)
+	}
+	t.Cleanup(func() { sess.Stop() })
+
+	istatus, ibody := doJSON(t, "POST", srv.URL+"/api/sessions/"+sid+"/input", map[string]any{"message": ""})
+	if istatus != http.StatusOK {
+		t.Fatalf("input: status = %d, want 200; body=%v", istatus, ibody)
+	}
+	if ibody["bytes_written"] != float64(13) {
+		t.Errorf("bytes_written = %v, want 13 (empty body -> ESC[2004ESC[2014 + \"\\r\")", ibody["bytes_written"])
+	}
+}
+
+// TestWrapInputForWrite is the byte-exact regression guard for the
+// POST /api/sessions/{id}/input TWO-WRITE contract. The input handler calls
+// wrapInputForWrite to obtain an ORDERED pair of WriteInput payloads — the
+// body wrapped in ANSI bracketed paste markers (ESC[200~<body>ESC[201~)
+// first, then a single "\r" submit key — and writes them as two separate
+// sess.WriteInput calls.
+//
+// Raw-mode TUIs (Claude Code via Ink, opencode, anything readline/bubbletea-
+// based with bracketed paste enabled) run a heuristic paste detector on stdin
+// chunks; programmatic writes arrive at PTY-read speed and trip the
+// heuristic, absorbing any embedded "\r" as paste content rather than the
+// Enter key. The explicit bracketed sequence tells the TUI "this is one
+// paste event", bypassing the heuristic; the trailing "\r" lands OUTSIDE the
+// bracket as a standalone Enter keystroke that submits the captured paste.
+// This is the canonical "paste and submit" sequence. (Iterative diagnosis:
+// 260728-s5a set the "\r" submit key, 260728-sm5 split the two writes,
+// 260728-t4c added the bracketed wrap — the deterministic fix.)
+//
+// This pure-function assertion is the load-bearing guard: it fails loudly if
+// the write shape ever reverts to one combined call, if the submit key
+// reverts to "\n", OR if the bracketed paste wrap is dropped. The HTTP
+// round-trip tests below cannot distinguish the two-write shape (nor "\r"
+// from "\n" — bash's cooked-mode line discipline translates both identically
+// on input) nor observe the bracket markers (bash in cooked mode echoes
+// control sequences literally), so this function's return values ARE the
+// byte stream that reaches the PTY, in order.
+//
+// The multi-byte UTF-8 case is the regression guard for the original failing
+// symptom: a single combined write of a multi-byte body + "\r" was flagged as
+// a paste and never submitted.
+func TestWrapInputForWrite(t *testing.T) {
+	const (
+		pasteStart = "\x1b[200~" // ESC[200~ — bracketed paste start (6 bytes)
+		pasteEnd   = "\x1b[201~" // ESC[201~ — bracketed paste end (6 bytes)
+	)
+	// wantBody is the trimmed body wrapped in bracketed paste markers.
+	wrap := func(s string) string { return pasteStart + s + pasteEnd }
+	cases := []struct {
+		name       string
+		in         string
+		wantBody   string
+		wantSubmit string
+	}{
+		{"no terminator", "hello", wrap("hello"), "\r"},
+		{"trailing LF", "hello\n", wrap("hello"), "\r"},
+		{"trailing CR", "hello\r", wrap("hello"), "\r"},
+		{"trailing CRLF", "hello\r\n", wrap("hello"), "\r"},
+		{"empty message", "", wrap(""), "\r"},
+		{"multi-byte UTF-8", "ping — test", wrap("ping — test"), "\r"},
+		{"internal LFs preserved", "line one\nline two", wrap("line one\nline two"), "\r"},
+		{"internal LFs preserved with trailing LF", "line one\nline two\n", wrap("line one\nline two"), "\r"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotBody, gotSubmit := wrapInputForWrite(tc.in)
+			if gotBody != tc.wantBody {
+				t.Errorf("wrapInputForWrite(%q) body = %q, want %q", tc.in, gotBody, tc.wantBody)
+			}
+			if gotSubmit != tc.wantSubmit {
+				t.Errorf("wrapInputForWrite(%q) submit = %q, want %q", tc.in, gotSubmit, tc.wantSubmit)
+			}
+			// The submit key is ALWAYS exactly one byte, 0x0d — never empty,
+			// never "\n", never doubled. This is the byte-exact guard against
+			// either half of the two-write contract regressing.
+			if len(gotSubmit) != 1 || gotSubmit[0] != '\r' {
+				t.Errorf("submit key = %q (%d bytes), want exactly \"\\r\" (0x0d, 1 byte)", gotSubmit, len(gotSubmit))
+			}
+			// The body MUST be wrapped in the bracketed paste markers: it
+			// starts with ESC[200~ and ends with ESC[201~. Dropping either
+			// bracket defeats the heuristic bypass — the load-bearing fix
+			// from 260728-t4c. (The delimiters are 200/201 per the xterm
+			// spec; 2004 is the MODE number — the original constants used it
+			// by mistake and leaked a stray '~' into readline command lines.)
+			if !strings.HasPrefix(gotBody, pasteStart) {
+				t.Errorf("body %q missing bracketed-paste start %q", gotBody, pasteStart)
+			}
+			if !strings.HasSuffix(gotBody, pasteEnd) {
+				t.Errorf("body %q missing bracketed-paste end %q", gotBody, pasteEnd)
+			}
+			// The wrapped content must never carry a trailing terminator: that
+			// would re-introduce the combined-write shape the split defeats.
+			inner := strings.TrimPrefix(strings.TrimSuffix(gotBody, pasteEnd), pasteStart)
+			if len(inner) > 0 && (inner[len(inner)-1] == '\n' || inner[len(inner)-1] == '\r') {
+				t.Errorf("inner body %q ends with a terminator byte; wrapInputForWrite must strip it", inner)
+			}
+		})
 	}
 }

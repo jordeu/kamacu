@@ -187,15 +187,27 @@ func TestAgentsMigration(t *testing.T) {
 		t.Errorf("foreign_keys after migration = %d, want 1 (re-armed ON)", fk)
 	}
 
-	// (9) Idempotency: a second Migrate is a clean no-op -- still one agent.
+	// (9) Idempotency: a second Migrate is a clean no-op -- still exactly one
+	//     Claude seed (this migration's concern) and exactly one opencode seed
+	//     (added by 00015). Asserting per-engine rather than a total of 1 keeps
+	//     the idempotency check valid now that a full migration produces two
+	//     system seeds (claude + opencode), both guarded by their own NOT EXISTS /
+	//     goose-version idempotency.
 	if err := Migrate(db); err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
-	var agCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM agents").Scan(&agCount); err != nil {
-		t.Fatalf("count agents after re-run: %v", err)
+	var claudeCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM agents WHERE engine = 'claude'").Scan(&claudeCount); err != nil {
+		t.Fatalf("count claude agents after re-run: %v", err)
 	}
-	if agCount != 1 {
-		t.Errorf("agents after re-run = %d, want 1 (no second Claude)", agCount)
+	if claudeCount != 1 {
+		t.Errorf("claude agents after re-run = %d, want 1 (no second Claude)", claudeCount)
+	}
+	var opencodeCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM agents WHERE engine = 'opencode'").Scan(&opencodeCount); err != nil {
+		t.Fatalf("count opencode agents after re-run: %v", err)
+	}
+	if opencodeCount != 1 {
+		t.Errorf("opencode agents after re-run = %d, want 1 (no second opencode)", opencodeCount)
 	}
 }

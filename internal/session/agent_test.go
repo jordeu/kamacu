@@ -91,7 +91,7 @@ func TestOverlayJSONShape(t *testing.T) {
 		if !strings.Contains(h.Command, "http://127.0.0.1:7333/api/hooks/sessions/SESSID") {
 			t.Errorf("%s hook command missing receiver URL: %q", event, h.Command)
 		}
-		if !strings.Contains(h.Command, "X-Kangent-Token: TOK") {
+		if !strings.Contains(h.Command, "X-Kamacu-Token: TOK") {
 			t.Errorf("%s hook command missing token header: %q", event, h.Command)
 		}
 	}

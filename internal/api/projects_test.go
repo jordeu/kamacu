@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"context"
@@ -1124,5 +1125,142 @@ func TestProjectsCreateRejectsWhenNoDefaultWorkspace(t *testing.T) {
 	}
 	if n := countProjects(t, db); n != 0 {
 		t.Errorf("projects rows = %d, want 0 (create must not persist without a default)", n)
+	}
+}
+
+// TestProjectGet_Found_ReturnsProjectJSON (Gap 1 / MCPPROJ-02): the new
+// GET /api/projects/{id} endpoint returns a single project JSON via writeJSON
+// for an existing id. Mirrors the get-task pattern (tasks.go:275-290).
+func TestProjectGet_Found_ReturnsProjectJSON(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	repo := gitRepo(t)
+	pid := createProject(t, srv, repo)
+
+	status, body := doJSON(t, "GET", fmt.Sprintf("%s/api/projects/%d", srv.URL, pid), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/projects/{id}: status=%d, want 200; body=%v", status, body)
+	}
+	if got, _ := body["id"].(float64); int64(got) != pid {
+		t.Errorf("body id = %v, want %d", body["id"], pid)
+	}
+	if body["name"] == "" || body["name"] == nil {
+		t.Errorf("body name missing: %v", body)
+	}
+	if body["repo_path"] != repo {
+		t.Errorf("body repo_path = %v, want %q", body["repo_path"], repo)
+	}
+}
+
+// TestProjectGet_NotFound_Returns404 (Gap 1 / MCPPROJ-02): GET /api/projects/9999
+// returns 404 with {"error":"project not found"} body. Asserts on the Kamacu
+// message text substring (07-RESEARCH Gap 2: real shape is {"error":"..."},
+// not {"status","message"}).
+func TestProjectGet_NotFound_Returns404(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	status, body := doJSON(t, "GET", srv.URL+"/api/projects/9999", nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%v", status, body)
+	}
+	if errMsg, _ := body["error"].(string); !strings.Contains(errMsg, "project not found") {
+		t.Errorf("error = %q, want substring %q", errMsg, "project not found")
+	}
+}
+
+// TestProjectList_WorkspaceIDFilter_ReturnsOnlyThatWorkspace (D-02 /
+// MCPPROJ-01): GET /api/projects?workspace_id=N returns ONLY projects in that
+// workspace. Seeds two projects in different workspaces, asserts only the
+// matching one returns.
+func TestProjectList_WorkspaceIDFilter_ReturnsOnlyThatWorkspace(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	repo := gitRepo(t)
+	pid1 := createProject(t, srv, repo) // lands in Personal (ws 1)
+
+	// Create a second workspace and a project assigned to it directly via SQL
+	// (skipping the POST endpoint's workspace_id arg path — that's a separate
+	// concern; here we only need a fixture row in workspace 2). Use a second
+	// git repo because projects.repo_path has a UNIQUE constraint.
+	repo2 := gitRepo(t)
+	wsRes, err := db.Exec(`INSERT INTO workspaces (name) VALUES (?)`, "Work")
+	if err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	wsID, err := wsRes.LastInsertId()
+	if err != nil {
+		t.Fatalf("workspace LastInsertId: %v", err)
+	}
+	_, err = db.Exec(
+		`INSERT INTO projects (name, repo_path, workspace_id) VALUES (?, ?, ?)`,
+		"WorkProject", repo2, wsID)
+	if err != nil {
+		t.Fatalf("seed project in workspace 2: %v", err)
+	}
+
+	status, list := doJSONList(t, fmt.Sprintf("%s/api/projects?workspace_id=%d", srv.URL, wsID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if len(list) != 1 {
+		t.Fatalf("workspace filter returned %d projects, want 1", len(list))
+	}
+	if list[0]["name"] != "WorkProject" {
+		t.Errorf("returned project name = %v, want WorkProject", list[0]["name"])
+	}
+	// Sanity: the seeded Personal project is NOT in the filtered result.
+	if got, _ := list[0]["id"].(float64); int64(got) == pid1 {
+		t.Errorf("Personal project (id=%d) leaked into workspace filter", pid1)
+	}
+}
+
+// TestProjectList_NoFilter_ReturnsAll (D-02 regression): GET /api/projects
+// with NO query param returns ALL projects — proves the D-02 extension is
+// backward-compatible. The SPA and Phase 06's list_projects tool that omit the
+// param are byte-for-byte unchanged.
+func TestProjectList_NoFilter_ReturnsAll(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	repo := gitRepo(t)
+	createProject(t, srv, repo)
+
+	// Add a project in a second workspace directly (out of band). Use a second
+	// git repo — projects.repo_path has a UNIQUE constraint.
+	repo2 := gitRepo(t)
+	wsRes, err := db.Exec(`INSERT INTO workspaces (name) VALUES (?)`, "Other")
+	if err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	wsID, err := wsRes.LastInsertId()
+	if err != nil {
+		t.Fatalf("workspace LastInsertId: %v", err)
+	}
+	_, err = db.Exec(
+		`INSERT INTO projects (name, repo_path, workspace_id) VALUES (?, ?, ?)`,
+		"OtherProject", repo2, wsID)
+	if err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+
+	status, list := doJSONList(t, srv.URL+"/api/projects")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if len(list) != 2 {
+		t.Errorf("no-filter list returned %d projects, want 2 (backward-compat regression)", len(list))
+	}
+}
+
+// TestProjectList_WorkspaceIDUnparseable_IgnoresAndReturnsAll (D-02 / Kamacu
+// convention): GET /api/projects?workspace_id=abc returns ALL projects — an
+// unparseable value is silently ignored, not a 400.
+func TestProjectList_WorkspaceIDUnparseable_IgnoresAndReturnsAll(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	repo := gitRepo(t)
+	createProject(t, srv, repo)
+
+	status, list := doJSONList(t, srv.URL+"/api/projects?workspace_id=abc")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (unparseable value silently ignored)", status)
+	}
+	if len(list) != 1 {
+		t.Errorf("unparseable workspace_id returned %d projects, want 1 (ignored → all returned)", len(list))
 	}
 }

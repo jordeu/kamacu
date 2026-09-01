@@ -61,7 +61,12 @@ export default function TaskPage() {
   const { data: allAgents } = useAgents();
   const projectAgentId = allProjects?.find((p) => p.id === projectId)?.agent_id;
   const projectEngine = allAgents?.find((a) => a.id === projectAgentId)?.engine;
-  const isClaudeAgent = projectEngine !== "custom"; // undefined/"" (loading) or "claude" -> show
+  // D-62: strict claude-only rule, aligned with /global's locked predicate
+  // (config.agent.engine === "claude"). The quota chip shows ONLY for
+  // claude-engine projects and stays hidden while agents are unresolved
+  // (loading) — the accepted cosmetic flip; no loading machinery (17-UI-SPEC
+  // delta b).
+  const isClaudeAgent = projectEngine === "claude";
   const taskId = Number(taskIdParam);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -357,9 +362,9 @@ export default function TaskPage() {
       content: (
         <div className="flex h-full min-h-[320px] w-full flex-col">
           <AgentTab
-            task={task}
+            scope={{ kind: "task", taskId: task.id }}
             agentSession={agentSession}
-            projectId={projectId}
+            description={task.description}
             seed={seed}
           />
         </div>

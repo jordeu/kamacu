@@ -60,10 +60,6 @@ func Validate(key, value string) error {
 			return nil
 		}
 		return errors.New("Choose on or off.")
-	case KeyAgentExtraParams:
-		// Pass-through field: validating individual claude flags is explicitly
-		// out of scope (REQUIREMENTS Out of Scope).
-		return nil
 	case KeyPRReviewSeed:
 		// Free-text seed prompt (12-07). Accept any value; cap length so a
 		// pathological paste can't bloat the KV row. <n>/<title> placeholders

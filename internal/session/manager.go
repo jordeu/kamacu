@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
 	"github.com/google/uuid"
+	"golang.org/x/term"
 
 	"kamacu/internal/tmux"
 )
@@ -28,17 +30,50 @@ var ErrNotFound = errors.New("session not found")
 // honest D-84 error copy — never a silent fallback to plain bash.
 var ErrTmuxNotFound = errors.New("tmux not found")
 
+// kamacuEnvNames are the D014 hook-contract names the custom/opencode spawn
+// arm must own exclusively: the opencode engine gets fresh values injected at
+// spawn, and every other custom agent gets NONE — including the values a
+// parent Kamacu process may have exported.
+var kamacuEnvNames = map[string]bool{
+	"KAMACU_SESSION_ID": true,
+	"KAMACU_HOOK_TOKEN": true,
+	"KAMACU_HOOK_BASE":  true,
+}
+
+// stripKamacuEnv returns env with the KAMACU_* hook-contract names removed.
+// D-63: a Kamacu terminal exports KAMACU_SESSION_ID / KAMACU_HOOK_TOKEN /
+// KAMACU_HOOK_BASE into every child process — including a nested kamacu
+// server (or `go test`) and everything IT spawns. Without this filter the
+// custom spawn arm's verbatim os.Environ() inheritance would carry the
+// parent's values — the HOOK_TOKEN is a secret — into arbitrary
+// custom-agent children, breaking the D014 "custom agents get none of
+// these" contract outside clean shells. The opencode gate re-injects its
+// OWN values on top of the filtered base (append-last-value-wins), so
+// opencode spawns are unaffected.
+func stripKamacuEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if kamacuEnvNames[name] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // Manager owns every live Session. Lifecycle transitions (spawn / exit /
 // remove) each live in a single method so Phase 4 can add DB writes inside
 // them without restructuring.
 type Manager struct {
-	mu           sync.Mutex
-	sessions     map[string]*Session
-	counter      int           // monotonic global "bash #N" label counter; never reused
-	taskCounters map[int64]int // per-task "Bash N" label counters; never reused or reset
-	seq          int           // global spawn order, List sort tiebreak
-	agentCfg     AgentConfig   // set once at startup; read (copied) at agent spawn
-	tmuxClient   *tmux.Client  // set once at startup; socket/config for tmux-backed spawns
+	mu            sync.Mutex
+	sessions      map[string]*Session
+	counter       int           // monotonic global "bash #N" label counter; never reused
+	taskCounters  map[int64]int // per-task "Bash N" label counters; never reused or reset
+	globalCounter int           // global-scope "Bash N" label counter; never reused (Phase 15)
+	seq           int           // global spawn order, List sort tiebreak
+	agentCfg      AgentConfig   // set once at startup; read (copied) at agent spawn
+	tmuxClient    *tmux.Client  // set once at startup; socket/config for tmux-backed spawns
 }
 
 // NewManager returns an empty Manager.
@@ -76,6 +111,12 @@ type SpawnOpts struct {
 	// socket instead of a plain shell. Minted and persisted by the HTTP handler
 	// (kamacu-<task>-<n>); "" = plain shell. Mutually exclusive with Shell.
 	TmuxName string
+	// Global marks the session as global-scope (Phase 15, GSESS-01): it runs
+	// in the global root, lists under ListGlobal(), and stops under
+	// StopAllForScope(). Zero value false = current task/dev behavior —
+	// the flag rides the Kind/Shell/TmuxName back-compat precedent and is
+	// opaque to the PTY/argv machinery.
+	Global bool
 }
 
 // SetAgentConfig installs the agent spawn configuration (hook receiver
@@ -170,8 +211,43 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			cmd = exec.Command(bin, opts.AgentArgs[1:]...)
 			cmd.Dir = dir
 			// Same env posture as the claude path: inherit everything the user's
-			// terminal would have, then pin terminal identity (D-52).
-			cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+			// terminal would have, then pin terminal identity (D-52). The opencode
+			// engine reuses this custom command-render arm (opencode can't take a
+			// per-instance hook command via argv — its hooks come from an on-disk
+			// plugin), but additionally gets the D014 env contract
+			// (KAMACU_SESSION_ID / KAMACU_HOOK_TOKEN / KAMACU_HOOK_BASE) so that
+			// plugin can curl the hook receiver back with claude-compatible event
+			// names. Custom agents get none of these: the injection is
+			// opencode-gated, and the inherited base is filtered first (D-63) so a
+			// parent Kamacu process's exported values — HOOK_TOKEN is a secret —
+			// never leak into arbitrary custom-agent children.
+			envExtra := []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
+			if opts.AgentEngine == "opencode" {
+				envExtra = append(envExtra,
+					"KAMACU_SESSION_ID="+id, // minted at the top of Spawn; same id the settings overlay would embed
+					"KAMACU_HOOK_TOKEN="+cfg.Token,
+					"KAMACU_HOOK_BASE="+cfg.BaseURL, // D014
+					// M002/S03/T03: opencode resolves a session's `directory` from
+					// $PWD (verified empirically), NOT from getcwd(). exec.Cmd's
+					// cmd.Dir sets the OS cwd but does NOT update $PWD (a Go
+					// gotcha — shells update both on `cd`, exec does not). Without
+					// this, opencode records kamacu's LAUNCH dir as the session's
+					// directory, so the restart-resume discovery (which filters
+					// `opencode session list` on directory == worktree) would
+					// never match. Pinning $PWD to the worktree makes the actual
+					// cwd and $PWD consistent — the state a shell `cd` produces.
+					// Last-value-wins over the os.Environ() PWD entry, matching
+					// the TERM/COLORTERM append pattern above.
+					"PWD="+dir,
+				)
+			}
+			// D-63: strip inherited KAMACU_* BEFORE the opencode gate's
+			// envExtra injection above — see stripKamacuEnv. The
+			// append-last-value-wins idiom is preserved: when the opencode
+			// gate supplied fresh values they still win over anything
+			// inherited; custom agents see neither the parent's values nor
+			// injected ones.
+			cmd.Env = append(stripKamacuEnv(os.Environ()), envExtra...)
 		} else {
 		// Resume reuses the stored id (verified v2.1.173: --resume keeps the
 		// same session id, never forks); a fresh spawn mints a new one
@@ -284,6 +360,15 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start pty: %w", err)
 	}
+	// Put the PTY into raw mode so the kernel line discipline doesn't echo
+	// DA/DSR responses (xterm.js sends ESC[?1;2c etc. back as stdin when apps
+	// probe terminal capabilities) back into the visible output. Without this,
+	// every capability query produces garbage like "1;2c0;276;0c" in the
+	// terminal.
+	if _, err := term.MakeRaw(int(ptmx.Fd())); err != nil {
+		_ = ptmx.Close()
+		return nil, fmt.Errorf("set pty raw mode: %w", err)
+	}
 
 	ring, err := circbuf.NewBuffer(1 << 20) // 1 MiB replay ring
 	if err != nil {
@@ -298,6 +383,13 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 	switch {
 	case kind == KindAgent:
 		label = "Agent" // one agent per task — no counter (API enforces)
+	case opts.Global:
+		// Global scope (Phase 15): its own "Bash N" family, NEVER the dev
+		// "bash #N" family — this arm must sit ABOVE the TaskID==0 dev arm
+		// (a global spawn is TaskID-0 too, Pitfall 2). The API layer keeps
+		// Global and TaskID mutually exclusive; here the flag simply wins.
+		m.globalCounter++
+		label = fmt.Sprintf("Bash %d", m.globalCounter)
 	case opts.TaskID == 0:
 		m.counter++
 		label = fmt.Sprintf("bash #%d", m.counter)
@@ -311,6 +403,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		id:              id,
 		label:           label,
 		taskID:          opts.TaskID,
+		global:          opts.Global,
 		kind:            kind,
 		claudeSessionID: claudeSessionID,
 		engine:          opts.AgentEngine,
@@ -385,6 +478,12 @@ func (m *Manager) ListByTask(taskID int64) []Info {
 	return m.listWhere(func(s *Session) bool { return s.taskID == taskID })
 }
 
+// ListGlobal returns Info snapshots for global-scope sessions only, newest
+// first (same ordering contract as List) — Phase 15, GSESS-01.
+func (m *Manager) ListGlobal() []Info {
+	return m.listWhere(func(s *Session) bool { return s.global })
+}
+
 // listWhere snapshots sessions matching keep, newest first. The comparator
 // lives only here — List and ListByTask share it.
 func (m *Manager) listWhere(keep func(*Session) bool) []Info {
@@ -421,6 +520,32 @@ func (m *Manager) StopAllForTask(taskID int64) {
 	targets := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		if s.taskID == taskID && s.Info().Status == StatusRunning {
+			targets = append(targets, s)
+		}
+	}
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, s := range targets {
+		wg.Add(1)
+		go func(s *Session) {
+			defer wg.Done()
+			s.Stop()
+		}(s)
+	}
+	wg.Wait()
+}
+
+// StopAllForScope stops every RUNNING global-scope session concurrently and
+// blocks until all have fully exited (same shape as StopAllForTask with the
+// predicate swapped to the global flag). Scope-targeted stop goes through
+// this method exclusively — NEVER a task-id stop over the zero literal,
+// which would match every dev terminal (GSESS-01 landmine).
+func (m *Manager) StopAllForScope() {
+	m.mu.Lock()
+	targets := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.global && s.Info().Status == StatusRunning {
 			targets = append(targets, s)
 		}
 	}

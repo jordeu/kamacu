@@ -24,7 +24,7 @@ cleanup() {
 }
 
 start_server() {
-  ./bin/kamacu --addr "$ADDR" --db "$WORK/k.db" &
+  ./bin/kamacu serve --addr "$ADDR" --db "$WORK/k.db" &
   SERVER_PID=$!
   for _ in $(seq 1 50); do
     if curl -fsS "$BASE/api/healthz" >/dev/null 2>&1; then

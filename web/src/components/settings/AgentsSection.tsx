@@ -30,7 +30,7 @@ export interface AgentsSectionProps {}
  * The M001 agents management section — one more Settings <section> in the 640px
  * column, mirroring the ManageWorkspacesDialog hub but as a page section (per
  * D008, reuse the workspaces pattern; per the milestone scope this is name-only,
- * no icons). One row per agent with: the name + an engine badge (Claude/Custom),
+ * no icons). One row per agent with: the name + a system badge (System/Custom),
  * a set-default radio, an Edit control, and a guarded delete. Plus a "New agent"
  * entry that opens AgentNameDialog in create mode.
  *
@@ -117,7 +117,7 @@ export function AgentsSection({}: AgentsSectionProps) {
 
                 <span className="min-w-0 flex-1 truncate text-sm">{a.name}</span>
                 <Badge variant="secondary" className="font-mono text-[10px]">
-                  {a.engine === "claude" ? "Claude" : "Custom"}
+                  {a.is_system ? "System" : "Custom"}
                 </Badge>
 
                 <Button

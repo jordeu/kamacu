@@ -40,16 +40,19 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One query for the task's worktree_path, source/pr_base_ref (the diff-base
-	// discriminator — D-12/GHREV-03), + its project's repo_path (mirror
-	// worktreeHandlers.loadTaskRepo; the FK guarantees the project row exists).
+	// discriminator — D-12/GHREV-03), + its project's repo_path and managed
+	// marker (mirror worktreeHandlers.loadTaskRepo; the FK guarantees the
+	// project row exists).
 	var wtPath sql.NullString
 	var repo string
 	var source string
 	var prBaseRef sql.NullString
+	var managedInt int
 	err := h.db.QueryRow(
 		`SELECT worktree_path, source, pr_base_ref,
-		   (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id)
-		 FROM tasks WHERE id = ?`, id).Scan(&wtPath, &source, &prBaseRef, &repo)
+		   (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id),
+		   (SELECT managed FROM projects WHERE projects.id = tasks.project_id)
+		 FROM tasks WHERE id = ?`, id).Scan(&wtPath, &source, &prBaseRef, &repo, &managedInt)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -92,7 +95,31 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 		// (the stable remote-tracking ref — never FETCH_HEAD, Pitfall 1).
 		_ = h.wt.FetchRef(r.Context(), repo, baseName)
 		base = resolvePRBase(r.Context(), path, baseName)
+	} else if managedInt != 0 {
+		// Managed project (CKOUT-02 parity with provisioning): diff against
+		// origin/<default> — the same ref new task branches are based on — so
+		// the tab shows exactly what a PR against the default branch will
+		// show. ResolveBaseFresh best-effort fetches the default branch first
+		// (the managed-gated scoped D-24 exception), so the base reflects the
+		// CURRENT origin tip at every open, then falls back to the local chain
+		// when the ref can't resolve — never an error card for a stale base.
+		base, err = h.wt.ResolveBaseFresh(r.Context(), repo)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	} else {
+		// Folder project: best-effort fetch of the default branch so the
+		// merge-base reflects the latest upstream state (network-free
+		// projects — folder repos with no remote, offline work — simply skip:
+		// the fetch error is discarded and ResolveBase proceeds on the local
+		// base; the fetch only updates refs/remotes/origin/<branch>, never
+		// the working tree or local branches). The resolved BASE itself stays
+		// the local chain — folder projects never rebase their notion of the
+		// default branch onto origin.
+		if defaultBranch, derr := h.wt.DefaultBranch(r.Context(), repo); derr == nil {
+			_ = h.wt.FetchRef(r.Context(), repo, defaultBranch)
+		}
 		// Re-resolve the project base (its 4-step chain covers most base
 		// weirdness; failure routes to the error state).
 		base, err = h.wt.ResolveBase(r.Context(), repo)
