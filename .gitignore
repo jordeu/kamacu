@@ -4,22 +4,12 @@ web/node_modules/
 web/dist/*
 !web/dist/index.html
 
-# Claude Code runtime artifacts
-.claude/scheduled_tasks.lock
-
-# ── GSD baseline ──
-# Track all planning markdown + milestone artifacts (phases/, milestones/);
-# ignore only the binary DB, transient dirs, and logs.
-/.gsd/gsd.db
-/.gsd/gsd.db-shm
-/.gsd/gsd.db-wal
-/.gsd/runtime/
-/.gsd/audit/
-/.gsd/audit-log.jsonl
-/.gsd/event-log.jsonl
-/.gsd/notifications.jsonl
-/.gsd/state-manifest.json
-/.gsd/.compat.json
+# Local AI-assistant / planning artifacts — kept private, never tracked
+CLAUDE.md
+AGENTS.md
+.claude/
+.planning/
+.gsd/
 .gsd-worktrees/
 .gsd-backups/
 .gsd-id
