@@ -467,6 +467,60 @@ func TestDiffFolderTaskKeepsLocalBase(t *testing.T) {
 	}
 }
 
+// TestDiffPRBasePrefersOriginOverStaleLocal (fix-diff-tab): a github_pr review
+// whose PR head sits on CURRENT origin/main while the clone's local main is
+// frozen at clone time must diff against origin/main — GitHub's Files-changed —
+// never the stale local tip whose mega-diff sweeps the base branch's own drift
+// (file.txt v1→v2, advanced after the clone) into the review.
+func TestDiffPRBasePrefersOriginOverStaleLocal(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	srv, db, _ := newDiffServerDB(t)
+	origin, clone := makeOriginAndClone(t) // clone's local main frozen at clone time
+	pid := insertProjectRow(t, db, clone, true)
+
+	// Origin main advances AFTER the clone (the base's own drift), then the
+	// PR head branches off the ADVANCED tip (a PR rebased onto current main).
+	advanceOrigin(t, origin)
+	gitIn(t, origin, "checkout", "-b", "pr-head")
+	if err := os.WriteFile(filepath.Join(origin, "prchange.txt"), []byte("p1\n"), 0o644); err != nil {
+		t.Fatalf("write prchange.txt: %v", err)
+	}
+	gitIn(t, origin, "add", "prchange.txt")
+	gitIn(t, origin, "commit", "-m", "pr-head: prchange")
+	prHeadOID := gitOut(t, origin, "rev-parse", "pr-head")
+
+	// Bring the objects + remote-tracking refs into the clone (CheckoutPR's
+	// head fetch + the handler's base fetch), leaving refs/heads/main stale.
+	gitIn(t, clone, "fetch", "origin", "main", "pr-head")
+
+	wtPath := filepath.Join(t.TempDir(), "pr-9")
+	gitIn(t, clone, "worktree", "add", "--detach", wtPath, prHeadOID)
+	prID := insertPRReviewRow(t, db, pid, 9, "main", wtPath)
+
+	status, body := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d/diff", srv.URL, prID), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET pr diff status = %d, want 200; body=%v", status, body)
+	}
+	if base, _ := body["base"].(string); base != "origin/main" {
+		t.Errorf("base = %q, want %q (the fresh remote-tracking tip, not the stale local branch)", base, "origin/main")
+	}
+	files, _ := body["files"].([]any)
+	paths := map[string]bool{}
+	for _, f := range files {
+		fm, _ := f.(map[string]any)
+		if p, ok := fm["path"].(string); ok {
+			paths[p] = true
+		}
+	}
+	if len(paths) != 1 || !paths["prchange.txt"] {
+		t.Errorf("PR diff files = %v, want exactly [prchange.txt] (GitHub Files-changed; base drift must NOT leak)", paths)
+	}
+}
+
 func TestDiffMissingWorktreeDir(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
