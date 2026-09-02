@@ -87,12 +87,13 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 	var base string
 	if source == "github_pr" && prBaseRef.Valid && strings.TrimSpace(prBaseRef.String) != "" {
 		baseName := strings.TrimSpace(prBaseRef.String)
-		// Fetch the base FIRST so origin/<base> exists before merge-base
-		// (RESEARCH Pitfall 3 — "Not a valid object name origin/<base>"
-		// otherwise). Best-effort: ignore the fetch error and let merge-base
-		// surface a clear message into the UI error card if the ref truly can't
-		// resolve. Then prefer a local refs/heads/<base>, else origin/<base>
-		// (the stable remote-tracking ref — never FETCH_HEAD, Pitfall 1).
+		// Fetch the base FIRST so origin/<base> exists and is CURRENT before
+		// merge-base (RESEARCH Pitfall 3 — "Not a valid object name
+		// origin/<base>" otherwise). Best-effort: ignore the fetch error and
+		// let resolvePRBase fall back / merge-base surface a clear message
+		// into the UI error card if the ref truly can't resolve. The base is
+		// always resolved against the remote-tracking origin/<base> — never
+		// FETCH_HEAD (Pitfall 1).
 		_ = h.wt.FetchRef(r.Context(), repo, baseName)
 		base = resolvePRBase(r.Context(), path, baseName)
 	} else if managedInt != 0 {
@@ -173,21 +174,29 @@ func (h *diffHandlers) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-// resolvePRBase resolves a PR base branch name to a commit-ish for merge-base,
-// mirroring worktree.ResolveBase's local-then-remote shape (D-12): prefer a
-// local refs/heads/<baseName> if present, else the remote-tracking
-// origin/<baseName> (stable after FetchRef — NEVER FETCH_HEAD, RESEARCH Pitfall
-// 1). show-ref runs in the worktree dir; worktrees share the common git dir, so
-// refs/heads and refs/remotes resolve identically there. If neither ref exists,
-// origin/<baseName> is returned and diff.Compute's merge-base relays git's clear
-// "Not a valid object name" message into the UI error card (Pitfall 3 posture).
+// resolvePRBase resolves a PR base branch name to a commit-ish for merge-base.
+// It prefers the remote-tracking origin/<baseName> — freshly updated by the
+// FetchRef immediately before this call — because a managed clone's LOCAL
+// refs/heads/<baseName> is frozen at clone time, and diffing against that
+// stale tip sweeps the base branch's own drift into the review (the mega-diff
+// bug: GitHub's Files-changed is three-dot against the CURRENT origin base,
+// not the clone-time snapshot). The local branch is only a fallback when
+// origin/<baseName> is absent entirely (e.g. the fetch failed offline). If
+// neither ref exists, origin/<baseName> is returned and diff.Compute's
+// merge-base relays git's clear "Not a valid object name" message into the UI
+// error card (Pitfall 3 posture). show-ref runs in the worktree dir;
+// worktrees share the common git dir, so refs/heads and refs/remotes resolve
+// identically there.
 func resolvePRBase(ctx context.Context, wt, baseName string) string {
-	cmd := exec.CommandContext(ctx, "git", "-C", wt,
-		"show-ref", "--verify", "--quiet", "refs/heads/"+baseName)
-	if err := cmd.Run(); err == nil {
-		return baseName // local branch tip
+	if err := exec.CommandContext(ctx, "git", "-C", wt,
+		"show-ref", "--verify", "--quiet", "refs/remotes/origin/"+baseName).Run(); err == nil {
+		return "origin/" + baseName // current remote-tracking tip (fetched above)
 	}
-	return "origin/" + baseName // remote-tracking ref (fetched above)
+	if err := exec.CommandContext(ctx, "git", "-C", wt,
+		"show-ref", "--verify", "--quiet", "refs/heads/"+baseName).Run(); err == nil {
+		return baseName // offline fallback: the local tip, stale but present
+	}
+	return "origin/" + baseName // neither exists: merge-base surfaces the clear error
 }
 
 // setViewed handles the per-file Viewed write endpoint (DIFF-03). It toggles the
