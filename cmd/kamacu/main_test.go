@@ -1,11 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// TestPrintVersion proves the --version flag path: the binary reports the
+// build-injected version string (defaults to "dev" for plain `go build`;
+// goreleaser injects the git tag via -ldflags -X main.version=...).
+func TestPrintVersion(t *testing.T) {
+	var buf bytes.Buffer
+	printVersion(&buf)
+	if got := buf.String(); got != version+"\n" {
+		t.Errorf("printVersion wrote %q, want %q", got, version+"\n")
+	}
+}
 
 // TestEnsureLoopback proves D-21: the server refuses any --addr that is not
 // a loopback address. Non-localhost hostnames are refused outright — they
