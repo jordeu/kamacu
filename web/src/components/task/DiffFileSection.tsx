@@ -8,6 +8,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useToggleViewed, type DiffFile } from "@/api/diffs";
+import { CommitStateMarkers } from "@/components/task/CommitStateMarkers";
 
 // GitHub-style STACKING headers: each file header is a `sticky top-0` sibling in
 // the shared flat list. The Collapsible root is `display:contents` (no box), so
@@ -106,6 +107,10 @@ export function DiffFileSection({
           )}
         >
           <span className="inline-block size-4 shrink-0" />
+          <CommitStateMarkers
+            uncommitted={file.uncommitted}
+            unpushed={file.unpushed}
+          />
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-left font-mono text-sm",
@@ -144,6 +149,10 @@ export function DiffFileSection({
       >
         <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-sm text-left outline-none hover:bg-[#27272a] focus-visible:ring-2 focus-visible:ring-blue-500">
           <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]/diff-file:rotate-90" />
+          <CommitStateMarkers
+            uncommitted={file.uncommitted}
+            unpushed={file.unpushed}
+          />
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-left font-mono text-sm",

@@ -74,7 +74,9 @@ func runNoIndex(ctx context.Context, dir, relpath string) (string, error) {
 // tracked change since the merge-base (commits + staged + unstaged) plus
 // untracked files as full additions, base movement excluded by three-dot
 // semantics. Base is NOT set on the result — the handler fills Diff.Base from
-// ResolveBase so the totals bar and empty state share one value.
+// ResolveBase so the totals bar and empty state share one value. Each file
+// also carries the commit-state markers (File.Uncommitted/File.Unpushed —
+// the `git status` signal layered onto the same picture).
 //
 // Verified pipeline (05-RESEARCH.md §Diff Plumbing, git 2.43.0):
 //
@@ -92,6 +94,13 @@ func Compute(ctx context.Context, wt, base string) (*Diff, error) {
 		return nil, err // base weirdness / unborn HEAD → UI error card
 	}
 	mb := strings.TrimSpace(mbOut)
+
+	// Commit-state sets for the status markers (see commitState for the
+	// exact semantics and degradation rules).
+	uncommitted, unpushed, err := commitState(ctx, wt, mb)
+	if err != nil {
+		return nil, err
+	}
 
 	statsOut, err := run(ctx, wt, "-c", "core.quotePath=false",
 		"diff", "--no-color", "--no-ext-diff", "--numstat", "-z", mb)
@@ -134,6 +143,8 @@ func Compute(ctx context.Context, wt, base string) (*Diff, error) {
 		if f.Hunks == nil {
 			f.Hunks = []Hunk{}
 		}
+		f.Uncommitted = uncommitted[rec.Path]
+		f.Unpushed = unpushed[rec.Path]
 		if !f.Binary {
 			// numstat is the source of truth for tracked-file stats.
 			add, del := rec.Added, rec.Deleted
@@ -174,6 +185,7 @@ func Compute(ctx context.Context, wt, base string) (*Diff, error) {
 		f := secs[0]
 		f.Path = rel // authoritative path (the no-index a//b/ encoding may differ)
 		f.Status = "new"
+		f.Uncommitted = true // untracked = not captured in any commit, by definition
 		if f.Hunks == nil {
 			f.Hunks = []Hunk{}
 		}
@@ -203,6 +215,12 @@ func Compute(ctx context.Context, wt, base string) (*Diff, error) {
 	}
 	d.Totals.Files = len(d.Files)
 	for _, f := range d.Files {
+		if f.Uncommitted {
+			d.Totals.Uncommitted++
+		}
+		if f.Unpushed {
+			d.Totals.Unpushed++
+		}
 		if f.Additions != nil {
 			d.Totals.Additions += *f.Additions
 		}
@@ -227,6 +245,87 @@ func countHunkLines(hunks []Hunk) (add, del int) {
 		}
 	}
 	return add, del
+}
+
+// commitState returns the two path sets behind the status markers.
+//
+// uncommitted holds every path whose working-tree state differs from HEAD —
+// staged or unstaged; untracked files are marked by the caller (they never
+// reach a `git diff` at all). This is the `git status` signal.
+//
+// unpushed holds every path whose COMMITTED state differs from what the
+// remote has:
+//   - HEAD on a branch origin tracks → diff origin/<branch>..HEAD (pushed
+//     once, now ahead);
+//   - HEAD on a branch origin does NOT track, but a remote exists → the
+//     branch was never pushed, so every committed change is local-only and
+//     the merge-base stands in for the remote state;
+//   - detached HEAD (PR-review worktrees) or no origin remote → no push
+//     concept; the set stays empty.
+//
+// "Pushed" means as far as this clone knows — remote-tracking refs move only
+// on fetch/push, exactly like a local `git status`. All calls are local.
+func commitState(ctx context.Context, wt, mb string) (uncommitted, unpushed map[string]bool, err error) {
+	out, err := run(ctx, wt, "diff", "--name-only", "--no-renames", "-z", "HEAD")
+	if err != nil {
+		return nil, nil, err
+	}
+	uncommitted = nameOnlySet(out)
+	unpushed = map[string]bool{}
+
+	branch, err := run(ctx, wt, "branch", "--show-current")
+	if err != nil {
+		return nil, nil, err
+	}
+	if strings.TrimSpace(branch) == "" {
+		return uncommitted, unpushed, nil // detached HEAD
+	}
+	remotes, err := run(ctx, wt, "remote")
+	if err != nil {
+		return nil, nil, err
+	}
+	if !hasLine(remotes, "origin") {
+		return uncommitted, unpushed, nil // no origin remote: pushed has no meaning
+	}
+	pushBase := mb // never-pushed branch: committed-vs-base IS the local-only set
+	if refExists(ctx, wt, "refs/remotes/origin/"+strings.TrimSpace(branch)) {
+		pushBase = "origin/" + strings.TrimSpace(branch)
+	}
+	out, err = run(ctx, wt, "diff", "--name-only", "--no-renames", "-z", pushBase+"..HEAD")
+	if err != nil {
+		return nil, nil, err
+	}
+	unpushed = nameOnlySet(out)
+	return uncommitted, unpushed, nil
+}
+
+// nameOnlySet tokenizes NUL-separated `--name-only -z` output into a set
+// (the trailing NUL yields one empty token, dropped).
+func nameOnlySet(out string) map[string]bool {
+	set := make(map[string]bool)
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			set[p] = true
+		}
+	}
+	return set
+}
+
+// hasLine reports whether multi-line out contains exact line s.
+func hasLine(out, s string) bool {
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if l == s {
+			return true
+		}
+	}
+	return false
+}
+
+// refExists is a quiet, network-free check that ref resolves (show-ref exit
+// 0). Non-zero exit means "absent", not an error — callers treat it as false.
+func refExists(ctx context.Context, wt, ref string) bool {
+	return exec.CommandContext(ctx, "git", "-C", wt,
+		"show-ref", "--verify", "--quiet", ref).Run() == nil
 }
 
 // hashFile derives a deterministic sha256 hex fingerprint of a file's RENDERED
