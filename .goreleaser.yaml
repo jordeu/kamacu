@@ -1,0 +1,40 @@
+version: 2
+
+project_name: kamacu
+
+# The binary embeds the Vite build (web/embed.go //go:embed all:dist), so the
+# frontend must be rebuilt before every release build. As a before-hook it
+# also runs for local `goreleaser release --snapshot`, keeping local and CI
+# builds identical.
+before:
+  hooks:
+    - bash -c "cd web && npm ci && npm run build"
+
+builds:
+  - id: kamacu
+    main: ./cmd/kamacu
+    binary: kamacu
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge"
+
+release:
+  draft: true
+  prerelease: auto
