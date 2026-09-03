@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DiffFile } from "@/api/diffs";
+import { CommitStateMarkers } from "@/components/task/CommitStateMarkers";
 
 /**
  * The left "Files changed" tree (DIFF-01): a nested, path-compressed,
@@ -169,15 +170,19 @@ export function FileTree({
             "flex min-h-7 w-full items-center gap-2 rounded-sm border-l-2 border-transparent py-1 pr-2 text-left outline-none hover:bg-[#27272a] focus-visible:ring-2 focus-visible:ring-blue-500",
             selected && "border-blue-500 bg-accent",
           )}
-        >
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate font-mono text-sm",
-              file.viewed && "text-muted-foreground",
-            )}
           >
-            {node.name}
-          </span>
+            <CommitStateMarkers
+              uncommitted={file.uncommitted}
+              unpushed={file.unpushed}
+            />
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate font-mono text-sm",
+                file.viewed && "text-muted-foreground",
+              )}
+            >
+              {node.name}
+            </span>
           {file.viewed && (
             <Check className="size-3 shrink-0 text-muted-foreground" />
           )}

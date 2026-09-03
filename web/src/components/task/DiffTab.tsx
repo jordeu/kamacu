@@ -160,6 +160,18 @@ export function DiffTab({ taskId }: { taskId: number }) {
                 <span className="text-red-400 tabular-nums">{`−${totals.deletions}`}</span>
               </>
             )}
+            {totals.uncommitted > 0 && (
+              <>
+                {" · "}
+                <span className="text-amber-400 tabular-nums">{`${totals.uncommitted} uncommitted`}</span>
+              </>
+            )}
+            {totals.unpushed > 0 && (
+              <>
+                {" · "}
+                <span className="text-muted-foreground tabular-nums">{`${totals.unpushed} unpushed`}</span>
+              </>
+            )}
             {" vs "}
             <span className="font-mono">{base}</span>
           </p>

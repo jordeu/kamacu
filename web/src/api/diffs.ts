@@ -9,7 +9,13 @@ import type { ApiError } from "./client";
  */
 export interface DiffResponse {
   base: string;
-  totals: { files: number; additions: number; deletions: number };
+  totals: {
+    files: number;
+    additions: number;
+    deletions: number;
+    uncommitted: number;
+    unpushed: number;
+  };
   files: DiffFile[];
 }
 
@@ -28,6 +34,12 @@ export interface DiffFile {
   // Server-persisted per-file review state (DIFF-03). Reflected on every open,
   // including after a server restart.
   viewed: boolean;
+  // Commit-state markers: `uncommitted` = content not fully captured in
+  // commits (staged/unstaged/untracked — the `git status` signal);
+  // `unpushed` = committed content missing from the remote. Both can be true
+  // at once; neither affects the Viewed hash.
+  uncommitted: boolean;
+  unpushed: boolean;
 }
 
 export interface DiffHunk {

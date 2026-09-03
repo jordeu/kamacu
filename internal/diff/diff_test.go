@@ -293,6 +293,268 @@ func fileNames(d *Diff) []string {
 	return names
 }
 
+// pushFixture builds the commit-state scenario and returns its worktree:
+//   - repo on main with five text files, a bare clone wired up as origin
+//   - task-branch worktree off main whose first commit is PUSHED
+//   - after the push: one more commit (ahead of origin/task), a worktree edit
+//     on a pushed file, a staged edit, and an untracked file
+//
+// Expected markers per file (asserted by the tests below):
+//
+//	committed.txt  committed + pushed        → no markers
+//	dirty.txt      pushed, then edited       → uncommitted only
+//	ahead.txt      committed after push      → unpushed only
+//	both.txt       committed after push AND
+//	               then edited               → BOTH markers
+//	staged.txt     staged edit               → uncommitted only
+//	untracked.txt  untracked                 → uncommitted only (never unpushed)
+func pushFixture(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	write(t, repo, "committed.txt", "base\n")
+	write(t, repo, "dirty.txt", "base\n")
+	write(t, repo, "ahead.txt", "base\n")
+	write(t, repo, "both.txt", "base\n")
+	write(t, repo, "staged.txt", "base\n")
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-m", "base")
+
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	git(t, repo, "clone", "--bare", repo, origin)
+	git(t, repo, "remote", "add", "origin", origin)
+
+	parent := t.TempDir()
+	wt := filepath.Join(parent, "wt")
+	git(t, repo, "worktree", "add", "-b", "task", wt, "main")
+
+	// Committed changes that ARE pushed.
+	write(t, wt, "committed.txt", "committed and pushed\n")
+	write(t, wt, "dirty.txt", "pushed then dirtied\n")
+	git(t, wt, "add", "-A")
+	git(t, wt, "commit", "-m", "pushed work")
+	git(t, wt, "push", "-u", "origin", "task")
+
+	// Committed AFTER the push — ahead of origin/task.
+	write(t, wt, "ahead.txt", "committed after push\n")
+	write(t, wt, "both.txt", "committed after push, then dirtied\n")
+	git(t, wt, "add", "-A")
+	git(t, wt, "commit", "-m", "local work")
+
+	// Worktree-only edits — the `git status` signal.
+	write(t, wt, "dirty.txt", "pushed then dirtied\nWORKTREE-EDIT\n")
+	write(t, wt, "both.txt", "committed after push, then dirtied\nWORKTREE-EDIT\n")
+	write(t, wt, "staged.txt", "base\nSTAGED-EDIT\n")
+	git(t, wt, "add", "staged.txt")
+	write(t, wt, "untracked.txt", "untracked\n")
+
+	return wt
+}
+
+// marker returns the (uncommitted, unpushed) flags of path in d, failing the
+// test when the path is missing from the diff.
+func marker(t *testing.T, d *Diff, path string) (uncommitted, unpushed bool) {
+	t.Helper()
+	f := findFile(d, path)
+	if f == nil {
+		t.Fatalf("%s missing from diff (files=%v)", path, fileNames(d))
+	}
+	return f.Uncommitted, f.Unpushed
+}
+
+func TestComputeUncommittedMarker(t *testing.T) {
+	requireGit(t)
+	wt := pushFixture(t)
+
+	d, err := Compute(context.Background(), wt, "main")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+
+	cases := []struct {
+		path     string
+		want     bool
+		wantPush bool
+	}{
+		{"committed.txt", false, false},
+		{"dirty.txt", true, false},
+		{"staged.txt", true, false},
+		{"untracked.txt", true, false},
+	}
+	for _, c := range cases {
+		uc, up := marker(t, d, c.path)
+		if uc != c.want {
+			t.Errorf("%s Uncommitted = %v, want %v", c.path, uc, c.want)
+		}
+		if up != c.wantPush {
+			t.Errorf("%s Unpushed = %v, want %v", c.path, up, c.wantPush)
+		}
+	}
+
+	// Totals count the marked files: dirty + staged + untracked + both.
+	if d.Totals.Uncommitted != 4 {
+		t.Errorf("Totals.Uncommitted = %d, want 4", d.Totals.Uncommitted)
+	}
+}
+
+func TestComputeUnpushedMarkerPushedBranch(t *testing.T) {
+	requireGit(t)
+	wt := pushFixture(t)
+
+	d, err := Compute(context.Background(), wt, "main")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+
+	cases := []struct {
+		path       string
+		wantCommit bool
+		want       bool
+	}{
+		{"committed.txt", false, false},
+		{"dirty.txt", true, false},
+		{"ahead.txt", false, true},
+		{"both.txt", true, true},
+		{"untracked.txt", true, false},
+	}
+	for _, c := range cases {
+		uc, up := marker(t, d, c.path)
+		if up != c.want {
+			t.Errorf("%s Unpushed = %v, want %v", c.path, up, c.want)
+		}
+		if uc != c.wantCommit {
+			t.Errorf("%s Uncommitted = %v, want %v", c.path, uc, c.wantCommit)
+		}
+	}
+
+	// Totals count the marked files: ahead + both.
+	if d.Totals.Unpushed != 2 {
+		t.Errorf("Totals.Unpushed = %d, want 2", d.Totals.Unpushed)
+	}
+}
+
+func TestComputeUnpushedMarkerNeverPushedBranch(t *testing.T) {
+	requireGit(t)
+	// Origin exists, but the task branch was never pushed: every committed
+	// change is local-only and must carry the unpushed marker.
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	write(t, repo, "a.txt", "base\n")
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-m", "base")
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	git(t, repo, "clone", "--bare", repo, origin)
+	git(t, repo, "remote", "add", "origin", origin)
+
+	parent := t.TempDir()
+	wt := filepath.Join(parent, "wt")
+	git(t, repo, "worktree", "add", "-b", "task", wt, "main")
+	write(t, wt, "a.txt", "committed locally\n")
+	git(t, wt, "commit", "-am", "never pushed")
+
+	d, err := Compute(context.Background(), wt, "main")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if uc, up := marker(t, d, "a.txt"); uc || !up {
+		t.Errorf("a.txt markers = (uncommitted=%v, unpushed=%v), want (false, true) on a never-pushed branch", uc, up)
+	}
+}
+
+func TestComputeUnpushedMarkerNoRemote(t *testing.T) {
+	requireGit(t)
+	// Folder-style repo with no remote at all: "pushed" has no meaning, so no
+	// unpushed marker may appear even though the commit exists only locally.
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	write(t, repo, "a.txt", "base\n")
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-m", "base")
+	parent := t.TempDir()
+	wt := filepath.Join(parent, "wt")
+	git(t, repo, "worktree", "add", "-b", "task", wt, "main")
+	write(t, wt, "a.txt", "committed locally\n")
+	git(t, wt, "commit", "-am", "local only")
+
+	d, err := Compute(context.Background(), wt, "main")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if uc, up := marker(t, d, "a.txt"); uc || up {
+		t.Errorf("a.txt markers = (uncommitted=%v, unpushed=%v), want (false, false) with no remote", uc, up)
+	}
+}
+
+func TestComputeMarkersDetachedHead(t *testing.T) {
+	requireGit(t)
+	// PR-review worktrees check out a detached HEAD: no branch, no push
+	// concept — the unpushed marker degrades away while uncommitted still
+	// works.
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	write(t, repo, "a.txt", "base\n")
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-m", "base")
+	parent := t.TempDir()
+	wt := filepath.Join(parent, "wt")
+	git(t, repo, "worktree", "add", "--detach", wt, "main")
+	write(t, wt, "a.txt", "committed locally\n")
+	git(t, wt, "commit", "-am", "detached work")
+	write(t, wt, "a.txt", "committed locally\nWORKTREE-EDIT\n")
+
+	d, err := Compute(context.Background(), wt, "main")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if uc, up := marker(t, d, "a.txt"); !uc || up {
+		t.Errorf("a.txt markers = (uncommitted=%v, unpushed=%v), want (true, false) on detached HEAD", uc, up)
+	}
+}
+
+func TestCommitStateExcludedFromHash(t *testing.T) {
+	requireGit(t)
+	// Committing and pushing never change the rendered diff, so they must not
+	// change the Viewed-keying hash — otherwise every agent commit would reset
+	// the user's review state.
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	write(t, repo, "a.txt", "base\n")
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-m", "base")
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	git(t, repo, "clone", "--bare", repo, origin)
+	git(t, repo, "remote", "add", "origin", origin)
+	parent := t.TempDir()
+	wt := filepath.Join(parent, "wt")
+	git(t, repo, "worktree", "add", "-b", "task", wt, "main")
+
+	steps := []struct {
+		name string
+		run  func()
+	}{
+		{"uncommitted", func() { write(t, wt, "a.txt", "changed\n") }},
+		{"committed", func() { git(t, wt, "commit", "-am", "commit the change") }},
+		{"pushed", func() { git(t, wt, "push", "-u", "origin", "task") }},
+	}
+
+	var prev string
+	for _, s := range steps {
+		s.run()
+		d, err := Compute(context.Background(), wt, "main")
+		if err != nil {
+			t.Fatalf("Compute (%s): %v", s.name, err)
+		}
+		h := findFile(d, "a.txt").Hash
+		if prev != "" && h != prev {
+			t.Fatalf("hash changed at step %q (%q → %q) — commit state leaked into the Viewed hash", s.name, prev, h)
+		}
+		prev = h
+	}
+	if prev == "" {
+		t.Fatalf("no hash computed for a.txt")
+	}
+}
+
 // TestFileHash pins the rendered-per-file hash contract that keys the "Viewed"
 // persistence (DIFF-03) and drives auto-reset (DIFF-04). Every assertion is on a
 // RELATIONSHIP between hashes (equal / not-equal), never a hard-coded hex literal,

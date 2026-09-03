@@ -33,11 +33,14 @@ type Diff struct {
 	Files  []File `json:"files"`
 }
 
-// Totals is the "N files changed, +A −B" header data.
+// Totals is the "N files changed, +A −B" header data. Uncommitted/Unpushed
+// count the files carrying the corresponding status marker (see File).
 type Totals struct {
-	Files     int `json:"files"`
-	Additions int `json:"additions"`
-	Deletions int `json:"deletions"`
+	Files       int `json:"files"`
+	Additions   int `json:"additions"`
+	Deletions   int `json:"deletions"`
+	Uncommitted int `json:"uncommitted"`
+	Unpushed    int `json:"unpushed"`
 }
 
 // File is one changed path. Additions/Deletions are nil for binary files
@@ -59,6 +62,19 @@ type File struct {
 	// reviewed. Populated by the API handler from the diff_viewed store; it is the
 	// zero value (false) here because Compute is DB-free.
 	Viewed bool `json:"viewed"`
+
+	// Uncommitted marks a file whose current content is NOT fully captured in
+	// commits on the task branch: it differs from HEAD (staged or unstaged) or
+	// is untracked — the `git status` signal. Unpushed marks a file whose
+	// COMMITTED state (HEAD) is missing from the remote: origin/<branch> exists
+	// but is behind, or the branch was never pushed (every committed change is
+	// local-only). Both can be true at once (commit half, keep editing). A
+	// file with neither marker is committed and pushed. Like Viewed, both are
+	// metadata populated by Compute and DELIBERATELY EXCLUDED from Hash:
+	// committing or pushing never changes the rendered diff, so it must never
+	// reset a file's Viewed state.
+	Uncommitted bool `json:"uncommitted"`
+	Unpushed    bool `json:"unpushed"`
 
 	OldPath   *string `json:"oldPath"`
 	Status    string  `json:"status"` // modified | new | deleted | renamed
