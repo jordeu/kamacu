@@ -744,3 +744,95 @@ func TestViewedRejectsBadInput(t *testing.T) {
 		}
 	}
 }
+
+// TestDiffContent (MDV-01): GET /api/tasks/{id}/diff/content returns the two
+// full texts for a modified file (old = merge-base side, new = worktree disk
+// side) and the added-file shape for an untracked one — the Markdown viewer's
+// data source. Bad paths are rejected before any disk/git call (T-22-03
+// posture), and a path outside the diff 404s.
+func TestDiffContent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, _, _ := newDiffServer(t)
+	repo := gitRepoWithCommit(t) // main with file.txt "hello\n"
+	id, wtPath := provisionTaskWithWorktree(t, srv, repo)
+
+	// One modified tracked file + one untracked .md in the worktree.
+	if err := os.WriteFile(filepath.Join(wtPath, "file.txt"), []byte("hello\nWORLD\n"), 0o644); err != nil {
+		t.Fatalf("modify file.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "notes.md"), []byte("# Fresh\n"), 0o644); err != nil {
+		t.Fatalf("write notes.md: %v", err)
+	}
+
+	status, body := doJSON(t, "GET",
+		fmt.Sprintf("%s/api/tasks/%d/diff/content?path=file.txt", srv.URL, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET content status = %d, want 200; body=%v", status, body)
+	}
+	if s, _ := body["status"].(string); s != "modified" {
+		t.Errorf("status = %v, want modified", body["status"])
+	}
+	if old, _ := body["oldText"].(string); old != "hello\n" {
+		t.Errorf("oldText = %q, want the merge-base side", old)
+	}
+	if nw, _ := body["newText"].(string); nw != "hello\nWORLD\n" {
+		t.Errorf("newText = %q, want the worktree side", nw)
+	}
+
+	// Untracked file: the --no-index full-addition shape the diff GET shows.
+	status, body = doJSON(t, "GET",
+		fmt.Sprintf("%s/api/tasks/%d/diff/content?path=notes.md", srv.URL, id), nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET content (untracked) status = %d, want 200; body=%v", status, body)
+	}
+	if s, _ := body["status"].(string); s != "new" {
+		t.Errorf("untracked status = %v, want new", body["status"])
+	}
+	if body["oldText"] != nil {
+		t.Errorf("untracked oldText = %v, want nil", body["oldText"])
+	}
+	if nw, _ := body["newText"].(string); nw != "# Fresh\n" {
+		t.Errorf("untracked newText = %q, want # Fresh", nw)
+	}
+}
+
+// TestDiffContentRejectsBadInput: invalid paths 400, not-in-diff 404, unknown
+// task 404 — the same honest relays as the other diff endpoints.
+func TestDiffContentRejectsBadInput(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	srv, _, _ := newDiffServer(t)
+	repo := gitRepoWithCommit(t)
+	id, _ := provisionTaskWithWorktree(t, srv, repo)
+	base := fmt.Sprintf("%s/api/tasks/%d/diff/content", srv.URL, id)
+
+	cases := []struct {
+		name   string
+		query  string
+		status int
+	}{
+		{"empty/missing path", "", http.StatusBadRequest},
+		{"parent traversal", "?path=../secrets", http.StatusBadRequest},
+		{"nested traversal", "?path=docs/../../secrets", http.StatusBadRequest},
+		{"absolute path", "?path=/etc/passwd", http.StatusBadRequest},
+		{"backslash path", "?path=..%5Csecrets", http.StatusBadRequest},
+		{"over-length path", "?path=" + strings.Repeat("a", 4097), http.StatusBadRequest},
+		{"not in diff", "?path=never-existed.md", http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		status, body := doJSON(t, "GET", base+tc.query, nil)
+		if status != tc.status {
+			t.Errorf("%s: status = %d, want %d; body=%v", tc.name, status, tc.status, body)
+		}
+	}
+
+	// Unknown task: the shared 404.
+	status, body := doJSON(t, "GET",
+		fmt.Sprintf("%s/api/tasks/999999/diff/content?path=file.txt", srv.URL), nil)
+	if status != http.StatusNotFound {
+		t.Errorf("unknown task: status = %d, want 404; body=%v", status, body)
+	}
+}
