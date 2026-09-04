@@ -86,7 +86,9 @@ export function mapHunks(hunks: DiffHunk[]): LineMap {
     const m = RE_HUNK_HEADER.exec(hunk.header);
     if (!m) continue;
     // 1-based starts → 0-based; an omitted count means exactly one line.
-    let newLn = Number(m[3]) - 1;
+    // A deleted file's hunk starts at +0 — clamp so removals anchor at 0
+    // ("before the first line"), never at a nonsensical -1.
+    let newLn = Math.max(0, Number(m[3]) - 1);
     let pending: string[] = [];
 
     for (const line of hunk.lines) {
