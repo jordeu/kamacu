@@ -91,7 +91,10 @@ type Hunk struct {
 }
 
 // Line is one diff line. Kind drives add/del/context coloring; Text keeps the
-// leading +/-/space so the renderer can show it verbatim.
+// leading +/-/space byte — pinned by tests and folded into the Viewed hash
+// (diff.go hashFile), so NEVER strip it here (that would reset every file's
+// Viewed state). The web renderer draws its own +/- gutter, so it strips the
+// byte at render time (DiffFileSection) instead.
 type Line struct {
 	Kind string `json:"kind"` // context | add | del
 	Text string `json:"text"`

@@ -214,7 +214,11 @@ export function DiffFileSection({
                       line.kind === "context" ? "text-zinc-400" : "text-zinc-50"
                     }
                   >
-                    {line.text}
+                    {/* The parse contract (internal/diff/parse.go) keeps the
+                        leading +/-/space byte in text — the gutter span above
+                        already draws the marker, so strip the byte here or
+                        lines render "++added" / "−-removed". */}
+                    {line.text.slice(1)}
                   </span>
                 </div>
               ))}
