@@ -52,6 +52,36 @@ export interface DiffLine {
   text: string;
 }
 
+/** Full two-sided text of one file's diff (GET /api/tasks/{id}/diff/content). */
+export interface DiffContentResponse {
+  status: DiffFile["status"];
+  // The merge-base version (`git show <mb>:path`) — null for added files.
+  oldText: string | null;
+  // The worktree file on disk — the diff's new side; null for deleted files.
+  newText: string | null;
+}
+
+/**
+ * The Markdown viewer's data source (MDV-01). The hunks in the main diff
+ * response carry only ±3 context lines, so the full texts are fetched on
+ * dialog open (`enabled` gates the query — nothing is fetched while closed).
+ * Computed on demand server-side, never cached (D-61 posture).
+ */
+export function useTaskDiffContent(
+  taskId: number,
+  path: string,
+  enabled: boolean,
+) {
+  return useQuery<DiffContentResponse, ApiError>({
+    queryKey: ["diff", taskId, "content", path],
+    queryFn: () =>
+      get<DiffContentResponse>(
+        `/api/tasks/${taskId}/diff/content?path=${encodeURIComponent(path)}`,
+      ),
+    enabled,
+  });
+}
+
 /**
  * The Diff tab's data source (D-61). The DiffTab mounts only while the tab is
  * active, so the default staleTime 0 refetches on every mount — that IS the

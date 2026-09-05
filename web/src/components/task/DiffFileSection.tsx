@@ -9,6 +9,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useToggleViewed, type DiffFile } from "@/api/diffs";
 import { CommitStateMarkers } from "@/components/task/CommitStateMarkers";
+import { MarkdownDiffDialog } from "@/components/task/MarkdownDiffDialog";
+import { UnifiedDiffBody } from "@/components/task/UnifiedDiffBody";
 
 // GitHub-style STACKING headers: each file header is a `sticky top-0` sibling in
 // the shared flat list. The Collapsible root is `display:contents` (no box), so
@@ -39,6 +41,11 @@ const CHECKBOX_BLUE =
  *
  * Binary files render header-only ("Binary file changed"), not expandable; they
  * still get the Viewed checkbox (collapse-on-view is a harmless no-op — D-04).
+ *
+ * Non-binary .md files additionally carry a "Read as document" control (MDV,
+ * the Markdown viewer dialog) as a header sibling — prose reads as prose with
+ * the diff marked in place; the header's Source switch falls back to this same
+ * unified body (UnifiedDiffBody).
  */
 export function DiffFileSection({
   file,
@@ -178,48 +185,17 @@ export function DiffFileSection({
             </span>
           </span>
         </CollapsibleTrigger>
+        {/* Markdown viewer entry (MDV-01): an explicit control for .md files —
+            a SIBLING of the collapse trigger, never a child (the same
+            button-in-button rule as the Viewed checkbox). */}
+        {!file.binary && /\.md$/i.test(file.path) && (
+          <MarkdownDiffDialog taskId={taskId} file={file} />
+        )}
         {viewedLabel}
       </div>
       <CollapsibleContent>
         <div className="overflow-x-auto border-b border-border bg-zinc-950">
-          {file.hunks.map((hunk, hi) => (
-            <div key={hi}>
-              <div className="w-fit min-w-full bg-card px-3 py-2 font-mono text-xs whitespace-pre text-zinc-400">
-                {hunk.header}
-              </div>
-              {hunk.lines.map((line, li) => (
-                <div
-                  key={li}
-                  className={
-                    line.kind === "add"
-                      ? "w-fit min-w-full pl-3 font-mono text-xs leading-normal whitespace-pre bg-green-500/10"
-                      : line.kind === "del"
-                        ? "w-fit min-w-full pl-3 font-mono text-xs leading-normal whitespace-pre bg-red-500/10"
-                        : "w-fit min-w-full pl-3 font-mono text-xs leading-normal whitespace-pre"
-                  }
-                >
-                  <span
-                    className={
-                      line.kind === "add"
-                        ? "inline-block w-4 shrink-0 text-green-400 select-none"
-                        : line.kind === "del"
-                          ? "inline-block w-4 shrink-0 text-red-400 select-none"
-                          : "inline-block w-4 shrink-0 select-none"
-                    }
-                  >
-                    {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
-                  </span>
-                  <span
-                    className={
-                      line.kind === "context" ? "text-zinc-400" : "text-zinc-50"
-                    }
-                  >
-                    {line.text}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ))}
+          <UnifiedDiffBody hunks={file.hunks} />
         </div>
       </CollapsibleContent>
     </Collapsible>
