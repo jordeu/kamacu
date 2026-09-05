@@ -230,6 +230,14 @@ export default function TaskPage() {
   // typing in inputs/textareas/contenteditable (the xterm helper textarea IS
   // a textarea, so focused terminals keep Esc) or while any Radix
   // dialog/menu is open.
+  //
+  // CAPTURE phase is load-bearing: Radix's DismissableLayer closes the dialog
+  // from its own document keydown listener, and in a real browser React
+  // flushes that state flip (data-state → "closed") in a microtask that runs
+  // before the event bubbles up to window — so a bubble-phase listener here
+  // always sees the dialog already closed and navigates anyway. Capture runs
+  // before Radix, while data-state is still "open". We only observe; Radix
+  // still handles closing the dialog itself.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
@@ -244,8 +252,8 @@ export default function TaskPage() {
       }
       navigate(`/projects/${projectId}`);
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [navigate, projectId]);
 
   if (isPending) {
