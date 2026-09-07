@@ -1,7 +1,9 @@
 # Kamacu
 
-A local-only web app for organizing Claude Code agent sessions around projects and
-tasks. The name is an acronym: **KA**nban **M**ulti-**A**gent **C**ontrol **U**nit —
+A local-only, agent-agnostic web app for organizing coding-agent sessions around
+projects and tasks. Claude Code and OpenCode are supported natively, and any other
+terminal-driven agent can be added as a custom agent. The name is an acronym:
+**KA**nban **M**ulti-**A**gent **C**ontrol **U**nit —
 Kamacu is the control unit that drives your kanban of parallel agents, and the
 ember-spark logo is that animating force made visible.
 
@@ -11,19 +13,23 @@ ember-spark logo is that animating force made visible.
 
 A left sidebar lists your projects, each pointing at a local git repo checkout. The main
 area is a kanban board of tasks. Click a task to expand a full-page view with the main
-agent session — the real `claude` CLI running in a PTY, rendered live in a browser
-terminal — plus optional tabs for extra bash sessions. Claude Code is the default agent;
-other CLI agents can be configured per project.
+agent session — the agent's real CLI running in a PTY, rendered live in a browser
+terminal — plus optional tabs for extra bash sessions. Claude Code and OpenCode are
+built in, with live working/idle/waiting status on the board; any other CLI agent can
+be registered as a custom agent from just a name and a command. The default agent is
+configurable per project.
 
 It runs entirely on your machine, single user, accessed from a browser at localhost. The
 whole point is one place to see and drive all your agent work: every task gets its own
-isolated git worktree and a persistent Claude Code session you can open, leave, and
+isolated git worktree and a persistent agent session you can open, leave, and
 reattach to from any browser tab.
 
 ## Prerequisites
 
-- **Claude Code CLI** — Kamacu spawns the real `claude` CLI in a terminal; it never
-  reimplements it. Install it and sign in first.
+- **An agent CLI** — Kamacu spawns the real agent CLI in a terminal; it never
+  reimplements it. Claude Code and OpenCode are supported natively: install the one(s)
+  you use and sign in first. Any other terminal agent works too, registered as a
+  custom agent.
 - **git** — every task runs in its own git worktree off your project's checkout.
 - **Go 1.26** — to build the single backend binary.
 - **Node 20.19+ / 22.12+** — to build the React frontend (Vite's minimum).
@@ -59,10 +65,11 @@ Kamacu drives one loop, from an idea to a reviewed change:
    the sidebar with its own kanban board.
 2. **Task** — create a task on the board. Kamacu auto-creates a branch and an isolated
    git worktree for it, so concurrent tasks never collide in one checkout.
-3. **Agent** — open the task and Start a Claude Code session. It runs as the real
-   `claude` CLI inside the task's worktree, with the full interactive TUI (plan mode,
-   slash commands, permission prompts). Leave the tab and reattach later — the session
-   keeps running server-side and replays on reconnect.
+3. **Agent** — open the task and start an agent session. It runs as the real CLI —
+   `claude`, `opencode`, or a custom agent's command — inside the task's worktree,
+   with the full interactive TUI (plan mode, slash commands, permission prompts).
+   Leave the tab and reattach later — the session keeps running server-side and
+   replays on reconnect.
 4. **Review** — watch the board as a dispatcher: status dots tell you which agents are
    working, idle, or waiting on you. When an agent is done, review the diff against the
    base branch, then merge or open a PR. Incoming PRs work too: link a repo and Kamacu
