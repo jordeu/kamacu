@@ -57,6 +57,13 @@ make dev-backend    # Go server on its own port
 make dev-frontend   # Vite dev server with HMR, proxying API + WebSocket to the backend
 ```
 
+## MCP server
+
+Kamacu also exposes its API as a stdio MCP server, so coding agents can drive
+the board (projects, tasks, reviews) directly. See
+[docs/install-mcp.md](docs/install-mcp.md) — written to be pasted to an agent
+as a one-line install instruction.
+
 ## The workflow
 
 Kamacu drives one loop, from an idea to a reviewed change:
