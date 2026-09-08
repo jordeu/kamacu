@@ -36,10 +36,11 @@ curl -fsS http://127.0.0.1:7333/api/projects -o /dev/null -w '%{http_code}\n'
 
 - `200` — the app is up. Continue.
 - `connection refused` — the app is NOT running. Do not install yet: tell the
-  user to start it (`kamacu serve` from a Kamacu checkout) and stop here. An
+  user to start it (`kamacu serve`, or the boot service set up by
+  docs/install.md) and stop here. An
   install done now will look fine but fail on every tool call.
 
-### 2.2 Locate or build the binary
+### 2.2 Locate or install the binary
 
 The binary is NOT installed to `PATH` by default. Resolve an absolute path:
 
@@ -49,18 +50,16 @@ command -v kamacu || echo NOT_ON_PATH
 
 - If a path prints, use it (absolute — run `command -v` output through
   `readlink -f` if it is relative).
-- If `NOT_ON_PATH`, clone and build. Requires `git` and Go. Does NOT require
-  Node (the MCP bridge needs no frontend):
-
-  ```sh
-  git clone https://github.com/jordeu/kamacu.git "$HOME/.kamacu/mcp/kamacu"
-  make -C "$HOME/.kamacu/mcp/kamacu" backend   # → bin/kamacu
-  ```
-
-  The binary is now at `$HOME/.kamacu/mcp/kamacu/bin/kamacu`.
+- If `NOT_ON_PATH`, install the Kamacu app first: fetch and follow
+  https://raw.githubusercontent.com/jordeu/kamacu/master/docs/install.md —
+  the install guide for the app binary. It downloads the latest release for
+  this machine (Linux or macOS), verifies its checksum, and installs it to
+  `~/.local/bin/kamacu` by default. Then re-run `command -v kamacu` and use
+  the printed path. Building from a checkout (`make backend`; needs `git` and
+  Go, not Node) remains a fallback when GitHub releases are unreachable.
 
 From here on, `<KAMACU_BIN>` means that absolute path with `$HOME` already
-expanded (e.g. `/home/you/.kamacu/mcp/kamacu/bin/kamacu`). **MCP client configs
+expanded (e.g. `/home/you/.local/bin/kamacu`). **MCP client configs
 do not expand `~` or `$HOME` — always write the fully resolved absolute path.**
 
 ### 2.3 Environment variables — usually none needed
@@ -206,7 +205,7 @@ your client's equivalent), and report both results to the user.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `tools/call` returns `kamacu bridge: ... connect: connection refused` | Kamacu app not running (handshake still succeeds — do not trust the badge) | Start the app: `kamacu serve` in a Kamacu checkout; re-run step 4 |
+| `tools/call` returns `kamacu bridge: ... connect: connection refused` | Kamacu app not running (handshake still succeeds — do not trust the badge) | Start the app: `kamacu serve`, or the boot service from docs/install.md; re-run step 4 |
 | Same refused error but with a different port in the URL | App started with non-default `--addr` | Add `"env": {"KAMACU_HOOK_BASE": "http://127.0.0.1:<PORT>"}` to the server config |
 | Client fails to spawn the server; config shows a path with `~` or a dead path | Config holds an unexpanded or stale binary path | Re-register with the fully resolved absolute path (step 2.2) |
 | `claude mcp list` warns `kamacu is defined in multiple scopes with different endpoints` | An old install (e.g. a previous checkout) left an entry in another scope | Keep one: `claude mcp remove kamacu -s <scope>` for the stale ones |
