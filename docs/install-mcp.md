@@ -5,6 +5,16 @@ you are an agent and were pointed here, follow the steps in order, run the
 verification in step 4 yourself, and report the result. Substitute real values
 wherever you see `<ANGLE-BRACKET-PLACEHOLDERS>`.
 
+## 0. The instruction this document serves
+
+A user installs you by pasting this line to you, verbatim:
+
+```
+read https://raw.githubusercontent.com/jordeu/kamacu/master/docs/install-mcp.md and install the Kamacu MCP server for yourself
+```
+
+You are the intended executor of that line: carry out steps 1–5 below.
+
 ## 1. What you are installing
 
 `kamacu mcp serve` is a stdio MCP server that bridges to the JSON API of the
@@ -62,12 +72,33 @@ Agents spawned *inside* Kamacu receive `KAMACU_HOOK_BASE` and
 - `KAMACU_HOOK_BASE` defaults to `http://127.0.0.1:7333`, which is where the
   app listens by default. Set it only if the user started the app with a
   non-default `--addr`.
-- `KAMACU_HOOK_TOKEN` is not required: the API ignores it on `/api/*`; the real
-  boundary is that the app binds to loopback only.
+- `KAMACU_HOOK_TOKEN` is not required for the MCP tools: the REST endpoints
+  they call — projects, tasks, workspaces, sessions, reviews — do not check it.
+  The one API route that does require the token is the internal hook receiver
+  (`POST /api/hooks/sessions/{id}`), which no MCP tool calls. The real boundary
+  is that the app binds to loopback only.
 
 ## 3. Register the server with your client
 
 Pick exactly one section — yours.
+
+### Before you add: check for an existing kamacu entry
+
+```sh
+claude mcp get kamacu      # or: opencode mcp list, or grep '"kamacu"' <client-config>.json
+```
+
+If a `kamacu` entry already exists, do not blindly add over it. Known client
+behaviors (both verified):
+
+- Claude Code's `mcp add` **refuses** to add when `kamacu` already exists
+  in the same scope (`MCP server kamacu already exists in user config`), but an
+  entry in a *different* scope can shadow it (see Troubleshooting).
+- `opencode mcp add` **silently replaces** an existing `kamacu` entry with no
+  warning.
+
+If an entry exists, tell the user what it points at before changing anything,
+and skip re-adding if it already works (verify with step 4).
 
 ### Claude Code
 
@@ -112,8 +143,16 @@ projects). For a single-project install, put the same entry in that project's
 }
 ```
 
+**Merge, never overwrite.** When you edit a JSON config file by hand: read the
+existing file first (create it only if missing), add just the `kamacu` key
+under `mcp`, and preserve every other key and entry. The config likely holds
+other MCP servers the user depends on — replacing the file with the block above
+would delete them. If the existing file does not parse as JSON, stop and report
+the contents to the user instead of repairing or replacing it.
+
 Verify with `opencode mcp list` (expect `✓ kamacu connected`). There is no
-remove subcommand — to uninstall, delete the `kamacu` key from the JSON file.
+remove subcommand — to uninstall, delete the `kamacu` key from the JSON file
+(again: merge out the key, don't rewrite the file).
 
 ### Any other stdio MCP client
 
@@ -130,8 +169,11 @@ Use your client's local-stdio server config with this block:
 }
 ```
 
-Add `"env": {"KAMACU_HOOK_BASE": "http://127.0.0.1:7333"}` only if the app
-runs on a non-default port.
+**Merge, never overwrite** — same rule as above: add only the `kamacu` key to
+the existing config file, keep every other server entry, and if the file won't
+parse as JSON, stop and report instead of replacing it. Add
+`"env": {"KAMACU_HOOK_BASE": "http://127.0.0.1:7333"}` inside the `kamacu`
+object only if the app runs on a non-default port.
 
 ## 4. Verify the install — run this yourself
 
@@ -141,19 +183,21 @@ down). Call a real tool over stdio:
 
 ```sh
 KAMACU_BIN=<KAMACU_BIN> sh -c '
-(echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"install-check\",\"version\":\"0\"}}}"
- sleep 0.5
- echo "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"
- sleep 0.3
- echo "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_projects\",\"arguments\":{}}}"
- sleep 1) | "$KAMACU_BIN" mcp serve 2>/dev/null | tail -n 1'
+( echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"install-check\",\"version\":\"0\"}}}"
+  echo "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"
+  echo "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_projects\",\"arguments\":{}}}"
+  # hold stdin open (bounded ~15s) so the server can finish replying
+  for i in $(seq 1 150); do sleep 0.1; done
+) | "$KAMACU_BIN" mcp serve 2>/dev/null | grep -m1 "\"id\":2"'
 ```
 
-- **Success**: the last line is a JSON-RPC `result` whose `content[0].text` is
-  a JSON array of projects (possibly `[]`).
-- **Failure — app down**: the last line is
-  `"error":{"code":0,"message":"kamacu bridge: Get \"http://127.0.0.1:7333/api/projects\": dial tcp 127.0.0.1:7333: connect: connection refused"}`.
-  The app is not running — see troubleshooting.
+The reader returns as soon as the tool response arrives, not after a fixed
+delay. **Success**: the printed line is a JSON-RPC `result` whose
+`content[0].text` is a JSON array of projects (possibly `[]`).
+**Failure — app down**: the printed line is
+`"error":{"code":0,"message":"kamacu bridge: Get \"http://127.0.0.1:7333/api/projects\": dial tcp 127.0.0.1:7333: connect: connection refused"}` — start the app (see
+troubleshooting). **Nothing printed at all** means the server process itself
+did not answer — re-check the binary path from step 2.2.
 
 Then confirm your client sees it (`claude mcp list` / `opencode mcp list` /
 your client's equivalent), and report both results to the user.
@@ -166,4 +210,5 @@ your client's equivalent), and report both results to the user.
 | Same refused error but with a different port in the URL | App started with non-default `--addr` | Add `"env": {"KAMACU_HOOK_BASE": "http://127.0.0.1:<PORT>"}` to the server config |
 | Client fails to spawn the server; config shows a path with `~` or a dead path | Config holds an unexpanded or stale binary path | Re-register with the fully resolved absolute path (step 2.2) |
 | `claude mcp list` warns `kamacu is defined in multiple scopes with different endpoints` | An old install (e.g. a previous checkout) left an entry in another scope | Keep one: `claude mcp remove kamacu -s <scope>` for the stale ones |
+| An `opencode mcp add kamacu` run replaced a working entry without warning | `opencode mcp add` silently overwrites an existing `kamacu` entry | Check first (step 3 pre-check); restore the previous entry from the config if you clobbered it |
 | Server entry missing from the client after "successful" add | Added in `local` scope from a different directory | Re-add with `--scope user`, or re-run from the right project directory |
