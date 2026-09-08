@@ -31,31 +31,42 @@ reattach to from any browser tab.
   you use and sign in first. Any other terminal agent works too, registered as a
   custom agent.
 - **git** — every task runs in its own git worktree off your project's checkout.
-- **Go 1.26** — to build the single backend binary.
-- **Node 20.19+ / 22.12+** — to build the React frontend (Vite's minimum).
 - **tmux** — backs the durable bash tabs so sessions survive server restarts.
 
-## Build & run
+## Install
 
-Kamacu ships as one self-contained binary that serves the JSON API and the embedded
-frontend together at localhost:
+Kamacu ships as one self-contained binary (Go server with the React frontend
+embedded) for Linux and macOS, amd64 and arm64, published on the
+[releases page](https://github.com/jordeu/kamacu/releases). The easiest way to
+install it — or update an existing install — is to paste this line to your
+coding agent:
 
-```sh
-make build      # builds the React frontend, then the Go binary → bin/kamacu
-./bin/kamacu serve    # starts the server; open the printed localhost URL in a browser
+```
+read https://raw.githubusercontent.com/jordeu/kamacu/master/docs/install.md and install kamacu
 ```
 
-`make build` runs the Vite production build and embeds the output into a single
-`bin/kamacu` binary — no separate frontend server to run in production.
+The guide, [docs/install.md](docs/install.md), is written to be executed by the
+agent: it downloads the latest release for your platform, verifies its
+checksum, installs to `~/.local/bin` (or updates an existing binary in place),
+and asks whether `kamacu serve` should run as a background service at boot
+(systemd user unit on Linux, LaunchAgent on macOS) or be started manually.
 
-For frontend development with hot-reload, run the Vite dev server and let it proxy
-`/api` (JSON API and WebSocket terminal streams) through to a locally running
-backend:
+Once installed, start it (or let the service do it) and open
+http://127.0.0.1:7333 in a browser.
+
+### Development
+
+To build from a checkout instead (requires Go 1.26 and Node 20.19+/22.12+):
 
 ```sh
-make dev-backend    # Go server on its own port
-make dev-frontend   # Vite dev server with HMR, proxying API + WebSocket to the backend
+make build           # Vite production build, then the Go binary → bin/kamacu
+./bin/kamacu serve
 ```
+
+`make build` embeds the frontend into the binary — no separate frontend server
+in production. For frontend development with hot-reload, run `make dev-backend`
+and `make dev-frontend` (Vite dev server with HMR, proxying `/api` — the JSON
+API and WebSocket terminal streams — to the backend).
 
 ## MCP server
 
