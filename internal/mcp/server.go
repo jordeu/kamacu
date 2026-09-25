@@ -86,6 +86,6 @@ func registerTools(s *mcp.Server, b *bridge) {
 	registerProjectTools(s, b)
 	registerWorkspaceTools(s, b)
 	registerSessionTools(s, b)
-	registerReviewTools(s, b) // NEW — Phase 09 (list_pending_reviews / list_recently_reviewed / open_review)
+	registerReviewTools(s, b)   // NEW — Phase 09 (list_pending_reviews / list_recently_reviewed / open_review)
+	registerPresenceTools(s, b) // user-activity snapshot (get_user_activity)
 }
-

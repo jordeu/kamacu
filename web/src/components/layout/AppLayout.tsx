@@ -5,10 +5,16 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { ActiveSessionsBar } from "@/components/layout/ActiveSessionsBar";
 import { ActiveWorkspaceProvider } from "@/lib/useActiveWorkspace";
+import { usePresenceBeacon } from "@/presence/usePresenceBeacon";
 
 const SIDEBAR_STORAGE_KEY = "kamacu.sidebar";
 
 export function AppLayout() {
+  // Presence beacon (get_user_activity / MCP): one mount on the shell beats
+  // the current route + focused session + visibility on every route. It has
+  // no UI — the surface exists for the agents reading the snapshot.
+  usePresenceBeacon();
+
   // D-04: collapsed state persists across reloads. The generated shadcn
   // SidebarProvider only writes a cookie (never reads it back in an SPA),
   // so the open state is controlled here and backed by localStorage.
