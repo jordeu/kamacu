@@ -77,7 +77,7 @@ func newAgentIntegrationServer(t *testing.T) (*httptest.Server, *session.Manager
 	// catches main drift, and the PUT /api/global seed step for the
 	// global-agent suite (sessions_global_test.go).
 	GlobalRoutes(mux, db, mgr, tmux.Client{})
-	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil, false))
+	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil, false, nil))
 	srv := httptest.NewServer(mux)
 	mgr.SetAgentConfig(session.AgentConfig{
 		BaseURL:   srv.URL, // overlay hook URLs point back at this harness

@@ -41,7 +41,7 @@ func newTestServer(t *testing.T, insecureAnyOrigin bool) (*httptest.Server, *ses
 	mgr := session.NewManager()
 	mux := http.NewServeMux()
 	api.SessionRoutes(mux, mgr, db, tmux.Client{})
-	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil, insecureAnyOrigin))
+	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, nil, insecureAnyOrigin, nil))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() {

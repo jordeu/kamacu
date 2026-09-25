@@ -11,6 +11,16 @@ import (
 	"kamacu/internal/session"
 )
 
+// InputObserver receives a notification for every stdin ('0') frame a
+// BROWSER connection sends — the user-typing seam. The REST /input
+// endpoint (agent-delegated writes, e.g. send_session_message) never
+// reaches it, so implementations can treat every call as user-originated.
+// Defined here (the consumer) so the ws package stays decoupled from
+// presence; *presence.Tracker satisfies it structurally.
+type InputObserver interface {
+	NoteUserInput(sessionID string)
+}
+
 // Handler upgrades GET /api/sessions/{id}/ws requests and bridges the
 // connection to a session. It consumes ONLY the session package's public
 // surface (Attach/Detach/WriteInput/Resize/Done/Info) — never the ring
@@ -19,6 +29,7 @@ type Handler struct {
 	mgr               *session.Manager
 	originPatterns    []string
 	insecureAnyOrigin bool
+	observer          InputObserver // optional; nil is a strict no-op
 }
 
 // NewHandler returns a Handler serving sessions from mgr. originPatterns is
@@ -32,8 +43,11 @@ type Handler struct {
 // origin — never the "*" pattern, which accept.go explicitly warns against).
 // Leave it false to keep the loopback-only Origin allowlist (the default,
 // byte-for-byte-unchanged behavior).
-func NewHandler(mgr *session.Manager, originPatterns []string, insecureAnyOrigin bool) *Handler {
-	return &Handler{mgr: mgr, originPatterns: originPatterns, insecureAnyOrigin: insecureAnyOrigin}
+//
+// observer receives browser-originated stdin notifications; nil disables the
+// seam (a strict no-op).
+func NewHandler(mgr *session.Manager, originPatterns []string, insecureAnyOrigin bool, observer InputObserver) *Handler {
+	return &Handler{mgr: mgr, originPatterns: originPatterns, insecureAnyOrigin: insecureAnyOrigin, observer: observer}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +86,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeDone := make(chan struct{})
 	go h.writeLoop(ctx, conn, sess, q, writeDone)
 
-	h.readLoop(ctx, conn, sess)
+	h.readLoop(ctx, conn, sess, id)
 
 	// Reader is done (client closed, or we closed after exit). Stop the
 	// writer and wait for it so its final exit-frame write is never cut off
@@ -147,7 +161,7 @@ func (h *Handler) finish(ctx context.Context, conn *websocket.Conn, sess *sessio
 // resize frame — so a reattaching client whose fitted size equals the PTY's
 // current size still triggers the SIGWINCH jiggle, while resize storms never
 // re-trigger redraws (claude-code resize-storm duplication bug).
-func (h *Handler) readLoop(ctx context.Context, conn *websocket.Conn, sess *session.Session) {
+func (h *Handler) readLoop(ctx context.Context, conn *websocket.Conn, sess *session.Session, sessionID string) {
 	firstResize := true
 	for {
 		typ, data, err := conn.Read(ctx)
@@ -159,6 +173,12 @@ func (h *Handler) readLoop(ctx context.Context, conn *websocket.Conn, sess *sess
 		}
 		switch data[0] {
 		case FrameData:
+			// Browser-typed stdin: notify the presence seam FIRST (even a
+			// racing exit still means the user typed). Resize frames never
+			// notify — only input is the typing signal.
+			if h.observer != nil {
+				h.observer.NoteUserInput(sessionID)
+			}
 			// Errors only mean the session exited; the writer delivers the
 			// 'x' frame and close — nothing to do here.
 			_ = sess.WriteInput(data[1:])
