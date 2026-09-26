@@ -25,9 +25,9 @@ const maxBodyBytes = 1 << 20
 // bridge is the per-process HTTP client the MCP tool handlers use to call the
 // running Kamacu HTTP API. The bridge is plain HTTP (not WS) in Phase 06; all
 // auth rides the X-Kamacu-Token header on every request (D-06/D-07 wire
-// contract). Kamacu ignores the header on /api/* routes today (loopback
-// binding is the actual v1.11 auth boundary), but the header is sent on every
-// call so future server-side checks see it without further bridge changes.
+// contract). The presence snapshot requires this token; other
+// API routes rely on loopback binding. Send it on every call so protected
+// routes can authenticate subprocesses using the session environment.
 type bridge struct {
 	base   string
 	token  string
@@ -35,8 +35,8 @@ type bridge struct {
 }
 
 // newBridgeFromEnv reads KAMACU_HOOK_BASE (default http://127.0.0.1:7333 when
-// empty/unset) and KAMACU_HOOK_TOKEN (may be "" — Kamacu ignores on /api/*
-// per D-06) and returns the constructed *bridge. An invalid KAMACU_HOOK_BASE
+// empty/unset) and KAMACU_HOOK_TOKEN (required by token-gated routes)
+// and returns the constructed *bridge. An invalid KAMACU_HOOK_BASE
 // surfaces as a startup error so the subcommand fails fast instead of silently
 // pointing at a malformed URL.
 func newBridgeFromEnv() (*bridge, error) {
