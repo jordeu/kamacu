@@ -1,8 +1,8 @@
 # Kamacu
 
 A local-only, agent-agnostic web app for organizing coding-agent sessions around
-projects and tasks. Claude Code and OpenCode are supported natively, and any other
-terminal-driven agent can be added as a custom agent. The name is an acronym:
+projects and tasks. Claude Code, OpenCode and Codex are supported natively, and any
+other terminal-driven agent can be added as a custom agent. The name is an acronym:
 **KA**nban **M**ulti-**A**gent **C**ontrol **U**nit —
 Kamacu is the control unit that drives your kanban of parallel agents, and the
 ember-spark logo is that animating force made visible.
@@ -14,9 +14,9 @@ ember-spark logo is that animating force made visible.
 A left sidebar lists your projects, each pointing at a local git repo checkout. The main
 area is a kanban board of tasks. Click a task to expand a full-page view with the main
 agent session — the agent's real CLI running in a PTY, rendered live in a browser
-terminal — plus optional tabs for extra bash sessions. Claude Code and OpenCode are
-built in, with live working/idle/waiting status on the board; any other CLI agent can
-be registered as a custom agent from just a name and a command. The default agent is
+terminal — plus optional tabs for extra bash sessions. Claude Code, OpenCode and Codex
+are built in, with live working/idle/waiting status on the board; any other CLI agent
+can be registered as a custom agent from just a name and a command. The default agent is
 configurable per project.
 
 It runs entirely on your machine, single user, accessed from a browser at localhost. The
@@ -27,9 +27,11 @@ reattach to from any browser tab.
 ## Prerequisites
 
 - **An agent CLI** — Kamacu spawns the real agent CLI in a terminal; it never
-  reimplements it. Claude Code and OpenCode are supported natively: install the one(s)
-  you use and sign in first. Any other terminal agent works too, registered as a
-  custom agent.
+  reimplements it. Claude Code, OpenCode and Codex are supported natively: install the
+  one(s) you use and sign in first. Any other terminal agent works too, registered as
+  a custom agent. Codex status hooks need a one-time `/hooks` trust inside a Kamacu
+  codex session (Kamacu installs the hook profile under `~/.codex/kamacu.config.toml`
+  and spawns codex with `-p kamacu`).
 - **git** — every task runs in its own git worktree off your project's checkout.
 - **tmux** — backs the durable bash tabs so sessions survive server restarts.
 
@@ -91,7 +93,7 @@ Kamacu drives one loop, from an idea to a reviewed change:
 2. **Task** — create a task on the board. Kamacu auto-creates a branch and an isolated
    git worktree for it, so concurrent tasks never collide in one checkout.
 3. **Agent** — open the task and start an agent session. It runs as the real CLI —
-   `claude`, `opencode`, or a custom agent's command — inside the task's worktree,
+   `claude`, `opencode`, `codex`, or a custom agent's command — inside the task's worktree,
    with the full interactive TUI (plan mode, slash commands, permission prompts).
    Leave the tab and reattach later — the session keeps running server-side and
    replays on reconnect.

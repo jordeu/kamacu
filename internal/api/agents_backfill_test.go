@@ -182,3 +182,85 @@ func TestBackfillOpenCodeAgent(t *testing.T) {
 		t.Errorf("after second backfill: opencode agents = %d, want 1", got)
 	}
 }
+
+// TestBackfillCodexAgent proves the codex safety-net hook (the in-process
+// counterpart to migration 00019) is idempotent and re-creates the codex seed
+// only when it is gone. Mirrors TestBackfillOpenCodeAgent exactly, adapted to
+// the codex seed's shape (is_default=0, engine='codex').
+func TestBackfillCodexAgent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	countCodex := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE engine = 'codex' AND is_system = 1`).Scan(&n); err != nil {
+			t.Fatalf("count codex agents: %v", err)
+		}
+		return n
+	}
+
+	// (1) Healthy boot: migration 00019 already created the codex seed, so
+	// BackfillCodexAgent is a no-op and does NOT insert a second codex row.
+	if got := countCodex(); got != 1 {
+		t.Fatalf("after migrate: codex agents = %d, want 1 (migration seeds it)", got)
+	}
+	if err := BackfillCodexAgent(db); err != nil {
+		t.Fatalf("BackfillCodexAgent (healthy boot): %v", err)
+	}
+	if got := countCodex(); got != 1 {
+		t.Fatalf("after no-op backfill: codex agents = %d, want 1 (no second codex)", got)
+	}
+
+	// (2) Missing seed: simulate a recovery where the codex row was dropped
+	// (partial-apply / manual delete past the is_system guard). The backfill
+	// hook re-creates it (is_default=0, is_system=1, engine='codex').
+	if _, err := db.Exec(`DELETE FROM agents WHERE engine = 'codex' AND is_system = 1`); err != nil {
+		t.Fatalf("delete codex agent: %v", err)
+	}
+	if got := countCodex(); got != 0 {
+		t.Fatalf("after delete: codex agents = %d, want 0", got)
+	}
+	if err := BackfillCodexAgent(db); err != nil {
+		t.Fatalf("BackfillCodexAgent (missing seed): %v", err)
+	}
+	if got := countCodex(); got != 1 {
+		t.Fatalf("after re-create: codex agents = %d, want 1", got)
+	}
+
+	// (3) The re-created seed carries the codex engine + system marker and is
+	//     NOT a default (R019: claude stays the sole default). No user-created
+	//     row is ever clobbered (the backfill keys on engine='codex' AND
+	//     is_system=1, which a user-created row can never match).
+	var cxName, cxCommand, cxEngine string
+	var cxIsDefault, cxIsSystem int
+	if err := db.QueryRow(
+		`SELECT name, command, engine, is_default, is_system FROM agents WHERE engine = 'codex' AND is_system = 1`,
+	).Scan(&cxName, &cxCommand, &cxEngine, &cxIsDefault, &cxIsSystem); err != nil {
+		t.Fatalf("select re-created codex seed: %v", err)
+	}
+	if cxName != "Codex" || cxCommand != "codex" || cxEngine != "codex" {
+		t.Errorf("re-created codex seed = %q/%q/%q, want Codex/codex/codex", cxName, cxCommand, cxEngine)
+	}
+	if cxIsSystem != 1 {
+		t.Errorf("re-created codex seed is_system = %d, want 1", cxIsSystem)
+	}
+	if cxIsDefault != 0 {
+		t.Errorf("re-created codex seed is_default = %d, want 0 (claude sole default, R019)", cxIsDefault)
+	}
+
+	// (4) Idempotent on a second call after re-create -- still exactly one.
+	if err := BackfillCodexAgent(db); err != nil {
+		t.Fatalf("BackfillCodexAgent (second call): %v", err)
+	}
+	if got := countCodex(); got != 1 {
+		t.Errorf("after second backfill: codex agents = %d, want 1", got)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -405,23 +406,24 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := session.SpawnOpts{Kind: kind}
-	// csid holds the task's persisted claude session id; ocsid holds its
-	// opencode counterpart (the opaque ses_… opencode mints, captured ASYNC in
-	// T03). Both are read fresh inside the handler (Pitfall 6: this in-handler
-	// read is the single source of truth at spawn time — a stale client Resume
-	// after a Reset minted a new id simply resumes the NEW id, which is correct
-	// newest-wins behavior).
-	var csid, ocsid sql.NullString
+	// csid holds the task's persisted claude session id; ocsid/cxid hold its
+	// opencode/codex counterparts (the opaque ids those CLIs mint — opencode's
+	// captured by the async session-list poll, codex's by the hook-payload
+	// capture). All are read fresh inside the handler (Pitfall 6: this
+	// in-handler read is the single source of truth at spawn time — a stale
+	// client Resume after a Reset minted a new id simply resumes the NEW id,
+	// which is correct newest-wins behavior).
+	var csid, ocsid, cxid sql.NullString
 	var agentEngine, agentCommand, agentExtraParams string // M001: resolved alongside the task's worktree
 	if req.TaskID > 0 {
 		var path sql.NullString
 		err := h.db.QueryRow(
-			`SELECT t.worktree_path, t.claude_session_id, t.opencode_session_id, a.engine, a.command, a.extra_params
+			`SELECT t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, a.engine, a.command, a.extra_params
 			 FROM tasks t
 			 JOIN projects p ON p.id = t.project_id
 			 JOIN agents a ON a.id = p.agent_id
 			 WHERE t.id = ?`, req.TaskID,
-		).Scan(&path, &csid, &ocsid, &agentEngine, &agentCommand, &agentExtraParams)
+		).Scan(&path, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
@@ -443,11 +445,11 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// loadGlobalConfig fail-loud posture.
 		var rootPath string
 		err := h.db.QueryRow(
-			`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, a.engine, a.command, a.extra_params
+			`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, g.codex_session_id, a.engine, a.command, a.extra_params
 			 FROM global_task g
 			 JOIN agents a ON a.id = g.agent_id
 			 WHERE g.id = 1`,
-		).Scan(&rootPath, &csid, &ocsid, &agentEngine, &agentCommand, &agentExtraParams)
+		).Scan(&rootPath, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusInternalServerError, "global task row missing")
 			return
@@ -507,30 +509,47 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// conversation back, not a blank terminal). transcriptExists is
 			// cwd-agnostic (resume.go), so the claude check works verbatim
 			// against the global root's transcripts.
-			if agentEngine == "opencode" {
-				if !ocsid.Valid {
-					writeError(w, http.StatusConflict, "no global opencode session to resume")
-					return
-				}
-				// opts.ResumeSessionID stays "" — the `-s <id>` append in the
-				// custom spawn arm below keys off ocsid, which the singleton
-				// scan already filled.
-			} else {
+		if agentEngine == "opencode" {
+			if !ocsid.Valid {
+				writeError(w, http.StatusConflict, "no global opencode session to resume")
+				return
+			}
+			// opts.ResumeSessionID stays "" — the `-s <id>` append in the
+			// custom spawn arm below keys off ocsid, which the singleton
+			// scan already filled.
+		} else if agentEngine == "codex" {
+			// Codex global resume: keys off the persisted codex_session_id
+			// alone (captured from hook payloads); the `resume <id>` subcommand
+			// append below keys off cxid.
+			if !cxid.Valid {
+				writeError(w, http.StatusConflict, "no global codex session to resume")
+				return
+			}
+		} else {
 				if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
 					writeError(w, http.StatusConflict, "no global claude session to resume")
 					return
 				}
 				opts.ResumeSessionID = csid.String
 			}
-		} else if agentEngine == "opencode" {
-			if !ocsid.Valid {
-				writeError(w, http.StatusConflict, "no session to resume")
-				return
-			}
-			// opts.ResumeSessionID stays "" — opencode does NOT route through
-			// claude's --resume (MEM027); the `-s <id>` flag is appended to
-			// AgentArgs in the custom spawn arm below.
-		} else {
+	} else if agentEngine == "opencode" {
+		if !ocsid.Valid {
+			writeError(w, http.StatusConflict, "no session to resume")
+			return
+		}
+		// opts.ResumeSessionID stays "" — opencode does NOT route through
+		// claude's --resume (MEM027); the `-s <id>` flag is appended to
+		// AgentArgs in the custom spawn arm below.
+	} else if agentEngine == "codex" {
+		// Codex task resume: keys off the persisted codex_session_id alone —
+		// codex has no kamacu-side transcript glob (its sessions live under
+		// ~/.codex). The `resume <id>` subcommand is appended to AgentArgs in
+		// the custom spawn arm below.
+		if !cxid.Valid {
+			writeError(w, http.StatusConflict, "no session to resume")
+			return
+		}
+	} else {
 			if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
 				writeError(w, http.StatusConflict, "no session to resume")
 				return
@@ -571,6 +590,15 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// fake-opencode argv stub locks this exact fresh-vs-resume argv.
 			if agentEngine == "opencode" && req.Resume && ocsid.Valid {
 				opts.AgentArgs = append(opts.AgentArgs, "-s", ocsid.String)
+			}
+			// M002-codex/S03: a codex task with a persisted codex_session_id
+			// resumes via `codex resume <id>` (the session layer prepends
+			// `-p kamacu` ahead of these tokens). The fresh codex spawn stays
+			// renderAgentCommand("codex",...) == ["codex"] (the seed command
+			// has no placeholders). The fake-codex argv stub locks this exact
+			// fresh-vs-resume argv.
+			if agentEngine == "codex" && req.Resume && cxid.Valid {
+				opts.AgentArgs = append(opts.AgentArgs, "resume", cxid.String)
 			}
 		}
 	} else if reattach {
@@ -723,6 +751,23 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				go captureOpencodeSessionAsync(h.db, sess.Done(), globalPersistTarget(), opts.Cwd)
 			} else {
 				go captureOpencodeSessionAsync(h.db, sess.Done(), taskPersistTarget(req.TaskID), opts.Cwd)
+			}
+		}
+		// Codex session-id capture (the codex counterpart of the opencode
+		// block above, with a simpler source): codex mints its own uuid and
+		// every hook payload carries it (session_id), so the hook receiver
+		// records it onto the Session (first capture wins) and THIS poller
+		// just persists sess.CodexSessionID() to the session owner's resume
+		// column — no subprocess discovery. Async + warn-only, exactly the
+		// opencode posture: a capture failure (e.g. hooks not yet trusted in
+		// the codex TUI) costs only restart-resume, never the live session.
+		// Resume reuses the stored id (no capture) — only a FRESH codex spawn
+		// captures.
+		if agentEngine == "codex" && !req.Resume {
+			if req.Scope == "global" {
+				go captureCodexSessionAsync(h.db, sess.Done(), codexGlobalPersistTarget(), sess)
+			} else {
+				go captureCodexSessionAsync(h.db, sess.Done(), codexTaskPersistTarget(req.TaskID), sess)
 			}
 		}
 	}
@@ -1151,7 +1196,116 @@ func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, target openco
 	}
 }
 
-// --- Phase 08 read-only endpoints (MCPSESS-01/02/03 server-side) -------------
+// --- codex session-id capture ------------------------------------------------
+//
+// codex mints its own session uuid (rollout files under ~/.codex/sessions)
+// and every hook payload the kamacu profile POSTs carries it (session_id —
+// verified against codex 0.157.0). Capture therefore needs NO subprocess
+// discovery (unlike opencode's `session list` scan): the hook receiver
+// records the id onto the Session (Session.SetCodexSessionID, first capture
+// wins), and this poller persists it to the session owner's resume column —
+// tasks.codex_session_id, or the global_task singleton for a global spawn —
+// which is the restart-resume key (the `codex resume <id>` argv reads it).
+// When hooks are unavailable, the normal exit footer supplies a fallback ID.
+
+// codexPersistTarget is the parametrized persist step of the codex capture
+// poller, mirroring opencodePersistTarget: WHERE the captured uuid lands, as
+// a closure over isolated SQL so a wrong-table write is structurally
+// inexpressible.
+type codexPersistTarget struct {
+	owner   string // log label ("task <id>" / "global")
+	persist func(db *sql.DB, codexSessionID string) error
+}
+
+// codexTaskPersistTarget writes tasks.codex_session_id for taskID — the
+// restart-resume key of a task-scoped codex agent.
+func codexTaskPersistTarget(taskID int64) codexPersistTarget {
+	return codexPersistTarget{
+		owner: fmt.Sprintf("task %d", taskID),
+		persist: func(db *sql.DB, id string) error {
+			_, err := db.Exec(`UPDATE tasks SET codex_session_id = ? WHERE id = ?`, id, taskID)
+			return err
+		},
+	}
+}
+
+// codexGlobalPersistTarget writes global_task.codex_session_id on the
+// singleton row — the restart-resume key of the global (Scratchpad) codex
+// agent.
+func codexGlobalPersistTarget() codexPersistTarget {
+	return codexPersistTarget{
+		owner: "global",
+		persist: func(db *sql.DB, id string) error {
+			_, err := db.Exec(`UPDATE global_task SET codex_session_id = ? WHERE id = 1`, id)
+			return err
+		},
+	}
+}
+
+// Codex's normal exit footer also exposes the resume ID when hooks are not
+// trusted. Only accept the complete footer at the end of the exited output;
+// arbitrary resume commands in conversation output are not capture signals.
+var codexFooterANSI = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+var codexResumeFooter = regexp.MustCompile(`(?:^|[\r\n])To continue this session, run[\s]+codex resume ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\s*$`)
+
+func codexSessionIDFromFooter(output []byte) string {
+	plain := codexFooterANSI.ReplaceAll(output, nil)
+	match := codexResumeFooter.FindSubmatch(plain)
+	if len(match) == 0 {
+		return ""
+	}
+	return string(match[1])
+}
+
+// captureCodexSessionAsync polls the session's hook-recorded codex uuid until
+// it appears (the SessionStart hook fires at codex boot — but ONLY once the
+// user has trusted the kamacu hooks via /hooks, so the window must tolerate a
+// late first hook) and persists it via the parametrized target. In-memory
+// polls are free, so the poll runs until the session exits (done). The final
+// attempt also checks Codex's exit footer if no hook supplied the ID.
+// All failures are warn-only: capture is best-effort and must never affect
+// the live session.
+func captureCodexSessionAsync(db *sql.DB, done <-chan struct{}, target codexPersistTarget, sess *session.Session) {
+	const pollInterval = 500 * time.Millisecond
+	attempt := func() bool {
+		id := sess.CodexSessionID()
+		if id == "" && sess.Info().Status == session.StatusExited {
+			id = codexSessionIDFromFooter(sess.Snapshot())
+			if id != "" {
+				sess.SetCodexSessionID(id)
+			}
+		}
+		if id == "" {
+			return false // no hook yet (untrusted hooks / no turn started)
+		}
+		if err := target.persist(db, id); err != nil {
+			slog.Warn("persisting codex session id", "owner", target.owner, "error", err)
+			return false
+		}
+		slog.Info("captured codex session id", "owner", target.owner, "codex_session_id", id)
+		return true
+	}
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	if attempt() {
+		return
+	}
+	for {
+		select {
+		case <-done:
+			attempt() // final: the drained exit footer is now available
+			return
+		case <-ticker.C:
+			if attempt() {
+				return
+			}
+		}
+	}
+}
+
+// --- Phase 08 read-only endpoints (MCPSESS-01/02/03 server-side) --------------
 //
 // These handlers back the MCP bridge's session tools. They consume ONLY
 // session.Info/Snapshot — never the PTY-write primitive (D-14). The bridge

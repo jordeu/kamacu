@@ -83,11 +83,11 @@ func TestAgentCreate(t *testing.T) {
 		t.Errorf("command = %v, want \"gemini\"", a["command"])
 	}
 
-	// The list now has the system seeds (claude + opencode) + the new custom
-	// agent = 3.
+	// The list now has the system seeds (claude + opencode + codex) + the new
+	// custom agent = 4.
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 3 {
-		t.Errorf("agents after create = %d, want 3", len(list))
+	if len(list) != 4 {
+		t.Errorf("agents after create = %d, want 4", len(list))
 	}
 }
 
@@ -177,10 +177,10 @@ func TestAgentDeleteUnused(t *testing.T) {
 		t.Errorf("delete unused custom: status=%d, want 204", resp.StatusCode)
 	}
 
-	// Back to the two system seeds (claude + opencode).
+	// Back to the three system seeds (claude + opencode + codex).
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 2 {
-		t.Errorf("agents after delete = %d, want 2 (system seeds only)", len(list))
+	if len(list) != 3 {
+		t.Errorf("agents after delete = %d, want 3 (system seeds only)", len(list))
 	}
 }
 

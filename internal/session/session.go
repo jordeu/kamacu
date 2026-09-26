@@ -90,6 +90,7 @@ type Session struct {
 	kind            Kind         // KindBash or KindAgent; immutable after Spawn
 	claudeSessionID string       // agent only ("" for bash); the --session-id uuid, immutable after Spawn
 	engine          string       // agent only: the resolved agent's engine ("claude" | "custom" | "" ); custom agents skip the working/waiting/idle heuristics (D-M001-2)
+	codexSessionID  string       // codex only: the uuid codex mints (hook payload session_id), captured by the hook receiver; first hook wins
 	tmuxName        string       // tmux-backed bash tab: the kamacu-<task>-<n> session name ("" = not tmux)
 	tmuxClient      *tmux.Client // socket/config for lifecycle probes; nil unless tmuxName != ""
 	killer          func() error // non-nil: how Stop terminates the underlying work (assigned ONCE
@@ -120,6 +121,7 @@ type Session struct {
 	//                          (manual Ctrl+B d) — recorded for Phase 9's resume reconcile
 
 	done      chan struct{} // closed after the exit watcher finishes
+	pumpDone  chan struct{} // closed once the final PTY output has been consumed
 	termGrace time.Duration // D-14 grace between SIGTERM and SIGKILL
 	stopOnce  sync.Once
 }
@@ -130,6 +132,7 @@ type Session struct {
 // decides exit status; the exit watcher is the single authoritative exit
 // event.
 func (s *Session) pump() {
+	defer close(s.pumpDone)
 	buf := make([]byte, 4096)
 	for {
 		n, err := s.ptmx.Read(buf)
@@ -179,6 +182,16 @@ func (s *Session) waitExit() {
 			s.detachedAlive = true
 			s.mu.Unlock()
 		}
+	}
+	if s.engine == "codex" {
+		// Codex prints its resume command on exit. Wait for that footer before
+		// publishing Done, but bound the wait if a descendant holds the PTY open.
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-s.pumpDone:
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 	s.markExited(code)
 	_ = s.ptmx.Close() // AFTER Wait — the pump's Read already returned EIO
@@ -235,6 +248,28 @@ func (s *Session) Info() Info {
 // (the Phase 5 --resume key). Empty for bash sessions.
 func (s *Session) ClaudeSessionID() string {
 	return s.claudeSessionID
+}
+
+// CodexSessionID returns the uuid codex minted for its own session, captured
+// from the first hook payload's session_id by the hook receiver (codex, unlike
+// claude, owns its id — the restart-resume key for `codex resume <id>`). Empty
+// until a hook fires (e.g. the hooks are still untrusted in the codex TUI).
+func (s *Session) CodexSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.codexSessionID
+}
+
+// SetCodexSessionID records codex's own session uuid from a hook payload.
+// FIRST capture wins: the initial SessionStart of the kamacu-spawned
+// conversation is the resume key, and a later hook from a codex-side /resume
+// picker must not silently retarget kamacu's persisted id.
+func (s *Session) SetCodexSessionID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.codexSessionID == "" {
+		s.codexSessionID = id
+	}
 }
 
 // TmuxName returns the tmux session name for tmux-backed tabs ("" otherwise).
@@ -306,11 +341,12 @@ func (s *Session) MarkHooksAlive() {
 
 // ClearWaitingOnAttach clears a waiting agent to idle when a client attaches
 // (D-45 — opening the task's agent tab acknowledges the prompt). Strict
-// no-op for bash sessions and non-waiting agents.
+// no-op for bash sessions and non-waiting agents. Codex permission requests
+// remain pending across attaches/reconnects until answered or the turn ends.
 func (s *Session) ClearWaitingOnAttach() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.kind == KindAgent && s.waiting {
+	if s.kind == KindAgent && s.engine != "codex" && s.waiting {
 		s.waiting = false
 		s.lastActivity = time.Time{} // -> idle
 	}
@@ -328,8 +364,10 @@ func (s *Session) agentStatusLocked() string {
 	// don't understand would be the unreliable heuristic this milestone
 	// explicitly rejected. claude (and "" back-compat) and opencode (D013:
 	// opencode runs in a PTY like claude and its on-disk plugin drives the
-	// same SessionStart/Stop/Notification hooks) keep the full states.
-	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" {
+	// same SessionStart/Stop/Notification hooks) keep the full states. codex
+	// joins them: its lifecycle hooks (SessionStart/Stop/PermissionRequest)
+	// drive the same receiver transitions via ~/.codex/kamacu.config.toml.
+	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" && s.engine != "codex" {
 		return "running"
 	}
 	if s.waiting {
@@ -371,15 +409,15 @@ func (s *Session) Detach(connID string) {
 }
 
 // WriteInput writes raw input bytes to the PTY. Errors if the session exited.
-// For agents, stdin means the user typed/answered the prompt: waiting clears
-// and the session is working (D-47 state machine).
+// For agents, user input clears waiting and marks the session working.
+// Automatic terminal reports are forwarded without changing agent status.
 func (s *Session) WriteInput(p []byte) error {
 	s.mu.Lock()
 	if s.status == StatusExited {
 		s.mu.Unlock()
 		return errors.New("session exited")
 	}
-	if s.kind == KindAgent {
+	if s.kind == KindAgent && isUserInput(p) {
 		s.waiting = false
 		s.lastActivity = time.Now()
 	}

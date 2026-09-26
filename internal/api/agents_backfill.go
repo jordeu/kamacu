@@ -103,6 +103,33 @@ func BackfillOpenCodeAgent(db *sql.DB) error {
 	return err
 }
 
+// BackfillCodexAgent guarantees the codex system seed exists at startup,
+// mirroring BackfillOpenCodeAgent: it runs ONCE right after store.Migrate(db)
+// and is IDEMPOTENT — a cheap no-op on healthy boots. The seed is created by
+// migration 00019 (guarded by a NOT EXISTS predicate), so this hook's job is
+// the same safety-net posture: re-create the row if it was somehow dropped
+// from a migrated DB.
+//
+// The seed is engine='codex' (its own capability tier: PTY spawn + env-gated
+// status hooks via the exclusive ~/.codex/kamacu.config.toml profile layer,
+// see internal/codex/), command='codex' (the host codex CLI), is_default=0
+// (claude REMAINS the sole default — R019 invariant intact), and is_system=1
+// (non-deletable, R018). All SQL is parameterless/literal.
+func BackfillCodexAgent(db *sql.DB) error {
+	var id int64
+	err := db.QueryRow(`SELECT id FROM agents WHERE engine = 'codex' AND is_system = 1`).Scan(&id)
+	if err == nil {
+		return nil // codex seed already exists -> no-op (the healthy-boot path)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err // a real DB error is propagated, never swallowed
+	}
+	// No codex seed: re-create it (defensive; 00019 normally created it).
+	// is_default=0 preserves the exactly-one-default invariant (claude stays it).
+	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('Codex', 'codex', 'codex', 0, 1)`)
+	return err
+}
+
 // effectiveExtraParams returns the legacy setting's effective value without
 // importing the settings package (agents_backfill.go stays leaf-ish). The code
 // default ('--dangerously-skip-permissions', AGENT-02) is applied when the KV

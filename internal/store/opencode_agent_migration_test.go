@@ -121,8 +121,10 @@ func TestOpencodeAgentMigration(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE is_system = 1`).Scan(&sysCount); err != nil {
 		t.Fatalf("count system agents after 00015: %v", err)
 	}
-	if sysCount != 2 {
-		t.Errorf("is_system agent count after 00015 = %d, want 2 (claude + opencode)", sysCount)
+	// Migrate applies the FULL chain (00019 later seeds codex), so the three
+	// system seeds are claude + opencode + codex.
+	if sysCount != 3 {
+		t.Errorf("is_system agent count after 00015 = %d, want 3 (claude + opencode + codex)", sysCount)
 	}
 
 	// (d) FK enforcement is re-armed ON on the same pooled handle (Pitfall 3:
@@ -136,9 +138,10 @@ func TestOpencodeAgentMigration(t *testing.T) {
 		t.Errorf("foreign_keys after migration = %d, want 1 (re-armed ON)", fk)
 	}
 
-	// (e) Idempotency: a second Migrate is a clean no-op -- still exactly two
-	//     agents, exactly one opencode, exactly one default (claude). The 00015
-	//     NOT EXISTS guard + the goose version table make this belt-and-braces.
+	// (e) Idempotency: a second Migrate is a clean no-op -- still exactly the
+	//     three seed rows, exactly one opencode, exactly one default (claude).
+	//     The 00015 NOT EXISTS guard + the goose version table make this
+	//     belt-and-braces.
 	if err := Migrate(db); err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
@@ -146,8 +149,9 @@ func TestOpencodeAgentMigration(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM agents").Scan(&agCount); err != nil {
 		t.Fatalf("count agents after re-run: %v", err)
 	}
-	if agCount != 2 {
-		t.Errorf("agents after re-run = %d, want 2 (no second opencode)", agCount)
+	// Full-chain posture (00019 seeds codex too): three seed rows, no dupes.
+	if agCount != 3 {
+		t.Errorf("agents after re-run = %d, want 3 (no second opencode)", agCount)
 	}
 	var ocCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE engine = 'opencode'`).Scan(&ocCount); err != nil {
