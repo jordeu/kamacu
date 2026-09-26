@@ -24,6 +24,7 @@ import (
 	"kamacu/internal/github"
 	"kamacu/internal/migrate"
 	"kamacu/internal/opencode"
+	"kamacu/internal/presence"
 	"kamacu/internal/quota"
 	"kamacu/internal/reaper"
 	"kamacu/internal/session"
@@ -292,12 +293,17 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	mgr.SetTmuxClient(tmuxClient)
 
 	mux := http.NewServeMux()
+	// User-presence tracker (get_user_activity / MCP): UI beacons feed it,
+	// the WS input seam reports browser-typed stdin, the token-gated
+	// snapshot serves the MCP bridge. Ephemeral + in-memory by design.
+	presenceTracker := presence.NewTracker()
 	api.Routes(mux, db, wtSvc, mgr, tmuxClient)
 	api.SessionRoutes(mux, mgr, db, tmuxClient)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr, tmuxClient)
 	api.DiffRoutes(mux, db, wtSvc)
 	api.HookRoutes(mux, mgr, hookToken)
 	api.AgentRoutes(mux, mgr, db)
+	api.PresenceRoutes(mux, presenceTracker, hookToken)
 	quotaSvc := quota.New(quota.Config{ClaudeBin: c.claudeBin})
 	api.UsageRoutes(mux, quotaSvc)
 	ghSvc := github.New(github.Config{})
@@ -313,7 +319,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// the live-session 409 gate on root change/clear). No wt dependency:
 	// no worktrees exist for the global scope.
 	api.GlobalRoutes(mux, db, mgr, tmuxClient)
-	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns, c.insecureAllowRemote))
+	mux.Handle("GET /api/sessions/{id}/ws", ws.NewHandler(mgr, originPatterns, c.insecureAllowRemote, presenceTracker))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

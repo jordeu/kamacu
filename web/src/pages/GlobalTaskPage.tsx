@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/StatusDot";
+import { setActiveSession } from "@/presence/activeSessionStore";
 import { QuotaIndicator } from "@/components/quota/QuotaIndicator";
 import { AgentTab } from "@/components/task/AgentTab";
 import { TaskTabs, type TabDef } from "@/components/task/TaskTabs";
@@ -78,6 +79,21 @@ export default function GlobalTaskPage() {
   // Opening the view ALWAYS lands on the Agent tab — no smart selection
   // (D-39 task parity).
   const [activeTab, setActiveTab] = useState("agent");
+
+  // Presence (get_user_activity / MCP): report the focused terminal session —
+  // the Agent tab maps to the agent session, a session-id tab to itself, and
+  // Description/Diff to none. Cleared on unmount so navigating away never
+  // leaves a stale focus in the snapshot (task-page parity).
+  const presenceSessionId =
+    activeTab === "agent"
+      ? agentSession?.id
+      : (sessions ?? []).some((s) => s.id === activeTab)
+        ? activeTab
+        : undefined;
+  useEffect(() => {
+    setActiveSession(presenceSessionId ?? null);
+  }, [presenceSessionId]);
+  useEffect(() => () => setActiveSession(null), []);
   // Sessions the user ×-closed: muted, removed once they leave running.
   const [closingIds, setClosingIds] = useState<Set<string>>(new Set());
   // Ids seen RUNNING during this mount: a session that exits on its own
