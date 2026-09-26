@@ -287,7 +287,12 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		// D-52: the agent inherits EVERYTHING the user's terminal would have
 		// (auth, MCP servers, node shims), then pins terminal identity. This
 		// deliberately differs from bash sessions' minimal explicit env.
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+		// MCP children need the current server's connection settings too.
+		// Append after inherited values so nested servers cannot pass stale ones.
+		cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor",
+			"KAMACU_HOOK_TOKEN="+cfg.Token,
+			"KAMACU_HOOK_BASE="+cfg.BaseURL,
+		)
 		} // end claude-engine branch (M001)
 	} else if opts.TmuxName != "" {
 		// tmux-backed tab (TMUX-02): the attach client is just another

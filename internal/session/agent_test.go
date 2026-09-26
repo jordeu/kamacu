@@ -306,3 +306,37 @@ func TestSpawnKindDefaultsToBash(t *testing.T) {
 		t.Errorf("ClaudeSessionID() = %q for a bash session, want empty", got)
 	}
 }
+
+// MCP subprocesses inherit their connection settings from the agent session.
+func TestSpawnAgentInjectsMCPEnv(t *testing.T) {
+	for _, engine := range []string{"", "claude"} {
+		for _, resume := range []string{"", "existing-session"} {
+			for _, inherited := range []string{"", "stale-parent"} {
+				t.Run(fmt.Sprintf("engine=%s/resume=%s/inherited=%s", engine, resume, inherited), func(t *testing.T) {
+					t.Setenv("KAMACU_HOOK_TOKEN", inherited)
+					t.Setenv("KAMACU_HOOK_BASE", inherited)
+					t.Setenv("AGENT_AUTH_TEST", "preserved")
+					envFile := filepath.Join(t.TempDir(), "env")
+					cfg := testAgentConfig(writeEnvDumpStub(t, envFile))
+					cfg.BaseURL = "http://127.0.0.1:7999"
+					m := NewManager()
+					m.SetAgentConfig(cfg)
+					spawnForTestOpts(t, m, SpawnOpts{
+						Kind: KindAgent, Cwd: t.TempDir(), AgentEngine: engine,
+						ResumeSessionID: resume,
+					})
+					waitForStubReady(t, envFile)
+					for key, want := range map[string]string{
+						"KAMACU_HOOK_TOKEN": cfg.Token,
+						"KAMACU_HOOK_BASE":  cfg.BaseURL,
+						"AGENT_AUTH_TEST":   "preserved",
+					} {
+						if got, ok := envValue(t, envFile, key); !ok || got != want {
+							t.Errorf("%s = %q (present=%v), want %q", key, got, ok, want)
+						}
+					}
+				})
+			}
+		}
+	}
+}
