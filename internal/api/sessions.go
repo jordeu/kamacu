@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1205,6 +1206,7 @@ func captureOpencodeSessionAsync(db *sql.DB, done <-chan struct{}, target openco
 // wins), and this poller persists it to the session owner's resume column —
 // tasks.codex_session_id, or the global_task singleton for a global spawn —
 // which is the restart-resume key (the `codex resume <id>` argv reads it).
+// When hooks are unavailable, the normal exit footer supplies a fallback ID.
 
 // codexPersistTarget is the parametrized persist step of the codex capture
 // poller, mirroring opencodePersistTarget: WHERE the captured uuid lands, as
@@ -1240,21 +1242,39 @@ func codexGlobalPersistTarget() codexPersistTarget {
 	}
 }
 
+// Codex's normal exit footer also exposes the resume ID when hooks are not
+// trusted. Only accept the complete footer at the end of the exited output;
+// arbitrary resume commands in conversation output are not capture signals.
+var codexFooterANSI = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+var codexResumeFooter = regexp.MustCompile(`(?:^|[\r\n])To continue this session, run[\s]+codex resume ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\s*$`)
+
+func codexSessionIDFromFooter(output []byte) string {
+	plain := codexFooterANSI.ReplaceAll(output, nil)
+	match := codexResumeFooter.FindSubmatch(plain)
+	if len(match) == 0 {
+		return ""
+	}
+	return string(match[1])
+}
+
 // captureCodexSessionAsync polls the session's hook-recorded codex uuid until
 // it appears (the SessionStart hook fires at codex boot — but ONLY once the
 // user has trusted the kamacu hooks via /hooks, so the window must tolerate a
 // late first hook) and persists it via the parametrized target. In-memory
-// polls are free, so the poll runs until the session exits (done) or the
-// paranoia hard cap elapses; one final attempt fires on exit (a hook racing
-// the PTY close still lands). All failures are warn-only: capture is
-// best-effort and must never affect the live session.
+// polls are free, so the poll runs until the session exits (done). The final
+// attempt also checks Codex's exit footer if no hook supplied the ID.
+// All failures are warn-only: capture is best-effort and must never affect
+// the live session.
 func captureCodexSessionAsync(db *sql.DB, done <-chan struct{}, target codexPersistTarget, sess *session.Session) {
-	const (
-		pollInterval = 500 * time.Millisecond
-		hardCap      = 60 * time.Minute // backstop; done should always fire first
-	)
+	const pollInterval = 500 * time.Millisecond
 	attempt := func() bool {
 		id := sess.CodexSessionID()
+		if id == "" && sess.Info().Status == session.StatusExited {
+			id = codexSessionIDFromFooter(sess.Snapshot())
+			if id != "" {
+				sess.SetCodexSessionID(id)
+			}
+		}
 		if id == "" {
 			return false // no hook yet (untrusted hooks / no turn started)
 		}
@@ -1266,8 +1286,6 @@ func captureCodexSessionAsync(db *sql.DB, done <-chan struct{}, target codexPers
 		return true
 	}
 
-	hard := time.NewTimer(hardCap)
-	defer hard.Stop()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
@@ -1277,10 +1295,8 @@ func captureCodexSessionAsync(db *sql.DB, done <-chan struct{}, target codexPers
 	for {
 		select {
 		case <-done:
-			attempt() // final: a hook racing the exit still lands
+			attempt() // final: the drained exit footer is now available
 			return
-		case <-hard.C:
-			return // backstop; done() should have fired
 		case <-ticker.C:
 			if attempt() {
 				return

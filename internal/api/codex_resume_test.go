@@ -18,6 +18,101 @@ import (
 	"kamacu/internal/worktree"
 )
 
+func TestCodexSessionIDFromFooter(t *testing.T) {
+	const id = "0195abcd-1234-5678-9abc-123456789abc"
+	for _, tc := range []struct {
+		name, output, want string
+	}{
+		{"plain", "To continue this session, run codex resume " + id + "\r\n", id},
+		{"color and wrap", "output\r\nTo continue this session, run\r\n\x1b[32mcodex resume " + id + "\x1b[0m\r\n", id},
+		{"ordinary command", "codex resume " + id, ""},
+		{"not final", "To continue this session, run codex resume " + id + "\nmore output", ""},
+		{"invalid id", "To continue this session, run codex resume invalid", ""},
+		{"empty", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexSessionIDFromFooter([]byte(tc.output)); got != tc.want {
+				t.Fatalf("captured %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// No hooks fire: the CLI prints its footer and exits immediately. This also
+// exercises the race between process exit, terminal draining, and persistence.
+func TestCodexExitWithoutHooksCanResume(t *testing.T) {
+	for _, global := range []bool{false, true} {
+		name := "task"
+		if global {
+			name = "global"
+		}
+		t.Run(name, func(t *testing.T) {
+			srv, mgr, db, agentID, argsFile := newCodexResumeServer(t)
+			const id = "0195abcd-1234-5678-9abc-123456789abc"
+			t.Setenv("FAKE_CODEX_EXIT_ID", id)
+			req := map[string]any{"kind": "agent"}
+			var tid int64
+			query := "SELECT codex_session_id FROM global_task WHERE id = 1"
+			var queryArgs []any
+			if global {
+				if _, err := db.Exec("UPDATE global_task SET root_path = ?, agent_id = ? WHERE id = 1", t.TempDir(), agentID); err != nil {
+					t.Fatal(err)
+				}
+				req["scope"] = "global"
+			} else {
+				tid, _ = codexWorktreeTask(t, srv, db, agentID, "No hooks")
+				req["task_id"] = tid
+				query = "SELECT codex_session_id FROM tasks WHERE id = ?"
+				queryArgs = []any{tid}
+			}
+			status, body := doJSON(t, "POST", srv.URL+"/api/sessions", req)
+			if status != http.StatusCreated {
+				t.Fatalf("spawn = %d: %v", status, body)
+			}
+			sess, ok := mgr.Get(strID(body))
+			if !ok {
+				t.Fatal("spawned session missing")
+			}
+			select {
+			case <-sess.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("session did not exit")
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				var stored sql.NullString
+				if err := db.QueryRow(query, queryArgs...).Scan(&stored); err != nil {
+					t.Fatal(err)
+				}
+				if stored.String == id {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("footer ID not persisted: %q; output: %q", stored.String, sess.Snapshot())
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			entry := waitAgentStatus(t, srv, tid, "exited", 5*time.Second)
+			if entry["resumable"] != true {
+				t.Fatalf("exited session is not resumable: %v", entry)
+			}
+			t.Setenv("FAKE_CODEX_EXIT_ID", "")
+			if err := os.Remove(argsFile); err != nil {
+				t.Fatal(err)
+			}
+			req["resume"] = true
+			status, body = doJSON(t, "POST", srv.URL+"/api/sessions", req)
+			if status != http.StatusCreated {
+				t.Fatalf("resume = %d: %v", status, body)
+			}
+			args := readArgv(t, argsFile)
+			if !reflect.DeepEqual(args, []string{"-p", "kamacu", "resume", id}) {
+				t.Fatalf("resume argv = %v", args)
+			}
+		})
+	}
+}
+
 // This file locks the codex-engine fresh-vs-resume spawn argv, the
 // engine-gated resumable derivation, the honest no-id 409, and the
 // hook-driven codex session-id capture — the CI-testable core of codex

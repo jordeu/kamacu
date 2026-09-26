@@ -121,6 +121,7 @@ type Session struct {
 	//                          (manual Ctrl+B d) — recorded for Phase 9's resume reconcile
 
 	done      chan struct{} // closed after the exit watcher finishes
+	pumpDone  chan struct{} // closed once the final PTY output has been consumed
 	termGrace time.Duration // D-14 grace between SIGTERM and SIGKILL
 	stopOnce  sync.Once
 }
@@ -131,6 +132,7 @@ type Session struct {
 // decides exit status; the exit watcher is the single authoritative exit
 // event.
 func (s *Session) pump() {
+	defer close(s.pumpDone)
 	buf := make([]byte, 4096)
 	for {
 		n, err := s.ptmx.Read(buf)
@@ -180,6 +182,16 @@ func (s *Session) waitExit() {
 			s.detachedAlive = true
 			s.mu.Unlock()
 		}
+	}
+	if s.engine == "codex" {
+		// Codex prints its resume command on exit. Wait for that footer before
+		// publishing Done, but bound the wait if a descendant holds the PTY open.
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-s.pumpDone:
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 	s.markExited(code)
 	_ = s.ptmx.Close() // AFTER Wait — the pump's Read already returned EIO
@@ -329,11 +341,12 @@ func (s *Session) MarkHooksAlive() {
 
 // ClearWaitingOnAttach clears a waiting agent to idle when a client attaches
 // (D-45 — opening the task's agent tab acknowledges the prompt). Strict
-// no-op for bash sessions and non-waiting agents.
+// no-op for bash sessions and non-waiting agents. Codex permission requests
+// remain pending across attaches/reconnects until answered or the turn ends.
 func (s *Session) ClearWaitingOnAttach() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.kind == KindAgent && s.waiting {
+	if s.kind == KindAgent && s.engine != "codex" && s.waiting {
 		s.waiting = false
 		s.lastActivity = time.Time{} // -> idle
 	}
@@ -396,15 +409,15 @@ func (s *Session) Detach(connID string) {
 }
 
 // WriteInput writes raw input bytes to the PTY. Errors if the session exited.
-// For agents, stdin means the user typed/answered the prompt: waiting clears
-// and the session is working (D-47 state machine).
+// For agents, user input clears waiting and marks the session working.
+// Automatic terminal reports are forwarded without changing agent status.
 func (s *Session) WriteInput(p []byte) error {
 	s.mu.Lock()
 	if s.status == StatusExited {
 		s.mu.Unlock()
 		return errors.New("session exited")
 	}
-	if s.kind == KindAgent {
+	if s.kind == KindAgent && isUserInput(p) {
 		s.waiting = false
 		s.lastActivity = time.Now()
 	}

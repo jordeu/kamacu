@@ -11,5 +11,9 @@
 printf '%s\n' "$@" > "${FAKE_CODEX_ARGS_FILE:-/dev/null}"
 printf '\x1b[?2004h'            # bracketed paste on (like the real TUI)
 echo "fake codex ready"
+if [ -n "${FAKE_CODEX_EXIT_ID:-}" ]; then
+  printf 'To continue this session, run \033[32mcodex resume %s\033[0m\n' "$FAKE_CODEX_EXIT_ID"
+  exit 0
+fi
 trap 'exit 143' TERM            # mirrors verified SIGTERM behavior
 sleep 300 & wait                # idle until stopped

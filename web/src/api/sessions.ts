@@ -10,6 +10,7 @@ export interface TermSession {
   createdAt: string; // RFC3339
   taskId?: number; // omitted for unscoped dev sessions
   kind?: "bash" | "agent"; // session discriminator (04-02 server Info JSON)
+  engine?: string; // agent engine reported by the server
   agentStatus?: "working" | "idle" | "waiting" | "exited"; // agent sessions only
   stopRequested?: boolean; // Kamacu-initiated stop (gray-dot discriminator)
   // Restored tmux survivor (TMUX-05, D-88): a DB-derived ghost (id "") the

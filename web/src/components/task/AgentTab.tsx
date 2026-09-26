@@ -263,6 +263,8 @@ export function AgentTab({
   // Insert review prompt menu item above.) The status entry lookup is
   // scope-aware: by taskId (task) or by source === "global" (global).
   const handleConnect = () => {
+    // Viewing or reconnecting to Codex does not answer its permission prompt.
+    if (agentSession.engine === "codex") return;
     queryClient.setQueryData<AgentStatusEntry[]>(["agent-statuses"], (old) =>
       old?.map((e) => {
         if (e.status !== "waiting") return e;

@@ -62,7 +62,7 @@ func sendFrame(t *testing.T, ctx context.Context, conn *websocket.Conn, typ byte
 
 // collectUntil reads data frames, accumulating '0' payloads, until the
 // accumulated output contains substr. Markers in tests use the shell
-// quote-splitting trick (echo ws-MAR''KER) so the terminal echo of the typed
+// quote-splitting trick (echo ws-MAR”KER) so the terminal echo of the typed
 // command never matches — only real command output does.
 func collectUntil(t *testing.T, ctx context.Context, conn *websocket.Conn, substr string) string {
 	t.Helper()
@@ -145,6 +145,44 @@ func TestAttachClearsWaitingAgent(t *testing.T) {
 			t.Fatalf("AgentStatus = %q after WS attach, want idle (D-45)", got)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestCodexWaitingSurvivesSocketReconnectAndReports(t *testing.T) {
+	srv, mgr := newWSServer(t)
+	stub := filepath.Join(t.TempDir(), "fake-codex")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nprintf 'codex-ready\\n'\nexec cat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := mgr.Spawn(session.SpawnOpts{
+		Kind: session.KindAgent, AgentEngine: "codex", AgentArgs: []string{stub},
+		Cwd: t.TempDir(), TaskID: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sess.Stop)
+	sess.SetWaiting()
+	ctx := testCtx(t)
+	for attach := 0; attach < 2; attach++ {
+		conn := dial(t, ctx, srv, sess.Info().ID)
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		collectUntil(t, ctx, conn, "codex-ready")
+		sendFrame(t, ctx, conn, FrameData, "\x1b[I\x1b[24;80R\x1b[?1;2c")
+		// The echo proves the server processed the automatic reports and
+		// forwarded them through the PTY, without acknowledging the prompt.
+		collectUntil(t, ctx, conn, "?1;2c")
+		if got := sess.Info().AgentStatus; got != "waiting" {
+			t.Fatalf("attach %d after reports: status = %q, want waiting", attach, got)
+		}
+		if attach == 1 {
+			sendFrame(t, ctx, conn, FrameData, "answer")
+			collectUntil(t, ctx, conn, "answer")
+			if got := sess.Info().AgentStatus; got != "working" {
+				t.Fatalf("after answer: status = %q, want working", got)
+			}
+		}
+		conn.Close(websocket.StatusNormalClosure, "")
 	}
 }
 

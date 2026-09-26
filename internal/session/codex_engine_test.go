@@ -53,12 +53,13 @@ func readArgvLines(t *testing.T, argvFile string) []string {
 // TestOpencodeEngineKeepsHeuristicStates.
 func TestCodexEngineKeepsHeuristicStates(t *testing.T) {
 	m := NewManager()
+	stub := writeArgvDumpStub(t, filepath.Join(t.TempDir(), "args"))
 	s, err := m.Spawn(SpawnOpts{
 		Kind:        KindAgent,
 		Cwd:         t.TempDir(),
 		TaskID:      1,
 		AgentEngine: "codex",
-		AgentArgs:   []string{"sleep", "10"},
+		AgentArgs:   []string{stub},
 	})
 	if err != nil {
 		t.Fatalf("Spawn codex agent: %v", err)

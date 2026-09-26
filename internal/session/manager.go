@@ -437,6 +437,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		status:          StatusRunning,
 		lastWinsize:     initial,
 		done:            make(chan struct{}),
+		pumpDone:        make(chan struct{}),
 		termGrace:       5 * time.Second, // D-14
 	}
 	if kind == KindAgent {

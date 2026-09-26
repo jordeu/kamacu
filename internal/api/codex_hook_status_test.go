@@ -97,6 +97,26 @@ func TestCodexHookPermissionRequestSetsWaiting(t *testing.T) {
 	if got := sess.Info().AgentStatus; got != "waiting" {
 		t.Errorf("AgentStatus = %q, want %q", got, "waiting")
 	}
+	// xterm sends these without user interaction after focus changes and
+	// terminal queries. They must not acknowledge the permission request.
+	for _, report := range []string{"\x1b[I", "\x1b[24;80R", "\x1b[?1;2c", "\x1b[O"} {
+		if err := sess.WriteInput([]byte(report)); err != nil {
+			t.Fatal(err)
+		}
+		if got := sess.Info().AgentStatus; got != "waiting" {
+			t.Fatalf("after terminal report %q: status = %q, want waiting", report, got)
+		}
+	}
+	sess.ClearWaitingOnAttach()
+	if got := sess.Info().AgentStatus; got != "waiting" {
+		t.Fatalf("after reconnect: status = %q, want waiting", got)
+	}
+	if err := sess.WriteInput([]byte("y")); err != nil {
+		t.Fatal(err)
+	}
+	if got := sess.Info().AgentStatus; got != "working" {
+		t.Fatalf("after answer: status = %q, want working", got)
+	}
 }
 
 // TestCodexHookSessionStartCapturesCodexSessionID proves the restart-resume
