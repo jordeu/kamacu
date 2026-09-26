@@ -90,6 +90,7 @@ type Session struct {
 	kind            Kind         // KindBash or KindAgent; immutable after Spawn
 	claudeSessionID string       // agent only ("" for bash); the --session-id uuid, immutable after Spawn
 	engine          string       // agent only: the resolved agent's engine ("claude" | "custom" | "" ); custom agents skip the working/waiting/idle heuristics (D-M001-2)
+	codexSessionID  string       // codex only: the uuid codex mints (hook payload session_id), captured by the hook receiver; first hook wins
 	tmuxName        string       // tmux-backed bash tab: the kamacu-<task>-<n> session name ("" = not tmux)
 	tmuxClient      *tmux.Client // socket/config for lifecycle probes; nil unless tmuxName != ""
 	killer          func() error // non-nil: how Stop terminates the underlying work (assigned ONCE
@@ -237,6 +238,28 @@ func (s *Session) ClaudeSessionID() string {
 	return s.claudeSessionID
 }
 
+// CodexSessionID returns the uuid codex minted for its own session, captured
+// from the first hook payload's session_id by the hook receiver (codex, unlike
+// claude, owns its id — the restart-resume key for `codex resume <id>`). Empty
+// until a hook fires (e.g. the hooks are still untrusted in the codex TUI).
+func (s *Session) CodexSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.codexSessionID
+}
+
+// SetCodexSessionID records codex's own session uuid from a hook payload.
+// FIRST capture wins: the initial SessionStart of the kamacu-spawned
+// conversation is the resume key, and a later hook from a codex-side /resume
+// picker must not silently retarget kamacu's persisted id.
+func (s *Session) SetCodexSessionID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.codexSessionID == "" {
+		s.codexSessionID = id
+	}
+}
+
 // TmuxName returns the tmux session name for tmux-backed tabs ("" otherwise).
 func (s *Session) TmuxName() string { return s.tmuxName }
 
@@ -328,8 +351,10 @@ func (s *Session) agentStatusLocked() string {
 	// don't understand would be the unreliable heuristic this milestone
 	// explicitly rejected. claude (and "" back-compat) and opencode (D013:
 	// opencode runs in a PTY like claude and its on-disk plugin drives the
-	// same SessionStart/Stop/Notification hooks) keep the full states.
-	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" {
+	// same SessionStart/Stop/Notification hooks) keep the full states. codex
+	// joins them: its lifecycle hooks (SessionStart/Stop/PermissionRequest)
+	// drive the same receiver transitions via ~/.codex/kamacu.config.toml.
+	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" && s.engine != "codex" {
 		return "running"
 	}
 	if s.waiting {

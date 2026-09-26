@@ -63,9 +63,24 @@ func (h *hookHandlers) receive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Codex session-id capture (restart-resume key): codex's hook payloads
+	// carry codex's OWN session uuid on every event (verified shape:
+	// {"session_id":"<uuid>","hook_event_name":…}). Record it on codex-engine
+	// sessions only — claude/opencode payloads also carry their own ids and
+	// must never poison the codex resume column. First capture wins (a later
+	// codex-side /resume must not retarget the persisted key); SetCodexSessionID
+	// enforces that internally.
+	if sess.Info().Engine == "codex" && payload.SessionID != "" {
+		sess.SetCodexSessionID(payload.SessionID)
+	}
+
 	switch payload.HookEventName {
 	case "Notification":
 		sess.SetWaiting() // permission_prompt | elicitation_dialog (overlay matcher)
+	case "PermissionRequest":
+		// codex's dedicated approval-prompt event (claude uses Notification
+		// with notification_type=permission_prompt) — same SetWaiting effect.
+		sess.SetWaiting()
 	case "Stop":
 		sess.SetIdle()
 	case "SessionStart":

@@ -20,6 +20,7 @@ import (
 	"github.com/google/subcommands"
 
 	"kamacu/internal/api"
+	"kamacu/internal/codex"
 	"kamacu/internal/github"
 	"kamacu/internal/migrate"
 	"kamacu/internal/opencode"
@@ -187,6 +188,14 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		slog.Error("backfilling opencode agent", "error", err)
 		return subcommands.ExitFailure
 	}
+	// Codex built-in agent engine: guarantee the third non-deletable system
+	// agent row for codex exists (engine='codex', is_system=1, is_default=0).
+	// Mirrors BackfillOpenCodeAgent; migration 00019 normally creates it, so
+	// this is a cheap no-op on healthy boots and a safety net on recovery.
+	if err := api.BackfillCodexAgent(db); err != nil {
+		slog.Error("backfilling codex agent", "error", err)
+		return subcommands.ExitFailure
+	}
 
 	// v1.13 (GDATA-01): one-shot idempotent global_task guard. Migration 00017
 	// seeds the singleton, but a migration runs exactly once -- a hand-deleted
@@ -214,6 +223,19 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// based status with the BEL fallback armed) and must never block booting.
 	if err := opencode.InstallPlugin(); err != nil {
 		slog.Warn("installing opencode status plugin", "error", err)
+	}
+
+	// Codex built-in agent engine: ship + idempotently install the env-gated
+	// status hook profile to <CODEX_HOME>/kamacu.config.toml, selected at spawn
+	// via `codex -p kamacu` (an exclusive profile layer — the user's own
+	// config.toml/hooks.json are never touched). Byte-stable content keeps
+	// codex's hook-trust hash valid across boots (trust once via /hooks).
+	// Silent no-op when codex is not installed (its home dir is absent) —
+	// never pollutes a non-codex user's home dir. A write failure is warn-only:
+	// status hooks degrade gracefully (activity-based status with the BEL
+	// fallback armed) and must never block booting.
+	if err := codex.InstallHookConfig(); err != nil {
+		slog.Warn("installing codex status hook profile", "error", err)
 	}
 
 	// Kamacu-managed tmux config (D-79 status off, D-80 mouse on), regenerated
