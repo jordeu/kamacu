@@ -16,6 +16,9 @@ func TestTerminalReportsPreserveAgentStatus(t *testing.T) {
 		"\x1b]10;rgb:ffff/ffff/ffff\x1b\\", "\x1b]11;rgb:0000/0000/0000\x07",
 		"\x1b]4;2;rgb:0000/ffff/0000\x1b\\", "\x1bP1$r0m\x1b\\",
 		"\x1b[I\x1b[24;80R\x1b[?1;2c",
+		"\x1b[<35;20;10M", "\x1b[<32;20;10M", "\x1b[<64;20;10M",
+		"\x1b[<65;20;10M", "\x1b[<0;20;10m",
+		"\x1b[O\x1b[I\x1b[<35;20;10M\x1b[24;80R",
 	}
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -52,7 +55,7 @@ func TestTerminalUserInputClearsWaiting(t *testing.T) {
 	}
 	defer reader.Close()
 	defer writer.Close()
-	for _, input := range []string{"y", "\r", "\x1b", "\x03", "\x1b[A", "\x1b[B", "\x1b[200~yes\x1b[201~", "\x1b[24;80Ry"} {
+	for _, input := range []string{"y", "\r", "\x1b", "\x03", "\x1b[A", "\x1b[B", "\x1b[200~yes\x1b[201~", "\x1b[24;80Ry", "\x1b[<0;20;10M", "\x1b[<35;20;10My"} {
 		s := &Session{kind: KindAgent, engine: "codex", status: StatusRunning, ptmx: writer, waiting: true}
 		if err := s.WriteInput([]byte(input)); err != nil {
 			t.Fatal(err)

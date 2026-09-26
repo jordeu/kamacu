@@ -168,7 +168,9 @@ func TestCodexWaitingSurvivesSocketReconnectAndReports(t *testing.T) {
 		conn := dial(t, ctx, srv, sess.Info().ID)
 		defer conn.Close(websocket.StatusNormalClosure, "")
 		collectUntil(t, ctx, conn, "codex-ready")
-		sendFrame(t, ctx, conn, FrameData, "\x1b[I\x1b[24;80R\x1b[?1;2c")
+		// Blur/refocus and pointer motion after restoring the browser are
+		// passive reports, even when bundled together in one stdin frame.
+		sendFrame(t, ctx, conn, FrameData, "\x1b[O\x1b[I\x1b[<35;20;10M\x1b[<0;20;10m\x1b[24;80R\x1b[?1;2c")
 		// The echo proves the server processed the automatic reports and
 		// forwarded them through the PTY, without acknowledging the prompt.
 		collectUntil(t, ctx, conn, "?1;2c")

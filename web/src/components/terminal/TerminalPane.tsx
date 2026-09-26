@@ -12,6 +12,7 @@ import {
   terminalFontSize,
 } from "./xtermTheme";
 import { useTerminalSocket, type ConnState } from "./useTerminalSocket";
+import { isBrowserSwitchShortcut } from "./keyboard";
 
 export interface TerminalPaneProps {
   sessionId: string;
@@ -136,6 +137,7 @@ export function TerminalPane({
     // Ctrl+Shift+C / Ctrl+Shift+V — best-effort (Pitfall 8); copy-on-select
     // and native Ctrl+V are the guaranteed paths.
     term.attachCustomKeyEventHandler((e) => {
+      if (isBrowserSwitchShortcut(e)) return false;
       if (e.type !== "keydown") return true;
       if (e.ctrlKey && e.shiftKey && e.code === "KeyC" && term.hasSelection()) {
         void navigator.clipboard.writeText(term.getSelection());
