@@ -10,9 +10,9 @@ import { get, put } from "./client";
 // deliberately no managed boolean — the pointer IS the marker.
 //
 // agent.engine is deliberately a plain string: the Go wire emits "claude" |
-// "custom" | "opencode" (the OpenCode system seed). Do NOT reuse the stale
-// Agent.engine union in types.ts, which lacks "opencode" (16-RESEARCH
-// Pitfall 2).
+// "custom" | "opencode" | "codex" (the OpenCode and Codex system seeds). Do
+// NOT reuse the Agent.engine union in types.ts, which has lagged the wire
+// before (16-RESEARCH Pitfall 2).
 export interface GlobalConfig {
   root_path: string;
   github_repo: string | null;

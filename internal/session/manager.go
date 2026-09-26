@@ -208,7 +208,17 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			if lperr != nil {
 				return nil, fmt.Errorf("agent binary not found on PATH: %w", lperr)
 			}
-			cmd = exec.Command(bin, opts.AgentArgs[1:]...)
+			args := opts.AgentArgs[1:]
+			// Codex engine (verified against codex 0.157.0): kamacu's status
+			// hooks ride the exclusive ~/.codex/kamacu.config.toml PROFILE
+			// layer (nothing merged into user config), selected by prepending
+			// `-p kamacu` after the binary and BEFORE every handler token —
+			// the resume subcommand append included — so user-edited command
+			// tokens can never separate the flag from its subcommand.
+			if opts.AgentEngine == "codex" {
+				args = append([]string{"-p", "kamacu"}, args...)
+			}
+			cmd = exec.Command(bin, args...)
 			cmd.Dir = dir
 			// Same env posture as the claude path: inherit everything the user's
 			// terminal would have, then pin terminal identity (D-52). The opencode
@@ -217,12 +227,16 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			// plugin), but additionally gets the D014 env contract
 			// (KAMACU_SESSION_ID / KAMACU_HOOK_TOKEN / KAMACU_HOOK_BASE) so that
 			// plugin can curl the hook receiver back with claude-compatible event
-			// names. Custom agents get none of these: the injection is
-			// opencode-gated, and the inherited base is filtered first (D-63) so a
-			// parent Kamacu process's exported values — HOOK_TOKEN is a secret —
-			// never leak into arbitrary custom-agent children.
+			// names. The codex engine gets the same D014 contract for its
+			// env-gated kamacu.config.toml hooks (keeping the token out of argv,
+			// unlike claude's --settings overlay). Custom agents get none of
+			// these: the injection is engine-gated, and the inherited base is
+			// filtered first (D-63) so a parent Kamacu process's exported
+			// values — HOOK_TOKEN is a secret — never leak into arbitrary
+			// custom-agent children.
 			envExtra := []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
-			if opts.AgentEngine == "opencode" {
+			switch opts.AgentEngine {
+			case "opencode":
 				envExtra = append(envExtra,
 					"KAMACU_SESSION_ID="+id, // minted at the top of Spawn; same id the settings overlay would embed
 					"KAMACU_HOOK_TOKEN="+cfg.Token,
@@ -239,6 +253,12 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 					// Last-value-wins over the os.Environ() PWD entry, matching
 					// the TERM/COLORTERM append pattern above.
 					"PWD="+dir,
+				)
+			case "codex":
+				envExtra = append(envExtra,
+					"KAMACU_SESSION_ID="+id, // the env-gated profile hooks POST back to /api/hooks/sessions/<this id>
+					"KAMACU_HOOK_TOKEN="+cfg.Token,
+					"KAMACU_HOOK_BASE="+cfg.BaseURL, // D014 contract, shared with opencode
 				)
 			}
 			// D-63: strip inherited KAMACU_* BEFORE the opencode gate's
@@ -417,6 +437,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		status:          StatusRunning,
 		lastWinsize:     initial,
 		done:            make(chan struct{}),
+		pumpDone:        make(chan struct{}),
 		termGrace:       5 * time.Second, // D-14
 	}
 	if kind == KindAgent {
