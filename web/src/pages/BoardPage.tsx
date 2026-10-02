@@ -1,4 +1,13 @@
-import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { useSettings } from "@/api/settings";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { ImportGithubIssueDialog } from "@/components/board/ImportGithubIssueDialog";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,10 +27,16 @@ export default function BoardPage() {
   // M001: hide the Claude-only QuotaIndicator when this board's project runs a
   // non-claude agent. Mirrors the TaskPage engine-awareness.
   const { data: allAgents } = useAgents();
-  const projectEngine = allAgents?.find((a) => a.id === project?.agent_id)?.engine;
+  const projectEngine = allAgents?.find(
+    (a) => a.id === project?.agent_id,
+  )?.engine;
   const isClaudeAgent = projectEngine !== "custom";
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const importTrigger = useRef<HTMLButtonElement>(null);
+  const { data: settings } = useSettings();
+  const githubEnabled = settings?.github_integration?.value === "on";
 
   // "n" opens the New Task dialog — board page only, never while typing in an
   // input/textarea/contenteditable or while any dialog is open.
@@ -39,7 +54,8 @@ export default function BoardPage() {
       ) {
         return;
       }
-      if (document.querySelector('[role="dialog"]') !== null) return;
+      if (document.querySelector('[role="dialog"], [role="menu"]') !== null)
+        return;
       e.preventDefault();
       setDialogOpen(true);
     }
@@ -54,7 +70,47 @@ export default function BoardPage() {
         <div className="flex items-center gap-3">
           {isClaudeAgent ? <QuotaIndicator /> : null}
           {/* The only inverted high-contrast element on the page (UI-SPEC focal point). */}
-          <Button onClick={() => setDialogOpen(true)}>New task</Button>
+          <div className="flex">
+            <Button
+              className={githubEnabled ? "rounded-r-none" : undefined}
+              onClick={() => setDialogOpen(true)}
+            >
+              New task
+            </Button>
+            {githubEnabled && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    ref={importTrigger}
+                    aria-label="More ways to create a task"
+                    size="icon"
+                    className="rounded-l-none border-l border-primary-foreground/20"
+                  >
+                    <ChevronDown className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-64"
+                  onCloseAutoFocus={(event) => {
+                    if (importOpen) event.preventDefault();
+                  }}
+                >
+                  <DropdownMenuItem
+                    disabled={!project?.github_repo}
+                    onSelect={() => setImportOpen(true)}
+                  >
+                    Import from GitHub
+                  </DropdownMenuItem>
+                  {!project?.github_repo && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">
+                      Link a GitHub repository in project settings first.
+                    </p>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
       </header>
       {isLoading ? (
@@ -79,6 +135,15 @@ export default function BoardPage() {
         </div>
       ) : (
         <Board tasks={tasks ?? []} projectId={projectId} />
+      )}
+      {importOpen && githubEnabled && project?.github_repo && (
+        <ImportGithubIssueDialog
+          key={`${projectId}:${project.github_repo}`}
+          projectId={projectId}
+          repo={project.github_repo}
+          restoreFocus={() => importTrigger.current?.focus()}
+          onClose={() => setImportOpen(false)}
+        />
       )}
       <NewTaskDialog
         projectId={projectId}

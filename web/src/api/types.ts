@@ -75,6 +75,9 @@ export interface Agent {
 }
 
 export interface Task {
+  issue_repo?: string | null;
+  issue_number?: number | null;
+  issue_url?: string | null;
   id: number;
   project_id: number;
   title: string;
