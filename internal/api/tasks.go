@@ -35,6 +35,10 @@ type Task struct {
 	Branch        *string `json:"branch"`
 	WorktreePath  *string `json:"worktree_path"`
 	WorktreeError *string `json:"worktree_error"`
+	// Issue provenance is a one-time snapshot; imported issues remain board tasks.
+	IssueRepo   *string `json:"issue_repo"`
+	IssueNumber *int64  `json:"issue_number"`
+	IssueURL    *string `json:"issue_url"`
 	// source discriminates a manual task ('manual') from a PR review
 	// ('github_pr'); the board excludes github_pr rows (GHREV-04). pr_number
 	// and pr_base_ref are NULL for manual tasks and carry the PR's number +
@@ -58,12 +62,12 @@ type taskHandlers struct {
 	tmuxClient tmux.Client
 }
 
-const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref`
+const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef)
+		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL)
 	return t, err
 }
 
