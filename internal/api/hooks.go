@@ -54,9 +54,14 @@ func (h *hookHandlers) receive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		HookEventName    string `json:"hook_event_name"`
-		SessionID        string `json:"session_id"`
-		NotificationType string `json:"notification_type"`
+		HookEventName    string          `json:"hook_event_name"`
+		SessionID        string          `json:"session_id"`
+		NotificationType string          `json:"notification_type"`
+		Source           string          `json:"source"`
+		TurnID           string          `json:"turn_id"`
+		ToolUseID        string          `json:"tool_use_id"`
+		ToolName         string          `json:"tool_name"`
+		ToolInput        json.RawMessage `json:"tool_input"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -72,6 +77,12 @@ func (h *hookHandlers) receive(w http.ResponseWriter, r *http.Request) {
 	// enforces that internally.
 	if sess.Info().Engine == "codex" && payload.SessionID != "" {
 		sess.SetCodexSessionID(payload.SessionID)
+	}
+
+	if sess.Info().Engine == "codex" {
+		sess.ApplyCodexHook(session.CodexHook{Event: payload.HookEventName, SessionID: payload.SessionID, Source: payload.Source, TurnID: payload.TurnID, ToolUseID: payload.ToolUseID, ToolName: payload.ToolName, ToolInput: payload.ToolInput})
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
 	switch payload.HookEventName {

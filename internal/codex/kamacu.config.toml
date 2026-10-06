@@ -6,10 +6,10 @@
 # layers on top of the user's own config.toml; it never replaces it). Edits
 # here are overwritten on the next boot.
 #
-# Purpose: forward codex lifecycle events to Kamacu's UNCHANGED claude-
-# compatible hook receiver (internal/api/hooks.go, POST
+# Purpose: forward codex lifecycle events to Kamacu's hook receiver
+# (internal/api/hooks.go, POST
 # /api/hooks/sessions/{id}) so a codex-engine task reports
-# working/waiting/idle exactly like a claude-engine task. codex sends the
+# working/waiting/idle through its Codex-specific status reducer. codex sends the
 # same wire contract claude does: one JSON object on stdin whose
 # hook_event_name discriminates the event.
 #
@@ -18,36 +18,55 @@
 # KAMACU_HOOK_BASE only for engine=="codex". A plain `codex` run (or any other
 # -p kamacu invocation outside Kamacu) runs nothing and touches no network.
 #
-# Event mapping (verified against codex 0.157.0):
-#   SessionStart      -> MarkHooksAlive (BEL fallback off; session_id capture)
-#   Stop              -> SetIdle (turn end)
-#   PermissionRequest -> SetWaiting (approval prompt)
-#
-# Stop is SYNCHRONOUS on purpose: codex cancels unfinished background hooks
-# when the session ends, so an async Stop would never reach the receiver on
-# the final turn. SessionStart/PermissionRequest are async (verified to fire)
-# so status reporting never delays a turn or an approval prompt.
-#
-# Hooks are subject to codex's trust review: run /hooks once inside a
-# Kamacu codex session and trust the kamacu entries. Until trusted, hooks are
-# skipped and Kamacu falls back to its activity/BEL heuristics.
+# Lifecycle hooks are synchronous and bounded so status delivery finishes
+# before Codex proceeds at each boundary. Parallel tools can still interleave.
+# PermissionRequest is approval telemetry; only a visible prompt means waiting.
+# Trust the updated entries through /hooks after upgrading.
 
 [[hooks.SessionStart]]
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -s -m 3 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
-async = true
-timeout = 5
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3
 
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
 type = "command"
-command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -s -m 3 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
-timeout = 5
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3
+
+[[hooks.PreToolUse]]
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3
 
 [[hooks.PermissionRequest]]
 [[hooks.PermissionRequest.hooks]]
 type = "command"
-command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -s -m 3 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
-async = true
-timeout = 5
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3
+
+[[hooks.Interrupt]]
+[[hooks.Interrupt.hooks]]
+type = "command"
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3
+
+[[hooks.SessionEnd]]
+[[hooks.SessionEnd.hooks]]
+type = "command"
+command = "[ -n \"$KAMACU_SESSION_ID\" ] && curl -fsS -o /dev/null -m 2 -H \"X-Kamacu-Token: $KAMACU_HOOK_TOKEN\" --data-binary @- \"$KAMACU_HOOK_BASE/api/hooks/sessions/$KAMACU_SESSION_ID\""
+timeout = 3

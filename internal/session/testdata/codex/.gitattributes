@@ -1,0 +1,2 @@
+# Terminal replays contain intentional CRLF, trailing spaces, and escape bytes.
+*.ansi binary

@@ -8,6 +8,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/google/subcommands v1.2.0
 	github.com/google/uuid v1.6.0
+	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/pressly/goose/v3 v3.28.0
 	golang.org/x/sync v0.22.0

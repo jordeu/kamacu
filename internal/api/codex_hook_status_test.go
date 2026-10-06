@@ -10,14 +10,9 @@ import (
 	"kamacu/internal/session"
 )
 
-// This file is the cross-cutting integration proof for codex engine status:
-// the UNCHANGED, engine-agnostic hook receiver (hooks.go) drives a codex-
-// engine session through working/waiting/idle — exactly the loop the on-disk
-// codex profile (internal/codex/kamacu.config.toml) drives in production
-// (PermissionRequest -> waiting, Stop -> idle, SessionStart -> hooks-alive
-// canary + codex session-id capture). hooks.go is not imported here; only
-// SpawnOpts (AgentEngine="codex") and the public Session hook methods are
-// exercised, over HTTP exactly as production does.
+// HTTP regression coverage for Codex lifecycle status and session-id capture.
+// The receiver dispatches Codex events to its engine-specific reducer while
+// preserving the Claude/OpenCode hook contract.
 
 // writeFakeCodex writes an executable stub standing in for the codex binary.
 // codex spawns via the custom command-render arm (AgentArgs) with `-p kamacu`
@@ -40,18 +35,19 @@ done
 	return path
 }
 
-// newCodexHookServer wires the UNCHANGED hook receiver over a fresh Manager
+// newCodexHookServer wires the hook receiver over a fresh Manager
 // whose agent config carries the hook token + base URL a codex process
-// receives via env (D014). No ClaudeBin: codex spawns via AgentArgs.
+// receives via env (D014). Both engine paths use isolated test stubs.
 func newCodexHookServer(t *testing.T) (*httptest.Server, *session.Manager) {
 	t.Helper()
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
-		BaseURL: "http://127.0.0.1:7333",
-		Token:   testHookToken,
+		BaseURL:   "http://127.0.0.1:7333",
+		Token:     testHookToken,
+		ClaudeBin: writeFakeClaude(t),
 	})
 	mux := http.NewServeMux()
-	HookRoutes(mux, mgr, testHookToken) // UNCHANGED, engine-agnostic receiver
+	HookRoutes(mux, mgr, testHookToken)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() {
@@ -82,40 +78,30 @@ func spawnCodexAgent(t *testing.T, mgr *session.Manager) *session.Session {
 	return sess
 }
 
-// TestCodexHookPermissionRequestSetsWaiting proves the codex waiting signal:
-// codex fires a dedicated PermissionRequest event (verified against codex
-// 0.157.0) where claude fires Notification(permission_prompt). The receiver
-// maps it to the same SetWaiting transition.
-func TestCodexHookPermissionRequestSetsWaiting(t *testing.T) {
+// PermissionRequest runs before automatic review. Its telemetry alone must
+// never claim a user is blocked, even when the request arrives after an answer.
+func TestCodexHookPermissionRequestDoesNotSetWaiting(t *testing.T) {
 	srv, mgr := newCodexHookServer(t)
 	sess := spawnCodexAgent(t, mgr)
-
-	body := `{"hook_event_name":"PermissionRequest","session_id":"0d1a2b3c-1111-2222-3333-444455556666","tool_name":"Bash"}`
-	if got := postHook(t, hookURL(srv, sess.Info().ID), testHookToken, body); got != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", got)
+	url := hookURL(srv, sess.Info().ID)
+	steps := []struct{ body, want string }{
+		{`{"hook_event_name":"UserPromptSubmit","turn_id":"t1"}`, "working"},
+		{`{"hook_event_name":"PermissionRequest","turn_id":"t1","tool_name":"Bash","tool_input":{"command":"sleep 30"}}`, "working"},
+		{`{"hook_event_name":"PostToolUse","turn_id":"t1","tool_name":"Bash","tool_use_id":"call1","tool_input":{"command":"sleep 30"}}`, "working"},
+		{`{"hook_event_name":"Stop","turn_id":"t1"}`, "idle"},
+		{`{"hook_event_name":"PermissionRequest","turn_id":"t1"}`, "idle"},
+		{`{"hook_event_name":"PostToolUse","turn_id":"t1"}`, "idle"},
+		{`{"hook_event_name":"UserPromptSubmit","turn_id":"t2"}`, "working"},
+		{`{"hook_event_name":"Stop","turn_id":"t1"}`, "working"},
+		{`{"hook_event_name":"Interrupt","turn_id":"t2"}`, "idle"},
 	}
-	if got := sess.Info().AgentStatus; got != "waiting" {
-		t.Errorf("AgentStatus = %q, want %q", got, "waiting")
-	}
-	// xterm sends these without user interaction after focus changes and
-	// terminal queries. They must not acknowledge the permission request.
-	for _, report := range []string{"\x1b[I", "\x1b[24;80R", "\x1b[?1;2c", "\x1b[O"} {
-		if err := sess.WriteInput([]byte(report)); err != nil {
-			t.Fatal(err)
+	for _, step := range steps {
+		if got := postHook(t, url, testHookToken, step.body); got != http.StatusNoContent {
+			t.Fatalf("hook = %d", got)
 		}
-		if got := sess.Info().AgentStatus; got != "waiting" {
-			t.Fatalf("after terminal report %q: status = %q, want waiting", report, got)
+		if got := sess.Info().AgentStatus; got != step.want {
+			t.Fatalf("%s: got %s, want %s", step.body, got, step.want)
 		}
-	}
-	sess.ClearWaitingOnAttach()
-	if got := sess.Info().AgentStatus; got != "waiting" {
-		t.Fatalf("after reconnect: status = %q, want waiting", got)
-	}
-	if err := sess.WriteInput([]byte("y")); err != nil {
-		t.Fatal(err)
-	}
-	if got := sess.Info().AgentStatus; got != "working" {
-		t.Fatalf("after answer: status = %q, want working", got)
 	}
 }
 
@@ -178,7 +164,7 @@ func TestCodexHookSessionIDCaptureIsEngineGated(t *testing.T) {
 
 // TestCodexHookFullTurnLoop drives the exact production loop of the on-disk
 // codex profile through the receiver: SessionStart (hooks-alive + capture) ->
-// working -> PermissionRequest -> waiting -> Stop -> idle.
+// working -> automatic approval -> working -> Stop -> idle.
 func TestCodexHookFullTurnLoop(t *testing.T) {
 	srv, mgr := newCodexHookServer(t)
 	sess := spawnCodexAgent(t, mgr)
@@ -189,7 +175,7 @@ func TestCodexHookFullTurnLoop(t *testing.T) {
 		status string
 	}{
 		{`{"hook_event_name":"SessionStart","source":"startup","session_id":"` + codexID + `"}`, "working"},
-		{`{"hook_event_name":"PermissionRequest","tool_name":"Bash","session_id":"` + codexID + `"}`, "waiting"},
+		{`{"hook_event_name":"PermissionRequest","tool_name":"Bash","session_id":"` + codexID + `"}`, "working"},
 		{`{"hook_event_name":"Stop","session_id":"` + codexID + `"}`, "idle"},
 	}
 	for i, step := range steps {

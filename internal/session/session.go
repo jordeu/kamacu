@@ -50,7 +50,7 @@ type Info struct {
 	CreatedAt time.Time `json:"createdAt"`
 	TaskID    int64     `json:"taskId,omitempty"` // 0 omitted for dev sessions
 	Kind      Kind      `json:"kind,omitempty"`   // "bash" or "agent"
-	Engine    string    `json:"engine,omitempty"`   // agent only: "claude" | "custom" — lets the status handler/UI distinguish
+	Engine    string    `json:"engine,omitempty"` // agent only: "claude" | "custom" — lets the status handler/UI distinguish
 
 	// Agent-only fields (kind == "agent").
 	AgentStatus   string `json:"agentStatus,omitempty"`   // working | idle | waiting | exited
@@ -90,6 +90,7 @@ type Session struct {
 	kind            Kind         // KindBash or KindAgent; immutable after Spawn
 	claudeSessionID string       // agent only ("" for bash); the --session-id uuid, immutable after Spawn
 	engine          string       // agent only: the resolved agent's engine ("claude" | "custom" | "" ); custom agents skip the working/waiting/idle heuristics (D-M001-2)
+	codexState      *codexStatus // Codex-only lifecycle and rendered screen reducer
 	codexSessionID  string       // codex only: the uuid codex mints (hook payload session_id), captured by the hook receiver; first hook wins
 	tmuxName        string       // tmux-backed bash tab: the kamacu-<task>-<n> session name ("" = not tmux)
 	tmuxClient      *tmux.Client // socket/config for lifecycle probes; nil unless tmuxName != ""
@@ -283,13 +284,21 @@ func (s *Session) DetachedAlive() bool {
 	return s.detachedAlive
 }
 
-// noteAgentOutputLocked applies an output chunk's agent-status effects:
+// noteAgentOutputLocked dispatches Codex output to its screen reducer.
+// Other engines retain the original output activity and bell heuristics:
 // the OSC-aware BEL fallback (hooks-dead mode only — Pitfall 2) and the
 // settle-gated activity timestamp. Output NEVER clears waiting, and never
 // counts as activity inside the post-Stop settle window (Pitfall 1).
 // Caller holds s.mu. No-op for bash sessions.
 func (s *Session) noteAgentOutputLocked(chunk []byte) {
 	if s.kind != KindAgent {
+		return
+	}
+	if s.engine == "codex" {
+		s.noteCodexOutputLocked(chunk)
+		if !s.hooksAlive && !s.waiting {
+			s.lastActivity = time.Now()
+		}
 		return
 	}
 	if bare := s.bel.scan(chunk); bare > 0 && !s.hooksAlive {
@@ -327,6 +336,11 @@ func (s *Session) SetIdle() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.waiting = false
+	if s.engine == "codex" {
+		c := s.codexStateLocked()
+		c.active, c.lifecycle = false, true
+		c.ignoreCurrentScreen()
+	}
 	s.stopHookAt = time.Now()
 	s.lastActivity = time.Time{}
 }
@@ -358,17 +372,13 @@ func (s *Session) agentStatusLocked() string {
 	if s.status == StatusExited {
 		return "exited"
 	}
-	// M001 (D-M001-2): custom-engine agents report only running/exited. The
-	// working/waiting/idle heuristics below are claude-hook-driven (and a
-	// fallback activity estimate); applying them to a custom agent TUI we
-	// don't understand would be the unreliable heuristic this milestone
-	// explicitly rejected. claude (and "" back-compat) and opencode (D013:
-	// opencode runs in a PTY like claude and its on-disk plugin drives the
-	// same SessionStart/Stop/Notification hooks) keep the full states. codex
-	// joins them: its lifecycle hooks (SessionStart/Stop/PermissionRequest)
-	// drive the same receiver transitions via ~/.codex/kamacu.config.toml.
+	// Custom engines have no known lifecycle contract. Supported engines
+	// keep working/waiting/idle; Codex uses its own lifecycle/screen reducer.
 	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" && s.engine != "codex" {
 		return "running"
+	}
+	if s.engine == "codex" {
+		return s.codexStatusLocked()
 	}
 	if s.waiting {
 		return "waiting"
@@ -420,6 +430,12 @@ func (s *Session) WriteInput(p []byte) error {
 	if s.kind == KindAgent && isUserInput(p) {
 		s.waiting = false
 		s.lastActivity = time.Now()
+		if s.engine == "codex" {
+			c := s.codexStateLocked()
+			c.active = true
+			c.endedAt = time.Time{}
+			c.ignoreCurrentScreen()
+		}
 	}
 	s.mu.Unlock()
 	_, err := s.ptmx.Write(p)
@@ -481,6 +497,10 @@ func (s *Session) setsizeLocked(ws pty.Winsize) error {
 		return err
 	}
 	s.lastWinsize = ws
+	if s.codexState != nil && s.codexState.terminal != nil && ws.Cols > 0 && ws.Rows > 0 {
+		cols, rows := codexObserverSize(int(ws.Cols), int(ws.Rows))
+		s.codexState.terminal.Resize(cols, rows)
+	}
 	return nil
 }
 

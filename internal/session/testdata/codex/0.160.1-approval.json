@@ -1,0 +1,18 @@
+{
+  "cols": 120,
+  "rows": 30,
+  "stages": [
+    {
+      "end": 6611,
+      "status": "working"
+    },
+    {
+      "end": 15001,
+      "status": "waiting"
+    },
+    {
+      "end": 24014,
+      "status": "idle"
+    }
+  ]
+}
