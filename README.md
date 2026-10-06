@@ -31,7 +31,11 @@ reattach to from any browser tab.
   one(s) you use and sign in first. Any other terminal agent works too, registered as
   a custom agent. Codex status hooks need a one-time `/hooks` trust inside a Kamacu
   codex session (Kamacu installs the hook profile under `~/.codex/kamacu.config.toml`
-  and spawns codex with `-p kamacu`).
+  and spawns codex with `-p kamacu`). After upgrading status hooks, trust the
+  updated entries again through `/hooks`. Codex status combines lifecycle hooks
+  with the visible terminal: approval review alone does not mean waiting, and
+  quiet running turns remain working. With hooks disabled or untrusted, terminal
+  indicators provide fallback detection.
 - **git** — every task runs in its own git worktree off your project's checkout.
 - **tmux** — backs the durable bash tabs so sessions survive server restarts.
 

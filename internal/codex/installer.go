@@ -1,11 +1,12 @@
 // Package codex ships and installs the Kamacu status hook profile for the
 // codex agent engine.
 //
-// codex loads lifecycle hooks (SessionStart / Stop / PermissionRequest, one
+// codex loads lifecycle hooks (prompt, tools, approval, stop and interrupt; one
 // JSON object on stdin with hook_event_name — the same wire contract as
 // claude's hooks) from config layers next to its active config files. Kamacu
 // therefore ships an env-gated profile (kamacu.config.toml) that no-ops
-// outside a Kamacu PTY and POSTs to the UNCHANGED claude hook receiver.
+// outside a Kamacu PTY and POSTs to the shared hook receiver, which dispatches
+// Codex events to its lifecycle and terminal-screen status reducer.
 //
 // The profile is an EXCLUSIVE layer kamacu owns (selected at spawn via
 // `codex -p kamacu`): unlike a shared ~/.codex/hooks.json it never merges

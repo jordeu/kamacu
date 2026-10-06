@@ -174,46 +174,33 @@ func assertHookConfigContent(t *testing.T, b []byte) {
 	t.Helper()
 	s := string(b)
 	mustContain := []string{
-		"kamacu-managed",       // managed-file header (overwritten at startup)
-		"KAMACU_SESSION_ID",    // env gate + receiver URL segment
-		"KAMACU_HOOK_TOKEN",    // X-Kamacu-Token value
-		"KAMACU_HOOK_BASE",     // receiver origin
-		"X-Kamacu-Token",       // same header as claude's overlay
-		"/api/hooks/sessions/", // UNCHANGED hook receiver path
+		"kamacu-managed",                // managed-file header (overwritten at startup)
+		"KAMACU_SESSION_ID",             // env gate + receiver URL segment
+		"KAMACU_HOOK_TOKEN",             // X-Kamacu-Token value
+		"KAMACU_HOOK_BASE",              // receiver origin
+		"X-Kamacu-Token",                // same header as claude's overlay
+		"/api/hooks/sessions/",          // UNCHANGED hook receiver path
 		`[ -n \"$KAMACU_SESSION_ID\" ]`, // env gate (TOML-escaped quotes = file bytes): complete no-op outside kamacu
-		"[[hooks.SessionStart]]",      // -> MarkHooksAlive (BEL fallback off)
-		"[[hooks.Stop]]",              // -> SetIdle (turn end)
-		"[[hooks.PermissionRequest]]", // -> SetWaiting (approval prompt)
+		"[[hooks.SessionStart]]",        // -> MarkHooksAlive (BEL fallback off)
+		"[[hooks.Stop]]",                // -> SetIdle (turn end)
+		"[[hooks.PermissionRequest]]",   // -> possible approval (screen confirms waiting)
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(s, want) {
 			t.Errorf("hook config missing required token %q (env gate / wire contract invariant)", want)
 		}
 	}
-	// Stop MUST be synchronous: codex cancels unfinished background hooks at
-	// session close (verified), so an async Stop would be lost on the final
-	// turn. SessionStart/PermissionRequest are async (verified to fire; never
-	// block the turn).
-	for _, sec := range []struct{ header, name string }{
-		{"[[hooks.SessionStart]]", "SessionStart"},
-		{"[[hooks.PermissionRequest]]", "PermissionRequest"},
-	} {
-		body := sectionOf(s, sec.header)
+	// Status deliveries must complete before Codex proceeds to the next boundary.
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "Interrupt", "SessionEnd"} {
+		body := sectionOf(s, "[[hooks."+event+"]]")
 		if body == "" {
-			t.Fatalf("section %s not found", sec.name)
+			t.Fatalf("missing hook %s", event)
 		}
-		if !strings.Contains(body, "async = true") {
-			t.Errorf("%s hook must set async = true (never block the turn)", sec.name)
+		if strings.Contains(body, "async = true") {
+			t.Errorf("%s status hook must be synchronous", event)
 		}
-	}
-	stopBody := sectionOf(s, "[[hooks.Stop]]")
-	if stopBody == "" {
-		t.Fatal("section Stop not found")
-	}
-	if strings.Contains(stopBody, "async = true") {
-		t.Errorf("Stop hook must NOT be async (cancelled at session close — verified codex 0.157.0); use a sync hook")
-	}
-	if !strings.Contains(stopBody, "timeout") {
-		t.Errorf("Stop hook must carry an explicit timeout")
+		if !strings.Contains(body, "timeout = 3") {
+			t.Errorf("%s must have a bounded timeout", event)
+		}
 	}
 }
