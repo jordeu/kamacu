@@ -216,7 +216,9 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			// the resume subcommand append included — so user-edited command
 			// tokens can never separate the flag from its subcommand.
 			if opts.AgentEngine == "codex" {
-				args = append([]string{"-p", "kamacu"}, args...)
+				// Inline mode keeps conversation output in xterm scrollback.
+				// The alternate screen has no history, even with scrollback enabled.
+				args = append([]string{"-p", "kamacu", "--no-alt-screen"}, args...)
 			}
 			cmd = exec.Command(bin, args...)
 			cmd.Dir = dir

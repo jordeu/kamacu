@@ -106,7 +106,7 @@ func TestCodexExitWithoutHooksCanResume(t *testing.T) {
 				t.Fatalf("resume = %d: %v", status, body)
 			}
 			args := readArgv(t, argsFile)
-			if !reflect.DeepEqual(args, []string{"-p", "kamacu", "resume", id}) {
+			if !reflect.DeepEqual(args, []string{"-p", "kamacu", "--no-alt-screen", "resume", id}) {
 				t.Fatalf("resume argv = %v", args)
 			}
 		})
@@ -225,8 +225,8 @@ func codexWorktreeTask(t *testing.T, srv *httptest.Server, db *sql.DB, agentID i
 }
 
 // TestCodexFreshSpawnArgvHasProfileFlag: a fresh codex spawn (resume:false)
-// records EXACTLY ["-p", "kamacu"] — the engine-gated profile selector the
-// session layer prepends, and nothing else (no resume subcommand, no -s, no
+// records EXACTLY ["-p", "kamacu", "--no-alt-screen"] — the profile and scrollback options
+// the session layer prepends, and nothing else (no resume subcommand, no -s, no
 // claude flags).
 func TestCodexFreshSpawnArgvHasProfileFlag(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -244,15 +244,15 @@ func TestCodexFreshSpawnArgvHasProfileFlag(t *testing.T) {
 		t.Fatalf("fresh codex spawn = %d, want 201; body=%v", status, body)
 	}
 	args := readArgv(t, argsFile)
-	want := []string{"-p", "kamacu"}
+	want := []string{"-p", "kamacu", "--no-alt-screen"}
 	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("fresh codex argv = %v, want exactly %v (the profile selector only)", args, want)
+		t.Fatalf("fresh codex argv = %v, want exactly %v (profile and scrollback options)", args, want)
 	}
 	stopAndWaitExited(t, srv, tid, strID(body))
 }
 
 // TestCodexResumeSpawnAppendsResumeSubcommand: a codex task with a persisted
-// codex_session_id spawns `codex -p kamacu resume <uuid>` — NOT claude's
+// codex_session_id spawns `codex -p kamacu --no-alt-screen resume <uuid>` — NOT claude's
 // --resume, NOT a fresh codex. Locks the resume argv exactly.
 func TestCodexResumeSpawnAppendsResumeSubcommand(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -272,7 +272,7 @@ func TestCodexResumeSpawnAppendsResumeSubcommand(t *testing.T) {
 		t.Fatalf("resume codex spawn = %d, want 201; body=%v", status, body)
 	}
 	args := readArgv(t, argsFile)
-	want := []string{"-p", "kamacu", "resume", stored}
+	want := []string{"-p", "kamacu", "--no-alt-screen", "resume", stored}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("resume codex argv = %v, want exactly %v (the codex resume subcommand, NOT claude --resume and NOT a fresh spawn)", args, want)
 	}
