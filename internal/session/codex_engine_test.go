@@ -142,7 +142,7 @@ func TestCodexSpawnPrependsProfileFlag(t *testing.T) {
 	})
 
 	got := readArgvLines(t, argvFile)
-	want := []string{"-p", "kamacu", "resume", "0d1a2b3c-1111-2222-3333-444455556666"}
+	want := []string{"-p", "kamacu", "--no-alt-screen", "resume", "0d1a2b3c-1111-2222-3333-444455556666"}
 	if len(got) != len(want) {
 		t.Fatalf("codex spawn argv = %q, want %q", got, want)
 	}
