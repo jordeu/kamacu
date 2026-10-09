@@ -77,7 +77,7 @@ func TestIssueImportLifecycle(t *testing.T) {
 
 func TestIssueImportGatesAndFailures(t *testing.T) {
 	srv, db, _ := newTestServer(t)
-	pid := createProject(t, srv, gitRepo(t)) // unborn repository: provisioning will fail
+	pid := createBrokenProject(t, srv)
 	endpoint := fmt.Sprintf("%s/api/projects/%d/issues", srv.URL, pid)
 	oldView, oldSearch := viewIssue, searchIssues
 	t.Cleanup(func() { viewIssue, searchIssues = oldView, oldSearch })

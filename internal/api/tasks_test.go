@@ -501,8 +501,7 @@ func TestTaskCreateCorruptTemplateLandsInWorktreeError(t *testing.T) {
 
 func TestTaskCreateBrokenRepoStill201(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	// gitRepo = bare `git init`, no commit: unborn HEAD → provisioning fails.
-	pid := createProject(t, srv, gitRepo(t))
+	pid := createBrokenProject(t, srv)
 
 	status, body := doJSON(t, "POST", fmt.Sprintf("%s/api/projects/%d/tasks", srv.URL, pid),
 		map[string]any{"title": "No Base Yet"})

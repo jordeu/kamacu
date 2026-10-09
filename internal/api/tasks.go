@@ -138,6 +138,9 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 	// never a crashed create.
 	err = settings.CheckRefFormat(wctx, branch)
 	if err == nil {
+		err = wt.EnsureInitialCommit(wctx, repoPath)
+	}
+	if err == nil {
 		var base string
 		if managed {
 			// CKOUT-02/D-04: start new work from the freshest default branch.

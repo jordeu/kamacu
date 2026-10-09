@@ -106,20 +106,22 @@ func wtURL(srv *httptest.Server, id int64) string {
 
 func TestWorktreeCreateRetryAfterFailure(t *testing.T) {
 	srv, _ := newWorktreeServer(t)
-	repo := gitRepo(t) // unborn HEAD — provisioning fails at creation
+	repo := gitRepo(t)
 	pid := createProject(t, srv, repo)
+	gitDir := filepath.Join(repo, ".git")
+	if err := os.Rename(gitDir, gitDir+".saved"); err != nil {
+		t.Fatal(err)
+	}
 	body := createTask(t, srv, pid, "Retry Me")
 	id := taskID(t, body)
 	if body["worktree_error"] == nil {
-		t.Fatalf("precondition: expected worktree_error on unborn repo, got %v", body)
+		t.Fatalf("precondition: expected worktree_error on broken repo, got %v", body)
 	}
 
-	// Heal the repo (first commit), then Retry via POST (D-25 Retry path).
-	if err := os.WriteFile(filepath.Join(repo, "f.txt"), []byte("x\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+	// Restore the empty repository, then retry.
+	if err := os.Rename(gitDir+".saved", gitDir); err != nil {
+		t.Fatal(err)
 	}
-	gitIn(t, repo, "add", "f.txt")
-	gitIn(t, repo, "commit", "-m", "first")
 
 	status, body := doJSON(t, "POST", wtURL(srv, id), nil)
 	if status != http.StatusOK {
@@ -284,7 +286,7 @@ func TestWorktreeGet(t *testing.T) {
 
 func TestWorktreeGetNoWorktree(t *testing.T) {
 	srv, _ := newWorktreeServer(t)
-	pid := createProject(t, srv, gitRepo(t)) // unborn → no worktree
+	pid := createBrokenProject(t, srv)
 	id := taskID(t, createTask(t, srv, pid, "No Tree"))
 
 	status, body := doJSON(t, "GET", wtURL(srv, id), nil)
@@ -379,7 +381,7 @@ func TestWorktreeDeleteDirtyGate(t *testing.T) {
 
 func TestWorktreeDeleteNoWorktree(t *testing.T) {
 	srv, _ := newWorktreeServer(t)
-	pid := createProject(t, srv, gitRepo(t)) // unborn → no worktree
+	pid := createBrokenProject(t, srv)
 	id := taskID(t, createTask(t, srv, pid, "Nothing To Clean"))
 
 	status, body := doJSON(t, "DELETE", wtURL(srv, id), nil)
@@ -451,5 +453,27 @@ func TestWorktreeCleanupCountsAndKillsDetachedTmux(t *testing.T) {
 	}
 	if got := branchList(t, repo, branch); got == "" {
 		t.Errorf("branch %s deleted by cleanup — must ALWAYS be kept (D-34)", branch)
+	}
+}
+
+func createBrokenProject(t *testing.T, srv *httptest.Server) int64 {
+	t.Helper()
+	repo := gitRepo(t)
+	id := createProject(t, srv, repo)
+	if err := os.RemoveAll(filepath.Join(repo, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestWorktreeCreateEmptyRepository(t *testing.T) {
+	srv, _ := newWorktreeServer(t)
+	repo := gitRepo(t)
+	pid := createProject(t, srv, repo)
+	for _, title := range []string{"First task", "Second task"} {
+		body := createTask(t, srv, pid, title)
+		if body["worktree_error"] != nil || body["worktree_path"] == nil {
+			t.Fatalf("empty repository provisioning failed: %v", body)
+		}
 	}
 }
