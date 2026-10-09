@@ -30,17 +30,42 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+const fetchTimeout = 60 * time.Second
+
+// Network operations always have a deadline, including callers using the
+// server-lifetime context. WaitDelay bounds waits on pipes inherited by SSH.
+func gitNetworkRun(ctx context.Context, timeout time.Duration, repo string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return gitCommand(ctx, repo, true, args...)
+}
 
 // gitRun executes `git -C repo args...` and returns stdout. Failure is any
 // nonzero exit; the returned error message is git's stderr, trimmed and with
 // the "fatal: " prefix stripped — it surfaces verbatim in the UI as
 // "Couldn't create a worktree: {git error}" per UI-SPEC.
 func gitRun(ctx context.Context, repo string, args ...string) (string, error) {
+	return gitCommand(ctx, repo, false, args...)
+}
+
+func gitCommand(ctx context.Context, repo string, network bool, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
+	if network {
+		cmd.WaitDelay = time.Second
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		if _, set := os.LookupEnv("GIT_SSH_COMMAND"); !set {
+			cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3")
+		}
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("git command: %w", ctx.Err())
+		}
 		msg := strings.TrimSpace(errb.String())
 		msg = strings.TrimPrefix(msg, "fatal: ")
 		if msg == "" {
@@ -308,15 +333,18 @@ func (s *Service) branchExistsLocally(ctx context.Context, repo, name string) bo
 // in the NEW worktree in one step, pinned to headOID, so the project's primary
 // checkout HEAD/branch never move.
 func (s *Service) CheckoutPR(ctx context.Context, repo, path, headOID, headRefName string, prNumber int) error {
+	// Fetch before taking the mutation lock: a dead remote must not stall
+	// unrelated worktree operations. Git handles concurrent ref updates with
+	// its own ref locks; callers use headOID rather than shared FETCH_HEAD.
+	if err := s.FetchRef(ctx, repo, fmt.Sprintf("refs/pull/%d/head", prNumber)); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("worktree path already exists: %s", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if _, err := gitRun(ctx, repo, "fetch", "origin", fmt.Sprintf("refs/pull/%d/head", prNumber)); err != nil {
 		return err
 	}
 
@@ -358,9 +386,7 @@ func (s *Service) CheckoutPR(ctx context.Context, repo, path, headOID, headRefNa
 // merge-base. Same scoped-fetch exception as CheckoutPR. Callers may ignore
 // the error and let the subsequent merge-base surface a clear message.
 func (s *Service) FetchRef(ctx context.Context, repo, ref string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := gitRun(ctx, repo, "fetch", "origin", ref)
+	_, err := gitNetworkRun(ctx, fetchTimeout, repo, "fetch", "origin", ref)
 	return err
 }
 
@@ -573,6 +599,6 @@ func (s *Service) EnsureSubmodules(ctx context.Context, wt string) error {
 	if _, err := os.Stat(filepath.Join(wt, ".gitmodules")); err != nil {
 		return nil // no submodules — nothing to do, no git call needed
 	}
-	_, err := gitRun(ctx, wt, "submodule", "update", "--init", "--recursive")
+	_, err := gitNetworkRun(ctx, fetchTimeout, wt, "submodule", "update", "--init", "--recursive")
 	return err
 }

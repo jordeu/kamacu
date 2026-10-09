@@ -8,6 +8,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -986,6 +988,134 @@ func TestListParseBuffer(t *testing.T) {
 				if got[i] != tc.want[i] {
 					t.Errorf("entry[%d] = %+v, want %+v", i, got[i], tc.want[i])
 				}
+			}
+		})
+	}
+}
+
+// Use real git with an SSH transport that never sends a protocol response.
+func hangingSSH(t *testing.T, repo string) string {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "started")
+	script := filepath.Join(t.TempDir(), "ssh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho $$ > \""+marker+"\"\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_SSH_COMMAND", script)
+	t.Setenv("GIT_SSH_VARIANT", "ssh")
+	gitCmd(t, repo, "remote", "add", "origin", "ssh://example.invalid/repo")
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(marker); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+				if process, err := os.FindProcess(pid); err == nil {
+					_ = process.Kill()
+				}
+			}
+		}
+	})
+	return marker
+}
+
+func TestHangingFetchDoesNotBlockCreate(t *testing.T) {
+	for _, checkout := range []bool{false, true} {
+		name := "FetchRef"
+		if checkout {
+			name = "CheckoutPR"
+		}
+		t.Run(name, func(t *testing.T) {
+			repo := makeRepo(t)
+			marker := hangingSSH(t, repo)
+			headOID := strings.TrimSpace(gitCmd(t, repo, "rev-parse", "HEAD"))
+			s := NewService(t.TempDir())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				if checkout {
+					done <- s.CheckoutPR(ctx, repo, filepath.Join(s.Root, "review"), headOID, "review", 1)
+				} else {
+					done <- s.FetchRef(ctx, repo, "main")
+				}
+			}()
+			deadline := time.After(5 * time.Second)
+			for {
+				if _, err := os.Stat(marker); err == nil {
+					break
+				}
+				select {
+				case err := <-done:
+					t.Fatalf("fetch exited before hanging: %v", err)
+				case <-deadline:
+					t.Fatal("SSH did not start")
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			created := make(chan error, 1)
+			createCtx, createCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer createCancel()
+			go func() { created <- s.Create(createCtx, repo, "new-task", filepath.Join(s.Root, "new-task"), "main") }()
+			select {
+			case err := <-created:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("Create blocked behind network fetch")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("fetch error = %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("cancelled fetch did not return")
+			}
+		})
+	}
+}
+
+func TestNetworkGitHardTimeout(t *testing.T) {
+	repo := makeRepo(t)
+	hangingSSH(t, repo)
+	started := time.Now()
+	_, err := gitNetworkRun(context.Background(), 100*time.Millisecond, repo, "fetch", "origin", "main")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want deadline exceeded", err)
+	}
+	if time.Since(started) > 3*time.Second {
+		t.Fatal("network command exceeded timeout and pipe grace period")
+	}
+}
+
+func TestNetworkGitEnvironment(t *testing.T) {
+	for _, custom := range []bool{false, true} {
+		t.Run(strconv.FormatBool(custom), func(t *testing.T) {
+			bin := t.TempDir()
+			script := "#!/bin/sh\nprintf '%s\\n%s' \"$GIT_SSH_COMMAND\" \"$GIT_TERMINAL_PROMPT\"\n"
+			if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			want := "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+			if custom {
+				want = "custom-ssh --option"
+				t.Setenv("GIT_SSH_COMMAND", want)
+			} else {
+				previous, set := os.LookupEnv("GIT_SSH_COMMAND")
+				os.Unsetenv("GIT_SSH_COMMAND")
+				t.Cleanup(func() {
+					if set {
+						os.Setenv("GIT_SSH_COMMAND", previous)
+					}
+				})
+			}
+			out, err := gitNetworkRun(context.Background(), time.Second, "unused", "fetch", "origin", "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out != want+"\n0" {
+				t.Fatalf("environment = %q", out)
 			}
 		})
 	}
