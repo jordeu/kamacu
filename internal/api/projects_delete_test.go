@@ -268,3 +268,45 @@ func splitLines(s string) []string {
 	}
 	return out
 }
+
+// Terminal records have a non-cascading task FK and must be removed first.
+func TestFolderDeleteWithTerminalRecords(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	repo := gitRepoWithCommit(t)
+	id := createProject(t, srv, repo)
+	task := taskID(t, createTask(t, srv, id, "Terminal task"))
+	if _, err := env.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name) VALUES (?, 1, 'project-delete-task')`, task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.db.Exec(`INSERT INTO tmux_sessions (scope, n, name) VALUES ('global', 1, 'project-delete-global')`); err != nil {
+		t.Fatal(err)
+	}
+	status, body := deleteProject(t, srv, id)
+	if status != http.StatusNoContent {
+		t.Fatalf("delete: status=%d body=%v", status, body)
+	}
+	if projectExists(t, env.db, id) {
+		t.Fatal("project still exists after deletion")
+	}
+	for _, table := range []string{"tasks", "tmux_sessions"} {
+		var count int
+		condition := "id = ?"
+		if table == "tmux_sessions" {
+			condition = "task_id = ?"
+		}
+		if err := env.db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE "+condition, task).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s task records: count=%d err=%v", table, count, err)
+		}
+	}
+	var globals int
+	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tmux_sessions WHERE scope = 'global'`).Scan(&globals); err != nil || globals != 1 {
+		t.Fatalf("global terminal changed: count=%d err=%v", globals, err)
+	}
+	status, _ = doJSON(t, "GET", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("reload deleted project: status=%d", status)
+	}
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatalf("folder repository was touched: %v", err)
+	}
+}

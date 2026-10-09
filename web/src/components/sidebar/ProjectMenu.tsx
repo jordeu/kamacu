@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
+import { ApiError } from "@/api/client";
 import { useDeleteProject, useMoveProject } from "@/api/mutations";
 import { useWorkspaces } from "@/api/queries";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
@@ -49,7 +50,13 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
 
   async function handleDelete() {
     const isCurrent = projectId === String(project.id);
-    await deleteProject.mutateAsync(project.id);
+    try {
+      await deleteProject.mutateAsync(project.id);
+    } catch {
+      // Keep the confirmation open so the mutation error is visible.
+      return;
+    }
+    setDeleteOpen(false);
     if (isCurrent) {
       // Refetch before navigating so the index redirect never targets the
       // just-deleted project from a stale cache.
@@ -120,7 +127,10 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
           </DropdownMenuSub>
           <DropdownMenuItem
             variant="destructive"
-            onSelect={() => setDeleteOpen(true)}
+            onSelect={() => {
+              deleteProject.reset();
+              setDeleteOpen(true);
+            }}
           >
             Delete project
           </DropdownMenuItem>
@@ -139,18 +149,39 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
         onOpenChange={setSettingsOpen}
       />
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => {
+        if (!deleteProject.isPending) setDeleteOpen(open);
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete project?</AlertDialogTitle>
             <AlertDialogDescription>
-              {`"${project.name}" and all its tasks will be removed from Kamacu. The repository on disk is untouched.`}
+              {project.managed
+                ? `"${project.name}" and all its tasks, managed checkout, and task worktrees will be removed. Uncommitted changes, unpushed commits, stashes, or running sessions can block deletion.`
+                : `"${project.name}" and all its tasks will be removed from Kamacu. The repository on disk is untouched.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteProject.error && (
+            <div role="alert" className="text-sm text-destructive">
+              <p>{deleteProject.error.message || "Could not delete the project. Please try again."}</p>
+              {deleteProject.error instanceof ApiError && deleteProject.error.reasons?.length ? (
+                <ul className="mt-2 list-disc pl-4">
+                  {deleteProject.error.reasons.map((reason, index) => (
+                    <li key={index}>
+                      {reason.target}: {({ uncommitted: "uncommitted changes", unpushed: "unpushed commits or unavailable default branch", stash: "stashed changes", sessions: "running sessions" } as Record<string, string>)[reason.kind] ?? reason.kind}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleDelete}>
-              Delete project
+            <AlertDialogCancel disabled={deleteProject.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={deleteProject.isPending} onClick={(event) => {
+              event.preventDefault();
+              void handleDelete();
+            }}>
+              {deleteProject.isPending ? "Deleting…" : "Delete project"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
