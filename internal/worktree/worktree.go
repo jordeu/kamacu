@@ -180,6 +180,44 @@ func (s *Service) ResolveBase(ctx context.Context, repo string) (string, error) 
 	return strings.TrimSpace(out), nil
 }
 
+// EnsureInitialCommit gives an unborn repository a shared empty base for task
+// branches. It never stages files, changes the index, runs hooks, or pushes.
+// Base resolution remains read-only; only provisioning calls this method.
+func (s *Service) EnsureInitialCommit(ctx context.Context, repo string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.RefResolves(ctx, repo, "HEAD") {
+		return nil
+	}
+	if base, err := s.ResolveBase(ctx, repo); err == nil && s.RefResolves(ctx, repo, base) {
+		return nil // An existing default branch already provides a base.
+	}
+	out, err := gitRun(ctx, repo, "symbolic-ref", "HEAD")
+	if err != nil {
+		return err
+	}
+	ref := strings.TrimSpace(out)
+	// Refuse to replace an existing but invalid branch ref.
+	if _, err := gitRun(ctx, repo, "show-ref", "--verify", ref); err == nil {
+		return fmt.Errorf("HEAD does not resolve to a commit")
+	}
+	tree, err := gitRun(ctx, repo, "hash-object", "-w", "-t", "tree", "--stdin")
+	if err != nil {
+		return err
+	}
+	commit, err := gitRun(ctx, repo, "-c", "user.name=Kamacu", "-c", "user.email=kamacu@localhost",
+		"commit-tree", strings.TrimSpace(tree), "-m", "Initial empty commit")
+	if err != nil {
+		return err
+	}
+	// Empty old-value requires the ref to still be absent (safe against races).
+	_, err = gitRun(ctx, repo, "update-ref", ref, strings.TrimSpace(commit), "")
+	if err != nil && s.RefResolves(ctx, repo, ref) {
+		return nil
+	}
+	return err
+}
+
 // DefaultBranch returns the repo's default branch name by reading the same
 // origin/HEAD symbolic ref ResolveBase's first leg uses, stripping the leading
 // "origin/" (e.g. refs/remotes/origin/HEAD → "main"). A managed clone always

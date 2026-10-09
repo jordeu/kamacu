@@ -1120,3 +1120,49 @@ func TestNetworkGitEnvironment(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureInitialCommitEmptyClone(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(t.TempDir())
+	source := t.TempDir()
+	gitCmd(t, source, "init", "-b", "trunk")
+	repo := cloneRepo(t, source)
+	// Neither staged nor untracked user files belong in the bootstrap commit.
+	if err := os.WriteFile(filepath.Join(repo, "staged.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, repo, "add", "staged.txt")
+	before := gitCmd(t, repo, "status", "--porcelain")
+	if err := svc.EnsureInitialCommit(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	tip := gitCmd(t, repo, "rev-parse", "HEAD")
+	if files := gitCmd(t, repo, "ls-tree", "--name-only", "HEAD"); files != "" {
+		t.Fatalf("bootstrap committed files: %s", files)
+	}
+	if after := gitCmd(t, repo, "status", "--porcelain"); after != before {
+		t.Fatalf("index changed: before %q after %q", before, after)
+	}
+	base, err := svc.ResolveBaseFresh(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, branch := range []string{"task/first", "task/second"} {
+		path := filepath.Join(t.TempDir(), "worktree")
+		if err := svc.Create(ctx, repo, branch, path, base); err != nil {
+			t.Fatal(err)
+		}
+		if got := gitCmd(t, path, "rev-parse", "HEAD"); got != tip {
+			t.Fatalf("task has different base: %s", got)
+		}
+	}
+	if err := svc.EnsureInitialCommit(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitCmd(t, repo, "rev-parse", "HEAD"); got != tip {
+		t.Fatal("bootstrap was not idempotent")
+	}
+	if refs := gitCmd(t, source, "for-each-ref"); refs != "" {
+		t.Fatalf("source changed: %s", refs)
+	}
+}

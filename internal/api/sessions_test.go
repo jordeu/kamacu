@@ -185,7 +185,7 @@ func TestSessionSpawnTaskValidation(t *testing.T) {
 	}
 
 	// Task with NULL worktree_path → 409 (D-30 server side).
-	pid := createProject(t, srv, gitRepo(t)) // unborn HEAD → no worktree
+	pid := createBrokenProject(t, srv)
 	id := taskID(t, createTask(t, srv, pid, "Treeless"))
 	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id})
 	if status != http.StatusConflict {
@@ -1107,8 +1107,8 @@ func TestSessionAgentValidation(t *testing.T) {
 		t.Errorf("error = %q, want %q", body["error"], "task has no worktree")
 	}
 
-	// kind=agent on a task with NULL worktree_path (unborn HEAD repo).
-	pid := createProject(t, srv, gitRepo(t))
+	// kind=agent on a task with NULL worktree_path.
+	pid := createBrokenProject(t, srv)
 	id := taskID(t, createTask(t, srv, pid, "Treeless Agent"))
 	status, body = doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": id, "kind": "agent"})
 	if status != http.StatusConflict {
@@ -2098,7 +2098,7 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 		t.Fatalf("write post: %v", err)
 	}
 
-	streamed, err := io.ReadAll(resp.Body)
+ streamed, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}
