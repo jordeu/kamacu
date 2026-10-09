@@ -54,9 +54,9 @@ type Project struct {
 	// straight into int64). Every project has exactly one agent; migrated/
 	// created rows default to the Claude seed (id 1). Column ORDER here MUST
 	// match projectColumns (it sits between workspace_id and the timestamps).
-	AgentID int64 `json:"agent_id"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	AgentID   int64  `json:"agent_id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // projectHandlers carries the gated-delete dependencies (mirrors taskHandlers /
@@ -730,7 +730,7 @@ func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
 
 	// --- Folder path (UNCHANGED, D-09): never touch the directory. ---
 	if managed == 0 {
-		res, err := h.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+		res, err := h.deleteProjectRows(r.Context(), id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -916,19 +916,33 @@ func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Conte
 		return
 	}
 
-	// Delete rows FK-ordered (FKs ON, no CASCADE on tmux_sessions): clear
-	// tmux_sessions of the project's tasks first, then the project (CASCADE
-	// removes the task rows). Mirror reaper.go / tasks.go delete ordering.
-	if _, derr := h.db.ExecContext(ctx,
-		`DELETE FROM tmux_sessions WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id); derr != nil {
-		writeError(w, http.StatusInternalServerError, derr.Error())
-		return
-	}
-	if _, derr := h.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); derr != nil {
-		writeError(w, http.StatusInternalServerError, derr.Error())
+	if _, err := h.deleteProjectRows(ctx, id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteProjectRows clears task terminal records before cascading task deletion.
+// Both project types use a transaction so a failed delete leaves all rows intact.
+func (h *projectHandlers) deleteProjectRows(ctx context.Context, id int64) (sql.Result, error) {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM tmux_sessions WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // gateReasonKind maps the shared CleanupWorktreeGated reason strings to a
