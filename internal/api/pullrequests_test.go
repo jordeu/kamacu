@@ -892,3 +892,67 @@ func TestPostReview_GhFailure_502(t *testing.T) {
 		t.Fatalf("body = %q, want it to contain 'couldn't post this review: gh timeout'", rec.Body.String())
 	}
 }
+
+func TestOpenPullRequestsScope(t *testing.T) {
+	original := listOpenPRs
+	t.Cleanup(func() { listOpenPRs = original })
+	calls := 0
+	listOpenPRs = func(_ context.Context, repo, dir string) ([]github.PRSummary, string) {
+		calls++
+		if repo != "owner/name" || dir != "/tmp/open-prs" {
+			t.Fatalf("wrong repo context: %q %q", repo, dir)
+		}
+		return []github.PRSummary{{Number: 42, Title: "Any open PR"}}, "ok"
+	}
+	db := newPRTestDB(t)
+	id := insertProject(t, db, "p", "/tmp/open-prs", "owner/name")
+	fake := &prFake{}
+	mux := newPREnv(t, db, fake, nil)
+	path := "/api/projects/" + itoa(id) + "/pull-requests?scope=open"
+	res := decodePRResult(t, prGet(t, mux, path))
+	if res.State != "ok" || len(res.PRs) != 1 || res.PRs[0].Number != 42 || calls != 1 || fake.calls.Load() != 0 {
+		t.Fatalf("unexpected result: %+v, calls=%d", res, calls)
+	}
+	if err := settings.Set(db, settings.KeyGithubIntegration, "off"); err != nil {
+		t.Fatal(err)
+	}
+	if res := decodePRResult(t, prGet(t, mux, path)); res.State != "disabled" || calls != 1 {
+		t.Fatal("open list bypassed integration gate")
+	}
+	if err := settings.Set(db, settings.KeyGithubIntegration, "on"); err != nil {
+		t.Fatal(err)
+	}
+	unlinked := insertProject(t, db, "unlinked", "/tmp/unlinked", "")
+	if res := decodePRResult(t, prGet(t, mux, "/api/projects/"+itoa(unlinked)+"/pull-requests?scope=open")); res.State != "disabled" || calls != 1 {
+		t.Fatal("open list bypassed project gate")
+	}
+}
+
+func TestReviewClosedAndMergedPR(t *testing.T) {
+	for _, state := range []string{"CLOSED", "MERGED"} {
+		t.Run(state, func(t *testing.T) {
+			db := newPRTestDB(t)
+			repo, head := makePRRepo(t, 5)
+			id := insertProject(t, db, "p", repo, "owner/name")
+			mux := newPRReviewEnv(t, db, t.TempDir())
+			stubViewPR(t, func(context.Context, string, int) (github.PRDetail, error) {
+				return github.PRDetail{Number: 5, Title: "Historical PR", HeadRefOid: head, BaseRefName: "trunk", State: state}, nil
+			})
+			rec := prPost(t, mux, "/api/projects/"+itoa(id)+"/pull-requests/5/review")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("open %s PR: %d %s", state, rec.Code, rec.Body.String())
+			}
+			var result struct {
+				PR struct {
+					State string `json:"state"`
+				} `json:"pr"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.PR.State != state {
+				t.Fatalf("state = %q, want %s", result.PR.State, state)
+			}
+		})
+	}
+}

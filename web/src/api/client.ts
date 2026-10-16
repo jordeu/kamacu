@@ -56,8 +56,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function get<T>(path: string): Promise<T> {
-  return api<T>(path);
+export function get<T>(path: string, init?: RequestInit): Promise<T> {
+  return api<T>(path, init);
 }
 
 export function post<T>(path: string, body?: unknown): Promise<T> {
