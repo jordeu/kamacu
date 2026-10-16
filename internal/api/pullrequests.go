@@ -19,6 +19,8 @@ import (
 // package var so the review-endpoint tests can stub the live gh read and stay
 // hermetic — the git half (CheckoutPR) runs against a real local repo, the gh
 // half is injected. Production wiring leaves it as github.ViewPR.
+var listOpenPRs = github.ListOpenPRs
+
 var viewPR = github.ViewPR
 
 // postReview is the review-posting seam (defaults to github.PostReview). Package
@@ -80,6 +82,12 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 		}
 		if !repo.Valid || strings.TrimSpace(repo.String) == "" {
 			writeJSON(w, http.StatusOK, github.Result{State: "disabled"})
+			return
+		}
+
+		if r.URL.Query().Get("scope") == "open" {
+			prs, state := listOpenPRs(r.Context(), repo.String, repoPath)
+			writeJSON(w, http.StatusOK, github.Result{State: state, PRs: prs})
 			return
 		}
 

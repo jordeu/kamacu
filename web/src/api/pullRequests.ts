@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
 import type { ApiError } from "./client";
@@ -127,5 +128,25 @@ export function useOpenReview(projectId: number) {
       qc.setQueryData(prDetailKey(res.task.id), res.pr);
       qc.setQueryData(["task", res.task.id], res.task);
     },
+  });
+}
+
+/** Fetch the full open-PR list only while the picker is visible. */
+export function useOpenPullRequests(projectId: number, enabled: boolean) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!enabled) return;
+    // Disabling a query does not cancel an in-flight fetch. Dismissal must
+    // abort it explicitly so the server can stop the paginated gh process.
+    return () => {
+      void qc.cancelQueries({ queryKey: ["open-pull-requests", projectId], exact: true });
+    };
+  }, [enabled, projectId, qc]);
+
+  return useQuery({
+    queryKey: ["open-pull-requests", projectId],
+    queryFn: ({ signal }) => get<PullRequestsResponse>(`/api/projects/${projectId}/pull-requests?scope=open`, { signal }),
+    enabled,
+    staleTime: 30_000,
   });
 }

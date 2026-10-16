@@ -14,6 +14,7 @@ import {
   usePullRequests,
   useRefreshPullRequests,
 } from "@/api/pullRequests";
+import { ReviewPRPicker } from "./ReviewPRPicker";
 import { PRCard } from "./PRCard";
 
 /**
@@ -140,6 +141,7 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
         >
           <RefreshCw className="size-3.5" />
         </Button>
+        <ReviewPRPicker projectId={projectId} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-md bg-[#101013] p-3">
         <ReviewStates
