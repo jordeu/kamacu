@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -108,5 +110,35 @@ func TestSearchIssuesAssignedToMe(t *testing.T) {
 	}
 	if _, err := SearchIssues(context.Background(), "owner/repo", "", "42", false, true, 1); err == nil {
 		t.Fatal("account lookup failure was hidden")
+	}
+}
+
+func TestIssueRunnerFailureDetails(t *testing.T) {
+	for _, tc := range []struct{ name, stderr string }{
+		{"untrusted config", "mise ERROR Config files in /project/mise.toml are not trusted."},
+		{"authentication", "gh: authentication failed (HTTP 401)"},
+		{"rate limit", "gh: API rate limit exceeded"},
+		{"unknown", "Unexpected failure\nAdditional diagnostic details"},
+		{"empty stderr", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			script := "#!/bin/sh\nprintf '%s\\n' " + "'" + tc.stderr + "'" + " >&2\nexit 1\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir)
+			_, err := issueRunner(context.Background(), t.TempDir(), "api", "user")
+			if err == nil {
+				t.Fatal("expected CLI failure")
+			}
+			want := "Could not read GitHub issues: exit status 1"
+			if tc.stderr != "" {
+				want += "\n" + tc.stderr
+			}
+			if err.Error() != want {
+				t.Fatalf("error = %q, want %q", err, want)
+			}
+		})
 	}
 }

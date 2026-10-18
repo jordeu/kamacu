@@ -1,6 +1,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,29 +56,21 @@ func (i issueWire) issue() Issue {
 var issueRunner = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err == nil {
 		return out, nil
 	}
 	if ctx.Err() != nil {
-		return nil, errors.New("GitHub request timed out or was cancelled. Try again.")
+		err = ctx.Err()
+	} else if errors.Is(err, exec.ErrNotFound) {
+		err = errors.New("GitHub CLI (gh) is not installed. Install it to import issues.")
 	}
-	if errors.Is(err, exec.ErrNotFound) {
-		return nil, errors.New("GitHub CLI (gh) is not installed. Install it to import issues.")
+	if detail := strings.TrimSpace(stderr.String()); detail != "" {
+		return nil, fmt.Errorf("Could not read GitHub issues: %w\n%s", err, detail)
 	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		stderr := strings.ToLower(string(exit.Stderr))
-		switch {
-		case strings.Contains(stderr, "rate limit"):
-			return nil, errors.New("GitHub rate limit reached. Try again later.")
-		case strings.Contains(stderr, "401"), strings.Contains(stderr, "auth login"), strings.Contains(stderr, "authentication"):
-			return nil, errors.New("GitHub authentication is required. Run gh auth login on the server, then retry.")
-		case strings.Contains(stderr, "404"):
-			return nil, errors.New("GitHub issue or repository is unavailable. Check the repository link and your access.")
-		}
-	}
-	return nil, errors.New("Could not read GitHub issues. Check your connection and repository access, then retry.")
+	return nil, fmt.Errorf("Could not read GitHub issues: %w", err)
 }
 
 func readIssueJSON(ctx context.Context, dir string, target any, args ...string) error {
