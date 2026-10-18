@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import { useSettings } from "@/api/settings";
 import {
   DropdownMenu,
@@ -66,7 +66,27 @@ export default function BoardPage() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between px-6 py-4">
-        <h1 className="text-base font-medium">{project?.name ?? ""}</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="truncate text-base font-medium">{project?.name ?? ""}</h1>
+          {project?.github_repo && (
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground"
+            >
+              <a
+                href={`https://github.com/${project.github_repo}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Open ${project.github_repo} on GitHub (opens in a new tab)`}
+                title={`Open ${project.github_repo} on GitHub`}
+              >
+                <ExternalLink className="size-4" aria-hidden="true" />
+              </a>
+            </Button>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           {isClaudeAgent ? <QuotaIndicator /> : null}
           {/* The only inverted high-contrast element on the page (UI-SPEC focal point). */}
