@@ -59,6 +59,15 @@ func artifactServer(t *testing.T) (*httptest.Server, *artifact.Service) {
 }
 
 func TestArtifactHTTPUploadAndIsolationHeaders(t *testing.T) {
+	for _, setting := range []string{"", "0", "false", "invalid", "1", "true"} {
+		t.Run("allowlists="+setting, func(t *testing.T) {
+			t.Setenv("KAMACU_ARTIFACT_CONNECTION_ALLOWLISTS", setting)
+			testArtifactHTTPUploadAndIsolationHeaders(t, setting == "1" || setting == "true")
+		})
+	}
+}
+
+func testArtifactHTTPUploadAndIsolationHeaders(t *testing.T, enabled bool) {
 	srv, svc := artifactServer(t)
 	request := func(method, path, token string, body []byte) *http.Response {
 		t.Helper()
@@ -122,11 +131,15 @@ func TestArtifactHTTPUploadAndIsolationHeaders(t *testing.T) {
 	if resp.Header.Get("X-Content-Type-Options") != "nosniff" || resp.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatal(resp.Header)
 	}
-	if resp.Header.Get("Connection-Allowlist") != fmt.Sprintf("(%q);webrtc=block;redirects=block", srv.URL+fmt.Sprintf("/api/artifact-content/%s/%s/*", a.ID, a.Revision)) {
+	wantPolicy := ""
+	if enabled {
+		wantPolicy = fmt.Sprintf("(%q);webrtc=block;redirects=block", srv.URL+fmt.Sprintf("/api/artifact-content/%s/%s/*", a.ID, a.Revision))
+	}
+	if resp.Header.Get("Connection-Allowlist") != wantPolicy {
 		t.Fatal("missing scoped native network policy", resp.Header)
 	}
 	content, err := io.ReadAll(resp.Body)
-	if err != nil || bytes.Contains(content, payload) || !bytes.Contains(content, []byte(`report("unsupported")`)) {
+	if err != nil || bytes.Contains(content, payload) || bytes.Contains(content, []byte(`report("unsupported")`)) != enabled {
 		t.Fatal("HTML must remain inert until browser policy verification", err)
 	}
 	if resp = request("GET", strings.Replace(file, a.Revision, "missing", 1), "", nil); resp.StatusCode != 404 {
@@ -203,6 +216,7 @@ func TestArtifactActiveAssetsCannotExecuteOnDirectNavigation(t *testing.T) {
 // Opt-in real-browser acceptance test. Uses the built web app and a disposable
 // HTTP service/database. No live Kamacu instance or shared upload path is used.
 func TestArtifactsBrowser(t *testing.T) {
+	t.Setenv("KAMACU_ARTIFACT_CONNECTION_ALLOWLISTS", "1")
 	if os.Getenv("KAMACU_BROWSER_TEST") != "1" {
 		t.Skip("set KAMACU_BROWSER_TEST=1 and KAMACU_PLAYWRIGHT_PACKAGE to run browser acceptance")
 	}
