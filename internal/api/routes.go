@@ -15,7 +15,7 @@ import (
 // tmuxClient lets task deletion kill the task's live tmux sessions before the
 // row delete (D-93) — StopAllForTask only reaches in-memory sessions, so a
 // detached tmux survivor needs a direct kill.
-func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client) {
+func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client, afterDelete ...func()) {
 	p := &projectHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	t := &taskHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	wh := &workspaceHandlers{db: db}
@@ -35,7 +35,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.M
 	mux.HandleFunc("PATCH /api/projects/{id}", p.update)
 	mux.HandleFunc("GET /api/projects/{id}/github-origin", p.githubOrigin)
 	mux.HandleFunc("GET /api/github/status", githubStatus)
-	mux.HandleFunc("DELETE /api/projects/{id}", p.delete)
+	mux.HandleFunc("DELETE /api/projects/{id}", afterArtifactDelete(p.delete, afterDelete))
 	mux.HandleFunc("GET /api/projects/{id}/issues", t.listIssues)
 	mux.HandleFunc("GET /api/projects/{id}/issues/{number}", t.getIssue)
 	mux.HandleFunc("POST /api/projects/{id}/issues/{number}/import", t.importIssue)
@@ -45,6 +45,16 @@ func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.M
 	mux.HandleFunc("GET /api/tasks/{id}", t.get)
 	mux.HandleFunc("PATCH /api/tasks/{id}", t.update)
 	mux.HandleFunc("POST /api/tasks/{id}/move", t.move)
-	mux.HandleFunc("DELETE /api/tasks/{id}", t.delete)
+	mux.HandleFunc("DELETE /api/tasks/{id}", afterArtifactDelete(t.delete, afterDelete))
 	SettingsRoutes(mux, db)
+}
+
+// Collection also covers project deletion's cascading task rows.
+func afterArtifactDelete(next http.HandlerFunc, callbacks []func()) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		next(w, r)
+		for _, callback := range callbacks {
+			callback()
+		}
+	}
 }
