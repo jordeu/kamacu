@@ -16,7 +16,7 @@ func TestFeedbackEnvironmentArgs(t *testing.T) {
  {"name":"remote","enabled":true,"transport":{"type":"http","command":"kamacu","args":["mcp","serve"]}}
  ]`
 	got, err := feedbackEnvironmentArgs([]byte(data))
-	want := []string{"-c", `mcp_servers."kamacu".env_vars=["EXISTING","KAMACU_TASK_ID","KAMACU_SESSION_ID","KAMACU_HOOK_TOKEN","KAMACU_HOOK_BASE"]`, "-c", `mcp_servers."renamed".env_vars=["KAMACU_TASK_ID","KAMACU_SESSION_ID","KAMACU_HOOK_TOKEN","KAMACU_HOOK_BASE"]`}
+	want := []string{"-c", `mcp_servers.kamacu.env_vars=["EXISTING","KAMACU_TASK_ID","KAMACU_SESSION_ID","KAMACU_HOOK_TOKEN","KAMACU_HOOK_BASE"]`, "-c", `mcp_servers.renamed.env_vars=["KAMACU_TASK_ID","KAMACU_SESSION_ID","KAMACU_HOOK_TOKEN","KAMACU_HOOK_BASE"]`}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, %v", got, err)
 	}

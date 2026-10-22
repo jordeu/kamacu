@@ -53,9 +53,10 @@ func feedbackEnvironmentArgs(data []byte) ([]string, error) {
 				vars = append(vars, name)
 			}
 		}
-		name, _ := json.Marshal(entry.Name)
+		// Codex splits -c keys on dots and keeps quotes literally, so the name
+		// must stay bare; Codex already restricts server names to [A-Za-z0-9_-].
 		value, _ := json.Marshal(vars)
-		args = append(args, "-c", "mcp_servers."+string(name)+".env_vars="+string(value))
+		args = append(args, "-c", "mcp_servers."+entry.Name+".env_vars="+string(value))
 	}
 	return args, nil
 }
