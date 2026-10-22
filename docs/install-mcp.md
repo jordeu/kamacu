@@ -263,14 +263,25 @@ CSP restricts scripts, styles, images, fonts, media, and connections to the
 artifact's uploaded revision (plus embedded image/media data). CDN resources
 and external API/WebSocket calls are blocked; bundle dependencies locally.
 Do not depend on service workers, browser storage, or evaluation of strings as
-JavaScript. Interactive previews require native **Connection Allowlists** support
-to be enabled in the viewer's browser. Before parsing any uploaded HTML, a trusted
-renderer checks that the browser actually blocks WebRTC. Unsupported browsers
-show an explicit error and never execute uploaded code, including when a preview
-URL is opened directly. Non-HTML assets remain usable as subresources but download on direct
-navigation, preventing unverified SVG/XML/PDF documents from rendering external links. The native policy blocks external navigation,
-redirects, and WebRTC/STUN as well as the resource restrictions enforced by CSP.
-This is a deliberate compatibility requirement: CSP alone cannot contain WebRTC.
+JavaScript.
+
+Connection Allowlists are disabled by default for browser compatibility. To
+enable them, set the environment variable when starting Kamacu:
+
+```sh
+KAMACU_ARTIFACT_CONNECTION_ALLOWLISTS=1 kamacu serve
+```
+
+With this option enabled, interactive previews require native **Connection
+Allowlists** support in the viewer's browser. A trusted renderer checks native
+WebRTC blocking before parsing uploaded HTML; unsupported browsers show an
+error and never execute uploaded code. The native policy additionally blocks
+external navigation, redirects, and WebRTC/STUN. With the option disabled,
+previews still use the CSP sandbox and resource restrictions described above,
+but CSP alone cannot contain WebRTC or all external navigation.
+Non-HTML assets remain usable as subresources but download on direct navigation.
+Restart Kamacu after changing the variable.
+
 See the [Connection Allowlists design](https://wicg.github.io/connection-allowlists/)
 and [Chrome's implementation guidance](https://developer.chrome.com/blog/connection-allowlists-origin-trial).
 

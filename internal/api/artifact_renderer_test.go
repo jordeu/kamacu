@@ -14,7 +14,7 @@ func TestArtifactRendererKeepsUploadedMarkupInert(t *testing.T) {
 		"\xff\x00<!-- parser edge --><svg onload='new RTCPeerConnection()'>",
 	} {
 		var output bytes.Buffer
-		if err := renderArtifactHTML(&output, strings.NewReader(content), `</script><script>alert(1)</script>`); err != nil {
+		if err := renderArtifactHTML(&output, strings.NewReader(content), `</script><script>alert(1)</script>`, true); err != nil {
 			t.Fatal(err)
 		}
 		document := output.String()
@@ -32,6 +32,23 @@ func TestArtifactRendererKeepsUploadedMarkupInert(t *testing.T) {
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil || !bytes.Equal(decoded, []byte(content)) {
 			t.Fatal("payload changed", err)
+		}
+	}
+}
+
+func TestArtifactRendererConnectionAllowlistsOptIn(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		var output bytes.Buffer
+		if err := renderArtifactHTML(&output, strings.NewReader("<h1>Preview</h1>"), "token", enabled); err != nil {
+			t.Fatal(err)
+		}
+		document := output.String()
+		if strings.Contains(document, "new RTCPeerConnection") != enabled ||
+			strings.Contains(document, `report("unsupported")`) != enabled {
+			t.Fatalf("browser capability gate does not match opt-in %v", enabled)
+		}
+		if !strings.Contains(document, `report("ready")`) || !strings.Contains(document, "document.write(content)") {
+			t.Fatal("preview must render and report readiness in either mode")
 		}
 	}
 }

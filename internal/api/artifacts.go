@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -19,7 +20,8 @@ import (
 // ArtifactRoutes keeps upload control token-gated while sharing the existing
 // loopback/origin boundary for UI operations. Upload bytes use a scoped token.
 func ArtifactRoutes(mux *http.ServeMux, service *artifact.Service, token string) {
-	h := &artifactHandlers{service: service, token: token}
+	connectionAllowlists, _ := strconv.ParseBool(os.Getenv("KAMACU_ARTIFACT_CONNECTION_ALLOWLISTS"))
+	h := &artifactHandlers{service: service, token: token, connectionAllowlists: connectionAllowlists}
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts", h.list)
 	mux.HandleFunc("POST /api/tasks/{id}/artifact-uploads", h.begin)
 	mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifact}/uploads", h.begin)
@@ -31,8 +33,9 @@ func ArtifactRoutes(mux *http.ServeMux, service *artifact.Service, token string)
 }
 
 type artifactHandlers struct {
-	service *artifact.Service
-	token   string
+	service              *artifact.Service
+	token                string
+	connectionAllowlists bool
 }
 
 func (h *artifactHandlers) authorized(w http.ResponseWriter, r *http.Request) bool {
@@ -163,7 +166,7 @@ func (h *artifactHandlers) content(w http.ResponseWriter, r *http.Request) {
 	source := fmt.Sprintf("%s://%s/api/artifact-content/%s/%s/", scheme, r.Host, r.PathValue("artifact"), r.PathValue("revision"))
 	csp := fmt.Sprintf("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' %s; style-src 'unsafe-inline' %s; img-src data: blob: %s; font-src data: %s; media-src data: blob: %s; connect-src %s; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'", source, source, source, source, source, source)
 	// Active asset formats such as SVG/XML must also be safe on direct navigation.
-	// HTML alone executes the trusted capability gate before any uploaded code.
+	// HTML uses a trusted renderer with an optional native-policy capability gate.
 	isHTML := strings.HasPrefix(contentType, "text/html")
 	if !isHTML {
 		csp = strings.Replace(csp, "sandbox allow-scripts;", "sandbox;", 1)
@@ -173,7 +176,9 @@ func (h *artifactHandlers) content(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment")
 	}
 	w.Header().Set("Content-Security-Policy", csp)
-	w.Header().Set("Connection-Allowlist", fmt.Sprintf("(%q);webrtc=block;redirects=block", source+"*"))
+	if h.connectionAllowlists {
+		w.Header().Set("Connection-Allowlist", fmt.Sprintf("(%q);webrtc=block;redirects=block", source+"*"))
+	}
 	w.Header().Set("X-DNS-Prefetch-Control", "off")
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -187,7 +192,7 @@ func (h *artifactHandlers) content(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodHead {
 			return
 		}
-		if err := renderArtifactHTML(w, f, r.URL.Query().Get("preview_token")); err != nil {
+		if err := renderArtifactHTML(w, f, r.URL.Query().Get("preview_token"), h.connectionAllowlists); err != nil {
 			slog.Warn("rendering artifact preview", "artifact", r.PathValue("artifact"), "error", err)
 		}
 		return

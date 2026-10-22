@@ -7,12 +7,10 @@ import (
 	"io"
 )
 
-// renderArtifactHTML never parses uploaded markup until native WebRTC blocking
-// has been verified in this document. Unsupported browsers fail closed. A JS
-// API shim would be bypassable through fresh realms (e.g. about:blank frames).
-// Connection-Allowlist is enforced by the browser, including inherited local
-// documents, rather than relying on mutable JavaScript globals.
-func renderArtifactHTML(w io.Writer, source io.Reader, token string) error {
+// renderArtifactHTML streams uploaded markup as inert base64. When Connection
+// Allowlists are enabled, native WebRTC blocking is verified before parsing it;
+// unsupported browsers fail closed.
+func renderArtifactHTML(w io.Writer, source io.Reader, token string, connectionAllowlists bool) error {
 	if len(token) > 128 {
 		token = ""
 	}
@@ -21,7 +19,11 @@ func renderArtifactHTML(w io.Writer, source io.Reader, token string) error {
 (() => {
   const token = %s;
   const report = status => parent.postMessage({kind: "kamacu-artifact-preview", token, status}, "*");
-  const policyError = error => error.name === "NotAllowedError" && error.message.includes("Connection-Allowlist");
+`, encodedToken); err != nil {
+		return err
+	}
+	if connectionAllowlists {
+		if _, err := io.WriteString(w, `  const policyError = error => error.name === "NotAllowedError" && error.message.includes("Connection-Allowlist");
   let blocked = false;
   try {
     // An unsupported engine must reject this deliberately invalid ICE URL.
@@ -50,7 +52,11 @@ func renderArtifactHTML(w io.Writer, source io.Reader, token string) error {
     report("unsupported");
     return;
   }
-  const content = new TextDecoder().decode(Uint8Array.from(atob("`, encodedToken); err != nil {
+`); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(w, `  const content = new TextDecoder().decode(Uint8Array.from(atob("`); err != nil {
 		return err
 	}
 	// Base64 is streamed and cannot terminate this trusted script, even if the
@@ -65,7 +71,7 @@ func renderArtifactHTML(w io.Writer, source io.Reader, token string) error {
 	_, err := io.WriteString(w, `"), character => character.charCodeAt(0)));
   report("ready");
   // document.open preserves the response's policy container; the new content
-  // remains subject to the native connection allowlist and CSP sandbox.
+  // remains subject to the CSP sandbox and any enabled connection allowlist.
   document.open();
   document.write(content);
   document.close();
