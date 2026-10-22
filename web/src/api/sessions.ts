@@ -103,6 +103,8 @@ export function useSpawnAgent(taskId: number) {
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       // Board/tab dots appear without waiting a poll period.
       queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
+      queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
   });
 }
@@ -124,6 +126,8 @@ export function useResumeAgent(taskId: number) {
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
+      queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
   });
 }

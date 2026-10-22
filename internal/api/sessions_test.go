@@ -2338,3 +2338,83 @@ func TestWrapInputForWrite(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentStartMovesOnlyTodoToInProgress(t *testing.T) {
+	for _, resume := range []bool{false, true} {
+		for _, initial := range []string{"todo", "in_progress", "in_review", "done"} {
+			t.Run(fmt.Sprintf("resume=%v/%s", resume, initial), func(t *testing.T) {
+				srv, _, db, globRoot, _ := newResumeServer(t)
+				id, _ := worktreeTask(t, srv, "Start work")
+				if _, err := db.Exec(`UPDATE tasks SET status = ?, position = 99 WHERE id = ?`, initial, id); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`INSERT INTO tasks (project_id, title, status, position)
+					SELECT project_id, 'Already working', 'in_progress', -3 FROM tasks WHERE id = ?`, id); err != nil {
+					t.Fatal(err)
+				}
+				if resume {
+					stored := uuid.NewString()
+					setTaskClaudeSession(t, db, id, stored)
+					seedTranscript(t, globRoot, stored)
+				}
+				code, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{
+					"task_id": id, "kind": "agent", "resume": resume,
+				})
+				if code != http.StatusCreated {
+					t.Fatalf("spawn: %d %v", code, body)
+				}
+				var status string
+				var position float64
+				var entered sql.NullString
+				if err := db.QueryRow(`SELECT status, position, in_progress_at FROM tasks WHERE id = ?`, id).Scan(&status, &position, &entered); err != nil {
+					t.Fatal(err)
+				}
+				want := initial
+				if initial == "todo" {
+					want = "in_progress"
+					if !entered.Valid || position != -4 {
+						t.Fatalf("transition did not stamp time and position: %v, %v", entered, position)
+					}
+				} else if position != 99 || entered.Valid {
+					t.Fatalf("existing column was modified: position=%v entered=%v", position, entered)
+				}
+				if status != want {
+					t.Fatalf("status = %s, want %s", status, want)
+				}
+			})
+		}
+	}
+}
+
+func TestFailedAgentStartAndShellLeaveTodoUnchanged(t *testing.T) {
+	for _, kind := range []string{"agent", "bash", "failed_spawn"} {
+		t.Run(kind, func(t *testing.T) {
+			srv, _, db, _, _ := newResumeServer(t)
+			id, _ := worktreeTask(t, srv, "Keep TODO")
+			request := map[string]any{"task_id": id, "kind": kind}
+			wantCode := http.StatusCreated
+			if kind == "agent" {
+				request["resume"] = true // No stored conversation: rejected before spawn.
+				wantCode = http.StatusConflict
+			}
+			if kind == "failed_spawn" {
+				request["kind"] = "agent"
+				if _, err := db.Exec(`UPDATE tasks SET worktree_path = ? WHERE id = ?`, filepath.Join(t.TempDir(), "missing"), id); err != nil {
+					t.Fatal(err)
+				}
+				wantCode = http.StatusInternalServerError
+			}
+			code, body := doJSON(t, "POST", srv.URL+"/api/sessions", request)
+			if code != wantCode {
+				t.Fatalf("spawn: %d %v", code, body)
+			}
+			var status string
+			if err := db.QueryRow(`SELECT status FROM tasks WHERE id = ?`, id).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != "todo" {
+				t.Fatalf("status = %s, want todo", status)
+			}
+		})
+	}
+}

@@ -229,8 +229,9 @@ export function useMoveTask(projectId: number) {
     onError: (_error, _args, context) => {
       queryClient.setQueryData(["tasks", projectId], context?.prev);
     },
-    onSettled: () => {
+    onSettled: (_task, _error, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["task", id] });
     },
   });
 }

@@ -762,6 +762,18 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "couldn't start a session")
 		return
 	}
+	// Starting or resuming a board task begins work. The conditional UPDATE
+	// preserves concurrent manual moves and leaves PR/global sessions alone.
+	if kind == session.KindAgent && req.TaskID != 0 {
+		if _, err := h.db.Exec(`UPDATE tasks SET status = 'in_progress',
+			position = (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks AS target
+				WHERE target.project_id = tasks.project_id AND target.status = 'in_progress' AND target.source = 'manual'),
+			in_progress_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			WHERE id = ? AND status = 'todo' AND source = 'manual'`, req.TaskID); err != nil {
+			slog.Error("moving started task to in progress", "task", req.TaskID, "error", err)
+		}
+	}
 	// Persist the Phase 5 --resume key BEFORE replying (latest spawn wins).
 	// A write failure degrades Phase 5 resume only — the session is usable.
 	// Phase 15: the persist target is scope-branched — the singleton UPDATE

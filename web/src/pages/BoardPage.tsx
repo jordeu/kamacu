@@ -8,7 +8,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ImportGithubIssueDialog } from "@/components/board/ImportGithubIssueDialog";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
+import { AgentExitDialog } from "@/components/task/AgentExitDialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAgents, useProjects, useTasks } from "@/api/queries";
@@ -20,6 +21,18 @@ import { QuotaIndicator } from "@/components/quota/QuotaIndicator";
 export default function BoardPage() {
   const params = useParams();
   const projectId = Number(params.projectId);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [exitedAgentTaskId, setExitedAgentTaskId] = useState<number | null>(() => {
+    const id = location.state?.exitedAgentTaskId;
+    return typeof id === "number" ? id : null;
+  });
+  // Consume the navigation event so refresh/back cannot reopen the prompt.
+  useEffect(() => {
+    if (location.state?.exitedAgentTaskId !== undefined) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state, location.pathname, navigate]);
 
   const { data: tasks, isLoading, isError, refetch } = useTasks(projectId);
   const { data: projects } = useProjects();
@@ -163,6 +176,14 @@ export default function BoardPage() {
           repo={project.github_repo}
           restoreFocus={() => importTrigger.current?.focus()}
           onClose={() => setImportOpen(false)}
+        />
+      )}
+      {exitedAgentTaskId !== null && (
+        <AgentExitDialog
+          key={`${projectId}:${exitedAgentTaskId}`}
+          taskId={exitedAgentTaskId}
+          projectId={projectId}
+          onClose={() => setExitedAgentTaskId(null)}
         />
       )}
       <NewTaskDialog

@@ -42,6 +42,7 @@ import { DescriptionTab } from "@/components/task/DescriptionTab";
 import { DiffTab } from "@/components/task/DiffTab";
 import { TaskTabs, type TabDef } from "@/components/task/TaskTabs";
 import { WorktreeMetaLine } from "@/components/task/WorktreeMetaLine";
+import { hasViewedAgentExited, type ViewedAgent } from "@/components/task/agentExit";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 
 function isTypingTarget(el: Element | null): boolean {
@@ -79,7 +80,8 @@ export default function TaskPage() {
   const createWorktree = useCreateWorktree(taskId, projectId);
 
   // Bash session lifecycle (D-27..D-30) — the server is tab truth (D-28).
-  const { data: sessions } = useSessions(taskId);
+  const { data: sessions, isFetchedAfterMount: sessionsFetched } =
+    useSessions(taskId);
   const spawn = useSpawnSession(taskId);
   const stopSession = useStopSession();
   const deleteSession = useDeleteSession();
@@ -112,10 +114,25 @@ export default function TaskPage() {
     task?.source === "github_pr",
   );
 
-  // Newest agent session, running or exited (server list is newest-first).
-  // An exited agent stays in the pane with the Start-again banner until a
-  // fresh spawn replaces it.
+  // Newest agent session (server list is newest-first).
   const agentSession = (sessions ?? []).find((s) => s.kind === "agent");
+
+  const observedAgent = useRef<ViewedAgent | null>(null);
+  useEffect(() => {
+    // Ignore cached exits on revisit: only a process observed running during
+    // this visit can take the user back to the board.
+    if (!sessionsFetched || !task || !agentSession) return;
+    const previous = observedAgent.current;
+    if (agentSession.status === "running") {
+      observedAgent.current = { taskId, sessionId: agentSession.id };
+      return;
+    }
+    if (!hasViewedAgentExited(previous, taskId, agentSession)) return;
+    observedAgent.current = null;
+    navigate(`/projects/${projectId}`, {
+      state: { exitedAgentTaskId: task.source === "manual" ? taskId : undefined },
+    });
+  }, [agentSession, sessionsFetched, task, taskId, projectId, navigate]);
 
   // D-39: opening a task ALWAYS lands on the Agent tab — no smart selection.
   const [activeTab, setActiveTab] = useState("agent");
