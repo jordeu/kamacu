@@ -75,6 +75,7 @@ export default function TaskPage() {
   // Fetch by id so deep links work without the board cache (TASK-05).
   const { data: task, isPending, isError } = useTask(taskId);
   const updateTask = useUpdateTask(projectId);
+  const updateRecurrence = useUpdateTask(projectId);
   const createWorktree = useCreateWorktree(taskId, projectId);
 
   // Bash session lifecycle (D-27..D-30) — the server is tab truth (D-28).
@@ -573,7 +574,16 @@ export default function TaskPage() {
                   <Ellipsis className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className="min-w-52">
+                <DropdownMenuItem
+                  disabled={updateRecurrence.isPending}
+                  onSelect={() =>
+                    updateRecurrence.mutate({ id: task.id, recurrent: !task.recurrent })
+                  }
+                >
+                  {task.recurrent ? "Make task non-recurrent" : "Make task recurrent"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 {/* D-31 menu path: neutral item — it opens a gated dialog;
                     `Delete task` stays the menu's only red item. */}
                 {task.worktree_path && (
@@ -622,6 +632,11 @@ export default function TaskPage() {
             </DropdownMenu>
           )}
         </header>
+        {updateRecurrence.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            Could not change recurrence. {updateRecurrence.error.message}
+          </p>
+        )}
 
         {isPR ? (
           // PR meta (D-09): a single GitHub-style merge line with the clickable

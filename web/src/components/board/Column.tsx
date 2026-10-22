@@ -20,6 +20,9 @@ export function Column({ status, tasks, topSlot }: ColumnProps) {
   // collide with task ids.
   const { setNodeRef, isOver } = useDroppable({ id: `column:${status}` });
 
+  const recurrent = status === "todo" ? tasks.filter((t) => t.recurrent) : [];
+  const ordinary = status === "todo" ? tasks.filter((t) => !t.recurrent) : tasks;
+
   return (
     <div className="flex min-h-0 min-w-[260px] flex-1 flex-col">
       <div className="flex items-baseline gap-2 px-3 pb-2">
@@ -27,11 +30,11 @@ export function Column({ status, tasks, topSlot }: ColumnProps) {
           {STATUS_LABELS[status]}
         </span>
         <span className="text-xs font-medium text-muted-foreground">
-          {tasks.length}
+          {ordinary.length}
         </span>
       </div>
       <SortableContext
-        items={tasks.map((t) => t.id)}
+        items={[...ordinary, ...recurrent].map((t) => t.id)}
         strategy={verticalListSortingStrategy}
       >
         <div
@@ -42,9 +45,24 @@ export function Column({ status, tasks, topSlot }: ColumnProps) {
           )}
         >
           {topSlot}
-          {tasks.map((task) => (
+          {ordinary.map((task) => (
             <TaskCard key={task.id} task={task} />
           ))}
+          {recurrent.length > 0 && (
+            <>
+              <div className="mt-2 flex items-baseline gap-2 border-t border-border pt-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Recurrent tasks
+                </span>
+                <span className="text-xs font-medium text-muted-foreground">
+                  {recurrent.length}
+                </span>
+              </div>
+              {recurrent.map((task) => (
+                <TaskCard key={task.id} task={task} />
+              ))}
+            </>
+          )}
         </div>
       </SortableContext>
     </div>

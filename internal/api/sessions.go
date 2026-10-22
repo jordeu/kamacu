@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,10 +51,12 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxCli
 }
 
 type sessionHandlers struct {
-	mgr        *session.Manager
-	db         *sql.DB
-	globRoot   string      // ~/.claude/projects; tests inject a temp dir for resume validation
-	tmuxClient tmux.Client // socket/config for the TMUX-05 has-session reconcile probe
+	// Serialize agent identity checks through spawn and persistence.
+	agentSpawnMu sync.Mutex
+	mgr          *session.Manager
+	db           *sql.DB
+	globRoot     string      // ~/.claude/projects; tests inject a temp dir for resume validation
+	tmuxClient   tmux.Client // socket/config for the TMUX-05 has-session reconcile probe
 }
 
 // list handles GET /api/sessions — newest first, JSON [] when empty.
@@ -405,6 +408,10 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "task has no worktree")
 		return
 	}
+	if kind == session.KindAgent {
+		h.agentSpawnMu.Lock()
+		defer h.agentSpawnMu.Unlock()
+	}
 	opts := session.SpawnOpts{Kind: kind}
 	// csid holds the task's persisted claude session id; ocsid/cxid hold its
 	// opencode/codex counterparts (the opaque ids those CLIs mint — opencode's
@@ -488,6 +495,41 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			for _, info := range h.mgr.ListByTask(req.TaskID) {
 				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
 					writeError(w, http.StatusConflict, "agent session already running")
+					return
+				}
+			}
+		}
+	}
+	if req.Resume {
+		conversation := csid.String
+		column := "claude_session_id"
+		switch agentEngine {
+		case "opencode":
+			conversation, column = ocsid.String, "opencode_session_id"
+		case "codex":
+			conversation, column = cxid.String, "codex_session_id"
+		}
+		if conversation != "" {
+			for _, info := range h.mgr.List() {
+				if info.Kind != session.KindAgent || info.Status != session.StatusRunning || info.Engine != agentEngine {
+					continue
+				}
+				var runningID sql.NullString
+				query := `SELECT ` + column + ` FROM tasks WHERE id = ?`
+				ownerID := info.TaskID
+				if info.Global {
+					query = `SELECT ` + column + ` FROM global_task WHERE id = ?`
+					ownerID = 1
+				}
+				if err := h.db.QueryRow(query, ownerID).Scan(&runningID); err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						continue
+					}
+					writeError(w, http.StatusInternalServerError, "couldn't check running conversations")
+					return
+				}
+				if runningID.String == conversation {
+					writeError(w, http.StatusConflict, "this conversation is running in another task; stop that agent before resuming here")
 					return
 				}
 			}
