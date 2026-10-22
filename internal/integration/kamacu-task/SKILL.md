@@ -13,14 +13,16 @@ For a task or Scratchpad session, call Kamacu's `list_feedback` MCP tool to vali
 
 ## Ask with enough context to decide
 
-Before asking for a decision, call `ask_feedback` with:
+First show the question and every answer option as ordinary terminal text, using a numbered list for the options. Include enough context to decide there. Do not use a blocking native question dialog.
+
+Then call `ask_feedback` with the same question and option labels, plus:
 
 - A stable `request_key`; reuse it when retrying the same question.
 - A short `summary` of the task and its objective.
 - Markdown `context` explaining the findings, relevant alternatives, tradeoffs, and your recommendation. Give enough information to decide without opening the task. Do not include credentials.
 - The specific `question` and, when useful, simple `options` with stable IDs and clear labels. Free-text replies are also supported.
 
-Present the same question as ordinary terminal text. Avoid native blocking question dialogs: the user must be able to answer in either the inbox or the terminal. Only one question can be pending per session; `existing_pending` means use the returned question.
+After the tool confirms creation, briefly confirm it is available in the inbox, then poll for an answer. The user must be able to answer in either the inbox or the terminal. Only one question can be pending per session; `existing_pending` means use the returned question.
 
 ## Wait and reconcile both answer channels
 

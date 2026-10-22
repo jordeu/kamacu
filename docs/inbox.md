@@ -23,6 +23,10 @@ Built-in Claude, Codex, and OpenCode engines receive connection credentials;
 custom engines receive task/session identity but retain their existing credential
 configuration requirements.
 
+Agents first display the question and numbered options in the terminal, then send the same question to the inbox and poll for the answer.
+
+The inbox starts with collapsed message rows; expand any row to review context and answer. Its icon sits next to Scratchpad in the bottom sessions bar, with a pending count visible even when the sidebar or sessions bar is collapsed.
+
 The MCP server advertises workflow instructions and these tools:
 
 | Tool | Purpose |
