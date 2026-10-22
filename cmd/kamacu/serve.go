@@ -20,6 +20,7 @@ import (
 	"github.com/google/subcommands"
 
 	"kamacu/internal/api"
+	"kamacu/internal/artifact"
 	"kamacu/internal/codex"
 	"kamacu/internal/github"
 	"kamacu/internal/migrate"
@@ -41,11 +42,11 @@ import (
 // a thin dispatcher; this Command is the explicit `kamacu serve` subcommand
 // (D-01..D-05).
 type serveCmd struct {
-	addr                 string
-	db                   string
-	claudeBin            string
-	devOrigins           []string
-	insecureAllowRemote  bool
+	addr                string
+	db                  string
+	claudeBin           string
+	devOrigins          []string
+	insecureAllowRemote bool
 }
 
 func (serveCmd) Name() string { return "serve" }
@@ -297,7 +298,33 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// the WS input seam reports browser-typed stdin, the token-gated
 	// snapshot serves the MCP bridge. Ephemeral + in-memory by design.
 	presenceTracker := presence.NewTracker()
-	api.Routes(mux, db, wtSvc, mgr, tmuxClient)
+	artifactService, err := artifact.New(db, dbPath+".artifacts")
+	if err != nil {
+		slog.Error("initializing artifacts", "error", err)
+		return subcommands.ExitFailure
+	}
+	collectArtifacts := func() {
+		if err := artifactService.Sweep(context.Background()); err != nil {
+			slog.Warn("collecting artifacts", "error", err)
+		}
+	}
+	collectArtifacts()
+	artifactCtx, cancelArtifacts := context.WithCancel(ctx)
+	defer cancelArtifacts()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-artifactCtx.Done():
+				return
+			case <-ticker.C:
+				collectArtifacts()
+			}
+		}
+	}()
+	api.ArtifactRoutes(mux, artifactService, hookToken)
+	api.Routes(mux, db, wtSvc, mgr, tmuxClient, collectArtifacts)
 	api.SessionRoutes(mux, mgr, db, tmuxClient)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr, tmuxClient)
 	api.DiffRoutes(mux, db, wtSvc)
@@ -375,9 +402,10 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// hostCheck (DNS-rebinding defense) wraps the mux by default; the opt-in
 	// --insecure-allow-remote path serves the mux directly so non-loopback
 	// Host headers are accepted.
-	var handler http.Handler = hostCheck(mux)
+	guarded := api.BrowserOriginGuard(mux, originPatterns)
+	var handler http.Handler = hostCheck(guarded)
 	if c.insecureAllowRemote {
-		handler = mux
+		handler = guarded
 	}
 	if err := http.ListenAndServe(c.addr, handler); err != nil {
 		slog.Error("server stopped", "error", err)

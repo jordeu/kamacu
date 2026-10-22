@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,6 +24,10 @@ export interface TabDef {
   content: ReactNode;
   /** Renders the × affordance; closing stops the session (D-29). */
   onClose?: () => void;
+  closeLabel?: string;
+  /** Artifact titles cannot be reset to an empty string. */
+  allowEmptyRename?: boolean;
+  renameMaxLength?: number;
   /** Muted label — closing or exited sessions (liveness by muting). */
   muted?: boolean;
   /** Keep content mounted while inactive (terminal tabs: WS must survive). */
@@ -61,6 +65,16 @@ export function TaskTabs({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const cancelRenameRef = useRef(false);
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const revealSelected = () => strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    revealSelected();
+    const observer = new ResizeObserver(revealSelected);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [value, tabs.length]);
 
   function commitRename(tab: TabDef, value: string) {
     const cancelled = cancelRenameRef.current;
@@ -73,7 +87,7 @@ export function TaskTabs({
     // empty. Send "" for a reset; otherwise send the trimmed value only when
     // it actually changed.
     if (trimmed === "") {
-      tab.onRename?.("");
+      if (tab.allowEmptyRename !== false) tab.onRename?.("");
     } else if (trimmed !== tab.label) {
       tab.onRename?.(trimmed);
     }
@@ -90,6 +104,7 @@ export function TaskTabs({
       {/* Visible strip even with a single tab — the seam must be visible.
           Never wraps: scrolls horizontally when bash tabs exceed the width. */}
       <TabsList
+        ref={stripRef}
         variant="line"
         className="w-full shrink-0 justify-start overflow-x-auto border-b border-border"
       >
@@ -103,6 +118,7 @@ export function TaskTabs({
                 <span className="inline-flex">
                   <TabsTrigger
                     value={tab.id}
+                    aria-label={tab.label}
                     disabled
                     className="flex-none px-2 data-active:after:bg-blue-500"
                   >
@@ -121,6 +137,7 @@ export function TaskTabs({
             <TabsTrigger
               key={tab.id}
               value={tab.id}
+              aria-label={tab.label}
               className="flex-none px-2 data-active:after:bg-blue-500"
             >
               {/* dot + 4px gap + label (UI-SPEC) — trigger height unchanged */}
@@ -135,6 +152,8 @@ export function TaskTabs({
                   // the Radix trigger's select from firing while typing.
                   <Input
                     autoFocus
+                    aria-label={`Rename ${tab.label}`}
+                    maxLength={tab.renameMaxLength}
                     value={draft}
                     className="h-6 w-32 px-1 py-0 text-sm"
                     onChange={(e) => setDraft(e.target.value)}
@@ -142,6 +161,7 @@ export function TaskTabs({
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
+                      e.stopPropagation();
                       if (e.key === "Enter") {
                         e.currentTarget.blur();
                       } else if (e.key === "Escape") {
@@ -180,7 +200,7 @@ export function TaskTabs({
                   <span
                     role="button"
                     tabIndex={0}
-                    aria-label={`Stop ${tab.label} and close tab`}
+                    aria-label={tab.closeLabel ?? `Stop ${tab.label} and close tab`}
                     className="ml-1 rounded-sm p-0.5 text-zinc-400 outline-none hover:bg-[#27272a] hover:text-zinc-50 focus-visible:ring-2 focus-visible:ring-blue-500"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -197,7 +217,7 @@ export function TaskTabs({
                     <X className="size-3" />
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>Stop and close</TooltipContent>
+                <TooltipContent>{tab.closeLabel ?? "Stop and close"}</TooltipContent>
               </Tooltip>
             )}
             </TabsTrigger>

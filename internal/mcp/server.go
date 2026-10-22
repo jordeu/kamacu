@@ -83,6 +83,7 @@ func (ServeCommand) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subc
 // jsonschema-go.
 func registerTools(s *mcp.Server, b *bridge) {
 	registerTaskTools(s, b)
+	registerArtifactTools(s, b)
 	registerProjectTools(s, b)
 	registerWorkspaceTools(s, b)
 	registerSessionTools(s, b)

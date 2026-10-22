@@ -22,9 +22,11 @@ running Kamacu app, giving you ~30 tools to drive Kamacu boards programmatically
 (`list_projects`, `create_task`, `move_task`, `start_task_agent`,
 `post_pr_review`, …).
 
-**Hard prerequisite: the Kamacu app must already be running on this machine**
-(someone started `kamacu serve`). The MCP server is only a bridge — without the
-app it starts fine but every tool call fails (see step 4).
+**Hard prerequisite: the Kamacu app must already be running and reachable**
+(someone started `kamacu serve`). It normally runs on this machine; remote
+agents can use a trusted tunnel and set `KAMACU_HOOK_BASE` to their reachable
+base URL. No shared filesystem is needed. The MCP server is only a bridge —
+without the app it starts fine but every tool call fails (see step 4).
 
 ## 2. Preflight — run these first
 
@@ -71,11 +73,12 @@ Agents spawned *inside* Kamacu receive `KAMACU_HOOK_BASE` and
 - `KAMACU_HOOK_BASE` defaults to `http://127.0.0.1:7333`, which is where the
   app listens by default. Set it only if the user started the app with a
   non-default `--addr`.
-- `KAMACU_HOOK_TOKEN` is not required for the MCP tools: the REST endpoints
-  they call — projects, tasks, workspaces, sessions, reviews — do not check it.
-  The one API route that does require the token is the internal hook receiver
-  (`POST /api/hooks/sessions/{id}`), which no MCP tool calls. The real boundary
-  is that the app binds to loopback only.
+- `KAMACU_HOOK_TOKEN` is required for HTML artifact upload control and the
+  presence snapshot. Agents started by Kamacu receive it automatically. An
+  externally configured agent needs the current instance token through its
+  trusted environment configuration to use these tools. Existing project,
+  task, workspace, session, and review tools do not require it. The app still
+  binds to loopback by default; this does not enable public remote access.
 
 ## 3. Register the server with your client
 
@@ -211,3 +214,75 @@ your client's equivalent), and report both results to the user.
 | `claude mcp list` warns `kamacu is defined in multiple scopes with different endpoints` | An old install (e.g. a previous checkout) left an entry in another scope | Keep one: `claude mcp remove kamacu -s <scope>` for the stale ones |
 | An `opencode mcp add kamacu` run replaced a working entry without warning | `opencode mcp add` silently overwrites an existing `kamacu` entry | Check first (step 3 pre-check); restore the previous entry from the config if you clobbered it |
 | Server entry missing from the client after "successful" add | Added in `local` scope from a different directory | Re-add with `--scope user`, or re-run from the right project directory |
+
+## HTML artifacts
+
+Artifacts are interactive previews attached to project tasks. Each appears as a
+named tab after Diff. Users can double-click a tab title to rename it or use its
+remove control. Agents can create, list, and replace content; replacements keep
+the artifact ID and any user-edited title.
+
+Package one of:
+
+- A `.html` file containing its CSS, JavaScript, and images inline.
+- A `.tar.gz` containing `index.html` at the root plus local supporting files.
+  Use relative URLs for those files. For example:
+
+  ```sh
+  tar -czf preview.tar.gz -C preview index.html assets
+  ```
+
+The limit is 20,000,000 uploaded bytes, 100,000,000 extracted bytes, 1,000 files,
+and 20 published artifacts per task. Symlinks, hardlinks, unsafe paths, duplicate
+paths, special files, and archives without a root `index.html` are rejected.
+Directories and metadata have separate bounds to limit decompression overhead.
+
+Use this protocol from either a local or remote agent:
+
+1. Call `begin_artifact_upload` with `task_id`, `title`, `filename`, and the exact
+   `size_bytes`. For replacement, call `begin_artifact_replacement` with
+   `task_id`, `artifact_id`, `filename`, and `size_bytes`.
+2. The result supplies `upload_id`, an absolute `upload_url`, `method: "PUT"`,
+   required `headers`, and Unix `expires_at` (15 minutes). Upload raw file bytes
+   with that method and those headers. With curl, use `--data-binary @file`, not
+   multipart form upload. The local filename is never sent as a server path.
+3. After HTTP 204, call `finalize_artifact_upload` with `task_id` and `upload_id`.
+   Validation and publishing happen here; the new tab appears only on success.
+   Retry successful finalization safely before the upload session expires. Conflicting replacements require
+   beginning a new upload against the latest revision.
+4. Use `list_artifacts(task_id)` to retrieve published IDs, titles, and revisions.
+
+Keep the upload capability private. It permits writing only that pending
+upload; it does not authorize finalization or other API operations. Interrupted
+transfers can retry before expiry. Completed transfers are immutable. Failed
+validation leaves the previous published artifact intact.
+
+Previews run JavaScript in an opaque-origin sandbox. Browser storage, access to
+Kamacu's DOM/session, forms, popups, workers, and nested frames are disabled.
+CSP restricts scripts, styles, images, fonts, media, and connections to the
+artifact's uploaded revision (plus embedded image/media data). CDN resources
+and external API/WebSocket calls are blocked; bundle dependencies locally.
+Do not depend on service workers, browser storage, or evaluation of strings as
+JavaScript. Interactive previews require native **Connection Allowlists** support
+to be enabled in the viewer's browser. Before parsing any uploaded HTML, a trusted
+renderer checks that the browser actually blocks WebRTC. Unsupported browsers
+show an explicit error and never execute uploaded code, including when a preview
+URL is opened directly. Non-HTML assets remain usable as subresources but download on direct
+navigation, preventing unverified SVG/XML/PDF documents from rendering external links. The native policy blocks external navigation,
+redirects, and WebRTC/STUN as well as the resource restrictions enforced by CSP.
+This is a deliberate compatibility requirement: CSP alone cannot contain WebRTC.
+See the [Connection Allowlists design](https://wicg.github.io/connection-allowlists/)
+and [Chrome's implementation guidance](https://developer.chrome.com/blog/connection-allowlists-origin-trial).
+
+Preview availability is checked before mounting the iframe. HTTP failures,
+connection failures, unsupported browsers, and missing renderer readiness are
+reported in the task UI. Retry rechecks availability and remounts the preview,
+even if its revision has not changed.
+
+New tabs do not steal focus. Visited previews stay mounted across tab switches.
+When content changes, the viewer shows “Updated” with a Reload action; accepting
+it resets interaction state. Reloading the task also resets state. Files survive
+worktree cleanup and restart, and are removed when their artifact, task, or
+project is deleted. Storage lives in `<database path>.artifacts`; orphaned files
+are collected at startup and once per minute. Previous immutable revisions remain available until deletion
+so an open old preview can still load its assets.

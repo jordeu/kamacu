@@ -3,6 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
+import { useArtifacts, useRenameArtifact, type Artifact } from "@/api/artifacts";
+import { ArtifactTab } from "@/components/task/ArtifactTab";
+import { RemoveArtifactDialog } from "@/components/task/RemoveArtifactDialog";
 import { usePullRequestDetail } from "@/api/pullRequests";
 import { useAgents, useProjects, useTask } from "@/api/queries";
 import { useUpdateTask } from "@/api/mutations";
@@ -75,6 +78,10 @@ export default function TaskPage() {
 
   // Fetch by id so deep links work without the board cache (TASK-05).
   const { data: task, isPending, isError } = useTask(taskId);
+  const artifactQuery = useArtifacts(taskId);
+  const artifacts = artifactQuery.data;
+  const renameArtifact = useRenameArtifact(taskId);
+  const [removingArtifact, setRemovingArtifact] = useState<Artifact | null>(null);
   const updateTask = useUpdateTask(projectId);
   const updateRecurrence = useUpdateTask(projectId);
   const createWorktree = useCreateWorktree(taskId, projectId);
@@ -235,9 +242,10 @@ export default function TaskPage() {
       "agent",
       "description",
       ...(task?.worktree_path ? ["diff"] : []),
+      ...(artifacts ?? []).map((artifact) => `artifact:${artifact.id}`),
       ...visibleSessions.map((s) => s.id),
     ],
-    [task?.worktree_path, visibleSessions],
+    [task?.worktree_path, visibleSessions, artifacts],
   );
 
   // Pitfall 7: a Radix Tabs value pointing at a removed tab renders blank.
@@ -441,6 +449,17 @@ export default function TaskPage() {
         </div>
       ),
     },
+    ...(artifacts ?? []).map((artifact): TabDef => ({
+      id: `artifact:${artifact.id}`,
+      label: artifact.title,
+      keepMounted: true,
+      allowEmptyRename: false,
+      renameMaxLength: 100,
+      onRename: (title) => renameArtifact.mutate({ id: artifact.id, title }),
+      onClose: () => setRemovingArtifact(artifact),
+      closeLabel: `Remove ${artifact.title}`,
+      content: <ArtifactTab artifact={artifact} active={activeTab === `artifact:${artifact.id}`} />,
+    })),
     ...visibleSessions.map((s): TabDef => {
       const closing = closingIds.has(s.id);
       return {
@@ -728,6 +747,9 @@ export default function TaskPage() {
         )}
       </div>
 
+      <RemoveArtifactDialog artifact={removingArtifact} taskId={taskId} onClose={() => setRemovingArtifact(null)} />
+      {renameArtifact.error && <p role="alert" className="text-sm text-destructive">{renameArtifact.error.message}</p>}
+      {artifactQuery.error && <p role="alert" className="text-sm text-destructive">Artifacts could not be refreshed. {artifactQuery.error.message}</p>}
       <TaskTabs
         tabs={tabs}
         value={activeTab}
