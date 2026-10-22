@@ -74,15 +74,36 @@ Agents spawned *inside* Kamacu receive `KAMACU_HOOK_BASE` and
   app listens by default. Set it only if the user started the app with a
   non-default `--addr`.
 - `KAMACU_HOOK_TOKEN` is required for HTML artifact upload control and the
-  presence snapshot. Agents started by Kamacu receive it automatically. An
+  presence snapshot and inbox feedback. Built-in agents started by Kamacu receive it automatically. An
   externally configured agent needs the current instance token through its
   trusted environment configuration to use these tools. Existing project,
   task, workspace, session, and review tools do not require it. The app still
   binds to loopback by default; this does not enable public remote access.
 
-## 3. Register the server with your client
+## 3. Enable the agent integration
 
-Pick exactly one section — yours.
+For Claude Code, Codex, or OpenCode, use the bundled installer:
+
+```sh
+<KAMACU_BIN> integration enable claude   # or: codex / opencode
+<KAMACU_BIN> integration status
+```
+
+This registers the user-level MCP server and installs the bundled `kamacu-task`
+skill. No separate download or startup prompt is needed. The same controls are
+available under **Settings → Agents → Kamacu integration**. Setup affects the
+user account running Kamacu on the server host; it does not configure a browser
+visitor's computer. Start a new agent session afterward, then verify step 4.
+
+The installer reuses a compatible existing registration without taking ownership
+of it. Conflicting entries or edited skills are preserved and reported. For
+repair, removal, update behavior, and client configuration paths, see
+[Agent integration](agent-integration.md).
+
+### Manual MCP-only registration
+
+Use the following instructions for another MCP client or a manually maintained
+configuration. These steps do not install the task skill. Pick your client.
 
 ### Before you add: check for an existing kamacu entry
 
@@ -215,6 +236,15 @@ your client's equivalent), and report both results to the user.
 | An `opencode mcp add kamacu` run replaced a working entry without warning | `opencode mcp add` silently overwrites an existing `kamacu` entry | Check first (step 3 pre-check); restore the previous entry from the config if you clobbered it |
 | Server entry missing from the client after "successful" add | Added in `local` scope from a different directory | Re-add with `--scope user`, or re-run from the right project directory |
 
+## Feedback inbox
+
+Task agents also receive `KAMACU_TASK_ID` and `KAMACU_SESSION_ID`. Keep these
+inherited from the launching process; do not hard-code them in MCP configuration.
+If your client filters subprocess environment variables, allow all four
+`KAMACU_*` names listed above. Restart existing task agents after upgrading so
+they receive the task identity. See [the inbox protocol](inbox.md) for question
+creation, polling, reporting terminal answers, and recovery.
+
 ## HTML artifacts
 
 Artifacts are interactive previews attached to project tasks. Each appears as a
@@ -297,3 +327,7 @@ worktree cleanup and restart, and are removed when their artifact, task, or
 project is deleted. Storage lives in `<database path>.artifacts`; orphaned files
 are collected at startup and once per minute. Previous immutable revisions remain available until deletion
 so an open old preview can still load its assets.
+
+Scratchpad agents use `KAMACU_TASK_ID=0`. Pass `task_id: 0` to the artifact tools
+to publish, list, or replace Scratchpad previews. They appear as tabs in Scratchpad
+with the same sandbox, limits, rename, and removal controls as task artifacts.

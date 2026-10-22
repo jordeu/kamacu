@@ -19,9 +19,10 @@ const (
 // Set once at startup via Manager.SetAgentConfig; Spawn reads a copy under
 // the manager mutex.
 type AgentConfig struct {
-	BaseURL   string // hook receiver origin, e.g. "http://127.0.0.1:7333"
-	Token     string // per-instance X-Kamacu-Token value
-	ClaudeBin string // "" -> exec.LookPath("claude") at spawn time
+	CodexMCPEnvArgs func(bin, dir string) ([]string, error) // per-launch MCP environment allowlist
+	BaseURL         string                                  // hook receiver origin, e.g. "http://127.0.0.1:7333"
+	Token           string                                  // per-instance X-Kamacu-Token value
+	ClaudeBin       string                                  // "" -> exec.LookPath("claude") at spawn time
 }
 
 // overlayHook is one hook command entry in the injected settings overlay.

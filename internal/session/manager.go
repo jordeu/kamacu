@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,26 +31,17 @@ var ErrNotFound = errors.New("session not found")
 // honest D-84 error copy — never a silent fallback to plain bash.
 var ErrTmuxNotFound = errors.New("tmux not found")
 
-// kamacuEnvNames are the D014 hook-contract names the custom/opencode spawn
-// arm must own exclusively: the opencode engine gets fresh values injected at
-// spawn, and every other custom agent gets NONE — including the values a
-// parent Kamacu process may have exported.
+// kamacuEnvNames must never leak from a parent Kamacu process. Every agent
+// gets fresh task/session identity; built-in engines also get hook credentials.
 var kamacuEnvNames = map[string]bool{
 	"KAMACU_SESSION_ID": true,
+	"KAMACU_TASK_ID":    true,
 	"KAMACU_HOOK_TOKEN": true,
 	"KAMACU_HOOK_BASE":  true,
 }
 
-// stripKamacuEnv returns env with the KAMACU_* hook-contract names removed.
-// D-63: a Kamacu terminal exports KAMACU_SESSION_ID / KAMACU_HOOK_TOKEN /
-// KAMACU_HOOK_BASE into every child process — including a nested kamacu
-// server (or `go test`) and everything IT spawns. Without this filter the
-// custom spawn arm's verbatim os.Environ() inheritance would carry the
-// parent's values — the HOOK_TOKEN is a secret — into arbitrary
-// custom-agent children, breaking the D014 "custom agents get none of
-// these" contract outside clean shells. The opencode gate re-injects its
-// OWN values on top of the filtered base (append-last-value-wins), so
-// opencode spawns are unaffected.
+// stripKamacuEnv removes inherited instance identity and credentials before
+// the launch path injects values belonging to this server and session.
 func stripKamacuEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
@@ -218,7 +210,15 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			if opts.AgentEngine == "codex" {
 				// Inline mode keeps conversation output in xterm scrollback.
 				// The alternate screen has no history, even with scrollback enabled.
-				args = append([]string{"-p", "kamacu", "--no-alt-screen"}, args...)
+				prefix := []string{"-p", "kamacu", "--no-alt-screen"}
+				if cfg.CodexMCPEnvArgs != nil {
+					envArgs, err := cfg.CodexMCPEnvArgs(bin, dir)
+					if err != nil {
+						return nil, fmt.Errorf("configure Codex inbox: %w", err)
+					}
+					prefix = append(prefix, envArgs...)
+				}
+				args = append(prefix, args...)
 			}
 			cmd = exec.Command(bin, args...)
 			cmd.Dir = dir
@@ -232,7 +232,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			// names. The codex engine gets the same D014 contract for its
 			// env-gated kamacu.config.toml hooks (keeping the token out of argv,
 			// unlike claude's --settings overlay). Custom agents get none of
-			// these: the injection is engine-gated, and the inherited base is
+			// hook credentials: their injection is engine-gated, and the inherited base is
 			// filtered first (D-63) so a parent Kamacu process's exported
 			// values — HOOK_TOKEN is a secret — never leak into arbitrary
 			// custom-agent children.
@@ -271,50 +271,50 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			// injected ones.
 			cmd.Env = append(stripKamacuEnv(os.Environ()), envExtra...)
 		} else {
-		// Resume reuses the stored id (verified v2.1.173: --resume keeps the
-		// same session id, never forks); a fresh spawn mints a new one
-		// (D-55 newest-wins). NEVER pass --fork-session (it forks a new id,
-		// orphaning tasks.claude_session_id) and NEVER combine --resume with
-		// --session-id.
-		claudeSessionID = opts.ResumeSessionID
-		if claudeSessionID == "" {
-			claudeSessionID = uuid.NewString() // deterministic Phase 5 --resume key
-		}
-		idFlag := "--session-id"
-		if opts.ResumeSessionID != "" {
-			idFlag = "--resume"
-		}
-		bin := cfg.ClaudeBin
-		if bin == "" {
-			bin, err = exec.LookPath("claude")
-			if err != nil {
-				return nil, fmt.Errorf("claude binary not found on PATH: %w", err)
+			// Resume reuses the stored id (verified v2.1.173: --resume keeps the
+			// same session id, never forks); a fresh spawn mints a new one
+			// (D-55 newest-wins). NEVER pass --fork-session (it forks a new id,
+			// orphaning tasks.claude_session_id) and NEVER combine --resume with
+			// --session-id.
+			claudeSessionID = opts.ResumeSessionID
+			if claudeSessionID == "" {
+				claudeSessionID = uuid.NewString() // deterministic Phase 5 --resume key
 			}
-		}
-		// D-53: just the session identity, the inline hook overlay, and the
-		// settings-driven extras. Since Phase 6 the extras come from the
-		// agent_extra_params setting (tokenized by the handler) and the
-		// DEFAULT includes --dangerously-skip-permissions — an intentional
-		// reversal of v1.0's interactive-by-default D-51 posture (AGENT-02);
-		// the user removes the flag in Settings to restore prompts. Extras
-		// append AFTER the fixed flags (composition verified on v2.1.173,
-		// fresh and resume alike). Known sharp edge: a user-supplied
-		// --settings in the extras would override the hook overlay
-		// (last-value-wins) and silently kill status hooks — the SessionStart
-		// canary catches that; policing the pass-through field is out of scope.
-		args := []string{idFlag, claudeSessionID, "--settings", buildOverlayJSON(cfg.BaseURL, cfg.Token, id)}
-		args = append(args, opts.ExtraArgs...)
-		cmd = exec.Command(bin, args...)
-		cmd.Dir = dir
-		// D-52: the agent inherits EVERYTHING the user's terminal would have
-		// (auth, MCP servers, node shims), then pins terminal identity. This
-		// deliberately differs from bash sessions' minimal explicit env.
-		// MCP children need the current server's connection settings too.
-		// Append after inherited values so nested servers cannot pass stale ones.
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor",
-			"KAMACU_HOOK_TOKEN="+cfg.Token,
-			"KAMACU_HOOK_BASE="+cfg.BaseURL,
-		)
+			idFlag := "--session-id"
+			if opts.ResumeSessionID != "" {
+				idFlag = "--resume"
+			}
+			bin := cfg.ClaudeBin
+			if bin == "" {
+				bin, err = exec.LookPath("claude")
+				if err != nil {
+					return nil, fmt.Errorf("claude binary not found on PATH: %w", err)
+				}
+			}
+			// D-53: just the session identity, the inline hook overlay, and the
+			// settings-driven extras. Since Phase 6 the extras come from the
+			// agent_extra_params setting (tokenized by the handler) and the
+			// DEFAULT includes --dangerously-skip-permissions — an intentional
+			// reversal of v1.0's interactive-by-default D-51 posture (AGENT-02);
+			// the user removes the flag in Settings to restore prompts. Extras
+			// append AFTER the fixed flags (composition verified on v2.1.173,
+			// fresh and resume alike). Known sharp edge: a user-supplied
+			// --settings in the extras would override the hook overlay
+			// (last-value-wins) and silently kill status hooks — the SessionStart
+			// canary catches that; policing the pass-through field is out of scope.
+			args := []string{idFlag, claudeSessionID, "--settings", buildOverlayJSON(cfg.BaseURL, cfg.Token, id)}
+			args = append(args, opts.ExtraArgs...)
+			cmd = exec.Command(bin, args...)
+			cmd.Dir = dir
+			// D-52: the agent inherits EVERYTHING the user's terminal would have
+			// (auth, MCP servers, node shims), then pins terminal identity. This
+			// deliberately differs from bash sessions' minimal explicit env.
+			// MCP children need the current server's connection settings too.
+			// Append after inherited values so nested servers cannot pass stale ones.
+			cmd.Env = append(stripKamacuEnv(os.Environ()), "TERM=xterm-256color", "COLORTERM=truecolor",
+				"KAMACU_HOOK_TOKEN="+cfg.Token,
+				"KAMACU_HOOK_BASE="+cfg.BaseURL,
+			)
 		} // end claude-engine branch (M001)
 	} else if opts.TmuxName != "" {
 		// tmux-backed tab (TMUX-02): the attach client is just another
@@ -380,6 +380,11 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			"USER=" + os.Getenv("USER"),
 			"SHELL=" + shell,
 		}
+	}
+
+	// Task identity is supplied for all agent engines, including custom ones.
+	if kind == KindAgent {
+		cmd.Env = append(cmd.Env, "KAMACU_TASK_ID="+strconv.FormatInt(opts.TaskID, 10), "KAMACU_SESSION_ID="+id)
 	}
 
 	initial := pty.Winsize{Rows: 24, Cols: 80}

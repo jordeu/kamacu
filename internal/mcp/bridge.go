@@ -29,9 +29,11 @@ const maxBodyBytes = 1 << 20
 // API routes rely on loopback binding. Send it on every call so protected
 // routes can authenticate subprocesses using the session environment.
 type bridge struct {
-	base   string
-	token  string
-	client *http.Client
+	base      string
+	token     string
+	client    *http.Client
+	taskID    int64
+	sessionID string
 }
 
 // newBridgeFromEnv reads KAMACU_HOOK_BASE (default http://127.0.0.1:7333 when
@@ -47,10 +49,13 @@ func newBridgeFromEnv() (*bridge, error) {
 	if _, err := url.Parse(base); err != nil {
 		return nil, fmt.Errorf("invalid KAMACU_HOOK_BASE %q: %w", base, err)
 	}
+	taskID, sessionID := feedbackIdentityFromEnv()
 	return &bridge{
-		base:   base,
-		token:  os.Getenv("KAMACU_HOOK_TOKEN"),
-		client: &http.Client{Timeout: 10 * time.Second}, // fail fast; no retry (the agent's Discretion)
+		base:      base,
+		taskID:    taskID,
+		sessionID: sessionID,
+		token:     os.Getenv("KAMACU_HOOK_TOKEN"),
+		client:    &http.Client{Timeout: 10 * time.Second}, // fail fast; no retry (the agent's Discretion)
 	}, nil
 }
 
@@ -63,6 +68,10 @@ func (b *bridge) do(ctx context.Context, method, path string, body io.Reader) (*
 		return nil, fmt.Errorf("kamacu bridge: build %s %s: %w", method, path, err)
 	}
 	req.Header.Set("X-Kamacu-Token", b.token)
+	if strings.HasPrefix(path, "/api/agent-feedback/") {
+		req.Header.Set("X-Kamacu-Task-ID", fmt.Sprint(b.taskID))
+		req.Header.Set("X-Kamacu-Session-ID", b.sessionID)
+	}
 	return b.client.Do(req)
 }
 
@@ -91,9 +100,16 @@ func (b *bridge) call(ctx context.Context, method, path string, body io.Reader) 
 		return nil, fmt.Errorf("kamacu bridge: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	limit := int64(maxBodyBytes)
+	if path == "/api/agent-feedback/list" {
+		limit = 4 << 20
+	} // ten bounded questions with Markdown and answers
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("kamacu %s %s: read body: %w", method, path, err)
+	}
+	if int64(len(respBody)) > limit {
+		return nil, fmt.Errorf("kamacu bridge: response exceeds %d bytes", limit)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("kamacu %s %s: HTTP %d: %s", method, path, resp.StatusCode, string(respBody))

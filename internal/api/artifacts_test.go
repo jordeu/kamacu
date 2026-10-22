@@ -228,3 +228,20 @@ func TestArtifactsBrowser(t *testing.T) {
 		t.Log(string(output))
 	}
 }
+
+func TestArtifactScratchpadScopeRequiresExplicitZero(t *testing.T) {
+	server, _ := artifactServer(t)
+	for _, tc := range []struct {
+		id   string
+		want int
+	}{{"0", 200}, {"bad", 404}, {"-1", 404}} {
+		response, err := server.Client().Get(server.URL + "/api/tasks/" + tc.id + "/artifacts")
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != tc.want {
+			t.Fatalf("scope %q: got %d, want %d", tc.id, response.StatusCode, tc.want)
+		}
+	}
+}

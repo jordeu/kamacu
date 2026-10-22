@@ -23,6 +23,7 @@ func main() {
 	subcommands.Register(subcommands.HelpCommand(), "")
 	subcommands.Register(&serveCmd{}, "")
 	subcommands.Register(mcpCmd{}, "")
+	subcommands.Register(integrationCmd{}, "")
 
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()

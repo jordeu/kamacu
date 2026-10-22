@@ -53,6 +53,7 @@ export function AgentTab({
   agentSession,
   description,
   seed,
+  autoFocus,
 }: {
   scope: AgentTabScope;
   agentSession: TermSession | undefined;
@@ -63,6 +64,7 @@ export function AgentTab({
   // PR-review seed (Phase 12 D-06/D-07): when set, prefill (never send) this
   // prompt into the agent once, after the session connects. Task scope only.
   seed?: string;
+  autoFocus?: boolean;
 }) {
   const isTask = scope.kind === "task";
   // Both hook sets are declared unconditionally (rules-of-hooks); the set a
@@ -306,6 +308,7 @@ export function AgentTab({
 
   return (
     <TerminalPane
+      autoFocus={autoFocus}
       key={agentSession.id} // a fresh session id (from Reset or Resume) remounts the pane
       sessionId={agentSession.id}
       label={`Agent`}

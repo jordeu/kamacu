@@ -20,6 +20,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AgentIntegrations } from "@/components/settings/AgentIntegrations";
 import { AgentNameDialog } from "@/components/settings/AgentNameDialog";
 
 const SECTION_HELP = `Agents available in project task tabs. The default is used for new projects.`;
@@ -164,6 +165,7 @@ export function AgentsSection({}: AgentsSectionProps) {
           <Plus />
           New agent
         </Button>
+        <AgentIntegrations />
       </section>
 
       <AgentNameDialog

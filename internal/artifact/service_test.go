@@ -389,3 +389,66 @@ func TestArchiveDotPrefixAndFileCount(t *testing.T) {
 		t.Fatal("accepted 1001 files")
 	}
 }
+
+func TestScratchpadArtifactsLifecycleAndIsolation(t *testing.T) {
+	s := fixture(t)
+	ctx := context.Background()
+	taskArtifact := publish(t, s, "", "preview.html", []byte("<h1>Task</h1>"))
+	upload := func(id string) Artifact {
+		t.Helper()
+		u, err := s.Begin(ctx, 0, id, "Scratchpad preview", "preview.html", int64(len("<h1>Global</h1>  ")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.Receive(ctx, u.ID, u.Token, strings.NewReader("<h1>Global</h1>  ")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.Finalize(ctx, 1, u.ID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("cross-scope finalize: %v", err)
+		}
+		a, err := s.Finalize(ctx, 0, u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := s.Finalize(ctx, 0, u.ID)
+		if err != nil || again.ID != a.ID {
+			t.Fatalf("retry: %+v %v", again, err)
+		}
+		return a
+	}
+	a := upload("")
+	if a.TaskID != 0 {
+		t.Fatal(a)
+	}
+	if _, err := s.Begin(ctx, 0, taskArtifact.ID, "", "preview.html", 16); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-scope replacement: %v", err)
+	}
+	if _, err := s.Rename(ctx, 1, a.ID, "Wrong"); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	if _, err := s.Rename(ctx, 0, a.ID, "Renamed"); err != nil {
+		t.Fatal(err)
+	}
+	replacement := upload(a.ID)
+	if replacement.ID != a.ID || replacement.Title != "Renamed" || replacement.Revision == a.Revision {
+		t.Fatal(replacement)
+	}
+	if _, err := s.DB.Exec("DELETE FROM tasks WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.List(ctx, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list: %+v %v", list, err)
+	}
+	file, err := s.Open(ctx, a.ID, replacement.Revision, "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	if err = s.Delete(ctx, 0, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Open(ctx, a.ID, replacement.Revision, "index.html"); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+}

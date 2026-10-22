@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
+import { useArtifacts, useRenameArtifact, type Artifact } from "@/api/artifacts";
+import { ArtifactTab } from "@/components/task/ArtifactTab";
+import { RemoveArtifactDialog } from "@/components/task/RemoveArtifactDialog";
 import { useGlobal } from "@/api/global";
 import { useAgentStatuses } from "@/api/agents";
 import {
@@ -46,6 +49,12 @@ import { TerminalPane } from "@/components/terminal/TerminalPane";
  */
 export default function GlobalTaskPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const feedbackSession = searchParams.get("feedback_session");
+  const artifactQuery = useArtifacts(0);
+  const artifacts = artifactQuery.data;
+  const renameArtifact = useRenameArtifact(0);
+  const [removingArtifact, setRemovingArtifact] = useState<Artifact | null>(null);
   const queryClient = useQueryClient();
 
   // The ONE config query (D-17) — shared with the Settings Scratchpad
@@ -79,6 +88,11 @@ export default function GlobalTaskPage() {
   // Opening the view ALWAYS lands on the Agent tab — no smart selection
   // (D-39 task parity).
   const [activeTab, setActiveTab] = useState("agent");
+  useEffect(() => {
+    if (!feedbackSession) return;
+    const frame = requestAnimationFrame(() => setActiveTab("agent"));
+    return () => cancelAnimationFrame(frame);
+  }, [feedbackSession]);
 
   // Presence (get_user_activity / MCP): report the focused terminal session —
   // the Agent tab maps to the agent session, a session-id tab to itself, and
@@ -177,10 +191,10 @@ export default function GlobalTaskPage() {
       );
   }, [sessions, keepExitedIds, closingIds]);
 
-  // The strip is EXACTLY [agent, ...bash tabs] — nothing else (GVIEW-01).
+  // Match task tabs: permanent agent, published artifacts, then bash sessions.
   const tabIds = useMemo(
-    () => ["agent", ...visibleSessions.map((s) => s.id)],
-    [visibleSessions],
+    () => ["agent", ...(artifacts ?? []).map((a) => `artifact:${a.id}`), ...visibleSessions.map((s) => s.id)],
+    [visibleSessions, artifacts],
   );
 
   // Pitfall 7: a Radix Tabs value pointing at a removed tab renders blank.
@@ -363,10 +377,22 @@ export default function GlobalTaskPage() {
       // NO onClose — permanent tab (D-38): stopped, never closed.
       content: (
         <div className="flex h-full min-h-[320px] w-full flex-col">
-          <AgentTab scope={{ kind: "global" }} agentSession={agentSession} />
+          {feedbackSession && agentSession?.id !== feedbackSession && <p role="status" className="mb-3 text-sm text-muted-foreground">The agent session that asked this question is no longer available. Resume the Scratchpad agent to continue.</p>}
+          <AgentTab scope={{ kind: "global" }} agentSession={agentSession} autoFocus={feedbackSession === agentSession?.id} />
         </div>
       ),
     },
+    ...(artifacts ?? []).map((artifact): TabDef => ({
+      id: `artifact:${artifact.id}`,
+      label: artifact.title,
+      keepMounted: true,
+      allowEmptyRename: false,
+      renameMaxLength: 100,
+      onRename: (title) => renameArtifact.mutate({ id: artifact.id, title }),
+      onClose: () => setRemovingArtifact(artifact),
+      closeLabel: `Remove ${artifact.title}`,
+      content: <ArtifactTab artifact={artifact} active={activeTab === `artifact:${artifact.id}`} />,
+    })),
     ...visibleSessions.map((s): TabDef => {
       const closing = closingIds.has(s.id);
       return {
@@ -470,6 +496,9 @@ export default function GlobalTaskPage() {
         {banner}
       </div>
 
+      <RemoveArtifactDialog artifact={removingArtifact} taskId={0} onClose={() => setRemovingArtifact(null)} />
+      {renameArtifact.error && <p role="alert" className="text-sm text-destructive">{renameArtifact.error.message}</p>}
+      {artifactQuery.error && <p role="alert" className="text-sm text-destructive">Artifacts could not be refreshed. {artifactQuery.error.message}</p>}
       <TaskTabs
         tabs={tabs}
         value={activeTab}
