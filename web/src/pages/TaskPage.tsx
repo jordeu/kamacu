@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { useArtifacts, useRenameArtifact, type Artifact } from "@/api/artifacts";
@@ -74,6 +74,8 @@ export default function TaskPage() {
   const isClaudeAgent = projectEngine === "claude";
   const taskId = Number(taskIdParam);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const feedbackSession = searchParams.get("feedback_session");
   const queryClient = useQueryClient();
 
   // Fetch by id so deep links work without the board cache (TASK-05).
@@ -143,6 +145,11 @@ export default function TaskPage() {
 
   // D-39: opening a task ALWAYS lands on the Agent tab — no smart selection.
   const [activeTab, setActiveTab] = useState("agent");
+  useEffect(() => {
+    if (!feedbackSession) return;
+    const frame = requestAnimationFrame(() => setActiveTab("agent"));
+    return () => cancelAnimationFrame(frame);
+  }, [feedbackSession, taskId]);
 
   // Presence (get_user_activity / MCP): report the focused terminal session —
   // the Agent tab maps to the agent session, a session-id tab to itself, and
@@ -411,11 +418,13 @@ export default function TaskPage() {
       // NO onClose — permanent tab (D-38): stopped, never closed.
       content: (
         <div className="flex h-full min-h-[320px] w-full flex-col">
+          {feedbackSession && agentSession?.id !== feedbackSession && <p role="status" className="mb-3 text-sm text-muted-foreground">The agent session that asked this question is no longer available. Resume the task’s agent to continue.</p>}
           <AgentTab
             scope={{ kind: "task", taskId: task.id }}
             agentSession={agentSession}
             description={task.description}
             seed={seed}
+            autoFocus={feedbackSession === agentSession?.id}
           />
         </div>
       ),

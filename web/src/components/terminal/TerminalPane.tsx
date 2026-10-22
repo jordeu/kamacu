@@ -30,6 +30,7 @@ export interface TerminalPaneProps {
   exitedActions?: ReactNode; // replaces the default exited/not-found banner action group (agent resume pair); bash defaults unchanged when undefined
   dimWhenExited?: boolean; // default false (bash unchanged); true dims the terminal area once exited (agent)
   onReady?: (api: { paste: (text: string) => void } | null) => void; // imperative paste handle
+  autoFocus?: boolean; // inbox deep link: focus once when connected
   onConnect?: () => void; // fires when conn state becomes "connected" (D-45 hook)
 }
 
@@ -54,12 +55,21 @@ export function TerminalPane({
   dimWhenExited,
   onReady,
   onConnect,
+  autoFocus = false,
 }: TerminalPaneProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [term, setTerm] = useState<Terminal | null>(null);
   const [conn, setConn] = useState<ConnState>({ kind: "connecting" });
   const [showConnecting, setShowConnecting] = useState(false);
   const [stopping, setStopping] = useState(false);
+
+  const focusedSession = useRef<string | null>(null);
+  useEffect(() => {
+    if (autoFocus && term && conn.kind === "connected" && focusedSession.current !== sessionId) {
+      const frame = requestAnimationFrame(() => { term.focus(); focusedSession.current = sessionId; });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [autoFocus, term, conn.kind, sessionId]);
 
   const onSessionExitRef = useRef(onSessionExit);
   onSessionExitRef.current = onSessionExit;

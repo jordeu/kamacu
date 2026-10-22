@@ -70,6 +70,10 @@ func ValidTitle(title string) bool {
 }
 func digest(token string) string { h := sha256.Sum256([]byte(token)); return hex.EncodeToString(h[:]) }
 func (s *Service) task(ctx context.Context, id int64) error {
+	// Scratchpad is a durable global scope, represented by NULL in storage.
+	if id == 0 {
+		return nil
+	}
 	var n int
 	err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM tasks WHERE id=? AND project_id IS NOT NULL", id).Scan(&n)
 	if err != nil {
@@ -85,7 +89,7 @@ func (s *Service) List(ctx context.Context, task int64) ([]Artifact, error) {
 	if err := s.task(ctx, task); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, "SELECT id,task_id,title,revision,created_at,updated_at FROM artifacts WHERE task_id=? ORDER BY created_at,id", task)
+	rows, err := s.DB.QueryContext(ctx, "SELECT id,COALESCE(task_id,0),title,revision,created_at,updated_at FROM artifacts WHERE task_id IS NULLIF(?,0) ORDER BY created_at,id", task)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +119,7 @@ func (s *Service) Begin(ctx context.Context, task int64, artifactID, title, file
 	}
 	expected := ""
 	if artifactID != "" {
-		if err := s.DB.QueryRowContext(ctx, "SELECT revision FROM artifacts WHERE id=? AND task_id=?", artifactID, task).Scan(&expected); err != nil {
+		if err := s.DB.QueryRowContext(ctx, "SELECT revision FROM artifacts WHERE id=? AND task_id IS NULLIF(?,0)", artifactID, task).Scan(&expected); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return Upload{}, ErrNotFound
 			}
@@ -128,7 +132,7 @@ func (s *Service) Begin(ctx context.Context, task int64, artifactID, title, file
 			return Upload{}, errors.New("title must contain 1 to 100 characters")
 		}
 		var count int
-		if err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM artifacts WHERE task_id=?", task).Scan(&count); err != nil {
+		if err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM artifacts WHERE task_id IS NULLIF(?,0)", task).Scan(&count); err != nil {
 			return Upload{}, err
 		}
 		if count >= MaxArtifacts {
@@ -138,14 +142,14 @@ func (s *Service) Begin(ctx context.Context, task int64, artifactID, title, file
 	}
 	// Bound abandoned pending uploads as well as published artifacts.
 	var pending int
-	if err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM artifact_uploads WHERE task_id=? AND expires_at>? AND published_revision=''", task, time.Now().Unix()).Scan(&pending); err != nil {
+	if err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM artifact_uploads WHERE task_id IS NULLIF(?,0) AND expires_at>? AND published_revision=''", task, time.Now().Unix()).Scan(&pending); err != nil {
 		return Upload{}, err
 	}
 	if pending >= MaxArtifacts {
 		return Upload{}, errors.New("too many pending uploads; wait for expiry")
 	}
 	u := Upload{ID: uuid.NewString(), Token: uuid.NewString() + uuid.NewString(), ExpiresAt: time.Now().Add(15 * time.Minute).Unix()}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO artifact_uploads(id,task_id,artifact_id,title,filename,size_bytes,expected_revision,token_hash,expires_at) VALUES(?,?,?,?,?,?,?,?,?)`, u.ID, task, artifactID, title, filename, size, expected, digest(u.Token), u.ExpiresAt)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO artifact_uploads(id,task_id,artifact_id,title,filename,size_bytes,expected_revision,token_hash,expires_at) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?)`, u.ID, task, artifactID, title, filename, size, expected, digest(u.Token), u.ExpiresAt)
 	return u, err
 }
 
@@ -207,7 +211,7 @@ func (s *Service) Finalize(ctx context.Context, task int64, id string) (Artifact
 	var artifactID, title, filename, expected, published string
 	var expires int64
 	var uploaded int
-	err := s.DB.QueryRowContext(ctx, `SELECT artifact_id,title,filename,expected_revision,published_revision,expires_at,uploaded FROM artifact_uploads WHERE id=? AND task_id=?`, id, task).Scan(&artifactID, &title, &filename, &expected, &published, &expires, &uploaded)
+	err := s.DB.QueryRowContext(ctx, `SELECT artifact_id,title,filename,expected_revision,published_revision,expires_at,uploaded FROM artifact_uploads WHERE id=? AND task_id IS NULLIF(?,0)`, id, task).Scan(&artifactID, &title, &filename, &expected, &published, &expires, &uploaded)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Artifact{}, ErrNotFound
@@ -247,16 +251,16 @@ func (s *Service) Finalize(ctx context.Context, task int64, id string) (Artifact
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if expected == "" {
 		var count int
-		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM artifacts WHERE task_id=?", task).Scan(&count); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM artifacts WHERE task_id IS NULLIF(?,0)", task).Scan(&count); err != nil {
 			return Artifact{}, err
 		}
 		if count >= MaxArtifacts {
 			return Artifact{}, errors.New("task already has 20 artifacts")
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO artifacts(id,task_id,title,revision,created_at,updated_at) VALUES(?,?,?,?,?,?)", artifactID, task, title, revision, now, now)
+		_, err = tx.ExecContext(ctx, "INSERT INTO artifacts(id,task_id,title,revision,created_at,updated_at) VALUES(?,NULLIF(?,0),?,?,?,?)", artifactID, task, title, revision, now, now)
 	} else {
 		var result sql.Result
-		result, err = tx.ExecContext(ctx, "UPDATE artifacts SET revision=?,updated_at=? WHERE id=? AND task_id=? AND revision=?", revision, now, artifactID, task, expected)
+		result, err = tx.ExecContext(ctx, "UPDATE artifacts SET revision=?,updated_at=? WHERE id=? AND task_id IS NULLIF(?,0) AND revision=?", revision, now, artifactID, task, expected)
 		if err == nil {
 			n, _ := result.RowsAffected()
 			if n == 0 {
@@ -283,7 +287,7 @@ func (s *Service) Finalize(ctx context.Context, task int64, id string) (Artifact
 
 func (s *Service) get(ctx context.Context, task int64, id string) (Artifact, error) {
 	var a Artifact
-	err := s.DB.QueryRowContext(ctx, "SELECT id,task_id,title,revision,created_at,updated_at FROM artifacts WHERE id=? AND task_id=?", id, task).Scan(&a.ID, &a.TaskID, &a.Title, &a.Revision, &a.CreatedAt, &a.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, "SELECT id,COALESCE(task_id,0),title,revision,created_at,updated_at FROM artifacts WHERE id=? AND task_id IS NULLIF(?,0)", id, task).Scan(&a.ID, &a.TaskID, &a.Title, &a.Revision, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -296,7 +300,7 @@ func (s *Service) Rename(ctx context.Context, task int64, id, title string) (Art
 	if !ValidTitle(title) {
 		return Artifact{}, errors.New("title must contain 1 to 100 characters")
 	}
-	result, err := s.DB.ExecContext(ctx, "UPDATE artifacts SET title=? WHERE task_id=? AND id=?", title, task, id)
+	result, err := s.DB.ExecContext(ctx, "UPDATE artifacts SET title=? WHERE task_id IS NULLIF(?,0) AND id=?", title, task, id)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -309,7 +313,7 @@ func (s *Service) Rename(ctx context.Context, task int64, id, title string) (Art
 func (s *Service) Delete(ctx context.Context, task int64, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result, err := s.DB.ExecContext(ctx, "DELETE FROM artifacts WHERE task_id=? AND id=?", task, id)
+	result, err := s.DB.ExecContext(ctx, "DELETE FROM artifacts WHERE task_id IS NULLIF(?,0) AND id=?", task, id)
 	if err != nil {
 		return err
 	}
@@ -317,7 +321,7 @@ func (s *Service) Delete(ctx context.Context, task int64, id string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	_, err = s.DB.ExecContext(ctx, "DELETE FROM artifact_uploads WHERE task_id=? AND artifact_id=?", task, id)
+	_, err = s.DB.ExecContext(ctx, "DELETE FROM artifact_uploads WHERE task_id IS NULLIF(?,0) AND artifact_id=?", task, id)
 	return err
 }
 

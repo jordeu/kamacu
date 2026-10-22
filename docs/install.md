@@ -271,3 +271,13 @@ curl -fsS http://127.0.0.1:7333/api/projects -o /dev/null -w '%{http_code}\n'
 | Service enabled but step 6 shows `connection refused` | Another instance holds port 7333, or the unit failed | `systemctl --user status kamacu` + `journalctl --user -u kamacu -n 50`; if a manual instance holds the port, stop it and restart the service |
 | `launchctl bootstrap` fails with `Bootstrap failed: 5` | Label already loaded | `launchctl bootout "gui/$(id -u)/com.jordeu.kamacu"` then retry the bootstrap |
 | Updated binary but app still reports the old version | The running process kept the old inode by design | Restart: service → step 4 commands; manual → the user reruns `kamacu serve` |
+
+## Optional agent integration
+
+The application binary includes the `kamacu-task` skill. Users can enable MCP
+and skill installation under **Settings → Agents → Kamacu integration**, or
+with `kamacu integration enable claude` (also `codex` and `opencode`). This is
+opt-in; installing the application alone does not enable it. Once enabled,
+Kamacu refreshes unchanged managed copies when the server starts after an
+upgrade. Restart agent sessions to load changes. See
+[Agent integration](agent-integration.md).

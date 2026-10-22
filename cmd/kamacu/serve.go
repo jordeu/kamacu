@@ -23,6 +23,8 @@ import (
 	"kamacu/internal/artifact"
 	"kamacu/internal/codex"
 	"kamacu/internal/github"
+	"kamacu/internal/inbox"
+	"kamacu/internal/integration"
 	"kamacu/internal/migrate"
 	"kamacu/internal/opencode"
 	"kamacu/internal/presence"
@@ -281,6 +283,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
+		CodexMCPEnvArgs: codex.FeedbackEnvironmentArgs,
 		// Hooks curl this URL and ALWAYS run on the server host. hookBaseURL
 		// normalizes a wildcard --addr host (0.0.0.0 / :: / empty) to
 		// 127.0.0.1:<port> so local hooks never target a wildcard/remote
@@ -331,6 +334,31 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	api.HookRoutes(mux, mgr, hookToken)
 	api.AgentRoutes(mux, mgr, db)
 	api.PresenceRoutes(mux, presenceTracker, hookToken)
+	inboxService := inbox.New(db, func(id string) inbox.Session {
+		sess, ok := mgr.Get(id)
+		if !ok {
+			return inbox.Session{}
+		}
+		info := sess.Info()
+		return inbox.Session{TaskID: info.TaskID, Global: info.Global, Live: info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested, Done: sess.Done()}
+	})
+	defer inboxService.Close()
+	if err := inboxService.Reconcile(ctx); err != nil {
+		slog.Error("recovering inbox", "error", err)
+		return subcommands.ExitFailure
+	}
+	go inboxService.Run(ctx)
+	api.InboxRoutes(mux, inboxService, hookToken)
+	integrationManager, err := integration.Default()
+	if err != nil {
+		slog.Warn("agent integration unavailable", "error", err)
+	} else {
+		if err := integrationManager.Sync(ctx); err != nil {
+			slog.Warn("agent integration needs attention", "error", err)
+		}
+		api.IntegrationRoutes(mux, integrationManager)
+	}
+
 	quotaSvc := quota.New(quota.Config{ClaudeBin: c.claudeBin})
 	api.UsageRoutes(mux, quotaSvc)
 	ghSvc := github.New(github.Config{})

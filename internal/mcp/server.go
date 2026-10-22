@@ -14,7 +14,7 @@ import (
 // ServeCommand is the body of `kamacu mcp serve`. It owns the MCP stdio
 // server lifecycle: env parse → bridge construction → SDK init → tool
 // registration → stdio loop. The subcommand is spawned by an agent CLI
-// (claude / opencode) inside a Kamacu task PTY; the agent CLI speaks JSON-RPC
+// (claude / codex / opencode) inside a Kamacu task PTY; the agent CLI speaks JSON-RPC
 // over the subcommand's stdio.
 type ServeCommand struct{}
 
@@ -26,11 +26,13 @@ func (ServeCommand) Usage() string {
 	return `kamacu mcp serve
 
 Reads from stdin and writes JSON-RPC to stdout. Spawned by an agent CLI
-(claude / opencode) inside a Kamacu task PTY. Env-driven (Phase 06 has no
+(claude / codex / opencode) inside a Kamacu task PTY. Env-driven (Phase 06 has no
 flags by design — D-05):
 
   KAMACU_HOOK_BASE    Kamacu base URL (default http://127.0.0.1:7333)
   KAMACU_HOOK_TOKEN   Per-instance hook token (sent as X-Kamacu-Token header)
+  KAMACU_TASK_ID      Task ID injected at agent launch (required for feedback)
+  KAMACU_SESSION_ID   Session ID injected at agent launch (required for feedback)
 
 Exits 0 on stdin EOF or context cancel; non-zero on bridge/server error.
 `
@@ -56,7 +58,7 @@ func (ServeCommand) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subc
 
 	// nil options means the SDK's own logger discards log output entirely
 	// (slog.DiscardHandler per 06-RESEARCH.md Pitfall 5).
-	srv := mcp.NewServer(&mcp.Implementation{Name: "kamacu", Version: "dev"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "kamacu", Version: "dev"}, &mcp.ServerOptions{Instructions: inboxInstructions})
 	registerTools(srv, b)
 
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil {
@@ -87,6 +89,7 @@ func registerTools(s *mcp.Server, b *bridge) {
 	registerProjectTools(s, b)
 	registerWorkspaceTools(s, b)
 	registerSessionTools(s, b)
-	registerReviewTools(s, b)   // NEW — Phase 09 (list_pending_reviews / list_recently_reviewed / open_review)
+	registerReviewTools(s, b) // NEW — Phase 09 (list_pending_reviews / list_recently_reviewed / open_review)
+	registerInboxTools(s, b)
 	registerPresenceTools(s, b) // user-activity snapshot (get_user_activity)
 }

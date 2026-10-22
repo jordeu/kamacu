@@ -132,8 +132,8 @@ func TestOpencodeSpawnInjectsHookEnv(t *testing.T) {
 }
 
 // TestCustomEngineDoesNotGetHookEnv proves the D014 injection is opencode-
-// gated: a custom-engine spawn (same stub, same AgentConfig) receives NONE
-// of the KAMACU_* vars. This is the R017 regression guard.
+// gated: a custom-engine spawn receives no hook credentials. Task/session
+// identity is deliberately available to all engines for inbox attribution. This is the R017 regression guard.
 //
 // D-63 context: a Kamacu terminal (this repo's own dogfooding surface)
 // exports all three KAMACU_* vars into every child shell — including the
@@ -181,7 +181,7 @@ func TestCustomEngineDoesNotGetHookEnv(t *testing.T) {
 
 	waitForStubReady(t, envFile)
 
-	for _, key := range []string{"KAMACU_SESSION_ID", "KAMACU_HOOK_TOKEN", "KAMACU_HOOK_BASE"} {
+	for _, key := range []string{"KAMACU_HOOK_TOKEN", "KAMACU_HOOK_BASE"} {
 		if _, ok := envValue(t, envFile, key); ok {
 			t.Errorf("%s present in custom child env — D014 injection must be opencode-gated (custom path unchanged)", key)
 		}

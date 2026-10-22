@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
-import { Plus, Settings, Activity } from "lucide-react";
+import { Plus, Settings, Activity, Inbox } from "lucide-react";
+import { useInbox } from "@/api/inbox";
 import { useProjects } from "@/api/queries";
 import { useAgentStatuses } from "@/api/agents";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import { WorkspaceSwitcher } from "@/components/sidebar/WorkspaceSwitcher";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 
 export function ProjectSidebar() {
+  const { data: inbox } = useInbox();
   const { data: projects } = useProjects();
   const { data: agentStatuses } = useAgentStatuses();
   const { activeWorkspaceId } = useActiveWorkspace();
@@ -71,6 +73,17 @@ export function ProjectSidebar() {
         {/* WSNAV-01: the workspace switcher sits at the top of the content,
             expanded-only — it self-hides in the icon rail via its own
             group-data-[collapsible=icon]:hidden wrapper, so no wrapper here. */}
+        <SidebarMenu className="px-2 group-data-[collapsible=icon]:px-1">
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={location.pathname === "/inbox"} tooltip={`Inbox${inbox?.pending_count ? ` · ${inbox.pending_count} waiting` : ""}`}>
+              <Link to="/inbox" aria-label={`Inbox${inbox?.pending_count ? `, ${inbox.pending_count} questions waiting` : ""}`} aria-current={location.pathname === "/inbox" ? "page" : undefined}>
+                <Inbox className={inbox?.pending_count ? "text-amber-400" : undefined} />
+                <span>Inbox</span>
+                {!!inbox?.pending_count && <span className="ml-auto rounded bg-amber-400/10 px-1.5 text-xs text-amber-400 tabular-nums group-data-[collapsible=icon]:hidden">{inbox.pending_count}</span>}
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <WorkspaceSwitcher />
         <SidebarMenu className="gap-1 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-1 group-data-[collapsible=icon]:px-1">
           {/* WSNAV-02 / D-12: a single filter over the project map feeds BOTH the
