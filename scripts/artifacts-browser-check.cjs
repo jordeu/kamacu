@@ -117,6 +117,7 @@ const { execFileSync } = require('node:child_process');
       return;
     }
     await frame.getByRole('heading', { name: 'Interactive preview' }).waitFor();
+    assert.equal(await frame.locator('#preview-status').count(), 0, 'wrapper status remained above the artifact');
     assert.equal(await frame.locator('body').getAttribute('data-inline'), 'yes');
     assert.equal(await frame.locator('body').getAttribute('data-parent-blocked'), 'yes');
     assert.equal(await frame.locator('body').getAttribute('data-storage-blocked'), 'yes');

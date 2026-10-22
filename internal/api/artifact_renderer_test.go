@@ -3,6 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -50,5 +54,36 @@ func TestArtifactRendererConnectionAllowlistsOptIn(t *testing.T) {
 		if !strings.Contains(document, `report("ready")`) || !strings.Contains(document, "document.write(content)") {
 			t.Fatal("preview must render and report readiness in either mode")
 		}
+	}
+}
+
+func TestArtifactRendererBrowser(t *testing.T) {
+	if os.Getenv("KAMACU_BROWSER_TEST") != "1" {
+		t.Skip("set KAMACU_BROWSER_TEST=1 to run browser acceptance")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "sandbox allow-scripts; script-src 'unsafe-inline'")
+		if err := renderArtifactHTML(w, strings.NewReader(`<h1>Preview</h1><script>document.body.dataset.ran = 'yes'</script>`), "token", false); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	cmd := exec.Command("node", "-e", `
+ const {chromium} = require(process.env.KAMACU_PLAYWRIGHT_PACKAGE || 'playwright');
+ const assert = require('node:assert/strict');
+ (async () => {
+  const browser = await chromium.launch({headless: true, executablePath: process.env.KAMACU_BROWSER_EXECUTABLE, args: ['--no-sandbox']});
+  try {
+   const page = await browser.newPage();
+   await page.goto(process.argv[1]);
+   await page.locator('body[data-ran="yes"]').waitFor();
+   assert.equal(await page.locator('h1').textContent(), 'Preview');
+   assert.equal(await page.locator('#preview-status').count(), 0, 'wrapper status remained above the artifact');
+  } finally { await browser.close(); }
+ })().catch(error => { console.error(error); process.exitCode = 1; });
+ `, server.URL)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("browser acceptance: %v\n%s", err, output)
 	}
 }
