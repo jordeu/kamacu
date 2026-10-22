@@ -163,6 +163,7 @@ export function useUpdateTask(projectId: number) {
       id: number;
       title?: string;
       description?: string;
+      recurrent?: boolean;
     }) => patch<Task>(`/api/tasks/${id}`, body),
     onSuccess: (_task, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });

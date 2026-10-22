@@ -17,6 +17,7 @@ import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useMoveTask } from "@/api/mutations";
 import { STATUSES, type Status, type Task } from "@/api/types";
 import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
+import { orderColumnTasks, sameTaskSection } from "./taskOrder";
 import { Column } from "./Column";
 import { ReviewColumn } from "./ReviewColumn";
 import { TaskCardOverlay } from "./TaskCard";
@@ -56,6 +57,7 @@ function groupTasks(tasks: Task[]): Record<Status, Task[]> {
   for (const task of [...tasks].sort((a, b) => a.position - b.position)) {
     columns[task.status].push(task);
   }
+  columns.todo = orderColumnTasks("todo", columns.todo);
   return columns;
 }
 
@@ -146,11 +148,13 @@ export function Board({ tasks, projectId }: BoardProps) {
       let insertAt = toTasks.length;
       if (!(typeof over.id === "string" && over.id.startsWith("column:"))) {
         const overIndex = toTasks.findIndex((t) => t.id === Number(over.id));
-        if (overIndex !== -1) insertAt = overIndex;
+        if (overIndex !== -1 && sameTaskSection(to, moved, toTasks[overIndex])) {
+          insertAt = overIndex;
+        }
       }
       toTasks.splice(insertAt, 0, { ...moved, status: to });
 
-      return { ...prev, [from]: fromTasks, [to]: toTasks };
+      return { ...prev, [from]: fromTasks, [to]: orderColumnTasks(to, toTasks) };
     });
   }
 
@@ -183,9 +187,17 @@ export function Board({ tasks, projectId }: BoardProps) {
     let newIndex = oldIndex;
     if (!(typeof over.id === "string" && over.id.startsWith("column:"))) {
       const overIndex = columnTasks.findIndex((t) => t.id === Number(over.id));
-      if (overIndex !== -1) newIndex = overIndex;
+      if (
+        overIndex !== -1 &&
+        sameTaskSection(status, columnTasks[oldIndex], columnTasks[overIndex])
+      ) {
+        newIndex = overIndex;
+      }
     }
-    const finalTasks = arrayMove(columnTasks, oldIndex, newIndex);
+    const finalTasks = orderColumnTasks(
+      status,
+      arrayMove(columnTasks, oldIndex, newIndex),
+    );
     const finalIndex = finalTasks.findIndex((t) => t.id === activeId);
     setColumns((prev) => ({ ...prev, [status]: finalTasks }));
 
@@ -198,7 +210,11 @@ export function Board({ tasks, projectId }: BoardProps) {
 
     // afterId = card directly ABOVE the final index; null at the top. Never
     // the moving task itself (it sits at finalIndex, not finalIndex - 1).
-    const afterId = finalIndex === 0 ? null : finalTasks[finalIndex - 1].id;
+    const previous = finalTasks[finalIndex - 1];
+    const afterId =
+      previous && sameTaskSection(status, finalTasks[finalIndex], previous)
+        ? previous.id
+        : null;
     moveTask.mutate(
       { id: activeId, status, afterId },
       {
@@ -223,6 +239,11 @@ export function Board({ tasks, projectId }: BoardProps) {
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
+      {moveTask.isError && (
+        <p role="alert" className="px-6 pb-2 text-sm text-destructive">
+          Could not move task. {moveTask.error.message}
+        </p>
+      )}
       <div className="flex h-full min-h-0 flex-1 gap-4 overflow-x-auto px-6 pb-6">
         {STATUSES.map((status) => (
           <Column key={status} status={status} tasks={columns[status]} />

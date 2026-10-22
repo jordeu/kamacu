@@ -29,6 +29,7 @@ type Task struct {
 	Title         string  `json:"title"`
 	Description   string  `json:"description"`
 	Status        string  `json:"status"`
+	Recurrent     bool    `json:"recurrent"`
 	Position      float64 `json:"position"`
 	CreatedAt     string  `json:"created_at"`
 	UpdatedAt     string  `json:"updated_at"`
@@ -62,12 +63,12 @@ type taskHandlers struct {
 	tmuxClient tmux.Client
 }
 
-const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url`
+const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url, recurrent`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL)
+		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent)
 	return t, err
 }
 
@@ -338,7 +339,7 @@ func (h *taskHandlers) get(w http.ResponseWriter, r *http.Request) {
 }
 
 // update handles PATCH /api/tasks/{id} — content edits only (title and/or
-// description). Status and position changes go through /move exclusively.
+// description, recurrence). Status and position changes go through /move exclusively.
 func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -347,6 +348,7 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title       *string `json:"title"`
 		Description *string `json:"description"`
+		Recurrent   *bool   `json:"recurrent"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -367,6 +369,23 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 		// clearing the description (empty string) is legal
 		sets = append(sets, "description = ?")
 		args = append(args, *req.Description)
+	}
+	if req.Recurrent != nil {
+		var source string
+		if err := h.db.QueryRow(`SELECT source FROM tasks WHERE id = ?`, id).Scan(&source); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "task not found")
+			} else {
+				writeError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+		if source != "manual" {
+			writeError(w, http.StatusConflict, "PR reviews cannot be recurrent")
+			return
+		}
+		sets = append(sets, "recurrent = ?")
+		args = append(args, *req.Recurrent)
 	}
 	if len(sets) == 0 {
 		// nothing to change — return the current row
@@ -419,8 +438,9 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 	// can never receive a board position. Reject it with 409 BEFORE any
 	// position math, even though the position queries already filter PR rows.
 	var projectID int64
-	var source string
-	if err := tx.QueryRowContext(ctx, `SELECT project_id, source FROM tasks WHERE id = ?`, id).Scan(&projectID, &source); err != nil {
+	var source, previousStatus string
+	var recurrent, spawned bool
+	if err := tx.QueryRowContext(ctx, `SELECT project_id, source, status, recurrent, recurrence_spawned FROM tasks WHERE id = ?`, id).Scan(&projectID, &source, &previousStatus, &recurrent, &spawned); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 		} else {
@@ -511,9 +531,39 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var successor Task
+	var repoPath string
+	var managed bool
+	if req.Status == "done" && previousStatus != "done" && recurrent && !spawned {
+		// Copy only content and conversation identities. Everything else gets
+		// normal new-task defaults, including a fresh worktree after commit.
+		successor, err = scanTask(tx.QueryRowContext(ctx, `
+			INSERT INTO tasks (project_id, title, description, position, recurrent,
+			                   claude_session_id, opencode_session_id, codex_session_id)
+			SELECT project_id, title, description,
+			       (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks
+			        WHERE project_id = ? AND status = 'todo' AND source = 'manual'),
+			       1, claude_session_id, opencode_session_id, codex_session_id
+			FROM tasks WHERE id = ? RETURNING `+taskColumns, projectID, id))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET recurrence_spawned = 1 WHERE id = ?`, id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err = tx.QueryRowContext(ctx, `SELECT repo_path, managed FROM projects WHERE id = ?`, projectID).Scan(&repoPath, &managed); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if successor.ID != 0 {
+		provisionWorktree(ctx, h.db, h.wt, successor.ID, successor.Title, repoPath, managed)
 	}
 	writeJSON(w, http.StatusOK, t)
 }

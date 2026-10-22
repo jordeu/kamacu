@@ -83,6 +83,7 @@ export interface Task {
   title: string;
   description: string;
   status: Status;
+  recurrent: boolean;
   position: number;
   created_at: string;
   updated_at: string;
