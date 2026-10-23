@@ -3,7 +3,9 @@ package inbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,7 +42,7 @@ func fixture(t *testing.T) (*Service, Identity) {
 }
 func create(t *testing.T, s *Service, who Identity, key string) Question {
 	t.Helper()
-	r, err := s.Create(context.Background(), who, Create{Key: key, Summary: "Task summary", Context: "Tradeoffs and recommendation", Question: "Which option?", Options: []Option{{"a", "Option A"}, {"b", "Option B"}}})
+	r, err := s.Create(context.Background(), who, Create{Key: key, Abstract: "Compact message", Summary: "Task summary", Context: "Tradeoffs and recommendation", Question: "Which option?", Options: []Option{{"a", "Option A"}, {"b", "Option B"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +63,7 @@ func TestCreateValidationIdentityAndIdempotency(t *testing.T) {
 			t.Fatalf("identity: %v", err)
 		}
 	}
-	for _, c := range []Create{{Key: "k", Summary: "s", Question: "q"}, {Key: "k", Summary: "s", Context: "c", Question: "q", Options: []Option{{"a", "A"}, {"a", "B"}}}} {
+	for _, c := range []Create{{Key: "k", Abstract: "Compact message", Summary: "s", Question: "q"}, {Key: "k", Abstract: "Compact message", Summary: "s", Context: "c", Question: "q", Options: []Option{{"a", "A"}, {"a", "B"}}}} {
 		if _, err := s.Create(ctx, who, c); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("validation: %v", err)
 		}
@@ -440,7 +442,7 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, who := fixture(t)
 			ctx := context.Background()
-			r, err := s.Complete(ctx, who, Create{Key: "finished", Summary: "Implemented feature", Context: "Tests passed"})
+			r, err := s.Complete(ctx, who, Create{Key: "finished", Abstract: "Compact message", Summary: "Implemented feature", Context: "Tests passed"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -448,7 +450,7 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 			if q.Kind != "completion" || len(q.Options) != 2 || q.Options[1].ID != "exit" {
 				t.Fatalf("completion: %+v", q)
 			}
-			retry, err := s.Complete(ctx, who, Create{Key: "finished", Summary: "Implemented feature", Context: "Tests passed"})
+			retry, err := s.Complete(ctx, who, Create{Key: "finished", Abstract: "Compact message", Summary: "Implemented feature", Context: "Tests passed"})
 			if err != nil || retry.Question.ID != q.ID {
 				t.Fatalf("retry: %+v %v", retry, err)
 			}
@@ -464,5 +466,59 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestAbstractValidationAndPersistence(t *testing.T) {
+	for _, abstract := range []string{"", "   ", strings.Repeat("x", 181), strings.Repeat("界", 180)} {
+		t.Run(fmt.Sprintf("length-%d", len(abstract)), func(t *testing.T) {
+			s, who := fixture(t)
+			c := Create{Key: "abstract", Abstract: abstract, Summary: "Summary", Context: "Context", Question: "Proceed?"}
+			r, err := s.Create(context.Background(), who, c)
+			if strings.TrimSpace(abstract) == "" || len([]rune(abstract)) > 180 {
+				if !errors.Is(err, ErrInvalid) {
+					t.Fatalf("expected invalid abstract, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			page, err := s.List(context.Background(), nil, false, 0)
+			if err != nil || r.Question.Abstract != abstract || len(page.Items) != 1 || page.Items[0].Abstract != abstract {
+				t.Fatalf("abstract not persisted: %+v %v", page, err)
+			}
+		})
+	}
+}
+
+func TestGetMessageOutsideFirstPage(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	q := create(t, s, who, "oldest")
+	if _, err := s.Answer(ctx, nil, q.ID, q.Revision, "Yes", ""); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		_, err := s.db.ExecContext(ctx, `INSERT INTO inbox_questions(id, task_id, session_id, created_session_id, request_key, summary, context, question, options, status, created_at, updated_at, heartbeat_at) VALUES(?,1,'one','one',?,'Summary','Context','Question','[]','answered',1,?,1)`, fmt.Sprintf("newer-%d", i), fmt.Sprintf("newer-%d", i), s.now().UnixMilli()+int64(i)+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := s.List(ctx, nil, true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !page.HasMore || len(page.Items) != 50 {
+		t.Fatalf("expected full first page: %+v", page)
+	}
+	for _, item := range page.Items {
+		if item.ID == q.ID {
+			t.Fatal("target unexpectedly on first page")
+		}
+	}
+	got, err := s.Get(ctx, q.ID)
+	if err != nil || got.ID != q.ID || got.Status != "answered" {
+		t.Fatalf("get older archived message: %+v %v", got, err)
 	}
 }

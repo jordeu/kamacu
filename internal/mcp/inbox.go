@@ -52,16 +52,18 @@ func registerInboxTools(s *mcp.Server, b *bridge) {
 	}
 	add("report_completion", "complete", "Required whenever requested work is complete and you are waiting for further input, even without a question. Provide a concise summary and Markdown details of changes, verification and limitations. Kamacu supplies Seen and Seen and exit session actions; free text is the next prompt. End your turn after posting; Kamacu injects replies into the terminal. Acknowledge injected answers before acting. On Seen, acknowledge then end your turn without reposting. Exit is handled by Kamacu.", map[string]any{
 		"request_key": str("Unique key for this completed work; reuse on retries"),
+		"abstract":    map[string]any{"type": "string", "minLength": 1, "maxLength": 180, "description": "Required self-contained plain-text message abstract for the compact inbox sidebar (maximum 180 characters)"},
 		"summary":     str("Summary of completed work (max 4000 bytes)"),
 		"context":     str("Markdown details: changes, verification and remaining limitations (max 32000 bytes)"),
-	}, "request_key", "summary", "context")
+	}, "request_key", "abstract", "summary", "context")
 	add("ask_feedback", "ask", inboxInstructions, map[string]any{
 		"request_key": str("Stable unique key for this question; reuse on retries to prevent duplicates"),
+		"abstract":    map[string]any{"type": "string", "minLength": 1, "maxLength": 180, "description": "Required self-contained plain-text message abstract for the compact inbox sidebar (maximum 180 characters)"},
 		"summary":     str("Required task summary, sufficient to understand what the agent is doing (max 4000 bytes)"),
 		"context":     str("Required Markdown decision context: relevant findings, alternatives, tradeoffs and recommendation (max 32000 bytes)"),
 		"question":    str("The specific decision the user needs to make (max 4000 bytes)"),
 		"options":     map[string]any{"type": "array", "maxItems": 10, "items": map[string]any{"type": "object", "properties": map[string]any{"id": str("Stable unique option ID"), "label": str("Simple answer label")}, "required": []string{"id", "label"}, "additionalProperties": false}},
-	}, "request_key", "summary", "context", "question")
+	}, "request_key", "abstract", "summary", "context", "question")
 	props := common()
 	props["answer"] = str("User's terminal answer; report before acting. Do not treat a request for clarification as an answer.")
 	props["option_id"] = str("Alternatively the selected option ID; do not also supply answer")

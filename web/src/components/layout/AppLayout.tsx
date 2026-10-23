@@ -7,6 +7,8 @@ import { ActiveSessionsBar } from "@/components/layout/ActiveSessionsBar";
 import { ActiveWorkspaceProvider } from "@/lib/useActiveWorkspace";
 import { usePresenceBeacon } from "@/presence/usePresenceBeacon";
 
+import { InboxSidebar } from "@/components/layout/InboxSidebar";
+
 const SIDEBAR_STORAGE_KEY = "kamacu.sidebar";
 
 export function AppLayout() {
@@ -51,13 +53,14 @@ export function AppLayout() {
               that occupies layout space, so <main> needs no collapsed padding and
               the floating re-expand trigger is retired — the rail's header
               SidebarTrigger is the re-expand entry point (D-02). */}
-          <main className="relative flex-1 overflow-hidden pb-9">
+          <main className="relative min-w-0 flex-1 overflow-hidden pb-9">
             <Outlet />
           </main>
           {/* D-13: mounted once outside <main>/<Outlet/> so the bar is present on
               every route. It is `fixed inset-x-0 bottom-0` (overlay) — a single
               mount renders it over every route without changing <main>'s layout
               or height, so the xterm terminals never reflow (D-03). */}
+          <InboxSidebar />
           <ActiveSessionsBar />
         </ActiveWorkspaceProvider>
       </SidebarProvider>

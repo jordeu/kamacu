@@ -9,6 +9,7 @@ export interface FeedbackQuestion {
   task_title: string;
   project_name: string;
   session_id: string;
+  abstract: string;
   summary: string;
   context: string;
   question: string;
@@ -32,6 +33,14 @@ export function useInbox(view: "pending" | "archived" = "pending", offset = 0) {
   return useQuery({
     queryKey: ["inbox", view, offset],
     queryFn: () => get<InboxPage>(`/api/inbox?view=${view}&offset=${offset}`),
+    refetchInterval: 3000,
+  });
+}
+export function useInboxMessage(id: string | null) {
+  return useQuery({
+    queryKey: ["inbox", "message", id],
+    queryFn: () => get<FeedbackQuestion>(`/api/inbox/${encodeURIComponent(id!)}`),
+    enabled: !!id,
     refetchInterval: 3000,
   });
 }

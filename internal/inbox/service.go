@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -48,6 +49,7 @@ type Question struct {
 	TaskTitle      string   `json:"task_title"`
 	ProjectName    string   `json:"project_name"`
 	SessionID      string   `json:"session_id"`
+	Abstract       string   `json:"abstract"`
 	Summary        string   `json:"summary"`
 	Context        string   `json:"context"`
 	Question       string   `json:"question"`
@@ -64,6 +66,7 @@ type Question struct {
 }
 type Create struct {
 	Key      string   `json:"request_key"`
+	Abstract string   `json:"abstract"`
 	Summary  string   `json:"summary"`
 	Context  string   `json:"context"`
 	Question string   `json:"question"`
@@ -122,12 +125,12 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var opts string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind)
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
@@ -229,6 +232,9 @@ func (s *Service) watch(sid string) {
 	}()
 }
 func validate(c Create) error {
+	if strings.TrimSpace(c.Abstract) == "" || !utf8.ValidString(c.Abstract) || utf8.RuneCountInString(c.Abstract) > 180 {
+		return fmt.Errorf("%w: abstract is required and must be at most 180 characters", ErrInvalid)
+	}
 	for _, field := range []struct {
 		v string
 		n int
@@ -294,7 +300,7 @@ func (s *Service) create(ctx context.Context, who Identity, c Create, kind strin
 	opts, _ := json.Marshal(c.Options)
 	id := uuid.NewString()
 	now := s.now().UnixMilli()
-	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind)
+	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract)
 	if err != nil {
 		return Result{}, err
 	}
@@ -516,6 +522,17 @@ func (s *Service) Acknowledge(ctx context.Context, who Identity, id string, revi
 	}
 	return result(q), err
 }
+
+// Get returns a message independently of inbox filters and pagination.
+func (s *Service) Get(ctx context.Context, id string) (Question, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.reconcile(ctx); err != nil {
+		return Question{}, err
+	}
+	return s.get(ctx, id)
+}
+
 func (s *Service) List(ctx context.Context, who *Identity, archived bool, offset int) (Page, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
