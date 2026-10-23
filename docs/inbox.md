@@ -25,14 +25,14 @@ configuration requirements.
 
 Agents first display the question and numbered options in the terminal, then send the same question to the inbox and end their turn. Kamacu delivers the answer directly into the originating terminal.
 
-The inbox starts with collapsed message rows; expand any row to review context and answer. Its icon sits next to Scratchpad in the bottom sessions bar, with a pending count visible even when the sidebar or sessions bar is collapsed.
+The inbox starts with collapsed message rows; expand any row to review context and answer. A global right sidebar shows an inbox icon and pending count when collapsed. Expand it to read compact messages, choose an option, write a reply, dismiss, or mark completed work as seen without leaving the current page. Its expanded state persists across navigation and reloads. Open full message expands that message on the full-width Inbox page. On narrow screens the expanded panel overlays content.
 
 The MCP server advertises workflow instructions and these tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `report_completion` | Required when work is finished, even without a question. Supply `request_key`, `summary`, and Markdown `context` describing changes, verification, and limitations. |
-| `ask_feedback` | Create a question with `request_key`, `summary`, `context`, `question`, and optional `options: [{id, label}]`. Reuse the key when retrying the same request. |
+| `report_completion` | Required when work is finished, even without a question. Supply `request_key`, `abstract`, `summary`, and Markdown `context` describing changes, verification, and limitations. |
+| `ask_feedback` | Create a question with `request_key`, `abstract`, `summary`, `context`, `question`, and optional `options: [{id, label}]`. Reuse the key when retrying the same request. |
 | `resolve_feedback` | Report a terminal answer using `question_id`, `revision`, and either `answer` or `option_id`. Call before acting on the answer. |
 | `acknowledge_feedback` | Confirm receipt of an archived result using `question_id` and `revision`. Acknowledge inbox answers before acting. |
 | `list_feedback` | Recover questions for the current task, including archived questions and previous sessions. Ten per page; advance `offset` by 10 when `has_more` is true. |
@@ -124,3 +124,5 @@ Optionally set `KAMACU_BROWSER_EXECUTABLE` to an installed Chromium executable a
 `KAMACU_INBOX_SCREENSHOTS` to a directory for desktop/mobile captures.
 
 Codex filters the environment of stdio MCP subprocesses. At launch, Kamacu inspects enabled local Kamacu MCP registrations and adds the four `KAMACU_*` variable names to their existing `env_vars` allowlist using process-local configuration overrides. Credentials remain in the environment; user configuration is not rewritten. Register the server as `kamacu` if you use a wrapper command. Discovery failures stop launch with a diagnostic instead of starting with broken inbox identity.
+
+New questions and completion reports require a self-contained plain-text `abstract` of at most 180 Unicode characters. The sidebar wraps this abstract and option labels; detailed summaries and context remain available in the full inbox. Existing messages receive a shortened summary during migration.

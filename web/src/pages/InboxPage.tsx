@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { ArrowUpRight, Inbox, ChevronRight, Check, Clock } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, type FeedbackQuestion } from "@/api/inbox";
+import { feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
 
 import { AgentExitDialog } from "@/components/task/AgentExitDialog";
 
@@ -15,7 +15,7 @@ function Context({ text }: { text: string }) {
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: () => null }}>{text}</ReactMarkdown>
   </div>;
 }
-function Question({ question: q, onResult }: { question: FeedbackQuestion; onResult: (message: string, exited?: FeedbackQuestion) => void }) {
+function Question({ question: q, onResult, expanded }: { question: FeedbackQuestion; expanded?: boolean; onResult: (message: string, exited?: FeedbackQuestion) => void }) {
   const [answer, setAnswer] = useState("");
   const action = useFeedbackAction();
   const completion = q.kind === "completion";
@@ -33,7 +33,7 @@ function Question({ question: q, onResult }: { question: FeedbackQuestion; onRes
   const shortDate = date.toDateString() === new Date().toDateString()
     ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : date.toLocaleDateString([], { month: "short", day: "numeric" });
-  return <details className="group/message border-b border-border last:border-0 open:bg-muted/20">
+  return <details open={expanded || undefined} id={`message-${q.id}`} className="group/message border-b border-border last:border-0 open:bg-muted/20">
     <summary aria-label={`Open question: ${q.question}`} className="flex cursor-pointer list-none items-start gap-3 px-3 py-4 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:items-center sm:px-5 [&::-webkit-details-marker]:hidden">
       <ChevronRight aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-open/message:rotate-90 motion-reduce:transition-none sm:mt-0" />
       <div className="grid min-w-0 flex-1 gap-1 sm:grid-cols-[minmax(8rem,0.8fr)_minmax(0,3fr)] sm:items-center sm:gap-5">
@@ -49,7 +49,7 @@ function Question({ question: q, onResult }: { question: FeedbackQuestion; onRes
       </span>
     </summary>
     <article aria-labelledby={`question-${q.id}`} className="border-t border-border px-4 py-6 sm:px-12">
-    <div className="mx-auto max-w-3xl">
+    <div className="min-w-0">
     <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
       <div className="min-w-0 flex-1">
         <p className="break-words text-sm text-muted-foreground">{q.task_id === 0 ? "Scratchpad" : `${q.project_name} / ${q.task_title}`}</p>
@@ -96,27 +96,36 @@ function Question({ question: q, onResult }: { question: FeedbackQuestion; onRes
   </details>;
 }
 export default function InboxPage() {
+  const [params, setParams] = useSearchParams();
+  const messageID = params.get("message");
+  const selected = useInboxMessage(messageID);
   const [view, setView] = useState<"pending" | "archived">("pending");
   const [offset, setOffset] = useState(0);
   const [exited, setExited] = useState<FeedbackQuestion | null>(null);
   const [notice, setNotice] = useState("");
   const inbox = useInbox(view, offset);
+  const activeView = messageID && selected.data ? (selected.data.status === "pending" ? "pending" : "archived") : view;
   return <main className="h-full overflow-y-auto p-4 sm:p-6">
     {exited && <AgentExitDialog taskId={exited.task_id} projectId={exited.project_id} onClose={() => setExited(null)} />}
-    <div className="mx-auto max-w-5xl">
+    <div className="w-full">
       <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
       <p className="mt-1 text-sm text-muted-foreground">Questions and completed work, across all your tasks.</p>
       <div className="mt-6 flex gap-2 border-b border-border pb-3" role="group" aria-label="Inbox view">
-        {(["pending", "archived"] as const).map((tab) => <Button key={tab} variant={view === tab ? "secondary" : "ghost"} aria-pressed={view === tab} onClick={() => { setView(tab); setOffset(0); setNotice(""); }}>
+        {(["pending", "archived"] as const).map((tab) => <Button key={tab} variant={activeView === tab ? "secondary" : "ghost"} aria-pressed={activeView === tab} onClick={() => { setParams({}); setView(tab); setOffset(0); setNotice(""); }}>
           {tab === "pending" ? <Clock className="size-4" aria-hidden="true" /> : <Check className="size-4" aria-hidden="true" />}
           {tab === "pending" ? `Pending${inbox.data ? ` (${inbox.data.pending_count})` : ""}` : "Archived"}
         </Button>)}
       </div>
       {notice && <p role="status" className="my-4 flex items-center gap-2 text-sm"><Check className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />{notice}</p>}
-      {inbox.isError && <div role="alert" className="mb-5 flex flex-wrap items-center gap-3 text-sm">
+      {messageID && <>
+        {selected.isPending && <Skeleton aria-label="Loading message" className="mt-4 h-24 w-full" />}
+        {selected.isError && <div role="alert" className="my-4 flex items-center gap-3 text-sm"><p>Couldn’t load this message.</p><Button variant="outline" onClick={() => void selected.refetch()}>Retry loading message</Button></div>}
+        {selected.data && <Question key={`${selected.data.id}:${selected.data.revision}`} question={selected.data} expanded onResult={(message, session) => { setNotice(message); if (session && session.task_id > 0) setExited(session); }} />}
+      </>}
+      {!messageID && inbox.isError && <div role="alert" className="mb-5 flex flex-wrap items-center gap-3 text-sm">
         <p>Couldn’t refresh your inbox.</p><Button variant="outline" onClick={() => void inbox.refetch()}>Retry loading</Button>
       </div>}
-      {inbox.isPending ? <div aria-label="Loading inbox" className="space-y-4"><Skeleton className="h-6 w-2/3" /><Skeleton className="h-24 w-full" /><Skeleton className="h-10 w-1/2" /></div> : inbox.data && <>
+      {!messageID && (inbox.isPending ? <div aria-label="Loading inbox" className="space-y-4"><Skeleton className="h-6 w-2/3" /><Skeleton className="h-24 w-full" /><Skeleton className="h-10 w-1/2" /></div> : inbox.data && <>
         {inbox.data.items.length === 0 ? <div className="py-16 text-center">
           <Inbox className="mx-auto mb-4 size-6 text-muted-foreground" aria-hidden="true" />
           <h2 className="text-base font-medium">{view === "pending" ? "No messages waiting" : "No archived questions"}</h2>
@@ -126,7 +135,7 @@ export default function InboxPage() {
           <Button variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Previous</Button>
           <Button variant="outline" disabled={!inbox.data.has_more} onClick={() => setOffset(offset + 50)}>Next</Button>
         </nav>}
-      </>}
+      </>)}
     </div>
   </main>;
 }

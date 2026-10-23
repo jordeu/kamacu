@@ -16,7 +16,7 @@ const path = require('node:path');
     return response.json();
   }
   async function ask(key) {
-    return agent('ask', { request_key: key, summary: 'I’m improving how users move between a task and its agent terminal.', context: '**Recommendation:** focus the agent terminal when opening a question’s task.\n\n- This saves a click when replying in the terminal.\n- Keep the current tab for ordinary task navigation.\n\nNo changes have been applied yet.', question: 'Should opening a question’s task focus the agent terminal?', options: [{ id: 'focus', label: 'Focus the agent terminal' }, { id: 'preserve', label: 'Keep the current tab' }] });
+    return agent('ask', { request_key: key, abstract: 'Compact inbox message.', summary: 'I’m improving how users move between a task and its agent terminal.', context: '**Recommendation:** focus the agent terminal when opening a question’s task.\n\n- This saves a click when replying in the terminal.\n- Keep the current tab for ordinary task navigation.\n\nNo changes have been applied yet.', question: 'Should opening a question’s task focus the agent terminal?', options: [{ id: 'focus', label: 'Focus the agent terminal' }, { id: 'preserve', label: 'Keep the current tab' }] });
   }
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -47,7 +47,7 @@ const path = require('node:path');
       if (await row.getAttribute('open') === null) await row.locator(':scope > summary').click();
     }
     for (const mode of ['seen', 'text', 'exit']) {
-      const completed = await agent('complete', {request_key:'completed-'+mode, summary:'Updated inbox completion handling.', context:'Implemented completion summaries. **Verification:** lifecycle tests passed.'});
+      const completed = await agent('complete', {request_key:'completed-'+mode, abstract: 'Compact inbox message.', summary:'Updated inbox completion handling.', context:'Implemented completion summaries. **Verification:** lifecycle tests passed.'});
       await page.reload();
       await expand(completed.question);
       await page.getByText('What was done', {exact:true}).waitFor();

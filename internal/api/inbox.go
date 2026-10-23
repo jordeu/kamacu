@@ -57,6 +57,7 @@ func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliv
 		h.stop = stop[0]
 	}
 	mux.HandleFunc("GET /api/inbox", h.list)
+	mux.HandleFunc("GET /api/inbox/{id}", h.get)
 	mux.HandleFunc("POST /api/inbox/{id}/answer", h.answer)
 	mux.HandleFunc("POST /api/inbox/{id}/dismiss", h.dismiss)
 	mux.HandleFunc("POST /api/agent-feedback/{action}", h.agent)
@@ -114,6 +115,15 @@ func (h *inboxHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, page)
+}
+
+func (h *inboxHandlers) get(w http.ResponseWriter, r *http.Request) {
+	q, err := h.service.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		inboxError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
 }
 
 type inboxAnswer struct {

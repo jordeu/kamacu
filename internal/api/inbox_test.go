@@ -57,7 +57,7 @@ func TestInboxHTTPIdentityAndBrowserResolution(t *testing.T) {
 		handler.ServeHTTP(w, r)
 		return w
 	}
-	body := map[string]any{"request_key": "key", "summary": "Summary", "context": "Enough context", "question": "Proceed?", "options": []inbox.Option{{ID: "yes", Label: "Yes"}}}
+	body := map[string]any{"request_key": "key", "abstract": "Compact message", "summary": "Summary", "context": "Enough context", "question": "Proceed?", "options": []inbox.Option{{ID: "yes", Label: "Yes"}}}
 	for _, tc := range []struct {
 		token, task, session string
 		want                 int
@@ -77,6 +77,25 @@ func TestInboxHTTPIdentityAndBrowserResolution(t *testing.T) {
 	if err = json.Unmarshal(w.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
+	readMessage := func(id string, want int) inbox.Question {
+		t.Helper()
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/inbox/"+id, nil))
+		if w.Code != want {
+			t.Fatalf("read message: %d %s", w.Code, w.Body.String())
+		}
+		var q inbox.Question
+		if want == http.StatusOK {
+			if err := json.Unmarshal(w.Body.Bytes(), &q); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return q
+	}
+	if q := readMessage(created.Question.ID, http.StatusOK); q.ID != created.Question.ID || q.Status != "pending" {
+		t.Fatalf("pending message: %+v", q)
+	}
+	readMessage("missing", http.StatusNotFound)
 	path := "/api/inbox/" + created.Question.ID + "/answer"
 	req := httptest.NewRequest("POST", path, bytes.NewBufferString(`{"revision":1,"option_id":"yes"}`))
 	req.Header.Set("Origin", "https://evil.invalid")
@@ -94,6 +113,9 @@ func TestInboxHTTPIdentityAndBrowserResolution(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resolved)
 	if w.Code != 200 || resolved.Outcome != "already_resolved" || resolved.Question.Answer != "Yes" {
 		t.Fatalf("conflict: %s", w.Body.String())
+	}
+	if q := readMessage(created.Question.ID, http.StatusOK); q.Status != "answered" || q.Answer != "Yes" {
+		t.Fatalf("archived message: %+v", q)
 	}
 	page, err := svc.List(context.Background(), nil, true, 0)
 	if err != nil || page.PendingCount != 1 || len(page.Items) != 1 {
@@ -188,7 +210,7 @@ func TestCompletionExitRequiresWinningOption(t *testing.T) {
 		{"seen", "", "seen", false},
 		{"exit", "", "exit", true},
 	} {
-		r, err := svc.Complete(context.Background(), inbox.Identity{TaskID: 0, SessionID: "scratch"}, inbox.Create{Key: tc.key, Summary: "Finished", Context: "Verified"})
+		r, err := svc.Complete(context.Background(), inbox.Identity{TaskID: 0, SessionID: "scratch"}, inbox.Create{Key: tc.key, Abstract: "Compact message", Summary: "Finished", Context: "Verified"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,7 +265,7 @@ func TestInboxTerminalDelivery(t *testing.T) {
 				return nil
 			}, func(string) { stopped++ })
 			for _, action := range []string{"text", "seen", "exit"} {
-				created, err := svc.Complete(context.Background(), who, inbox.Create{Key: action, Summary: "Done", Context: "Tests passed"})
+				created, err := svc.Complete(context.Background(), who, inbox.Create{Key: action, Abstract: "Compact message", Summary: "Done", Context: "Tests passed"})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -13,7 +13,7 @@ For a task or Scratchpad session, call Kamacu's `list_feedback` MCP tool to vali
 
 ## Report completed work
 
-Before ending a turn after completing the requested work, ALWAYS send a completion summary to the inbox, even if you have no question. Display the summary in the terminal, then call `report_completion` with a unique `request_key`, a concise `summary`, and Markdown `context` covering changes, verification and remaining limitations. Reuse the key only for retries of the same completed work.
+Before ending a turn after completing the requested work, ALWAYS send a completion summary to the inbox, even if you have no question. Display the summary in the terminal, then call `report_completion` with a unique `request_key`, a plain-text `abstract` of at most 180 characters that summarizes the message for the compact inbox sidebar, a concise `summary`, and Markdown `context` covering changes, verification and remaining limitations. Reuse the key only for retries of the same completed work.
 
 Kamacu supplies **Seen** and **Seen and exit session** buttons and a text field for the next prompt. After posting, end your turn. Kamacu injects inbox answers into the originating terminal. Reconcile directly typed terminal replies with `resolve_feedback` just as for questions.
 
@@ -33,6 +33,7 @@ First show the question and every answer option as ordinary terminal text, using
 Then call `ask_feedback` with the same question and option labels, plus:
 
 - A stable `request_key`; reuse it when retrying the same question.
+- A self-contained plain-text `abstract` of at most 180 characters, stating the decision needed so the user can answer from the sidebar.
 - A short `summary` of the task and its objective.
 - Markdown `context` explaining the findings, relevant alternatives, tradeoffs, and your recommendation. Give enough information to decide without opening the task. Do not include credentials.
 - The specific `question` and, when useful, simple `options` with stable IDs and clear labels. Free-text replies are also supported.

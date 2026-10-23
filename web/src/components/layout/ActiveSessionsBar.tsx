@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { ChevronUp, ChevronDown, Globe, Inbox } from "lucide-react";
+import { ChevronUp, ChevronDown, Globe } from "lucide-react";
 import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
-import { useInbox } from "@/api/inbox";
 import { dotMeta } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,8 +35,6 @@ import { cn } from "@/lib/utils";
  * filtered out client-side (D-09).
  */
 export function ActiveSessionsBar() {
-  const { data: inbox } = useInbox();
-  const pendingCount = inbox?.pending_count ?? 0;
   // --- Collapse persistence — mirror ReviewColumn exactly, GLOBAL key
   // (SBAR-07 / D-04). Absent key => collapsed (the `!== "0"` idiom); explicit
   // expand persists as "0". ---
@@ -219,21 +216,6 @@ export function ActiveSessionsBar() {
               />
             )}
           </span>
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Inbox, ${pendingCount} questions waiting`}
-          aria-current={location.pathname === "/inbox" ? "page" : undefined}
-          title={`Inbox · ${pendingCount} waiting`}
-          onClick={(event) => {
-            event.stopPropagation();
-            navigate("/inbox");
-          }}
-          className={cn("relative shrink-0 text-muted-foreground", location.pathname === "/inbox" && "bg-sidebar-accent text-sidebar-accent-foreground")}
-        >
-          <Inbox className={cn("size-3.5", pendingCount > 0 && "text-amber-400")} />
-          {pendingCount > 0 && <span aria-hidden="true" className="absolute -top-0.5 -right-1 min-w-4 rounded-full bg-amber-400 px-1 text-center text-[10px] leading-4 font-semibold text-zinc-950 tabular-nums">{pendingCount > 99 ? "99+" : pendingCount}</span>}
         </Button>
         {loading ? (
           <Skeleton className="h-3 w-24" />
