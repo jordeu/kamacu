@@ -62,7 +62,7 @@ http://127.0.0.1:7333 in a browser.
 
 ### Development
 
-To build from a checkout instead (requires Go 1.26 and Node 20.19+/22.12+):
+To build from a checkout instead, use Go 1.27.3+ and Node 22.22+ (Node 24 LTS recommended):
 
 ```sh
 make build           # Vite production build, then the Go binary → bin/kamacu
