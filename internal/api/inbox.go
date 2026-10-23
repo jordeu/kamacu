@@ -4,22 +4,55 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"kamacu/internal/inbox"
+	"kamacu/internal/session"
 )
 
 type inboxHandlers struct {
 	service *inbox.Service
 	token   string
 	stop    func(string)
+	deliver func(inbox.Question) error
 }
 
 func InboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, stop ...func(string)) {
-	h := &inboxHandlers{service: service, token: token}
+	inboxRoutes(mux, service, token, nil, stop...)
+}
+
+// InboxTerminalRoutes delivers browser answers directly to their originating agent.
+func InboxTerminalRoutes(mux *http.ServeMux, service *inbox.Service, token string, mgr *session.Manager, stop func(string)) {
+	inboxRoutes(mux, service, token, func(q inbox.Question) error {
+		sess, ok := mgr.Get(q.SessionID)
+		if !ok {
+			return fmt.Errorf("originating agent is unavailable")
+		}
+		info := sess.Info()
+		if info.Kind != session.KindAgent || info.Status != session.StatusRunning || info.StopRequested || info.TaskID != q.TaskID || info.Global != (q.TaskID == 0) {
+			return fmt.Errorf("originating agent is unavailable")
+		}
+		return sendTerminalMessage(sess, feedbackMessage(q))
+	}, stop)
+}
+
+func feedbackMessage(q inbox.Question) string {
+	// JSON escapes terminal control characters, including bracketed-paste delimiters.
+	payload, _ := json.Marshal(struct {
+		ID       string `json:"question_id"`
+		Revision int64  `json:"revision"`
+		Answer   string `json:"answer"`
+		Reason   string `json:"reason"`
+	}{q.ID, q.Revision, q.Answer, q.Reason})
+	return "Kamacu inbox answer: " + string(payload) + "\nCall acknowledge_feedback with this question_id and revision before acting, and use the returned answer. For reason=seen, end your turn without further work or another completion report."
+}
+
+func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliver func(inbox.Question) error, stop ...func(string)) {
+	h := &inboxHandlers{service: service, token: token, deliver: deliver}
 	if len(stop) > 0 {
 		h.stop = stop[0]
 	}
@@ -98,6 +131,15 @@ func (h *inboxHandlers) answer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		inboxError(w, err)
 		return
+	}
+	// Inject only the newly accepted browser answer; retries and terminal answers
+	// must not submit a second prompt. Persist first so recovery is always possible.
+	if out.Outcome == "accepted" && out.Question.Reason != "exit" && h.deliver != nil {
+		if err := h.deliver(out.Question); err != nil {
+			slog.Error("deliver inbox answer", "question", out.Question.ID, "error", err)
+			writeError(w, http.StatusBadGateway, "Answer saved, but terminal delivery failed. Open the agent terminal and ask it to recover the answer using list_feedback.")
+			return
+		}
 	}
 	// Only the winning explicit exit option can stop the originating session.
 	h.stopCompleted(out)

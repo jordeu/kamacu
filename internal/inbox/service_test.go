@@ -120,49 +120,52 @@ func TestAnswerRaceAndAcknowledgment(t *testing.T) {
 		t.Fatalf("archive: %+v %v", page, err)
 	}
 }
-func TestHeartbeatExpiryReopenAndStaleRevision(t *testing.T) {
+func TestPendingSurvivesWithoutPolling(t *testing.T) {
 	s, who := fixture(t)
 	ctx := context.Background()
-	clock := time.Now()
-	s.now = func() time.Time { return clock }
-	q := create(t, s, who, "lease")
-	clock = clock.Add(4 * time.Minute)
-	if _, err := s.Wait(ctx, who, q.ID, 0); err != nil {
-		t.Fatal(err)
+	q := create(t, s, who, "no-poll")
+	now := s.now()
+	s.now = func() time.Time { return now.Add(24 * time.Hour) }
+	page, err := s.List(ctx, nil, false, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("pending: %+v %v", page, err)
 	}
-	clock = clock.Add(4 * time.Minute)
-	page, _ := s.List(ctx, nil, false, 0)
-	if len(page.Items) != 1 {
-		t.Fatal("heartbeat did not renew lease")
-	}
-	clock = clock.Add(time.Minute)
-	r, err := s.Wait(ctx, who, q.ID, 0)
-	if err != nil || r.Outcome != "expired" {
-		t.Fatalf("expiry: %+v %v", r, err)
-	}
-	if r.Question.Reason != "heartbeat_expired" {
-		t.Fatal(r.Question.Reason)
-	}
-	r, err = s.Reopen(ctx, who, q.ID, q.Revision, false)
-	if err != nil || r.Question.Revision != 2 {
-		t.Fatalf("reopen: %+v %v", r, err)
-	}
-	r, err = s.Answer(ctx, nil, q.ID, 1, "old browser click", "")
-	if err != nil || r.Outcome != "stale_revision" || r.Question.Status != "pending" {
-		t.Fatalf("stale form: %+v %v", r, err)
+	r, err := s.Answer(ctx, nil, q.ID, q.Revision, "late answer", "")
+	if err != nil || r.Outcome != "accepted" {
+		t.Fatalf("answer: %+v %v", r, err)
 	}
 }
+
+func expireSession(t *testing.T, s *Service, sid string) {
+	t.Helper()
+	lookup := s.lookup
+	s.lookup = func(id string) Session {
+		if id == sid {
+			return Session{}
+		}
+		return lookup(id)
+	}
+	if err := s.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s.lookup = lookup
+}
+
 func TestSessionTransferAndDismissal(t *testing.T) {
 	s, who := fixture(t)
 	ctx := context.Background()
 	clock := time.Now()
 	s.now = func() time.Time { return clock }
 	q := create(t, s, who, "transfer")
-	clock = clock.Add(Lease)
+	expireSession(t, s, who.SessionID)
 	next := Identity{1, "two"}
 	r, err := s.Reopen(ctx, next, q.ID, q.Revision, false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	stale, err := s.Answer(ctx, nil, q.ID, q.Revision, "old browser click", "")
+	if err != nil || stale.Outcome != "stale_revision" || stale.Question.Status != "pending" {
+		t.Fatalf("stale form: %+v %v", stale, err)
 	}
 	if _, err = s.Answer(ctx, &who, q.ID, r.Question.Revision, "stale owner", ""); !errors.Is(err, ErrOwner) {
 		t.Fatalf("old owner: %v", err)
@@ -281,7 +284,7 @@ func TestAnswerExpiryRaceAndReopenPendingGuard(t *testing.T) {
 	clock := time.Now()
 	s.now = func() time.Time { return clock }
 	q := create(t, s, who, "old")
-	clock = clock.Add(Lease)
+	expireSession(t, s, who.SessionID)
 	r, err := s.Answer(ctx, nil, q.ID, q.Revision, "late answer", "")
 	if err != nil || r.Outcome != "already_resolved" || r.Question.Status != "unanswered" {
 		t.Fatalf("late answer: %+v %v", r, err)
@@ -404,8 +407,7 @@ func TestScratchpadFeedbackLifecycleAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	q2 := create(t, s, who, "expire")
-	now := s.now()
-	s.now = func() time.Time { return now.Add(Lease + time.Second) }
+	expireSession(t, s, who.SessionID)
 	result, err = s.Wait(ctx, who, q2.ID, 0)
 	if err != nil || result.Question.Status != "unanswered" {
 		t.Fatalf("expiry: %+v %v", result, err)

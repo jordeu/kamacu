@@ -293,7 +293,10 @@ func (e *e2eServer) childEnv() []string {
 // Both server A and server B run the identical command line.
 func (e *e2eServer) start() {
 	e.t.Helper()
+	// Disposable binaries must never rewrite the user's MCP registration,
+	// including the OpenCode leg that deliberately inherits the real home.
 	cmd := exec.Command(e.binPath, "serve",
+		"--no-integration-sync",
 		"--addr", e.addr,
 		"--db", e.dbPath,
 		"--claude-bin", e.fakeClaude,

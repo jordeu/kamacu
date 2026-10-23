@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -208,5 +209,77 @@ func TestCompletionExitRequiresWinningOption(t *testing.T) {
 		if (stopped != "") != tc.exit {
 			t.Fatalf("%s: losing answer stopped session", tc.key)
 		}
+	}
+}
+
+func TestInboxTerminalDelivery(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint("fail=", fail), func(t *testing.T) {
+			db, err := store.Open(filepath.Join(t.TempDir(), "inbox.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if err := store.Migrate(db); err != nil {
+				t.Fatal(err)
+			}
+			svc := inbox.New(db, func(string) inbox.Session { return inbox.Session{Global: true, Live: true} })
+			defer svc.Close()
+			who := inbox.Identity{SessionID: "scratch"}
+			calls := 0
+			stopped := 0
+			mux := http.NewServeMux()
+			inboxRoutes(mux, svc, "token", func(q inbox.Question) error {
+				calls++
+				if q.SessionID != who.SessionID || q.Answer == "" {
+					t.Fatalf("wrong recipient/payload: %+v", q)
+				}
+				if strings.Contains(feedbackMessage(q), "\x1b") {
+					t.Fatal("unescaped terminal control")
+				}
+				if fail {
+					return fmt.Errorf("PTY closed")
+				}
+				return nil
+			}, func(string) { stopped++ })
+			for _, action := range []string{"text", "seen", "exit"} {
+				created, err := svc.Complete(context.Background(), who, inbox.Create{Key: action, Summary: "Done", Context: "Tests passed"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := inboxAnswer{Revision: created.Question.Revision, OptionID: action}
+				if action == "text" {
+					body.OptionID = ""
+					body.Answer = "line one\n\x1b[201~line two"
+				}
+				raw, _ := json.Marshal(body)
+				before := calls
+				for attempt := 0; attempt < 2; attempt++ {
+					w := httptest.NewRecorder()
+					mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/inbox/"+created.Question.ID+"/answer", bytes.NewReader(raw)))
+					want := 200
+					if fail && action != "exit" && attempt == 0 {
+						want = 502
+					}
+					if w.Code != want {
+						t.Fatalf("%s attempt %d: %d %s", action, attempt, w.Code, w.Body.String())
+					}
+				}
+				expected := before + 1
+				if action == "exit" {
+					expected = before
+				}
+				if calls != expected {
+					t.Fatalf("%s: delivery calls=%d want=%d", action, calls, expected)
+				}
+				page, err := svc.List(context.Background(), &who, false, 0)
+				if err != nil || page.Items[0].Status != "answered" {
+					t.Fatalf("answer not durable: %+v %v", page, err)
+				}
+			}
+			if stopped == 0 {
+				t.Fatal("exit did not stop session")
+			}
+		})
 	}
 }

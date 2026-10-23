@@ -8,12 +8,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const inboxInstructions = `When you finish the requested work and are waiting for further input, ALWAYS call report_completion with a summary of what changed, verification, and remaining limitations, even when you have no question. Poll for a reply using the feedback protocol. A text reply (empty reason) is the next prompt, even if its words match a button label. Button actions have reason=seen or reason=exit. On Seen, acknowledge and end your turn without more work or another completion message. Seen and exit session is handled by Kamacu; do not do more work. When feedback is needed for a Kamacu task or Scratchpad (KAMACU_TASK_ID=0), FIRST display the question and all answer options as ordinary terminal text (number the options), with enough context to decide; do NOT use a blocking native question dialog. THEN call ask_feedback with the same question and option labels, a self-contained task summary, and decision context. The task and session are supplied by Kamacu. After creation is confirmed, wait_for_feedback repeatedly (up to 20 seconds per call). Process new terminal messages between polls. Do not continue other work while waiting. A user may answer in the inbox or terminal. BEFORE acting on a terminal answer, call resolve_feedback with the question ID and revision; the first answer recorded by Kamacu wins, so use the returned answer on a conflict. A clarification is not an answer: clarify in chat and keep polling. Polling is a heartbeat: after 5 minutes without a poll, or when the session stops, the question is archived unanswered. Poll cancellation does not withdraw it. An expired question stays archived until explicitly reopened; only reopen if the answer is still needed. Dismissed questions may only be reopened on the user's explicit instruction (user_requested=true), never automatically. Expired/dismissed means no answer, never approval. On resume, use list_feedback to recover questions for this task, explicitly reopen an unanswered question to take ownership, and use its new revision. Acknowledge an inbox answer with acknowledge_feedback before acting. Only one pending question is allowed per session; existing_pending means use the returned question rather than create another. If the question or context changed, create a new question after the previous one is terminal. Never claim a question was archived until the tool confirms it.`
+const inboxInstructions = `When work is complete, display a summary and call report_completion with changes, verification and limitations. When feedback is needed, first display the question and numbered options in the terminal, then call ask_feedback with the same question and self-contained decision context. After either tool confirms a pending message, end your turn. Do not poll or keep a tool call open: Kamacu injects inbox answers directly into the originating terminal. A delivered message includes question_id and revision; call acknowledge_feedback before acting and use the returned answer. A text answer with empty reason is the next instruction. For reason=seen, end the turn without further work or another completion. Kamacu handles reason=exit by stopping the session. For a user answer typed directly in the terminal, call resolve_feedback first; the first recorded answer wins. Clarification is not an answer. Pending questions remain open while the session is alive. A stopped session archives pending questions unanswered. On resume or delivery failure, use list_feedback to recover durable answers and acknowledge them. Reopen unanswered questions only if still needed; dismissed questions require explicit user instruction and user_requested=true. Only one question may be pending per session; existing_pending means use that question. Dismissal or expiration never implies approval.`
 
 func registerInboxTools(s *mcp.Server, b *bridge) {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -44,20 +43,14 @@ func registerInboxTools(s *mcp.Server, b *bridge) {
 					return nil, fmt.Errorf("missing feedback argument %q", key)
 				}
 			}
-			copyBridge := *b
-			// Ordinary bridge calls fail fast after 10s. Feedback waits are bounded
-			// at 20s server-side, with cancellation propagated through the SDK ctx.
-			client := *b.client
-			client.Timeout = 25 * time.Second
-			copyBridge.client = &client
 			body := req.Params.Arguments
 			if len(body) == 0 || string(body) == "null" {
 				body = json.RawMessage(`{}`)
 			}
-			return copyBridge.call(ctx, http.MethodPost, "/api/agent-feedback/"+action, bytes.NewReader(body))
+			return b.call(ctx, http.MethodPost, "/api/agent-feedback/"+action, bytes.NewReader(body))
 		}))
 	}
-	add("report_completion", "complete", "Required whenever requested work is complete and you are waiting for further input, even without a question. Provide a concise summary and Markdown details of changes, verification and limitations. Kamacu supplies Seen and Seen and exit session actions; free text is the next prompt. Use the usual wait/resolve/acknowledge protocol. On Seen, acknowledge then end your turn without reposting. Exit is handled by Kamacu.", map[string]any{
+	add("report_completion", "complete", "Required whenever requested work is complete and you are waiting for further input, even without a question. Provide a concise summary and Markdown details of changes, verification and limitations. Kamacu supplies Seen and Seen and exit session actions; free text is the next prompt. End your turn after posting; Kamacu injects replies into the terminal. Acknowledge injected answers before acting. On Seen, acknowledge then end your turn without reposting. Exit is handled by Kamacu.", map[string]any{
 		"request_key": str("Unique key for this completed work; reuse on retries"),
 		"summary":     str("Summary of completed work (max 4000 bytes)"),
 		"context":     str("Markdown details: changes, verification and remaining limitations (max 32000 bytes)"),
@@ -69,7 +62,6 @@ func registerInboxTools(s *mcp.Server, b *bridge) {
 		"question":    str("The specific decision the user needs to make (max 4000 bytes)"),
 		"options":     map[string]any{"type": "array", "maxItems": 10, "items": map[string]any{"type": "object", "properties": map[string]any{"id": str("Stable unique option ID"), "label": str("Simple answer label")}, "required": []string{"id", "label"}, "additionalProperties": false}},
 	}, "request_key", "summary", "context", "question")
-	add("wait_for_feedback", "wait", "Wait up to 20 seconds for a feedback answer; renews the 5-minute heartbeat once per call. Returns pending, answered, dismissed, or expired. Process terminal input before polling again. Cancelled waits leave the question intact; expired questions are NOT reopened by polling.", map[string]any{"question_id": id, "wait_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 20}}, "question_id")
 	props := common()
 	props["answer"] = str("User's terminal answer; report before acting. Do not treat a request for clarification as an answer.")
 	props["option_id"] = str("Alternatively the selected option ID; do not also supply answer")
@@ -78,7 +70,7 @@ func registerInboxTools(s *mcp.Server, b *bridge) {
 	props["user_requested"] = map[string]any{"type": "boolean", "description": "Set true ONLY when the user explicitly instructed reopening a dismissed question"}
 	add("reopen_feedback", "reopen", "Explicitly reopen an unanswered question still needed by this task; transfers ownership to this session and returns a new revision. Dismissed questions require explicit user instruction. Answered questions cannot reopen.", props, "question_id", "revision")
 	add("acknowledge_feedback", "acknowledge", "Confirm that the agent received the archived question result. Acknowledge inbox answers before acting; pending questions cannot be acknowledged.", common(), "question_id", "revision")
-	add("list_feedback", "list", "Recover feedback questions for the current task or Scratchpad on resume, newest first, 10 per page. Does NOT renew heartbeats or reopen anything; use wait_for_feedback for a pending owned question.", map[string]any{"offset": map[string]any{"type": "integer", "minimum": 0}})
+	add("list_feedback", "list", "Recover feedback questions for the current task or Scratchpad on resume, newest first, 10 per page. Does not reopen anything. For a pending owned question, end your turn and await terminal delivery.", map[string]any{"offset": map[string]any{"type": "integer", "minimum": 0}})
 }
 
 func feedbackIdentityFromEnv() (int64, string) {
