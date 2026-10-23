@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
 
 export interface FeedbackQuestion {
+  kind?: "question" | "completion";
   id: string;
   task_id: number;
   project_id: number;
@@ -52,6 +53,11 @@ export function feedbackOutcomeMessage(result: FeedbackResult) {
   if (result.outcome === "already_resolved") {
     if (result.question.status === "answered") return `This question was already answered: ${result.question.answer}`;
     return "This question is no longer waiting for an answer. You can find it in Archived.";
+  }
+  if (result.question.kind === "completion" && result.question.status === "answered") {
+    if (result.question.reason === "exit") return "Completion seen. Agent session is closing.";
+    if (result.question.reason === "seen") return "Marked as seen. Agent session stays open.";
+    return "Next prompt sent.";
   }
   return result.question.status === "dismissed" ? "Question dismissed." : "Answer sent. The question has been archived.";
 }

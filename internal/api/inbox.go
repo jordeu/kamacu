@@ -15,10 +15,14 @@ import (
 type inboxHandlers struct {
 	service *inbox.Service
 	token   string
+	stop    func(string)
 }
 
-func InboxRoutes(mux *http.ServeMux, service *inbox.Service, token string) {
-	h := &inboxHandlers{service, token}
+func InboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, stop ...func(string)) {
+	h := &inboxHandlers{service: service, token: token}
+	if len(stop) > 0 {
+		h.stop = stop[0]
+	}
 	mux.HandleFunc("GET /api/inbox", h.list)
 	mux.HandleFunc("POST /api/inbox/{id}/answer", h.answer)
 	mux.HandleFunc("POST /api/inbox/{id}/dismiss", h.dismiss)
@@ -95,7 +99,14 @@ func (h *inboxHandlers) answer(w http.ResponseWriter, r *http.Request) {
 		inboxError(w, err)
 		return
 	}
+	// Only the winning explicit exit option can stop the originating session.
+	h.stopCompleted(out)
 	writeJSON(w, 200, out)
+}
+func (h *inboxHandlers) stopCompleted(out inbox.Result) {
+	if h.stop != nil && out.Outcome != "stale_revision" && out.Question.Kind == "completion" && out.Question.Status == "answered" && out.Question.Reason == "exit" {
+		h.stop(out.Question.SessionID)
+	}
 }
 func (h *inboxHandlers) dismiss(w http.ResponseWriter, r *http.Request) {
 	var body inboxAnswer
@@ -135,6 +146,8 @@ func (h *inboxHandlers) agent(w http.ResponseWriter, r *http.Request) {
 	var out any
 	var err error
 	switch r.PathValue("action") {
+	case "complete":
+		out, err = h.service.Complete(r.Context(), who, body.Create)
 	case "ask":
 		out, err = h.service.Create(r.Context(), who, body.Create)
 	case "wait":
@@ -149,6 +162,9 @@ func (h *inboxHandlers) agent(w http.ResponseWriter, r *http.Request) {
 		out, err = h.service.Wait(r.Context(), who, body.QuestionID, time.Duration(seconds)*time.Second)
 	case "resolve":
 		out, err = h.service.Answer(r.Context(), &who, body.QuestionID, body.Revision, body.Answer, body.OptionID)
+		if err == nil {
+			h.stopCompleted(out.(inbox.Result))
+		}
 	case "reopen":
 		out, err = h.service.Reopen(r.Context(), who, body.QuestionID, body.Revision, body.UserRequested)
 	case "acknowledge":

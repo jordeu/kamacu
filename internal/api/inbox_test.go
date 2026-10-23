@@ -164,3 +164,49 @@ func TestInboxBrowser(t *testing.T) {
 		t.Log(string(output))
 	}
 }
+
+func TestCompletionExitRequiresWinningOption(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "completion.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	svc := inbox.New(db, func(id string) inbox.Session { return inbox.Session{Global: true, Live: id == "scratch"} })
+	defer svc.Close()
+	stopped := ""
+	mux := http.NewServeMux()
+	InboxRoutes(mux, svc, "token", func(id string) { stopped = id })
+	for _, tc := range []struct {
+		key, answer, option string
+		exit                bool
+	}{
+		{"text", inbox.CompletionExit, "", false},
+		{"seen", "", "seen", false},
+		{"exit", "", "exit", true},
+	} {
+		r, err := svc.Complete(context.Background(), inbox.Identity{TaskID: 0, SessionID: "scratch"}, inbox.Create{Key: tc.key, Summary: "Finished", Context: "Verified"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := func(answer, option string) {
+			raw, _ := json.Marshal(map[string]any{"revision": r.Question.Revision, "answer": answer, "option_id": option})
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/inbox/"+r.Question.ID+"/answer", bytes.NewReader(raw)))
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		}
+		call(tc.answer, tc.option)
+		if (stopped != "") != tc.exit {
+			t.Fatalf("%s: stopped %q", tc.key, stopped)
+		}
+		// A losing exit submission cannot override text or Seen.
+		call("", "exit")
+		if (stopped != "") != tc.exit {
+			t.Fatalf("%s: losing answer stopped session", tc.key)
+		}
+	}
+}

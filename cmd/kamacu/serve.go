@@ -348,7 +348,11 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 	go inboxService.Run(ctx)
-	api.InboxRoutes(mux, inboxService, hookToken)
+	api.InboxRoutes(mux, inboxService, hookToken, func(id string) {
+		if sess, ok := mgr.Get(id); ok {
+			go sess.Stop()
+		}
+	})
 	integrationManager, err := integration.Default()
 	if err != nil {
 		slog.Warn("agent integration unavailable", "error", err)

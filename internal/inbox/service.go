@@ -43,6 +43,7 @@ type Option struct {
 	Label string `json:"label"`
 }
 type Question struct {
+	Kind           string   `json:"kind"`
 	ID             string   `json:"id"`
 	TaskID         int64    `json:"task_id"`
 	ProjectID      int64    `json:"project_id"`
@@ -123,12 +124,12 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var opts string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt)
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
@@ -252,7 +253,20 @@ func validate(c Create) error {
 	}
 	return nil
 }
+
+const CompletionSeen = "Seen"
+const CompletionExit = "Seen and exit session"
+
+// Complete uses the same durable answer protocol, with server-defined actions.
+func (s *Service) Complete(ctx context.Context, who Identity, c Create) (Result, error) {
+	c.Question = "Work completed"
+	c.Options = []Option{{ID: "seen", Label: CompletionSeen}, {ID: "exit", Label: CompletionExit}}
+	return s.create(ctx, who, c, "completion")
+}
 func (s *Service) Create(ctx context.Context, who Identity, c Create) (Result, error) {
+	return s.create(ctx, who, c, "question")
+}
+func (s *Service) create(ctx context.Context, who Identity, c Create, kind string) (Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.valid(who); err != nil {
@@ -284,7 +298,7 @@ func (s *Service) Create(ctx context.Context, who Identity, c Create) (Result, e
 	opts, _ := json.Marshal(c.Options)
 	id := uuid.NewString()
 	now := s.now().UnixMilli()
-	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now)
+	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind)
 	if err != nil {
 		return Result{}, err
 	}
@@ -393,7 +407,15 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 		source = "session"
 		ack = s.now().UnixMilli()
 	}
-	err = s.transition(ctx, id, "answered_"+source, q.SessionID, `UPDATE inbox_questions SET status='answered',answer=?,answer_source=?,updated_at=?,acknowledged_at=? WHERE id=?`, answer, source, s.now().UnixMilli(), ack, id)
+	reason := ""
+	if q.Kind == "completion" {
+		reason = optionID
+		// Kamacu handles exit directly; no agent remains to acknowledge it.
+		if optionID == "exit" {
+			ack = s.now().UnixMilli()
+		}
+	}
+	err = s.transition(ctx, id, "answered_"+source, q.SessionID, `UPDATE inbox_questions SET status='answered',answer=?,answer_source=?,updated_at=?,acknowledged_at=?,reason=? WHERE id=?`, answer, source, s.now().UnixMilli(), ack, reason, id)
 	if err != nil {
 		return Result{}, err
 	}

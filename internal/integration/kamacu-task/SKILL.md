@@ -1,6 +1,6 @@
 ---
 name: kamacu-task
-description: Use before asking the user a question, requesting feedback or clarification, seeking approval, or offering decision choices. Also use when publishing an HTML preview. Checks the session environment for a Kamacu task or Scratchpad and routes feedback through its inbox when present; otherwise leaves normal interaction unchanged.
+description: Use before asking the user a question, requesting feedback or clarification, seeking approval, or offering decision choices. Also use whenever requested work is finished and the agent is waiting for more input, even without a question, and when publishing an HTML preview. Checks the session environment for a Kamacu task or Scratchpad and routes feedback through its inbox when present; otherwise leaves normal interaction unchanged.
 ---
 
 # Kamacu task feedback
@@ -10,6 +10,21 @@ description: Use before asking the user a question, requesting feedback or clari
 Read only `KAMACU_TASK_ID` and `KAMACU_SESSION_ID` from your environment. Do not dump the environment or print credentials. If either is missing, or the task ID is not a nonnegative integer, use your normal interaction workflow and stop applying this skill. `KAMACU_TASK_ID=0` identifies the global Scratchpad; positive IDs identify regular tasks. Never invent, change, or copy identity from another session.
 
 For a task or Scratchpad session, call Kamacu's `list_feedback` MCP tool to validate the session and recover existing questions. The MCP server supplies and validates identity; do not pass task or session IDs as tool arguments. If the server is unavailable or rejects the session, explain that the inbox is unavailable. Do not claim to have posted a question or silently proceed on an assumption. Normal chat remains available.
+
+## Report completed work
+
+Before ending a turn after completing the requested work, ALWAYS send a completion summary to the inbox, even if you have no question. Display the summary in the terminal, then call `report_completion` with a unique `request_key`, a concise `summary`, and Markdown `context` covering changes, verification and remaining limitations. Reuse the key only for retries of the same completed work.
+
+Kamacu supplies **Seen** and **Seen and exit session** buttons and a text field for the next prompt. Poll using `wait_for_feedback` and reconcile terminal replies with `resolve_feedback` just as for questions.
+
+- **Text reply:** acknowledge the inbox answer before treating it as the next prompt. Complete that work, then report its completion with a new key.
+- Distinguish buttons using the returned `reason` (`seen` or `exit`); a text reply has an empty reason, even if its words match a button label.
+- **Seen:** acknowledge, end your turn, and leave the session open. Do no more work and do not post another completion for the acknowledgment.
+- **Seen and exit session:** Kamacu stops the originating session and may offer to move the task to Done. Do no more work.
+- **Dismissed or expired:** stop polling; do not invent a next prompt or repost automatically.
+- **Existing pending question:** resolve it first; do not mistake it for confirmation that a completion was posted.
+
+If the tool is unavailable, explain that the completion could not be posted and provide the summary in the terminal.
 
 ## Ask with enough context to decide
 
