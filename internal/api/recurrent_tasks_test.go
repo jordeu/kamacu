@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"kamacu/internal/session"
 )
@@ -53,7 +54,18 @@ func TestRecurrentTaskLifecycle(t *testing.T) {
  issue_repo = 'owner/repo', issue_number = 123, issue_url = 'https://example.com/123', in_progress_at = 'old' WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
-	recurrentMove(t, srv, id, "done")
+	code, completed := doJSON(t, "POST", fmt.Sprintf("%s/api/tasks/%d/move", srv.URL, id), map[string]any{"status": "done"})
+	if code != http.StatusOK {
+		t.Fatalf("complete task: %d %v", code, completed)
+	}
+	completedAt, err := time.Parse(time.RFC3339Nano, completed["updated_at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedTitle := "Latest title - " + completedAt.Format("Jan 2")
+	if completed["title"] != completedTitle {
+		t.Fatalf("completed title = %v, want %q", completed["title"], completedTitle)
+	}
 	taskCount(t, db, pid, 2)
 	next, err := scanTask(db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE project_id = ? AND id != ?`, pid, id))
 	if err != nil {
@@ -98,7 +110,7 @@ func TestRecurrentTaskLifecycle(t *testing.T) {
 	if err := db.QueryRow(`SELECT title, codex_session_id FROM tasks WHERE id = ?`, id).Scan(&title, &conversation); err != nil {
 		t.Fatal(err)
 	}
-	if title != "Latest title" || conversation != "codex-conversation" {
+	if title != completedTitle || conversation != "codex-conversation" {
 		t.Fatal("prior instance changed")
 	}
 }
@@ -145,12 +157,12 @@ func TestRecurrentCompletionRollbackAndRetry(t *testing.T) {
 	if code != http.StatusInternalServerError {
 		t.Fatalf("failed completion: %d", code)
 	}
-	var status string
+	var status, title string
 	var spawned bool
-	if err := db.QueryRow(`SELECT status, recurrence_spawned FROM tasks WHERE id = ?`, id).Scan(&status, &spawned); err != nil {
+	if err := db.QueryRow(`SELECT status, title, recurrence_spawned FROM tasks WHERE id = ?`, id).Scan(&status, &title, &spawned); err != nil {
 		t.Fatal(err)
 	}
-	if status != "todo" || spawned {
+	if status != "todo" || title != "Atomic" || spawned {
 		t.Fatal("failed completion was not rolled back")
 	}
 	taskCount(t, db, pid, 1)

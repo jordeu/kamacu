@@ -549,7 +549,14 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET recurrence_spawned = 1 WHERE id = ?`, id); err != nil {
+		// Date only the completed instance, after copying its original title.
+		completedAt, err := time.Parse(time.RFC3339Nano, t.UpdatedAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		t.Title += " - " + completedAt.Format("Jan 2")
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET title = ?, recurrence_spawned = 1 WHERE id = ?`, t.Title, id); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
