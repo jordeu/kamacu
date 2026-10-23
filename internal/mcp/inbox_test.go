@@ -12,7 +12,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestFeedbackToolIdentityAndLongPollTransport(t *testing.T) {
+func TestFeedbackToolIdentityAndTransport(t *testing.T) {
 	paths := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Kamacu-Token") != "secret" || (r.Header.Get("X-Kamacu-Task-ID") != "42" && r.Header.Get("X-Kamacu-Task-ID") != "0") || r.Header.Get("X-Kamacu-Session-ID") != "session" {
@@ -23,13 +23,11 @@ func TestFeedbackToolIdentityAndLongPollTransport(t *testing.T) {
 			t.Errorf("invalid request body: %v", err)
 		}
 		paths <- r.URL.Path
-		// Longer than the ordinary client's timeout; inbox uses its own bound.
-		time.Sleep(40 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"outcome":"pending"}`))
 	}))
 	defer server.Close()
-	b := &bridge{base: server.URL, token: "secret", taskID: 42, sessionID: "session", client: &http.Client{Timeout: time.Millisecond}}
+	b := &bridge{base: server.URL, token: "secret", taskID: 42, sessionID: "session", client: &http.Client{Timeout: time.Second}}
 	ctx := context.Background()
 	a, z := sdk.NewInMemoryTransports()
 	srv := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "1"}, nil)
@@ -46,14 +44,19 @@ func TestFeedbackToolIdentityAndLongPollTransport(t *testing.T) {
 	}
 	defer cs.Close()
 	list, err := cs.ListTools(ctx, nil)
-	if err != nil || len(list.Tools) != 7 {
+	if err != nil || len(list.Tools) != 6 {
 		t.Fatalf("tools: %+v %v", list, err)
 	}
-	r, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "wait_for_feedback", Arguments: map[string]any{"question_id": "q", "wait_seconds": 1}})
+	for _, tool := range list.Tools {
+		if tool.Name == "wait_for_feedback" {
+			t.Fatal("polling tool still advertised")
+		}
+	}
+	r, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "acknowledge_feedback", Arguments: map[string]any{"question_id": "q", "revision": 1}})
 	if err != nil || r.IsError {
 		t.Fatalf("wait: %+v %v", r, err)
 	}
-	if path := <-paths; path != "/api/agent-feedback/wait" {
+	if path := <-paths; path != "/api/agent-feedback/acknowledge" {
 		t.Fatal(path)
 	}
 	badResult, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "ask_feedback", Arguments: map[string]any{"task_id": 99, "request_key": "k", "summary": "s", "context": "c", "question": "q"}})

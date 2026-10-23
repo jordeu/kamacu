@@ -1,6 +1,6 @@
 // Package inbox owns durable feedback questions. All state transitions are
-// serialized, including expiration and ownership transfers. Polls renew a lease
-// once on arrival; internal wakeups never masquerade as agent heartbeats.
+// serialized, including session exit and ownership transfers. Pending questions
+// remain live until their owning session stops; agent polling is not required.
 package inbox
 
 import (
@@ -16,8 +16,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-const Lease = 5 * time.Minute
 
 var (
 	ErrInvalid  = errors.New("invalid feedback request")
@@ -185,8 +183,6 @@ func (s *Service) reconcile(ctx context.Context) error {
 		reason := ""
 		if !s.lookup(sid).Live {
 			reason = "session_stopped"
-		} else if s.now().UnixMilli()-beat >= Lease.Milliseconds() {
-			reason = "heartbeat_expired"
 		}
 		if reason != "" {
 			expired = append(expired, stale{id, sid, reason})

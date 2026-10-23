@@ -894,17 +894,21 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	body, submit := wrapInputForWrite(req.Message)
-	if err := sess.WriteInput([]byte(body)); err != nil {
+	if err := sendTerminalMessage(sess, req.Message); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
+	}
+	body, submit := wrapInputForWrite(req.Message)
+	writeJSON(w, http.StatusOK, map[string]int{"bytes_written": len(body) + len(submit)})
+}
+
+func sendTerminalMessage(sess *session.Session, message string) error {
+	body, submit := wrapInputForWrite(message)
+	if err := sess.WriteInput([]byte(body)); err != nil {
+		return err
 	}
 	time.Sleep(100 * time.Millisecond)
-	if err := sess.WriteInput([]byte(submit)); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]int{"bytes_written": len(body) + len(submit)})
+	return sess.WriteInput([]byte(submit))
 }
 
 // wrapInputForWrite decomposes a request message into the ordered pair of

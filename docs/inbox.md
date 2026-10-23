@@ -18,12 +18,12 @@ Existing agents must be restarted to receive the new task identity. Scratchpad
 uses `KAMACU_TASK_ID=0`; the server verifies that its session is a live Scratchpad
 agent. Its messages show **Scratchpad** and an **Open Scratchpad** link to the
 originating terminal. Agents launched outside Kamacu cannot create inbox questions.
-Scratchpad questions share the same polling, expiry, answer and resume protocol.
+Scratchpad questions share the same delivery, expiry, answer and resume protocol.
 Built-in Claude, Codex, and OpenCode engines receive connection credentials;
 custom engines receive task/session identity but retain their existing credential
 configuration requirements.
 
-Agents first display the question and numbered options in the terminal, then send the same question to the inbox and poll for the answer.
+Agents first display the question and numbered options in the terminal, then send the same question to the inbox and end their turn. Kamacu delivers the answer directly into the originating terminal.
 
 The inbox starts with collapsed message rows; expand any row to review context and answer. Its icon sits next to Scratchpad in the bottom sessions bar, with a pending count visible even when the sidebar or sessions bar is collapsed.
 
@@ -33,10 +33,9 @@ The MCP server advertises workflow instructions and these tools:
 | --- | --- |
 | `report_completion` | Required when work is finished, even without a question. Supply `request_key`, `summary`, and Markdown `context` describing changes, verification, and limitations. |
 | `ask_feedback` | Create a question with `request_key`, `summary`, `context`, `question`, and optional `options: [{id, label}]`. Reuse the key when retrying the same request. |
-| `wait_for_feedback` | Poll by `question_id`, optionally holding the request for `wait_seconds` (0–20; default 20). Renews the heartbeat once on arrival. |
 | `resolve_feedback` | Report a terminal answer using `question_id`, `revision`, and either `answer` or `option_id`. Call before acting on the answer. |
 | `acknowledge_feedback` | Confirm receipt of an archived result using `question_id` and `revision`. Acknowledge inbox answers before acting. |
-| `list_feedback` | Recover questions for the current task, including archived questions and previous sessions. Ten per page; advance `offset` by 10 when `has_more` is true. Does not renew heartbeats. |
+| `list_feedback` | Recover questions for the current task, including archived questions and previous sessions. Ten per page; advance `offset` by 10 when `has_more` is true. |
 | `reopen_feedback` | Explicitly reopen an unanswered question using its ID and revision. A dismissed question additionally requires `user_requested: true`, only after the user asks to reopen it. |
 
 A typical interaction:
@@ -44,20 +43,17 @@ A typical interaction:
 1. Call `ask_feedback`, providing enough context to decide without opening the task.
    Present the same question as ordinary terminal text. Do not open a blocking
    native selection dialog.
-2. Keep calling `wait_for_feedback`, processing terminal messages between calls.
-   Do not do unrelated work while waiting. A request for clarification is not an
-   answer: explain in the terminal, then continue polling.
-3. If the inbox answers, acknowledge the returned result and proceed. If the user
-   answers in the terminal, call `resolve_feedback` first and use the returned
-   state/answer. Never assume a failed or timed-out submission was accepted.
-4. Stop polling when the result is terminal. Dismissed or expired means there is
-   no answer, never implicit approval.
+2. End the turn once the question is posted. Do not poll or hold a tool call open.
+3. An inbox answer arrives as a terminal prompt with the question ID and revision.
+   Call `acknowledge_feedback` before acting and use its returned answer. For an
+   answer typed directly in the terminal, call `resolve_feedback` first.
+4. Clarifications leave the question open. Dismissed or expired means there is no
+   answer, never implicit approval.
 
 The first answer recorded by Kamacu wins. `already_resolved` returns the current
 question and winning answer; `stale_revision` means the question was reopened
 since the submitted form/result was obtained. Review the current state rather
-than replaying stale input. Reads do not consume answers, so interrupted polls
-can be retried. One session can have only one pending question; `existing_pending`
+than replaying stale input. Reads do not consume answers, so saved answers can be recovered after a delivery failure. One session can have only one pending question; `existing_pending`
 returns it instead of creating a duplicate. Reusing a creation key returns the
 original record, even if it is archived.
 
@@ -65,32 +61,27 @@ original record, even if it is archived.
 
 Agents must call `report_completion` before ending a completed unit of work, even when they have no question. Messages show what changed, verification and remaining limitations. The inbox provides three paths:
 
-- **Send next prompt:** free text becomes the agent's next instruction through the normal polling and acknowledgment protocol.
+- **Send next prompt:** free text becomes the agent's next instruction through the terminal injection and acknowledgment protocol.
 - **Seen:** the agent acknowledges and ends its turn, leaving the session open without further work or another completion message.
 - **Seen and exit session:** Kamacu archives the message and stops its originating session. For eligible tasks, the existing dialog offers moving the task to Done.
 
-Completion messages use the same identity, retry keys, revisions, heartbeat and recovery rules as questions. Only an explicit exit option stops a session; free text containing the button label is still a next prompt. The result's `reason` is `seen` or `exit` for those actions, and empty for a text prompt. Dismissal and expiry never imply more work or permission to exit.
+Completion messages use the same identity, retry keys, revisions and recovery rules as questions. Only an explicit exit option stops a session; free text containing the button label is still a next prompt. The result's `reason` is `seen` or `exit` for those actions, and empty for a text prompt. Dismissal and expiry never imply more work or permission to exit.
 
 Existing installations receive the updated bundled skill through integration sync; restart agents to load the updated workflow and MCP tool list.
 
-## Heartbeat and recovery
+## Session lifetime and recovery
 
-- A question expires five minutes after creation or its most recent poll.
-- Expiration archives it as **Unanswered**. Polling an expired question returns
-  `expired` and does not reopen it.
-- A detected session exit archives pending questions immediately. A one-second
-  reconciliation sweep also handles stopped/missing sessions and lease expiry.
-- A live successor session on the same task may acknowledge a recovered answer.
-  The original owner and answer remain unchanged; the acknowledgment records the
-  receiving session in the event history.
-- Restart reconciliation archives pending questions whose owning session no longer
-  exists. Answered questions and acknowledgment state remain durable.
-- An explicit reopen starts a fresh heartbeat and increments the revision. A new
-  live session on the same task may take ownership; updates from the previous
-  session are rejected. Answered questions cannot be reopened.
-- Cancelling a poll leaves the question intact. Only an explicit user instruction
-  permits reopening a dismissed question; this instruction is enforced by the
-  agent workflow, not cryptographically verified by Kamacu.
+- Pending questions stay open while their originating agent session is alive.
+  They no longer require polling or expire after five minutes of silence.
+- Session exit archives pending questions as **Unanswered**. A reconciliation
+  sweep also handles missing sessions after restart.
+- Saved answers survive failed terminal delivery. The browser reports delivery
+  failures; open the terminal and ask the agent to recover using `list_feedback`.
+  Delivery is attempted once per accepted browser answer; repeating the HTTP
+  request does not inject a duplicate prompt.
+- A live successor on the same task can acknowledge recovered answers. Reopening
+  an unanswered question transfers ownership and increments its revision.
+- Reopening a dismissed question requires the user's explicit instruction.
 
 Question changes and lifecycle history are persisted in SQLite. Answering and
 archiving happen together; acknowledgment is tracked separately so the UI can
@@ -103,28 +94,21 @@ Questions allow up to 10 options. Maximum UTF-8 sizes: request key 200 bytes,
 summary and question 4,000 bytes each, context 32,000 bytes, option ID 100 bytes,
 option label 500 bytes, answer 16,000 bytes. The HTTP body limit is 96 KiB.
 
-Feedback long polls have a dedicated 25-second bridge timeout, rather than the
-ordinary bridge's 10-second timeout. Client tool timeouts must exceed the chosen
-wait duration. Terminal input may be queued until the poll finishes; terminal-side
-archiving depends on the agent reporting the answer. MCP elicitation support is
-not required.
+Answers use the existing bracketed-paste terminal transport followed by a separate
+Enter key. The payload is JSON-encoded so control characters in answers cannot
+break out of the paste. **Seen** also delivers a prompt to acknowledge and stop;
+**Seen and exit session** stops the session directly without injection.
+
+The legacy HTTP wait action remains available for older clients, but new MCP
+sessions no longer advertise `wait_for_feedback`. Restart agents after integration
+sync to load the new skill and tool list.
 
 ## Verification
 
-An isolated live MCP probe on 2026-10-22 asked each installed client to poll a tool
-that waited eight seconds, submitted a terminal answer during that wait, and
-verified a subsequent MCP call reported the same answer:
-
-| Client | Result |
-| --- | --- |
-| Claude Code 2.1.308 | Passed |
-| Codex CLI 0.163.0 | Passed |
-| OpenCode 1.18.35 | Passed |
-
-This checks the communication pattern, not a guarantee that every model will
-follow the workflow in every conversation. Unit/integration tests cover identity,
-concurrent answers, expiry, reopening, ownership transfer, dismissal, recovery,
-acknowledgment, and cancellation.
+Automated tests cover routing, duplicate suppression, delivery failures, durable
+answer recovery, and pending questions surviving without polls. Live CLI timing
+still needs checking with Claude, Codex, and OpenCode: an answer can arrive while
+an agent is finishing its previous turn, or while its prompt contains a draft.
 
 Browser acceptance uses a disposable database and the built frontend:
 

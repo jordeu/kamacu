@@ -49,6 +49,7 @@ type serveCmd struct {
 	claudeBin           string
 	devOrigins          []string
 	insecureAllowRemote bool
+	noIntegrationSync   bool
 }
 
 func (serveCmd) Name() string { return "serve" }
@@ -58,11 +59,12 @@ func (serveCmd) Synopsis() string {
 }
 
 func (serveCmd) Usage() string {
-	return `kamacu serve [--addr A] [--db D] [--claude-bin B] [--dev-origin H] [--insecure-allow-remote]
+	return `kamacu serve [--addr A] [--db D] [--claude-bin B] [--dev-origin H] [--insecure-allow-remote] [--no-integration-sync]
 `
 }
 
 func (c *serveCmd) SetFlags(f *flag.FlagSet) {
+	f.BoolVar(&c.noIntegrationSync, "no-integration-sync", false, "skip startup updates to user-level agent integrations (for disposable servers)")
 	f.StringVar(&c.addr, "addr", "127.0.0.1:7333", "listen address (localhost-only by design)")
 	f.StringVar(&c.db, "db", "~/.kamacu/kamacu.db", "path to SQLite database file")
 	f.StringVar(&c.claudeBin, "claude-bin", "", "path to the claude binary (default: resolve \"claude\" on PATH at spawn time)")
@@ -348,7 +350,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 	go inboxService.Run(ctx)
-	api.InboxRoutes(mux, inboxService, hookToken, func(id string) {
+	api.InboxTerminalRoutes(mux, inboxService, hookToken, mgr, func(id string) {
 		if sess, ok := mgr.Get(id); ok {
 			go sess.Stop()
 		}
@@ -357,8 +359,10 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	if err != nil {
 		slog.Warn("agent integration unavailable", "error", err)
 	} else {
-		if err := integrationManager.Sync(ctx); err != nil {
-			slog.Warn("agent integration needs attention", "error", err)
+		if !c.noIntegrationSync {
+			if err := integrationManager.Sync(ctx); err != nil {
+				slog.Warn("agent integration needs attention", "error", err)
+			}
 		}
 		api.IntegrationRoutes(mux, integrationManager)
 	}
