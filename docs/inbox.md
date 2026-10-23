@@ -1,6 +1,6 @@
 # Agent feedback inbox
 
-The global Inbox collects questions from task agents across all workspaces and the global Scratchpad. Each
+The global Inbox collects completion summaries and questions from task agents across all workspaces and the global Scratchpad. Each
 question includes its task summary, Markdown decision context, optional answer
 buttons, a free-text answer field, and an **Open task** link. The link selects the
 Agent tab and focuses the originating terminal if that session is still available.
@@ -31,6 +31,7 @@ The MCP server advertises workflow instructions and these tools:
 
 | Tool | Purpose |
 | --- | --- |
+| `report_completion` | Required when work is finished, even without a question. Supply `request_key`, `summary`, and Markdown `context` describing changes, verification, and limitations. |
 | `ask_feedback` | Create a question with `request_key`, `summary`, `context`, `question`, and optional `options: [{id, label}]`. Reuse the key when retrying the same request. |
 | `wait_for_feedback` | Poll by `question_id`, optionally holding the request for `wait_seconds` (0–20; default 20). Renews the heartbeat once on arrival. |
 | `resolve_feedback` | Report a terminal answer using `question_id`, `revision`, and either `answer` or `option_id`. Call before acting on the answer. |
@@ -59,6 +60,18 @@ than replaying stale input. Reads do not consume answers, so interrupted polls
 can be retried. One session can have only one pending question; `existing_pending`
 returns it instead of creating a duplicate. Reusing a creation key returns the
 original record, even if it is archived.
+
+## Completion summaries
+
+Agents must call `report_completion` before ending a completed unit of work, even when they have no question. Messages show what changed, verification and remaining limitations. The inbox provides three paths:
+
+- **Send next prompt:** free text becomes the agent's next instruction through the normal polling and acknowledgment protocol.
+- **Seen:** the agent acknowledges and ends its turn, leaving the session open without further work or another completion message.
+- **Seen and exit session:** Kamacu archives the message and stops its originating session. For eligible tasks, the existing dialog offers moving the task to Done.
+
+Completion messages use the same identity, retry keys, revisions, heartbeat and recovery rules as questions. Only an explicit exit option stops a session; free text containing the button label is still a next prompt. The result's `reason` is `seen` or `exit` for those actions, and empty for a text prompt. Dismissal and expiry never imply more work or permission to exit.
+
+Existing installations receive the updated bundled skill through integration sync; restart agents to load the updated workflow and MCP tool list.
 
 ## Heartbeat and recovery
 

@@ -46,7 +46,7 @@ func TestFeedbackToolIdentityAndLongPollTransport(t *testing.T) {
 	}
 	defer cs.Close()
 	list, err := cs.ListTools(ctx, nil)
-	if err != nil || len(list.Tools) != 6 {
+	if err != nil || len(list.Tools) != 7 {
 		t.Fatalf("tools: %+v %v", list, err)
 	}
 	r, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "wait_for_feedback", Arguments: map[string]any{"question_id": "q", "wait_seconds": 1}})

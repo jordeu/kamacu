@@ -427,3 +427,40 @@ func TestScratchpadFeedbackLifecycleAndIsolation(t *testing.T) {
 		t.Fatalf("task cascade: %v", err)
 	}
 }
+
+func TestCompletionActionsAndNextPrompt(t *testing.T) {
+	for _, tc := range []struct{ name, answer, option, reason string }{
+		{"next prompt", "Please add tests", "", ""},
+		{"seen", "", "seen", "seen"},
+		{"exit", "", "exit", "exit"},
+		{"text is not exit", CompletionExit, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, who := fixture(t)
+			ctx := context.Background()
+			r, err := s.Complete(ctx, who, Create{Key: "finished", Summary: "Implemented feature", Context: "Tests passed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			q := r.Question
+			if q.Kind != "completion" || len(q.Options) != 2 || q.Options[1].ID != "exit" {
+				t.Fatalf("completion: %+v", q)
+			}
+			retry, err := s.Complete(ctx, who, Create{Key: "finished", Summary: "Implemented feature", Context: "Tests passed"})
+			if err != nil || retry.Question.ID != q.ID {
+				t.Fatalf("retry: %+v %v", retry, err)
+			}
+			r, err = s.Answer(ctx, nil, q.ID, q.Revision, tc.answer, tc.option)
+			if err != nil || r.Question.Status != "answered" || r.Question.Reason != tc.reason {
+				t.Fatalf("answer: %+v %v", r, err)
+			}
+			r, err = s.Wait(ctx, who, q.ID, 0)
+			if err != nil || r.Question.Reason != tc.reason {
+				t.Fatalf("poll: %+v %v", r, err)
+			}
+			if _, err = s.Acknowledge(ctx, who, q.ID, q.Revision); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

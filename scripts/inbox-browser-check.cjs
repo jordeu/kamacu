@@ -38,13 +38,38 @@ const path = require('node:path');
       return route.fulfill({ json: data });
     });
     await page.goto(base + '/inbox');
-    await page.getByText('No questions waiting', { exact: true }).waitFor();
+    await page.getByText('No messages waiting', { exact: true }).waitFor();
     const directory = process.env.KAMACU_INBOX_SCREENSHOTS;
     if (directory) fs.mkdirSync(directory, {recursive:true});
     async function expand(question) {
       const row = page.locator('details').filter({has:page.locator(`#question-${question.id}`)}).first();
       await row.waitFor({state:'attached'});
       if (await row.getAttribute('open') === null) await row.locator(':scope > summary').click();
+    }
+    for (const mode of ['seen', 'text', 'exit']) {
+      const completed = await agent('complete', {request_key:'completed-'+mode, summary:'Updated inbox completion handling.', context:'Implemented completion summaries. **Verification:** lifecycle tests passed.'});
+      await page.reload();
+      await expand(completed.question);
+      await page.getByText('What was done', {exact:true}).waitFor();
+      if (directory && mode === 'seen') {
+        await page.screenshot({path:path.join(directory,'completion-desktop.png'),fullPage:true});
+        await page.setViewportSize({width:390,height:844});
+        await page.screenshot({path:path.join(directory,'completion-mobile.png'),fullPage:true});
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'completion mobile overflow');
+        await page.setViewportSize({width:1440,height:1000});
+      }
+      if (mode === 'text') {
+        await page.getByLabel('Send the next prompt', {exact:true}).fill('Please check accessibility next');
+        await page.getByRole('button',{name:'Send next prompt',exact:true}).click();
+        await page.getByText('Next prompt sent.', {exact:true}).waitFor();
+      } else {
+        await page.getByRole('button',{name:mode === 'seen' ? 'Seen' : 'Seen and exit session',exact:true}).click();
+        await page.getByText(mode === 'seen' ? 'Marked as seen. Agent session stays open.' : 'Completion seen. Agent session is closing.', {exact:true}).waitFor();
+      }
+      const result = await agent('wait', {question_id:completed.question.id,wait_seconds:0});
+      assert.equal(result.question.status,'answered');
+      assert.equal(result.question.reason,mode === 'text' ? '' : mode);
+      await agent('acknowledge',{question_id:completed.question.id,revision:1});
     }
     const first = await ask('options');
     const firstRow = page.locator('details').filter({has:page.locator(`#question-${first.question.id}`)}).first();
@@ -78,7 +103,7 @@ const path = require('node:path');
     if (directory) await page.screenshot({ path: path.join(directory, 'inbox-mobile.png'), fullPage: true });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'mobile page overflows horizontally');
     await page.getByRole('button', { name: 'Focus the agent terminal', exact: true }).click();
-    await page.getByText('No questions waiting', { exact: true }).waitFor();
+    await page.getByText('No messages waiting', { exact: true }).waitFor();
     let result = await agent('wait', { question_id: first.question.id, wait_seconds: 0 });
     assert.equal(result.question.answer, 'Focus the agent terminal');
     await page.getByRole('button', { name: 'Archived', exact: true }).click();
@@ -86,7 +111,7 @@ const path = require('node:path');
     await page.locator('article').getByText('Focus the agent terminal', { exact: true }).waitFor();
     await page.getByText('Awaiting agent', { exact: false }).waitFor();
     await agent('acknowledge', { question_id: first.question.id, revision: 1 });
-    await page.getByText('Received by agent', { exact: false }).waitFor();
+    await firstRow.getByText('Received by agent', { exact: false }).waitFor();
     await page.getByRole('button', { name: /^Pending/ }).click();
     const custom = await ask('custom');
     await expand(custom.question);
@@ -96,18 +121,18 @@ const path = require('node:path');
     await expand(custom.question);
     assert.equal(await page.getByLabel('Write your own answer').inputValue(),'Focus it only when the session is still running.','collapse lost answer draft');
     await page.getByRole('button', { name: 'Send answer', exact: true }).click();
-    await page.getByText('No questions waiting', { exact: true }).waitFor();
+    await page.getByText('No messages waiting', { exact: true }).waitFor();
     const dismissed = await ask('dismiss');
     await expand(dismissed.question);
     await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
-    await page.getByText('No questions waiting', { exact: true }).waitFor();
+    await page.getByText('No messages waiting', { exact: true }).waitFor();
     result = await agent('wait', { question_id: dismissed.question.id, wait_seconds: 0 });
     assert.equal(result.outcome, 'dismissed');
     const terminal = await ask('terminal');
     await expand(terminal.question);
     await page.getByRole('button', { name: 'Focus the agent terminal', exact: true }).waitFor();
     await agent('resolve', { question_id: terminal.question.id, revision: 1, answer: 'Answered in the terminal' });
-    await page.getByText('No questions waiting', { exact: true }).waitFor();
+    await page.getByText('No messages waiting', { exact: true }).waitFor();
     const navigation = await ask('navigation');
     await expand(navigation.question);
     await page.getByRole('link', { name: 'Open task: Improve task navigation' }).click();
