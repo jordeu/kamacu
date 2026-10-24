@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -862,5 +864,176 @@ func TestWorktreeCleanupCleanEligibleSinglePRStateCall(t *testing.T) {
 	}
 	if pr.calls != 1 {
 		t.Errorf("PRState calls = %d, want exactly 1 (WR-02: one gh call per PR row)", pr.calls)
+	}
+}
+
+// Explicit flags relax only their own gates, and never the task lifecycle gate.
+func TestWorktreeCleanupInclusionOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		unpushed, dirty bool
+		want            int
+	}{
+		{"defaults", false, false, 0},
+		{"unpushed and stash", true, false, 1},
+		{"dirty alone still blocked by stash", false, true, 0},
+		{"both", true, true, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, env := newCleanupPanelServer(t, &stubPRState{})
+			repo := gitRepoWithCommit(t)
+			pid := seedProjectFull(t, env.db, "Options", repo)
+			local := addLinkedWorktree(t, repo, "local")
+			seedTaskFull(t, env.db, pid, "Local", "done", "local", local, "manual", 0, "")
+			if err := os.WriteFile(filepath.Join(local, "local.txt"), []byte("local"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitIn(t, local, "add", ".")
+			gitIn(t, local, "commit", "-m", "local commit")
+			if err := os.WriteFile(filepath.Join(local, "local.txt"), []byte("stash"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitIn(t, local, "stash", "push", "-m", "keep stash")
+			dirty := addLinkedWorktree(t, repo, "dirty")
+			seedTaskFull(t, env.db, pid, "Dirty", "done", "dirty", dirty, "manual", 0, "")
+			if err := os.WriteFile(filepath.Join(dirty, "unsaved.txt"), []byte("unsaved"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			active := addLinkedWorktree(t, repo, "active")
+			seedTaskFull(t, env.db, pid, "Active", "in_progress", "active", active, "manual", 0, "")
+			opts := map[string]any{"include_unpushed": tc.unpushed, "include_dirty": tc.dirty}
+			status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible?dry_run=1", opts)
+			if status != 200 {
+				t.Fatalf("preview: %d %v", status, body)
+			}
+			items := body["items"].([]any)
+			if len(items) != tc.want {
+				t.Fatalf("preview count: %d, want %d", len(items), tc.want)
+			}
+			opts["targets"] = items
+			status, body = postJSON(t, srv.URL+"/api/worktrees/clean-eligible", opts)
+			if status != 200 || body["removed"] != float64(tc.want) {
+				t.Fatalf("execute: %d %v", status, body)
+			}
+			if _, err := os.Stat(active); err != nil {
+				t.Fatal("active task removed", err)
+			}
+			gitIn(t, repo, "show-ref", "--verify", "refs/heads/local")
+			gitIn(t, repo, "rev-parse", "--verify", "refs/stash")
+			if tc.want < 2 {
+				if _, err := os.Stat(dirty); err != nil {
+					t.Fatal("dirty worktree removed without consent", err)
+				}
+			}
+		})
+	}
+}
+
+func TestWorktreeCleanupStreamAndPreviewScope(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	seedProjectFull(t, env.db, "Stream", repo)
+	selected := addLinkedWorktree(t, repo, "selected")
+	other := addLinkedWorktree(t, repo, "other")
+	changed := addLinkedWorktree(t, repo, "changed")
+	if err := os.WriteFile(filepath.Join(changed, "new.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{"targets": []map[string]string{{"repo": repo, "path": selected}, {"repo": repo, "path": changed}}})
+	resp, err := http.Post(srv.URL+"/api/worktrees/clean-eligible?stream=1", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/x-ndjson" {
+		t.Fatalf("response: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	decoder := json.NewDecoder(resp.Body)
+	var records []cleanupProgress
+	for {
+		var p cleanupProgress
+		err := decoder.Decode(&p)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, p)
+	}
+	if len(records) != 3 {
+		t.Fatalf("records: %+v", records)
+	}
+	last := records[len(records)-1]
+	if !last.Done || last.Total != 2 || last.Completed != 2 || last.Removed != 1 || last.Skipped != 1 {
+		t.Fatalf("final: %+v", last)
+	}
+	if records[0].Done || records[0].Completed != 1 {
+		t.Fatalf("initial: %+v", records[0])
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatal("worktree outside preview removed", err)
+	}
+	if _, err := os.Stat(changed); err != nil {
+		t.Fatal("newly dirty worktree removed", err)
+	}
+	if _, err := os.Stat(selected); !os.IsNotExist(err) {
+		t.Fatal("selected worktree still exists", err)
+	}
+}
+
+func TestWorktreeCleanupDirtyOptInDoesNotRequireUnpushedOptIn(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	seedProjectFull(t, env.db, "Dirty only", repo)
+	dirty := addLinkedWorktree(t, repo, "dirty-only")
+	if err := os.WriteFile(filepath.Join(dirty, "unsaved.txt"), []byte("unsaved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible", map[string]any{"include_dirty": true})
+	if status != 200 || body["removed"] != float64(1) {
+		t.Fatalf("execute: %d %v", status, body)
+	}
+	if _, err := os.Stat(dirty); !os.IsNotExist(err) {
+		t.Fatal("dirty worktree not removed", err)
+	}
+	gitIn(t, repo, "show-ref", "--verify", "refs/heads/dirty-only")
+}
+
+func TestWorktreeCleanupDetachedRemainsProtectedWithOptIns(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	seedProjectFull(t, env.db, "Detached", repo)
+	detached := filepath.Join(t.TempDir(), "detached")
+	gitIn(t, repo, "worktree", "add", "--detach", detached)
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible", map[string]any{"include_unpushed": true, "include_dirty": true})
+	if status != 200 || body["removed"] != float64(0) {
+		t.Fatalf("execute: %d %v", status, body)
+	}
+	if _, err := os.Stat(detached); err != nil {
+		t.Fatal("detached worktree removed", err)
+	}
+}
+
+func TestWorktreeCleanupOptInsNeverStopRunningSession(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Running", repo)
+	path := addLinkedWorktree(t, repo, "running")
+	id := seedTaskFull(t, env.db, pid, "Running", "done", "running", path, "manual", 0, "")
+	if _, err := env.mgr.Spawn(session.SpawnOpts{Cwd: path, TaskID: id, Shell: "/bin/sh"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { env.mgr.StopAllForTask(id) })
+	status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible", map[string]any{"include_unpushed": true, "include_dirty": true})
+	if status != 200 || body["removed"] != float64(0) {
+		t.Fatalf("execute: %d %v", status, body)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("running worktree removed", err)
+	}
+	sessions := env.mgr.ListByTask(id)
+	if len(sessions) != 1 || sessions[0].Status != session.StatusRunning {
+		t.Fatalf("running session stopped: %+v", sessions)
 	}
 }

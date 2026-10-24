@@ -139,28 +139,82 @@ export function useRemoveWorktree() {
   });
 }
 
-/**
- * Bulk "clean eligible" (D-05). With { dryRun: true } it POSTs
- * clean-eligible?dry_run=1 → the preview set (server state unchanged); otherwise
- * it POSTs clean-eligible → the applied { removed, skipped } result. onSettled
- * invalidates ["worktrees"] on both paths — the dry-run leaves the list
- * unchanged server-side, but invalidating is harmless and keeps one code path.
- */
-export function useCleanEligible() {
-  const queryClient = useQueryClient();
-  return useMutation<
-    CleanEligiblePreview | CleanEligibleResult,
-    ApiError,
-    { dryRun: boolean }
-  >({
-    mutationFn: ({ dryRun }) =>
-      dryRun
-        ? post<CleanEligiblePreview>("/api/worktrees/clean-eligible?dry_run=1")
-        : post<CleanEligibleResult>("/api/worktrees/clean-eligible"),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["worktrees"] });
-    },
+export interface CleanupOptions {
+  include_unpushed: boolean;
+  include_dirty: boolean;
+}
+
+export interface CleanupProgress extends CleanEligibleResult {
+  total: number;
+  completed: number;
+  done: boolean;
+}
+
+export function useCleanEligiblePreview(
+  options: CleanupOptions,
+  enabled = true,
+) {
+  return useQuery<CleanEligiblePreview, ApiError>({
+    queryKey: ["worktree-cleanup-preview", options],
+    enabled,
+    refetchOnWindowFocus: false,
+    queryFn: () =>
+      post<CleanEligiblePreview>(
+        "/api/worktrees/clean-eligible?dry_run=1",
+        options,
+      ),
+    staleTime: 0,
   });
+}
+
+// Read server progress rather than estimating elapsed time. A missing final
+// record is an interrupted cleanup, never a successful completion.
+export async function cleanEligible(
+  options: CleanupOptions,
+  targets: EligibleItem[],
+  onProgress: (progress: CleanupProgress) => void,
+): Promise<CleanupProgress> {
+  const response = await fetch("/api/worktrees/clean-eligible?stream=1", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...options, targets }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(
+      body?.error ??
+        "Could not start cleanup. Refresh the preview and try again.",
+    );
+  }
+  if (!response.body)
+    throw new Error(
+      "Cleanup progress is unavailable. Refresh to check the worktrees.",
+    );
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  let last: CleanupProgress | undefined;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        last = JSON.parse(line) as CleanupProgress;
+        onProgress(last);
+      }
+      if (done) break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!last?.done)
+    throw new Error(
+      "Cleanup was interrupted. Some worktrees may have been removed. Refresh the preview to check what remains.",
+    );
+  return last;
 }
 
 /**
