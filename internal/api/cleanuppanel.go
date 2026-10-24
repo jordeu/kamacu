@@ -667,6 +667,7 @@ func (h *cleanupPanelHandlers) remove(w http.ResponseWriter, r *http.Request) {
 
 // eligibleItem is one entry in the bulk preview/execution set (23-04 contract).
 type eligibleItem struct {
+	worktree    enumWorktree
 	Repo        string `json:"repo"`
 	Path        string `json:"path"`
 	TaskID      int64  `json:"task_id"`
@@ -674,58 +675,126 @@ type eligibleItem struct {
 	Reason      string `json:"reason"` // "orphaned" | "done" | "pr_merged" | "pr_closed"
 }
 
-// cleanEligible recomputes the provably-safe set SERVER-SIDE (never trusts a
-// client list) and either previews it (dry_run) or removes it best-effort per
-// item. It NEVER forces (D-04/D-05): eligibility requires all four gates to
-// already pass, and each removal calls CleanupWorktreeGated with
-// stopSessions=false, force=false. A raced-tripped gate skips that item and
-// continues (unlike removeManaged's all-or-nothing).
-func (h *cleanupPanelHandlers) cleanEligible(w http.ResponseWriter, r *http.Request) {
-	dryRun := r.URL.Query().Get("dry_run") == "1"
+// cleanupOptions relaxes only explicitly selected gates. Sessions always block.
+type cleanupOptions struct {
+	IncludeUnpushed bool `json:"include_unpushed"`
+	IncludeDirty    bool `json:"include_dirty"`
+	// Targets limits execution to the preview the user confirmed. Nil preserves
+	// the original API behavior; an explicit empty list removes nothing.
+	Targets []eligibleItem `json:"targets"`
+}
 
+type cleanupProgress struct {
+	Total     int  `json:"total"`
+	Completed int  `json:"completed"`
+	Removed   int  `json:"removed"`
+	Skipped   int  `json:"skipped"`
+	Done      bool `json:"done"`
+}
+
+// cleanEligible previews or removes the freshly computed eligible set. Streaming
+// callers receive a progress record after each removal and an explicit final one.
+func (h *cleanupPanelHandlers) cleanEligible(w http.ResponseWriter, r *http.Request) {
+	var opts cleanupOptions
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&opts); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), enumTimeout)
 	defer cancel()
-
-	items := h.computeEligible(ctx)
-
-	if dryRun {
+	items, err := h.computeEligible(ctx, opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not scan worktrees. Refresh the preview and try again.")
+		return
+	}
+	if ctx.Err() != nil {
+		writeError(w, http.StatusGatewayTimeout, "Worktree scan timed out. Refresh the preview and try again.")
+		return
+	}
+	if r.URL.Query().Get("dry_run") == "1" {
 		if items == nil {
 			items = []eligibleItem{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 		return
 	}
-
-	// Execute: best-effort per item. NEVER force (stopSessions=false, force=false).
-	removed, skipped := 0, 0
-	for _, it := range items {
-		count := h.cleanupSessionCount(ctx, it.TaskID)
-		live := h.liveTmuxNames(ctx, it.TaskID)
-		ok, _, err := CleanupWorktreeGated(
-			ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
-			it.TaskID, it.Repo, it.Path, count, false /*stopSessions*/, false /*force*/)
-		if err != nil || !ok {
-			// A race re-tripped a gate, or a blocked shell — skip it, keep going.
-			skipped++
-			continue
+	if opts.Targets != nil {
+		selected := make(map[string]bool)
+		for _, it := range opts.Targets {
+			selected[it.Repo+"\x00"+it.Path] = true
 		}
-		removed++
+		filtered := make([]eligibleItem, 0)
+		for _, it := range items {
+			if selected[it.Repo+"\x00"+it.Path] {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"removed": removed, "skipped": skipped})
+	progress := cleanupProgress{Total: len(items)}
+	if opts.Targets != nil {
+		// Previewed items that became ineligible count as skipped.
+		progress.Total = len(opts.Targets)
+		progress.Skipped = progress.Total - len(items)
+		progress.Completed = progress.Skipped
+	}
+	streaming := r.URL.Query().Get("stream") == "1"
+	emit := func() bool {
+		if !streaming {
+			return true
+		}
+		if err := json.NewEncoder(w).Encode(progress); err != nil {
+			return false
+		}
+		return http.NewResponseController(w).Flush() == nil
+	}
+	if streaming {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		if !emit() {
+			return
+		}
+	}
+	for _, it := range items {
+		if ctx.Err() != nil {
+			return
+		}
+		// Recheck the opt-in gates immediately before removal, too.
+		if !h.passesAllGates(ctx, it.Repo, it.worktree, opts) {
+			progress.Skipped++
+		} else {
+			count := h.cleanupSessionCount(ctx, it.TaskID)
+			live := h.liveTmuxNames(ctx, it.TaskID)
+			ok, _, err := CleanupWorktreeGated(ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
+				it.TaskID, it.Repo, it.Path, count, false, opts.IncludeDirty)
+			if err != nil || !ok {
+				progress.Skipped++
+			} else {
+				progress.Removed++
+			}
+		}
+		progress.Completed++
+		if !emit() {
+			return
+		}
+	}
+	progress.Done = true
+	if streaming {
+		emit()
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"removed": progress.Removed, "skipped": progress.Skipped})
 }
 
-// computeEligible enumerates the same union as list() and returns the provably-
-// safe removal set (D-04): orphans OR referenced-done/pr-merged-or-closed, that
-// pass ALL four gates (no session, no dirty, no unpushed, no stash) and are not
-// a stale pointer. It reuses the shared enumerate() spine so the set never
-// drifts from what list() shows. A row whose unpushed base can't resolve is
-// conservatively INELIGIBLE (null unpushed fails the unpushed==0 test). NEVER
-// includes anything that would need force.
-func (h *cleanupPanelHandlers) computeEligible(ctx context.Context) []eligibleItem {
+// computeEligible uses the same enumeration as the list. Only completed or
+// orphaned worktrees qualify; options relax the dirty and unpushed/stash gates.
+// Unresolvable bases remain protected unless unpushed commits are opted in.
+func (h *cleanupPanelHandlers) computeEligible(ctx context.Context, opts cleanupOptions) ([]eligibleItem, error) {
 	groups, err := h.enumerate(ctx)
 	if err != nil {
 		slog.Warn("clean-eligible enumeration failed", "error", err)
-		return nil
+		return nil, err
 	}
 	var out []eligibleItem
 	for _, g := range groups {
@@ -745,8 +814,8 @@ func (h *cleanupPanelHandlers) computeEligible(ctx context.Context) []eligibleIt
 				continue
 			}
 
-			// All four gates must already pass (never force).
-			if !h.passesAllGates(ctx, g.meta.repoPath, ew) {
+			// Every gate not explicitly opted out of must pass.
+			if !h.passesAllGates(ctx, g.meta.repoPath, ew, opts) {
 				continue
 			}
 
@@ -755,6 +824,7 @@ func (h *cleanupPanelHandlers) computeEligible(ctx context.Context) []eligibleIt
 				taskID = ew.task.id
 			}
 			out = append(out, eligibleItem{
+				worktree:    ew,
 				Repo:        g.meta.repoPath,
 				Path:        ew.path,
 				TaskID:      taskID,
@@ -763,7 +833,7 @@ func (h *cleanupPanelHandlers) computeEligible(ctx context.Context) []eligibleIt
 			})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // eligibilityReason reports whether a REFERENCED/ORPHAN worktree qualifies for
@@ -798,27 +868,29 @@ func (h *cleanupPanelHandlers) eligibilityReason(ew enumWorktree) (string, bool)
 	return "", false
 }
 
-// passesAllGates reports whether a worktree passes ALL four conservative gates
-// (D-04): no live session, no dirty file, no unpushed commit, no stash. A row
-// whose unpushed base can't resolve is conservatively ineligible (null unpushed
-// fails unpushed==0). Any git error on a gate ⇒ ineligible (never remove on a
-// gate we couldn't compute).
-func (h *cleanupPanelHandlers) passesAllGates(ctx context.Context, repo string, ew enumWorktree) bool {
+// passesAllGates requires no sessions and checks every non-overridden gate.
+// Git errors remain ineligible. Detached HEADs cannot promise a surviving
+// branch, so they remain protected when unpushed commits are opted in.
+func (h *cleanupPanelHandlers) passesAllGates(ctx context.Context, repo string, ew enumWorktree, opts cleanupOptions) bool {
 	// Sessions.
 	if ew.task != nil && h.cleanupSessionCount(ctx, ew.task.id) > 0 {
 		return false
 	}
 	// Dirty.
 	dirty, derr := h.wt.DirtyCount(ctx, ew.path)
-	if derr != nil || dirty > 0 {
+	if derr != nil || (dirty > 0 && !opts.IncludeDirty) {
 		return false
 	}
 	// Stash.
 	stash, serr := h.wt.StashCount(ctx, ew.path)
-	if serr != nil || stash > 0 {
+	if serr != nil || (stash > 0 && !opts.IncludeUnpushed) {
 		return false
 	}
-	// Unpushed: base must resolve AND count must be 0 (unresolvable ⇒ ineligible).
+	// Explicit consent permits unpushed commits (the branch survives).
+	if opts.IncludeUnpushed {
+		return ew.entry != nil && !ew.entry.Detached && ew.entry.Branch != ""
+	}
+	// Without consent, an unresolved base is ineligible.
 	base, ok := h.unpushedBase(ctx, repo, ew)
 	if !ok {
 		return false
