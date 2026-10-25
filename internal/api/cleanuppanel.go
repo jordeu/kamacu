@@ -119,11 +119,12 @@ func (h *cleanupPanelHandlers) cleanupSessionCount(ctx context.Context, taskID i
 
 // projectMeta carries the fields the panel groups + labels rows by.
 type projectMeta struct {
-	id       int64
-	name     string
-	repoPath string
-	letters  string
-	color    string
+	id         int64
+	name       string
+	repoPath   string
+	githubRepo string
+	letters    string
+	color      string
 }
 
 // dbTask is the DB side of the union: one task row with a non-NULL
@@ -276,7 +277,7 @@ lookups:
 				lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
 				ew.prState, ew.prStateOK = h.resolvePRState(lookupCtx, repo, ew.task)
-			}(out[i].meta.repoPath, ew)
+			}(out[i].meta.githubRepo, ew)
 		}
 	}
 	wg.Wait()
@@ -291,7 +292,7 @@ lookups:
 // nil). Called exactly once per referenced row in enumerate so neither
 // eligibilityReason nor buildRow re-invokes h.pr.PRState.
 func (h *cleanupPanelHandlers) resolvePRState(ctx context.Context, repo string, t *dbTask) (string, bool) {
-	if t == nil || t.source != "github_pr" || t.prNumber <= 0 || h.pr == nil {
+	if t == nil || t.source != "github_pr" || t.prNumber <= 0 || h.pr == nil || strings.TrimSpace(repo) == "" {
 		return "", false
 	}
 	state, err := h.pr.PRState(ctx, repo, t.prNumber)
@@ -304,7 +305,7 @@ func (h *cleanupPanelHandlers) resolvePRState(ctx context.Context, repo string, 
 // loadProjects reads every project's grouping metadata (D-06 scan roots).
 func (h *cleanupPanelHandlers) loadProjects(ctx context.Context) ([]projectMeta, error) {
 	rows, err := h.db.QueryContext(ctx,
-		`SELECT id, name, repo_path, icon_letters, icon_color FROM projects ORDER BY name COLLATE NOCASE`)
+		`SELECT id, name, repo_path, COALESCE(github_repo, ''), icon_letters, icon_color FROM projects ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +313,7 @@ func (h *cleanupPanelHandlers) loadProjects(ctx context.Context) ([]projectMeta,
 	var out []projectMeta
 	for rows.Next() {
 		var p projectMeta
-		if err := rows.Scan(&p.id, &p.name, &p.repoPath, &p.letters, &p.color); err != nil {
+		if err := rows.Scan(&p.id, &p.name, &p.repoPath, &p.githubRepo, &p.letters, &p.color); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
