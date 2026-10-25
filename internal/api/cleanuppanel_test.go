@@ -27,6 +27,7 @@ import (
 // A missing key returns an error, exercising the degrade-don't-break path.
 type stubPRState struct {
 	mu     sync.Mutex
+	repo   string         // optional expected GitHub repository
 	states map[int]string // pr_number -> "OPEN"|"CLOSED"|"MERGED"
 	calls  int
 	err    error // when set, every call returns this error (gh absent)
@@ -36,6 +37,9 @@ func (s *stubPRState) PRState(ctx context.Context, repo string, n int) (string, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
+	if s.repo != "" && repo != s.repo {
+		return "", fmt.Errorf("invalid GitHub repository %q", repo)
+	}
 	if s.err != nil {
 		return "", s.err
 	}
@@ -74,7 +78,7 @@ func newCleanupPanelServer(t *testing.T, pr PRStateGetter) (*httptest.Server, *t
 func seedProjectFull(t *testing.T, db *sql.DB, name, repo string) int64 {
 	t.Helper()
 	res, err := db.Exec(
-		`INSERT INTO projects (name, repo_path, icon_letters, icon_color) VALUES (?, ?, ?, ?)`,
+		`INSERT INTO projects (name, repo_path, github_repo, icon_letters, icon_color) VALUES (?, ?, 'test/repo', ?, ?)`,
 		name, repo, "PR", "#123456")
 	if err != nil {
 		t.Fatalf("seed project: %v", err)
@@ -1058,5 +1062,46 @@ func TestDonePRVisibleWithoutGitHub(t *testing.T) {
 	}
 	if pr.calls != 0 {
 		t.Fatalf("Done task needs no PR lookup, got %d", pr.calls)
+	}
+}
+
+// gh -R accepts a GitHub repository, never the local checkout directory.
+func TestWorktreeCleanupPRUsesGitHubRepository(t *testing.T) {
+	for _, state := range []string{"MERGED", "CLOSED"} {
+		t.Run(state, func(t *testing.T) {
+			pr := &stubPRState{repo: "owner/project", states: map[int]string{42: state}}
+			srv, env := newCleanupPanelServer(t, pr)
+			repo := gitRepoWithCommit(t)
+			pid := seedProjectFull(t, env.db, "PR project", repo)
+			if _, err := env.db.Exec(`UPDATE projects SET github_repo='owner/project' WHERE id=?`, pid); err != nil {
+				t.Fatal(err)
+			}
+			path := addLinkedWorktree(t, repo, "pr-work")
+			seedTaskFull(t, env.db, pid, "Review", "in_review", "pr-work", path, "github_pr", 42, "main")
+			if err := os.WriteFile(filepath.Join(path, "local.txt"), []byte("keep"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			resp := getList(t, srv)
+			if resp.Counts.Total != 1 {
+				t.Fatalf("closed PR hidden: %+v", resp)
+			}
+			row := resp.Projects[0].Worktrees[0]
+			if row.Repo != repo || row.Dirty == 0 || row.PRState == nil {
+				t.Fatalf("incorrect row: %+v", row)
+			}
+			status, body := postJSON(t, srv.URL+"/api/worktrees/clean-eligible?dry_run=1", map[string]any{"include_dirty": true, "include_unpushed": true})
+			items, _ := body["items"].([]any)
+			if status != http.StatusOK || len(items) != 1 {
+				t.Fatalf("PR not available for bulk cleanup: status=%d body=%v", status, body)
+			}
+			status, body = postJSON(t, srv.URL+"/api/worktrees/clean-eligible", map[string]any{"include_dirty": true, "include_unpushed": true, "targets": items})
+			if status != http.StatusOK {
+				t.Fatalf("cleanup failed: status=%d body=%v", status, body)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("PR worktree still exists: %v", err)
+			}
+
+		})
 	}
 }
