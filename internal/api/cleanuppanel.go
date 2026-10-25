@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"kamacu/internal/session"
@@ -226,10 +227,7 @@ func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, er
 				ew := enumWorktree{
 					classification: "referenced", path: entry.Path, entry: entry, task: task,
 				}
-				// Resolve the PR state ONCE here (WR-02) so both the eligibility
-				// decision and the display field read the same value — exactly one
-				// gh call per referenced github_pr row across the whole request.
-				ew.prState, ew.prStateOK = h.resolvePRState(ctx, p.repoPath, task)
+				// Resolve PR state after collecting the complete local inventory.
 				grp.worktrees = append(grp.worktrees, ew)
 			} else {
 				grp.worktrees = append(grp.worktrees, enumWorktree{
@@ -255,6 +253,33 @@ func (h *cleanupPanelHandlers) enumerate(ctx context.Context) ([]enumProject, er
 
 		out = append(out, grp)
 	}
+	// Bound network concurrency and each lookup independently. One slow PR must
+	// not consume the inventory's entire deadline and hide completed work.
+	var wg sync.WaitGroup
+	limit := make(chan struct{}, 8)
+lookups:
+	for i := range out {
+		for j := range out[i].worktrees {
+			ew := &out[i].worktrees[j]
+			if ew.task == nil || ew.task.source != "github_pr" || ew.task.status == "done" {
+				continue
+			}
+			select {
+			case limit <- struct{}{}:
+			case <-ctx.Done():
+				break lookups
+			}
+			wg.Add(1)
+			go func(repo string, ew *enumWorktree) {
+				defer wg.Done()
+				defer func() { <-limit }()
+				lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				ew.prState, ew.prStateOK = h.resolvePRState(lookupCtx, repo, ew.task)
+			}(out[i].meta.repoPath, ew)
+		}
+	}
+	wg.Wait()
 	return out, nil
 }
 
@@ -849,6 +874,9 @@ func (h *cleanupPanelHandlers) eligibilityReason(ew enumWorktree) (string, bool)
 		return "orphaned", true
 	}
 	t := ew.task
+	if t.status == "done" {
+		return "done", true
+	}
 	if t.source == "github_pr" && t.prNumber > 0 {
 		if !ew.prStateOK {
 			return "", false // unresolved ⇒ not eligible, never forced
@@ -861,9 +889,6 @@ func (h *cleanupPanelHandlers) eligibilityReason(ew enumWorktree) (string, bool)
 		default:
 			return "", false
 		}
-	}
-	if t.status == "done" {
-		return "done", true
 	}
 	return "", false
 }
