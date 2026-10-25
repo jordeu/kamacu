@@ -18,7 +18,7 @@
 //     or the transcript (the session package holds no DB and Stop() touches only
 //     the process), so the agent keeps its normal resumable ghost — fully
 //     reversible. This is automatic; the reaper adds no extra code for it.
-//   - D-87: the reaper NEVER touches worktrees — it only calls StopAllForTask.
+//   - Worktree cleanup runs separately, with conservative preservation gates.
 //
 // There is no graceful-shutdown machinery in the app (process death is the
 // stop), so the goroutine needs no shutdown channel beyond the context it is
@@ -113,13 +113,14 @@ func NewWithPR(db *sql.DB, mgr *session.Manager, wt *worktree.Service, tmuxClien
 	}
 }
 
-// Run drives reapOnce (and, when wired, reconcilePRsOnce) on the ticker until
+// Run drives session expiry, Done worktree cleanup, and PR reconciliation until
 // ctx is cancelled (or, in practice, until the process dies — there is no
 // graceful shutdown). It runs once immediately at start so a restart promptly
 // reaps tasks that were already long-Done and reconciles already-merged PRs,
 // rather than waiting a full tick.
 func (r *Reaper) Run(ctx context.Context) {
 	r.reapOnce(ctx)
+	r.cleanupDoneOnce(ctx)
 	r.reconcilePRsOnce(ctx)
 	ticker := time.NewTicker(r.tick)
 	defer ticker.Stop()
@@ -129,6 +130,7 @@ func (r *Reaper) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			r.reapOnce(ctx)
+			r.cleanupDoneOnce(ctx)
 			r.reconcilePRsOnce(ctx)
 		}
 	}
@@ -411,4 +413,68 @@ func (r *Reaper) extraLiveTmux(ctx context.Context, taskID int64) int {
 		}
 	}
 	return count
+}
+
+// cleanupDoneOnce reclaims completed task worktrees independently of PR state
+// and the session TTL. Unsafe or unverifiable trees remain in the cleanup UI.
+func (r *Reaper) cleanupDoneOnce(ctx context.Context) {
+	if r.wt == nil || r.sessionMgr == nil {
+		return
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT t.id, t.worktree_path, p.repo_path FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.status='done' AND t.worktree_path IS NOT NULL`)
+	if err != nil {
+		slog.Warn("reaper: listing Done worktrees", "error", err)
+		return
+	}
+	type task struct {
+		id         int64
+		path, repo string
+	}
+	var tasks []task
+	for rows.Next() {
+		var t task
+		if err := rows.Scan(&t.id, &t.path, &t.repo); err != nil {
+			rows.Close()
+			return
+		}
+		tasks = append(tasks, t)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return
+	}
+	for _, t := range tasks {
+		checkCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		func() {
+			defer cancel()
+			skip := func(reason string) { slog.Info("reaper: skip Done cleanup", "task", t.id, "reason", reason) }
+			if n, err := r.wt.DirtyCount(checkCtx, t.path); err != nil || n > 0 {
+				skip("dirty or unreadable worktree")
+				return
+			}
+			if n, err := r.wt.StashCount(checkCtx, t.path); err != nil || n > 0 {
+				skip("stash present or unreadable")
+				return
+			}
+			base, err := r.wt.ResolveBase(checkCtx, t.repo)
+			if err != nil {
+				skip("unresolved base")
+				return
+			}
+			if n, err := r.wt.UnpushedCount(checkCtx, t.path, base); err != nil || n > 0 {
+				skip("local commits or unverifiable history")
+				return
+			}
+			count := r.runningSessions(t.id) + r.extraLiveTmux(checkCtx, t.id)
+			removed, reason, err := api.CleanupWorktreeGated(checkCtx, r.db, r.wt, r.sessionMgr, r.tmuxClient, r.liveTmuxNames(checkCtx, t.id), t.id, t.repo, t.path, count, false, false)
+			if err != nil {
+				slog.Warn("reaper: Done worktree cleanup", "task", t.id, "error", err)
+			} else if !removed {
+				skip(reason)
+			} else {
+				slog.Info("reaped Done worktree", "task", t.id)
+			}
+		}()
+	}
 }

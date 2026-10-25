@@ -333,3 +333,45 @@ func TestReconcileManualNeverTouched(t *testing.T) {
 		t.Errorf("manual task row was deleted: count=%d", n)
 	}
 }
+
+func TestCleanupDoneWorktrees(t *testing.T) {
+	for _, state := range []string{"clean", "dirty", "local-commit"} {
+		dirty := state != "clean"
+		t.Run(state, func(t *testing.T) {
+			db := newReaperDB(t)
+			fx := makePRFixture(t, 42)
+			linkProjectRepo(t, db, fx.repoDir)
+			insertManualTask(t, db, 1, fx.wtPath)
+			if _, err := db.Exec(`UPDATE tasks SET status='done' WHERE id=1`); err != nil {
+				t.Fatal(err)
+			}
+			if dirty {
+				if err := os.WriteFile(filepath.Join(fx.wtPath, "local.txt"), []byte("keep"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if state == "local-commit" {
+				gitT(t, fx.wtPath, "add", "local.txt")
+				gitT(t, fx.wtPath, "commit", "-m", "unpublished work")
+			}
+			newReconciler(db, nil).cleanupDoneOnce(context.Background())
+			_, err := os.Stat(fx.wtPath)
+			if dirty && err != nil {
+				t.Fatalf("dirty tree removed: %v", err)
+			}
+			if !dirty && !os.IsNotExist(err) {
+				t.Fatalf("clean tree retained: %v", err)
+			}
+			if countTasks(t, db, 1) != 1 {
+				t.Fatal("Done task history deleted")
+			}
+			var path sql.NullString
+			if err := db.QueryRow(`SELECT worktree_path FROM tasks WHERE id=1`).Scan(&path); err != nil {
+				t.Fatal(err)
+			}
+			if path.Valid != dirty {
+				t.Fatalf("pointer valid=%v, dirty=%v", path.Valid, dirty)
+			}
+		})
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"kamacu/internal/session"
@@ -25,12 +26,15 @@ import (
 // panel called gh only for github_pr rows and never for a manual/orphan row.
 // A missing key returns an error, exercising the degrade-don't-break path.
 type stubPRState struct {
+	mu     sync.Mutex
 	states map[int]string // pr_number -> "OPEN"|"CLOSED"|"MERGED"
 	calls  int
 	err    error // when set, every call returns this error (gh absent)
 }
 
 func (s *stubPRState) PRState(ctx context.Context, repo string, n int) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	if s.err != nil {
 		return "", s.err
@@ -1035,5 +1039,24 @@ func TestWorktreeCleanupOptInsNeverStopRunningSession(t *testing.T) {
 	sessions := env.mgr.ListByTask(id)
 	if len(sessions) != 1 || sessions[0].Status != session.StatusRunning {
 		t.Fatalf("running session stopped: %+v", sessions)
+	}
+}
+
+func TestDonePRVisibleWithoutGitHub(t *testing.T) {
+	pr := &stubPRState{err: fmt.Errorf("offline")}
+	srv, env := newCleanupPanelServer(t, pr)
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Done PR", repo)
+	path := addLinkedWorktree(t, repo, "done-pr")
+	seedTaskFull(t, env.db, pid, "Finished", "done", "done-pr", path, "github_pr", 42, "main")
+	if err := os.WriteFile(filepath.Join(path, "local.txt"), []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	resp := getList(t, srv)
+	if resp.Counts.Total != 1 || resp.Projects[0].Worktrees[0].Dirty == 0 {
+		t.Fatalf("blocked Done PR missing: %+v", resp)
+	}
+	if pr.calls != 0 {
+		t.Fatalf("Done task needs no PR lookup, got %d", pr.calls)
 	}
 }
