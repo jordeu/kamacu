@@ -142,9 +142,10 @@ func CleanupWorktreeGated(
 	for _, name := range liveTmux {
 		_ = tmuxClient.KillSession(cctx, name)
 	}
-	// Plain remove when clean; --force only when the user passed the dirty
-	// gate. The clean-but-submodules --force fallback lives inside Remove.
-	if rerr := wt.Remove(cctx, repo, path, dirty > 0); rerr != nil {
+	// Honor explicit force even for a clean worktree: Git locks require an
+	// override independent of dirty files. Automatic cleanup passes false.
+	// The clean-but-submodules single-force fallback lives inside Remove.
+	if rerr := wt.Remove(cctx, repo, path, force); rerr != nil {
 		// Extension A (D-01): a permission block is a DISTINCT outcome, not a
 		// generic error. Detect it BEFORE surfacing the raw error and NEVER retry
 		// --force (Pitfall 1). Returns reason=="blocked" + a *BlockedError the

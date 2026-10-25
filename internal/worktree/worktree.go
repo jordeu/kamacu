@@ -607,7 +607,8 @@ func (s *Service) Remove(ctx context.Context, repo, wt string, force bool) error
 	defer s.mu.Unlock()
 	args := []string{"worktree", "remove"}
 	if force {
-		args = append(args, "--force")
+		// Git requires two force flags to override an explicit worktree lock.
+		args = append(args, "--force", "--force")
 	}
 	args = append(args, wt)
 	if _, err := gitRun(ctx, repo, args...); err != nil {
@@ -620,6 +621,9 @@ func (s *Service) Remove(ctx context.Context, repo, wt string, force bool) error
 			}
 		}
 		if err != nil {
+			if strings.Contains(err.Error(), "locked working tree") {
+				return fmt.Errorf("Git has locked this worktree to prevent removal. If no worktree creation or maintenance is running, use Remove in Worktree cleanup to force removal, or run git worktree unlock on this path and retry. Git details: %w", err)
+			}
 			return err
 		}
 	}

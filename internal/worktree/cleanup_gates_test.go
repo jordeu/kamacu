@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,4 +82,26 @@ func TestStashCount(t *testing.T) {
 	if n < 1 {
 		t.Errorf("StashCount after stashing a change = %d, want >= 1 (gate c)", n)
 	}
+}
+
+func TestRemoveLockedWorktreeRequiresExplicitForce(t *testing.T) {
+	ctx := context.Background()
+	repo := makeRepo(t)
+	svc := NewService(t.TempDir())
+	path, branch := makeWorktree(t, svc, repo, "locked", 16)
+	gitCmd(t, repo, "worktree", "lock", "--reason", "initializing", path)
+	err := svc.Remove(ctx, repo, path, false)
+	if err == nil || !strings.Contains(err.Error(), "git worktree unlock") || !strings.Contains(err.Error(), "initializing") {
+		t.Fatalf("expected actionable lock error, got %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("non-force removal changed worktree: %v", err)
+	}
+	if err := svc.Remove(ctx, repo, path, true); err != nil {
+		t.Fatalf("force remove locked tree: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("worktree remains: %v", err)
+	}
+	gitCmd(t, repo, "rev-parse", "--verify", "refs/heads/"+branch)
 }

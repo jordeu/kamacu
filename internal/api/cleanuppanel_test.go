@@ -1105,3 +1105,28 @@ func TestWorktreeCleanupPRUsesGitHubRepository(t *testing.T) {
 		})
 	}
 }
+
+func TestWorktreeCleanupRemoveLockedCleanWorktree(t *testing.T) {
+	srv, env := newCleanupPanelServer(t, &stubPRState{})
+	repo := gitRepoWithCommit(t)
+	pid := seedProjectFull(t, env.db, "Locked", repo)
+	path := addLinkedWorktree(t, repo, "locked-clean")
+	id := seedTaskFull(t, env.db, pid, "Finished", "done", "locked-clean", path, "manual", 0, "")
+	gitIn(t, repo, "worktree", "lock", "--reason", "initializing", path)
+	status, body := postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{"repo": repo, "path": path, "force": false})
+	if status != http.StatusInternalServerError {
+		t.Fatalf("expected lock error: %d %v", status, body)
+	}
+	status, body = postJSON(t, srv.URL+"/api/worktrees/remove", map[string]any{"repo": repo, "path": path, "force": true, "stop_sessions": true})
+	if status != http.StatusNoContent {
+		t.Fatalf("force remove failed: %d %v", status, body)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("worktree remains: %v", err)
+	}
+	_, wp := taskColsFor(t, env.db, id)
+	if wp != "" {
+		t.Fatalf("worktree pointer remains: %q", wp)
+	}
+	gitIn(t, repo, "rev-parse", "--verify", "refs/heads/locked-clean")
+}
