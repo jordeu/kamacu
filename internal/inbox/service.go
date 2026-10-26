@@ -232,8 +232,8 @@ func (s *Service) watch(sid string) {
 	}()
 }
 func validate(c Create) error {
-	if strings.TrimSpace(c.Abstract) == "" || !utf8.ValidString(c.Abstract) || utf8.RuneCountInString(c.Abstract) > 180 {
-		return fmt.Errorf("%w: abstract is required and must be at most 180 characters", ErrInvalid)
+	if strings.TrimSpace(c.Abstract) == "" || !utf8.ValidString(c.Abstract) || utf8.RuneCountInString(c.Abstract) > 480 {
+		return fmt.Errorf("%w: abstract is required and must be at most 480 characters", ErrInvalid)
 	}
 	for _, field := range []struct {
 		v string
@@ -256,13 +256,12 @@ func validate(c Create) error {
 	return nil
 }
 
-const CompletionSeen = "Seen"
-const CompletionExit = "Seen and exit session"
+const CompletionExit = "OK, exit session"
 
 // Complete uses the same durable answer protocol, with server-defined actions.
 func (s *Service) Complete(ctx context.Context, who Identity, c Create) (Result, error) {
 	c.Question = "Work completed"
-	c.Options = []Option{{ID: "seen", Label: CompletionSeen}, {ID: "exit", Label: CompletionExit}}
+	c.Options = []Option{{ID: "exit", Label: CompletionExit}}
 	return s.create(ctx, who, c, "completion")
 }
 func (s *Service) Create(ctx context.Context, who Identity, c Create) (Result, error) {

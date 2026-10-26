@@ -64,9 +64,9 @@ export function feedbackOutcomeMessage(result: FeedbackResult) {
     return "This question is no longer waiting for an answer. You can find it in Archived.";
   }
   if (result.question.kind === "completion" && result.question.status === "answered") {
-    if (result.question.reason === "exit") return "Completion seen. Agent session is closing.";
+    if (result.question.reason === "exit") return "Message archived. Agent session is closing.";
     if (result.question.reason === "seen") return "Marked as seen. Agent session stays open.";
     return "Next prompt sent.";
   }
-  return result.question.status === "dismissed" ? "Question dismissed." : "Answer sent. The question has been archived.";
+  return result.question.status === "dismissed" ? "Message dismissed and archived." : "Answer sent. The question has been archived.";
 }

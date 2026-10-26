@@ -2,7 +2,7 @@
 
 The global Inbox collects completion summaries and questions from task agents across all workspaces and the global Scratchpad. Each
 question includes its task summary, Markdown decision context, optional answer
-buttons, a free-text answer field, and an **Open task** link. The link selects the
+buttons, a free-text answer field on the full Inbox page, and an **Open task** button. Opening a pending message’s task archives it as dismissed without replying to the agent. The button selects the
 Agent tab and focuses the originating terminal if that session is still available.
 Answered, dismissed, and unanswered questions appear in Archived.
 
@@ -25,7 +25,7 @@ configuration requirements.
 
 Agents first display the question and numbered options in the terminal, then send the same question to the inbox and end their turn. Kamacu delivers the answer directly into the originating terminal.
 
-The inbox starts with collapsed message rows; expand any row to review context and answer. A global right sidebar shows an inbox icon and pending count when collapsed. Expand it to read compact messages, choose an option, write a reply, dismiss, or mark completed work as seen without leaving the current page. Its expanded state persists across navigation and reloads. Open full message expands that message on the full-width Inbox page. On narrow screens the expanded panel overlays content.
+The inbox starts with collapsed message rows; expand any row to review context and answer. A global right sidebar shows an inbox icon and pending count when collapsed. Pending messages highlight the collapsed icon and count. Expand it to read self-contained messages and the question, choose an option, open the task, or dismiss. There is no free-text field in the sidebar; question messages link to the full inbox for context and custom replies. Completion cards offer only Open task, OK, exit session, and Dismiss. Its expanded state persists across navigation and reloads. Full context / custom reply expands that question on the full-width Inbox page. On narrow screens the expanded panel overlays content.
 
 The MCP server advertises workflow instructions and these tools:
 
@@ -46,7 +46,7 @@ A typical interaction:
 2. End the turn once the question is posted. Do not poll or hold a tool call open.
 3. An inbox answer arrives as a terminal prompt with the question ID and revision.
    Call `acknowledge_feedback` before acting and use its returned answer. For an
-   answer typed directly in the terminal, call `resolve_feedback` first.
+   answer to pending feedback typed directly in the terminal, call `resolve_feedback` first. Explicit new instructions after dismissal are fresh requests and must not be resolved against the archive.
 4. Clarifications leave the question open. Dismissed or expired means there is no
    answer, never implicit approval.
 
@@ -59,13 +59,13 @@ original record, even if it is archived.
 
 ## Completion summaries
 
-Agents must call `report_completion` before ending a completed unit of work, even when they have no question. Messages show what changed, verification and remaining limitations. The inbox provides three paths:
+Agents must call `report_completion` before ending a completed unit of work, even when they have no question. Messages show what changed, verification and remaining limitations. The inbox provides three actions:
 
-- **Send next prompt:** free text becomes the agent's next instruction through the terminal injection and acknowledgment protocol.
-- **Seen:** the agent acknowledges and ends its turn, leaving the session open without further work or another completion message.
-- **Seen and exit session:** Kamacu archives the message and stops its originating session. For eligible tasks, the existing dialog offers moving the task to Done.
+- **Open task:** archives the message as dismissed and focuses its originating terminal, where the user can send another prompt.
+- **OK, exit session:** archives the message and stops its originating session. For eligible tasks, the existing dialog offers moving the task to Done.
+- **Dismiss:** archives without replying or stopping the session.
 
-Completion messages use the same identity, retry keys, revisions and recovery rules as questions. Only an explicit exit option stops a session; free text containing the button label is still a next prompt. The result's `reason` is `seen` or `exit` for those actions, and empty for a text prompt. Dismissal and expiry never imply more work or permission to exit.
+Completion messages use the same identity, retry keys, revisions and recovery rules as questions. Only an explicit exit option stops a session; free text containing the button label is still a next prompt. The result’s `reason` is `exit` for session exit, and empty for a text prompt. Legacy messages may still return `seen`. Dismissal and expiry never imply more work or permission to exit. An explicit new instruction typed in the terminal after dismissal (including Open task) is a fresh request. Agents must not resolve it against the archived message or treat an empty archived answer as overriding it; reopening still requires the user’s explicit request.
 
 Existing installations receive the updated bundled skill through integration sync; restart agents to load the updated workflow and MCP tool list.
 
@@ -96,8 +96,8 @@ option label 500 bytes, answer 16,000 bytes. The HTTP body limit is 96 KiB.
 
 Answers use the existing bracketed-paste terminal transport followed by a separate
 Enter key. The payload is JSON-encoded so control characters in answers cannot
-break out of the paste. **Seen** also delivers a prompt to acknowledge and stop;
-**Seen and exit session** stops the session directly without injection.
+break out of the paste. Legacy **Seen** delivers a prompt to acknowledge and stop;
+**OK, exit session** stops the session directly without injection.
 
 The legacy HTTP wait action remains available for older clients, but new MCP
 sessions no longer advertise `wait_for_feedback`. Restart agents after integration
@@ -125,4 +125,4 @@ Optionally set `KAMACU_BROWSER_EXECUTABLE` to an installed Chromium executable a
 
 Codex filters the environment of stdio MCP subprocesses. At launch, Kamacu inspects enabled local Kamacu MCP registrations and adds the four `KAMACU_*` variable names to their existing `env_vars` allowlist using process-local configuration overrides. Credentials remain in the environment; user configuration is not rewritten. Register the server as `kamacu` if you use a wrapper command. Discovery failures stop launch with a diagnostic instead of starting with broken inbox identity.
 
-New questions and completion reports require a self-contained plain-text `abstract` of at most 180 Unicode characters. The sidebar wraps this abstract and option labels; detailed summaries and context remain available in the full inbox. Existing messages receive a shortened summary during migration.
+New questions and completion reports require a self-contained plain-text `abstract` of at most 480 Unicode characters. The sidebar wraps this abstract and option labels; detailed summaries and context remain available in the full inbox. Existing messages retain their stored abstract. Abstracts should include concrete findings, tradeoffs and recommendations for decisions, or outcomes, verification and limitations for completed work, rather than repeat a title. Agents must display the same full summary and context in the terminal before posting to the inbox.

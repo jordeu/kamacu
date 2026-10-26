@@ -207,7 +207,6 @@ func TestCompletionExitRequiresWinningOption(t *testing.T) {
 		exit                bool
 	}{
 		{"text", inbox.CompletionExit, "", false},
-		{"seen", "", "seen", false},
 		{"exit", "", "exit", true},
 	} {
 		r, err := svc.Complete(context.Background(), inbox.Identity{TaskID: 0, SessionID: "scratch"}, inbox.Create{Key: tc.key, Abstract: "Compact message", Summary: "Finished", Context: "Verified"})
@@ -264,7 +263,7 @@ func TestInboxTerminalDelivery(t *testing.T) {
 				}
 				return nil
 			}, func(string) { stopped++ })
-			for _, action := range []string{"text", "seen", "exit"} {
+			for _, action := range []string{"text", "exit"} {
 				created, err := svc.Complete(context.Background(), who, inbox.Create{Key: action, Abstract: "Compact message", Summary: "Done", Context: "Tests passed"})
 				if err != nil {
 					t.Fatal(err)
