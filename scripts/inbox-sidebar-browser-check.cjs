@@ -67,19 +67,24 @@ const assert = require('node:assert/strict');
   await sidebar.getByRole('alert').waitFor();
   assert.equal(new URL(page.url()).pathname,'/settings');
   assert.equal(pending,true);
+  await sidebar.getByRole('button',{name:'Collapse inbox sidebar'}).waitFor();
   dismissMode='stale';
   await sidebar.getByRole('button',{name:'Open task',exact:true}).click();
   await sidebar.getByText('This question was reopened. Review its current version before answering.',{exact:true}).waitFor();
   assert.equal(new URL(page.url()).pathname,'/settings');
   assert.equal(pending,true);
+  await sidebar.getByRole('button',{name:'Collapse inbox sidebar'}).waitFor();
   // Opening the task must archive using dismiss, without sending an answer.
   dismissMode='accept';
   await sidebar.getByRole('button',{name:'Open task',exact:true}).click();
   await page.waitForURL('**/projects/1/tasks/1?feedback_session=s');
   assert.equal(pending,false);
+  await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).waitFor();
+  assert.equal(await page.evaluate(()=>localStorage.getItem('kamacu:inbox-collapsed')),'1');
   assert.equal(answer.option_id,undefined);
   completion=false;
   pending=true; await page.goto(process.argv[2]+'/settings');
+  await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).click();
   await sidebar.getByRole('link',{name:'Full context / custom reply',exact:true}).click();
   await page.locator('#message-sidebar-question[open]').waitFor();
   await page.getByRole('button',{name:'Archived',exact:true}).click();
@@ -112,8 +117,7 @@ const assert = require('node:assert/strict');
     assert.equal(new URL(page.url()).pathname,surface === 'sidebar' ? '/settings' : '/inbox');
     releaseArchive();
     await page.waitForURL('**/projects/1/tasks/1?feedback_session=s');
-    // Keep the sidebar closed for the full-page test.
-    if (surface === 'sidebar') await sidebar.getByRole('button',{name:'Collapse inbox sidebar'}).click();
+    await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).waitFor();
   }
   assert.deepEqual(errors,[]); console.log('Sidebar options, dismissal, completion actions, archive-on-open, persistence, full-context links, pagination, mobile layout and navigation after polling removes cards in both inbox views passed.');
  } finally {await browser.close();}
