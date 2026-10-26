@@ -435,7 +435,6 @@ func TestScratchpadFeedbackLifecycleAndIsolation(t *testing.T) {
 func TestCompletionActionsAndNextPrompt(t *testing.T) {
 	for _, tc := range []struct{ name, answer, option, reason string }{
 		{"next prompt", "Please add tests", "", ""},
-		{"seen", "", "seen", "seen"},
 		{"exit", "", "exit", "exit"},
 		{"text is not exit", CompletionExit, "", ""},
 	} {
@@ -447,7 +446,7 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			q := r.Question
-			if q.Kind != "completion" || len(q.Options) != 2 || q.Options[1].ID != "exit" {
+			if q.Kind != "completion" || len(q.Options) != 1 || q.Options[0].ID != "exit" {
 				t.Fatalf("completion: %+v", q)
 			}
 			retry, err := s.Complete(ctx, who, Create{Key: "finished", Abstract: "Compact message", Summary: "Implemented feature", Context: "Tests passed"})
@@ -470,12 +469,12 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 }
 
 func TestAbstractValidationAndPersistence(t *testing.T) {
-	for _, abstract := range []string{"", "   ", strings.Repeat("x", 181), strings.Repeat("界", 180)} {
+	for _, abstract := range []string{"", "   ", strings.Repeat("x", 181), strings.Repeat("x", 480), strings.Repeat("x", 481), strings.Repeat("界", 480), strings.Repeat("界", 481)} {
 		t.Run(fmt.Sprintf("length-%d", len(abstract)), func(t *testing.T) {
 			s, who := fixture(t)
 			c := Create{Key: "abstract", Abstract: abstract, Summary: "Summary", Context: "Context", Question: "Proceed?"}
 			r, err := s.Create(context.Background(), who, c)
-			if strings.TrimSpace(abstract) == "" || len([]rune(abstract)) > 180 {
+			if strings.TrimSpace(abstract) == "" || len([]rune(abstract)) > 480 {
 				if !errors.Is(err, ErrInvalid) {
 					t.Fatalf("expected invalid abstract, got %v", err)
 				}

@@ -46,30 +46,25 @@ const path = require('node:path');
       await row.waitFor({state:'attached'});
       if (await row.getAttribute('open') === null) await row.locator(':scope > summary').click();
     }
-    for (const mode of ['seen', 'text', 'exit']) {
+    for (const mode of ['dismiss', 'exit']) {
       const completed = await agent('complete', {request_key:'completed-'+mode, abstract: 'Compact inbox message.', summary:'Updated inbox completion handling.', context:'Implemented completion summaries. **Verification:** lifecycle tests passed.'});
       await page.reload();
       await expand(completed.question);
       await page.getByText('What was done', {exact:true}).waitFor();
-      if (directory && mode === 'seen') {
+      if (directory && mode === 'dismiss') {
         await page.screenshot({path:path.join(directory,'completion-desktop.png'),fullPage:true});
         await page.setViewportSize({width:390,height:844});
         await page.screenshot({path:path.join(directory,'completion-mobile.png'),fullPage:true});
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'completion mobile overflow');
         await page.setViewportSize({width:1440,height:1000});
       }
-      if (mode === 'text') {
-        await page.getByLabel('Send the next prompt', {exact:true}).fill('Please check accessibility next');
-        await page.getByRole('button',{name:'Send next prompt',exact:true}).click();
-        await page.getByText('Next prompt sent.', {exact:true}).waitFor();
-      } else {
-        await page.getByRole('button',{name:mode === 'seen' ? 'Seen' : 'Seen and exit session',exact:true}).click();
-        await page.getByText(mode === 'seen' ? 'Marked as seen. Agent session stays open.' : 'Completion seen. Agent session is closing.', {exact:true}).waitFor();
-      }
+      assert.equal(await page.getByLabel('Send the next prompt', {exact:true}).count(), 0);
+      assert.equal(await page.getByRole('button', {name:'Seen',exact:true}).count(), 0);
+      await page.getByRole('button',{name:mode === 'dismiss' ? 'Dismiss' : 'OK, exit session',exact:true}).click();
+      await page.getByText(mode === 'dismiss' ? 'Message dismissed and archived.' : 'Message archived. Agent session is closing.', {exact:true}).waitFor();
       const result = await agent('wait', {question_id:completed.question.id,wait_seconds:0});
-      assert.equal(result.question.status,'answered');
-      assert.equal(result.question.reason,mode === 'text' ? '' : mode);
-      await agent('acknowledge',{question_id:completed.question.id,revision:1});
+      assert.equal(result.question.status,mode === 'dismiss' ? 'dismissed' : 'answered');
+      assert.equal(result.question.reason,mode === 'dismiss' ? '' : 'exit');
     }
     const first = await ask('options');
     const firstRow = page.locator('details').filter({has:page.locator(`#question-${first.question.id}`)}).first();
@@ -77,24 +72,6 @@ const path = require('node:path');
     assert.equal(await firstRow.getAttribute('open'),null,'messages should start collapsed');
     assert.equal(await page.getByRole('button',{name:'Focus the agent terminal',exact:true}).isVisible(),false);
     if(directory) await page.screenshot({path:path.join(directory,'inbox-list-desktop.png'),fullPage:true});
-    const inboxLink=page.getByRole('button',{name:'Inbox, 1 questions waiting',exact:true});
-    await inboxLink.waitFor();
-    const globeBounds=await page.getByRole('button',{name:/Open the Scratchpad/}).boundingBox();
-    const inboxBounds=await inboxLink.boundingBox();
-    assert.ok(Math.abs(globeBounds.y-inboxBounds.y)<1 && inboxBounds.x>globeBounds.x,'Inbox must be beside Scratchpad');
-    await inboxLink.click();
-    await page.getByRole('button',{name:'Expand active sessions',exact:true}).waitFor();
-    await page.getByRole('button',{name:'Toggle sidebar',exact:true}).click();
-    await page.waitForTimeout(250);
-    const bounds=await inboxLink.boundingBox();
-    const icon=await inboxLink.locator('svg').boundingBox();
-    assert.ok(Math.abs((bounds.x+bounds.width/2)-(icon.x+icon.width/2))<1,'collapsed icon is not centered');
-    assert.equal(await inboxLink.getByText('1',{exact:true}).filter({visible:true}).count(),1,'collapsed count missing');
-    if(directory) await page.screenshot({path:path.join(directory,'inbox-rail-desktop.png'),fullPage:true});
-    await page.getByRole('button',{name:'Toggle sidebar',exact:true}).click();
-    await page.setViewportSize({width:390,height:844});
-    if(directory) await page.screenshot({path:path.join(directory,'inbox-list-mobile.png'),fullPage:true});
-    await page.setViewportSize({width:1440,height:1000});
     await expand(first.question);
     await page.getByRole('button', { name: 'Focus the agent terminal', exact: true }).waitFor();
     await page.getByText('Recommendation:', { exact: false }).waitFor();
@@ -135,7 +112,7 @@ const path = require('node:path');
     await page.getByText('No messages waiting', { exact: true }).waitFor();
     const navigation = await ask('navigation');
     await expand(navigation.question);
-    await page.getByRole('link', { name: 'Open task: Improve task navigation' }).click();
+    await page.getByRole('button', { name: 'Open task: Improve task navigation' }).click();
     await page.waitForURL('**/projects/1/tasks/1?feedback_session=browser-session');
     await page.getByRole('tab', { name: 'Agent', exact: true }).waitFor();
     assert.equal(await page.getByRole('tab', { name: 'Agent', exact: true }).getAttribute('aria-selected'), 'true');
@@ -145,11 +122,13 @@ const path = require('node:path');
     headers['X-Kamacu-Session-ID'] = 'scratch-session';
     const scratch = await ask('scratchpad');
     await page.goto(base + '/inbox');
+    await page.getByRole('button', {name:'Archived',exact:true}).click();
     await expand(navigation.question);
+    await page.getByRole('button', {name:/^Pending/}).click();
     await expand(scratch.question);
-    assert.equal(await page.locator('details[open]').count(),2,'rows must expand independently');
+    assert.equal(await page.locator('details[open]').count(),1);
     if(directory) await page.screenshot({path:path.join(directory,'inbox-multiple-mobile.png'),fullPage:true});
-    await page.getByRole('link', {name:'Open Scratchpad',exact:true}).click();
+    await page.getByRole('button', {name:'Open Scratchpad',exact:true}).click();
     await page.waitForURL('**/global?feedback_session=scratch-session');
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
     const html = '<h1>Scratchpad preview</h1><script>document.body.dataset.ready="yes"</script>';
@@ -171,9 +150,9 @@ const path = require('node:path');
     await page.getByRole('button',{name:'Remove artifact',exact:true}).click();
     await page.getByRole('tab',{name:'Scratchpad preview',exact:true}).waitFor({state:'detached'});
     assert.equal(await page.getByRole('tab',{name:'Agent',exact:true}).getAttribute('aria-selected'),'true');
-    await agent('resolve',{question_id:scratch.question.id,revision:1,answer:'Answered through Scratchpad terminal'});
+
     const scratchResult = await agent('wait',{question_id:scratch.question.id,wait_seconds:0});
-    assert.equal(scratchResult.question.status,'answered');
+    assert.equal(scratchResult.question.status,'dismissed');
     await page.goto(base + '/settings');
     await page.getByRole('button', {name: 'Enable Claude Code integration', exact: true}).click();
     await page.getByRole('button', {name: 'Repair Claude Code integration', exact: true}).waitFor();

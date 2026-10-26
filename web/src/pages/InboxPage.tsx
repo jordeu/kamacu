@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { ArrowUpRight, Inbox, ChevronRight, Check, Clock } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -18,14 +18,18 @@ function Context({ text }: { text: string }) {
 function Question({ question: q, onResult, expanded }: { question: FeedbackQuestion; expanded?: boolean; onResult: (message: string, exited?: FeedbackQuestion) => void }) {
   const [answer, setAnswer] = useState("");
   const action = useFeedbackAction();
+  const navigate = useNavigate();
   const completion = q.kind === "completion";
   const pending = q.status === "pending";
-  function submit(kind: "answer" | "dismiss", option_id?: string) {
-    action.mutate({ question: q, action: kind, option_id, answer: kind === "answer" && !option_id ? answer : undefined }, {
-      onSuccess: (result) => {
-        onResult(feedbackOutcomeMessage(result), result.outcome !== "stale_revision" && result.question.kind === "completion" && result.question.reason === "exit" ? result.question : undefined);
-      },
-    });
+  async function submit(kind: "answer" | "dismiss", option_id?: string, openTask = false) {
+    try {
+      // Await the mutation directly: polling can unmount this card before it finishes.
+      const result = await action.mutateAsync({ question: q, action: kind, option_id, answer: kind === "answer" && !option_id ? answer : undefined });
+      if (openTask && result.outcome !== "stale_revision" && result.question.status !== "pending") navigate(feedbackTaskURL(q));
+      onResult(feedbackOutcomeMessage(result), option_id === "exit" && result.outcome !== "stale_revision" && result.question.kind === "completion" && result.question.reason === "exit" ? result.question : undefined);
+    } catch {
+      // The mutation exposes its error to the inline alert.
+    }
   }
   const status = q.status === "unanswered" ? "Unanswered" : q.status === "dismissed" ? "Dismissed" : "Answered";
   const timestamp = pending ? q.created_at : q.updated_at;
@@ -55,9 +59,7 @@ function Question({ question: q, onResult, expanded }: { question: FeedbackQuest
         <p className="break-words text-sm text-muted-foreground">{q.task_id === 0 ? "Scratchpad" : `${q.project_name} / ${q.task_title}`}</p>
         <h2 id={`question-${q.id}`} className="mt-2 whitespace-pre-wrap break-words text-base font-medium">{q.question}</h2>
       </div>
-      <Button asChild variant="ghost" size="sm" className="shrink-0">
-        <Link to={feedbackTaskURL(q)} aria-label={q.task_id === 0 ? "Open Scratchpad" : `Open task: ${q.task_title}`}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"} <ArrowUpRight className="size-4" /></Link>
-      </Button>
+      <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => pending ? submit("dismiss", undefined, true) : navigate(feedbackTaskURL(q))} aria-label={q.task_id === 0 ? "Open Scratchpad" : `Open task: ${q.task_title}`}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"} <ArrowUpRight className="size-4" /></Button>
     </div>
     {pending ? <div className="mt-6 space-y-6">
       <div><h3 className="mb-2 text-sm font-medium text-muted-foreground">Task summary</h3><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{q.summary}</p></div>
@@ -79,16 +81,17 @@ function Question({ question: q, onResult, expanded }: { question: FeedbackQuest
     {pending && <div className="mt-6 space-y-4 border-t border-border pt-5">
       <p className="text-sm font-medium">{completion ? "What next?" : "Your answer"} {q.options.length > 0 && <span className="ml-1 font-normal text-muted-foreground">Choose an option to send it immediately.</span>}</p>
       {q.options.length > 0 && <div className="flex flex-wrap gap-2" role="group" aria-label="Choose an answer to send immediately">
-        {q.options.map((option) => <Button key={option.id} variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
+        {(completion ? q.options.filter((option) => option.id === "exit") : q.options).map((option) => <Button key={option.id} variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{completion ? "OK, exit session" : option.label}</Button>)}
       </div>}
-      <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) submit("answer"); }}>
-        <label htmlFor={`answer-${q.id}`} className="mb-2 block text-sm text-muted-foreground">{completion ? "Send the next prompt" : "Write your own answer"}</label>
+      {!completion && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) submit("answer"); }}>
+        <label htmlFor={`answer-${q.id}`} className="mb-2 block text-sm text-muted-foreground">Write your own answer</label>
         <Textarea id={`answer-${q.id}`} value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={16000} rows={3} disabled={action.isPending} className="resize-y" />
         <div className="mt-3 flex items-center justify-between gap-3">
           <Button type="button" variant="ghost" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>
-          <Button type="submit" disabled={action.isPending || !answer.trim()}>{action.isPending ? "Sending…" : completion ? "Send next prompt" : "Send answer"}</Button>
+          <Button type="submit" disabled={action.isPending || !answer.trim()}>{action.isPending ? "Sending…" : "Send answer"}</Button>
         </div>
-      </form>
+      </form>}
+      {completion && <Button variant="ghost" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>}
       {action.isError && <p role="alert" className="text-sm text-destructive">{action.error.message} Your answer has been kept. Try again.</p>}
     </div>}
     </div>

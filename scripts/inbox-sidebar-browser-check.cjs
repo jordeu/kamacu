@@ -6,9 +6,12 @@ const assert = require('node:assert/strict');
  try {
   const page = await browser.newPage({viewport:{width:1440,height:1000}});
   const errors = []; page.on('pageerror', e => errors.push(e.message));
-  let pending = true, answer, paginated = false;
-  const q = {id:'sidebar-question',task_id:1,project_id:1,task_title:'Improve navigation',project_name:'Kamacu',session_id:'s',abstract:'Should task links focus the agent terminal?',summary:'Detailed task summary',context:'Decision context',question:'Focus terminal when opening a task?',options:[{id:'yes',label:'Focus terminal'}],status:'pending',revision:1,created_at:Date.now(),updated_at:Date.now(),kind:'question'};
+  let pending = true, answer, paginated = false, completion = false, dismissMode = "accept";
+  let releaseArchive;
+  const q = {id:'sidebar-question',task_id:1,project_id:1,task_title:'Improve navigation',project_name:'Kamacu',session_id:'s',abstract:'Task links currently preserve the selected tab, adding a click before replying. I recommend focusing the originating agent terminal only when opening a task from an inbox message; ordinary task navigation would keep the current tab. Choose whether inbox task links should focus the terminal.',summary:'Detailed task summary',context:'Decision context',question:'Focus terminal when opening a task?',options:[{id:'yes',label:'Focus terminal'}],status:'pending',revision:1,created_at:Date.now(),updated_at:Date.now(),kind:'question'};
   await page.route('**/api/**', async route => {
+   q.kind = completion ? 'completion' : 'question';
+   q.options = completion ? [{id:'seen',label:'Seen'},{id:'exit',label:'Seen and exit session'}] : [{id:'yes',label:'Focus terminal'}];
    const path = new URL(route.request().url()).pathname;
    let data = [];
    if(path === '/api/inbox') {
@@ -17,7 +20,12 @@ const assert = require('node:assert/strict');
     data={items:params.get('view') === 'archived' || !pending ? [] : firstPage ? [{...q,id:'first-page',abstract:'Another message'}] : [q],pending_count:pending?paginated?51:1:0,has_more:firstPage};
    }
    else if(path === '/api/inbox/'+q.id) data={...q,status:pending?'pending':'answered'};
-   else if(path.endsWith('/answer')) { answer=route.request().postDataJSON(); pending=false; data={outcome:'accepted',question:{...q,status:'answered',answer:answer.option_id?'Focus terminal':answer.answer}}; }
+   else if(path.endsWith('/dismiss') && dismissMode === 'error') return route.fulfill({status:500,json:{error:'Could not archive'}});
+   else if(path.endsWith('/dismiss') && dismissMode === 'stale') data={outcome:'stale_revision',question:{...q,revision:2}};
+   else if(path.endsWith('/dismiss')) { answer=route.request().postDataJSON(); pending=false; if (dismissMode === 'hold') await new Promise(resolve => { releaseArchive = resolve; }); data={outcome:'accepted',question:{...q,status:'dismissed'}}; }
+   else if(path.endsWith('/answer')) { answer=route.request().postDataJSON(); pending=false; data={outcome:'accepted',question:{...q,status:'answered',reason:answer.option_id === 'exit' ? 'exit' : '',answer:answer.option_id?'Focus terminal':answer.answer}}; }
+   else if(path === '/api/tasks/1') data={id:1,project_id:1,title:'Improve navigation',description:'',status:'todo',position:0};
+   else if(path === '/api/projects/1') data={id:1,name:'Kamacu',workspace_id:1};
    else if(path === '/api/workspaces') data=[{id:1,name:'Work'}];
    else if(path === '/api/projects') data=[{id:1,name:'Kamacu',workspace_id:1,icon_letters:'KA',icon_color:'blue'}];
    else if(path === '/api/worktrees') data={counts:{total:0,orphaned:0},projects:[]};
@@ -27,31 +35,61 @@ const assert = require('node:assert/strict');
   await page.goto(process.argv[2]+'/settings');
   const sidebar = page.getByRole('complementary',{name:'Inbox sidebar'});
   await sidebar.getByLabel('1 pending messages',{exact:true}).waitFor();
+  assert.match(await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).getAttribute('class'), /ring-blue/);
   await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).click();
   await sidebar.getByText(q.abstract,{exact:true}).waitFor();
   await page.screenshot({path:'/tmp/inbox-sidebar-desktop.png'});
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:'/tmp/inbox-sidebar-question-mobile.png'});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.setViewportSize({width:1440,height:1000});
   await sidebar.getByRole('button',{name:'Focus terminal',exact:true}).click();
   await sidebar.getByRole('status').waitFor();
   assert.equal(new URL(page.url()).pathname,'/settings'); assert.equal(answer.option_id,'yes'); assert.equal(answer.revision,1);
   pending=true; await page.reload();
   await sidebar.getByText(q.abstract,{exact:true}).waitFor();
-  await sidebar.getByLabel('Write a reply').fill('Please keep the current tab');
-  await sidebar.getByRole('button',{name:'Collapse inbox sidebar'}).click();
-  await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).click();
-  assert.equal(await sidebar.getByLabel('Write a reply').inputValue(),'Please keep the current tab','collapse discarded draft');
-  await sidebar.getByRole('button',{name:'Send reply',exact:true}).click();
-  await sidebar.getByRole('status').waitFor(); assert.equal(answer.answer,'Please keep the current tab'); assert.equal(new URL(page.url()).pathname,'/settings');
-  pending=true; await page.reload();
-  await sidebar.getByRole('link',{name:'Open full message',exact:true}).click();
+  assert.equal(await sidebar.locator('textarea').count(),0);
+  await sidebar.getByRole('button',{name:'Dismiss',exact:true}).click();
+  await sidebar.getByText('Message dismissed and archived.',{exact:true}).waitFor();
+  pending=true; completion=true; await page.reload();
+  await sidebar.getByText(q.abstract,{exact:true}).waitFor();
+  assert.equal(await sidebar.getByRole('button',{name:'Seen',exact:true}).count(),0);
+  assert.equal(await sidebar.getByRole('link',{name:/Full context/}).count(),0);
+  assert.equal(await sidebar.locator('textarea').count(),0);
+  assert.equal(await sidebar.locator('article button').count(),3);
+  await page.screenshot({path:'/tmp/inbox-sidebar-completion.png'});
+  await sidebar.getByRole('button',{name:'OK, exit session',exact:true}).click();
+  await sidebar.getByText('Message archived. Agent session is closing.',{exact:true}).waitFor();
+  assert.equal(answer.option_id,'exit');
+  // Failed or stale archive attempts must leave the user on the current page.
+  pending=true; dismissMode='error'; await page.reload();
+  await sidebar.getByRole('button',{name:'Open task',exact:true}).click();
+  await sidebar.getByRole('alert').waitFor();
+  assert.equal(new URL(page.url()).pathname,'/settings');
+  assert.equal(pending,true);
+  dismissMode='stale';
+  await sidebar.getByRole('button',{name:'Open task',exact:true}).click();
+  await sidebar.getByText('This question was reopened. Review its current version before answering.',{exact:true}).waitFor();
+  assert.equal(new URL(page.url()).pathname,'/settings');
+  assert.equal(pending,true);
+  // Opening the task must archive using dismiss, without sending an answer.
+  dismissMode='accept';
+  await sidebar.getByRole('button',{name:'Open task',exact:true}).click();
+  await page.waitForURL('**/projects/1/tasks/1?feedback_session=s');
+  assert.equal(pending,false);
+  assert.equal(answer.option_id,undefined);
+  completion=false;
+  pending=true; await page.goto(process.argv[2]+'/settings');
+  await sidebar.getByRole('link',{name:'Full context / custom reply',exact:true}).click();
   await page.locator('#message-sidebar-question[open]').waitFor();
   await page.getByRole('button',{name:'Archived',exact:true}).click();
   await page.getByText('No archived questions',{exact:true}).waitFor();
-  await sidebar.getByRole('link',{name:'Open full message',exact:true}).click();
+  await sidebar.getByRole('link',{name:'Full context / custom reply',exact:true}).click();
   await page.locator('#message-sidebar-question[open]').waitFor();
   paginated=true;
   await page.reload();
   await sidebar.getByRole('button',{name:'Next',exact:true}).click();
-  await sidebar.getByRole('link',{name:'Open full message',exact:true}).click();
+  await sidebar.getByRole('link',{name:'Full context / custom reply',exact:true}).click();
   await page.locator('#message-sidebar-question[open]').waitFor();
   await page.reload();
   await page.locator('#message-sidebar-question[open]').waitFor();
@@ -60,6 +98,23 @@ const assert = require('node:assert/strict');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile overflow');
   await sidebar.getByRole('button',{name:'Collapse inbox sidebar'}).click();
   await page.reload(); await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).waitFor();
-  assert.deepEqual(errors,[]); console.log('Sidebar option reply, text reply, route preservation, draft preservation, persistence, archived-view and paginated full-message links, direct reload and mobile checks passed.');
+  // Hold the POST response until polling removes its card. Navigation must survive unmount.
+  completion=true; paginated=false;
+  for (const surface of ['sidebar', 'page']) {
+    pending=true; dismissMode='hold'; releaseArchive=undefined;
+    await page.goto(process.argv[2]+(surface === 'sidebar' ? '/settings' : '/inbox'));
+    const card = surface === 'sidebar' ? sidebar.locator('article') : page.locator('main details');
+    if (surface === 'sidebar') await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).click();
+    else await card.locator('summary').click();
+    await card.getByRole('button',{name:/^Open task/}).click();
+    await card.waitFor({state:'detached'});
+    assert.equal(typeof releaseArchive,'function','archive response should still be held');
+    assert.equal(new URL(page.url()).pathname,surface === 'sidebar' ? '/settings' : '/inbox');
+    releaseArchive();
+    await page.waitForURL('**/projects/1/tasks/1?feedback_session=s');
+    // Keep the sidebar closed for the full-page test.
+    if (surface === 'sidebar') await sidebar.getByRole('button',{name:'Collapse inbox sidebar'}).click();
+  }
+  assert.deepEqual(errors,[]); console.log('Sidebar options, dismissal, completion actions, archive-on-open, persistence, full-context links, pagination, mobile layout and navigation after polling removes cards in both inbox views passed.');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
