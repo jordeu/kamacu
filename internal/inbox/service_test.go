@@ -521,3 +521,81 @@ func TestGetMessageOutsideFirstPage(t *testing.T) {
 		t.Fatalf("get older archived message: %+v %v", got, err)
 	}
 }
+
+func TestPendingCompletionsSnapshot(t *testing.T) {
+	s, _ := fixture(t)
+	s.lookup = func(id string) Session {
+		if id == "scratch" {
+			return Session{Global: true, Live: true}
+		}
+		if id == "other" {
+			return Session{TaskID: 2, Live: true}
+		}
+		return Session{TaskID: 1, Live: true}
+	}
+	ctx := context.Background()
+	complete := func(who Identity) Question {
+		t.Helper()
+		result, err := s.Complete(ctx, who, Create{Key: "done", Abstract: "Done", Summary: "Done", Context: "Verified"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Question
+	}
+	for i := 0; i < 60; i++ {
+		complete(Identity{1, fmt.Sprintf("session-%d", i)})
+	}
+	create(t, s, Identity{1, "question"}, "question")
+	complete(Identity{2, "other"})
+	scratch := complete(Identity{0, "scratch"})
+	archived := complete(Identity{1, "archived"})
+	if _, err := s.Dismiss(ctx, archived.ID, archived.Revision); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.PendingCompletions(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot) != 60 {
+		t.Fatalf("got %d completions, want 60", len(snapshot))
+	}
+	for _, q := range snapshot {
+		if q.TaskID != 1 || q.Kind != "completion" || q.Status != "pending" {
+			t.Fatalf("unexpected message: %+v", q)
+		}
+	}
+	// Later reports are not part of the captured IDs. Reopening a captured
+	// completion must still be protected by the ordinary dismiss revision guard.
+	later := complete(Identity{1, "later"})
+	first := snapshot[0]
+	if _, err := s.Dismiss(ctx, first.ID, first.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Reopen(ctx, Identity{1, first.SessionID}, first.ID, first.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range snapshot {
+		if _, err := s.Dismiss(ctx, q.ID, q.Revision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remaining, err := s.PendingCompletions(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("want later and reopened reports, got %+v", remaining)
+	}
+	for _, q := range remaining {
+		if q.ID != later.ID && q.ID != first.ID {
+			t.Fatalf("unexpected remaining message: %+v", q)
+		}
+	}
+	global, err := s.PendingCompletions(ctx, 0)
+	if err != nil || len(global) != 1 || global[0].ID != scratch.ID {
+		t.Fatalf("scratchpad snapshot: %+v, %v", global, err)
+	}
+	if _, err := s.PendingCompletions(ctx, -1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid task: %v", err)
+	}
+}

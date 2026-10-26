@@ -1,3 +1,4 @@
+import { useDismissTaskCompletions } from "@/api/inbox";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
@@ -80,6 +81,7 @@ export default function TaskPage() {
 
   // Fetch by id so deep links work without the board cache (TASK-05).
   const { data: task, isPending, isError } = useTask(taskId);
+  const seenCompletions = useDismissTaskCompletions(task?.id);
   const artifactQuery = useArtifacts(taskId);
   const artifacts = artifactQuery.data;
   const renameArtifact = useRenameArtifact(taskId);
@@ -756,6 +758,9 @@ export default function TaskPage() {
         )}
       </div>
 
+      {seenCompletions.isError && <p role="alert" className="text-sm text-destructive">
+        Could not archive completion messages. <button className="underline" onClick={seenCompletions.retry}>Retry</button>
+      </p>}
       <RemoveArtifactDialog artifact={removingArtifact} taskId={taskId} onClose={() => setRemovingArtifact(null)} />
       {renameArtifact.error && <p role="alert" className="text-sm text-destructive">{renameArtifact.error.message}</p>}
       {artifactQuery.error && <p role="alert" className="text-sm text-destructive">Artifacts could not be refreshed. {artifactQuery.error.message}</p>}

@@ -57,6 +57,7 @@ func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliv
 		h.stop = stop[0]
 	}
 	mux.HandleFunc("GET /api/inbox", h.list)
+	mux.HandleFunc("GET /api/inbox/tasks/{taskID}/completions", h.pendingCompletions)
 	mux.HandleFunc("GET /api/inbox/{id}", h.get)
 	mux.HandleFunc("POST /api/inbox/{id}/answer", h.answer)
 	mux.HandleFunc("POST /api/inbox/{id}/dismiss", h.dismiss)
@@ -238,4 +239,18 @@ func (h *inboxHandlers) agent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+func (h *inboxHandlers) pendingCompletions(w http.ResponseWriter, r *http.Request) {
+	taskID, err := strconv.ParseInt(r.PathValue("taskID"), 10, 64)
+	if err != nil || taskID < 0 {
+		writeError(w, http.StatusBadRequest, "invalid task ID")
+		return
+	}
+	items, err := h.service.PendingCompletions(r.Context(), taskID)
+	if err != nil {
+		inboxError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }

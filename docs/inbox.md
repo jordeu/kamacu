@@ -65,6 +65,8 @@ Agents must call `report_completion` before ending a completed unit of work, eve
 - **OK, exit session:** archives the message and stops its originating session. For eligible tasks, the existing dialog offers moving the task to Done.
 - **Dismiss:** archives without replying or stopping the session.
 
+Opening a task view from any entry point (including a board card or direct URL), or opening Scratchpad, also dismisses that task’s pending completion messages. Questions remain pending, and completions arriving after the view is opened stay in the inbox until another visit.
+
 Completion messages use the same identity, retry keys, revisions and recovery rules as questions. Only an explicit exit option stops a session; free text containing the button label is still a next prompt. The result’s `reason` is `exit` for session exit, and empty for a text prompt. Legacy messages may still return `seen`. Dismissal and expiry never imply more work or permission to exit. An explicit new instruction typed in the terminal after dismissal (including Open task) is a fresh request. Agents must not resolve it against the archived message or treat an empty archived answer as overriding it; reopening still requires the user’s explicit request.
 
 Existing installations receive the updated bundled skill through integration sync; restart agents to load the updated workflow and MCP tool list.

@@ -1,3 +1,4 @@
+import { useDismissTaskCompletions } from "@/api/inbox";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router";
@@ -60,6 +61,7 @@ export default function GlobalTaskPage() {
   // The ONE config query (D-17) — shared with the Settings Scratchpad
   // section; root_exists and the live counts are server-derived per request.
   const { data: config, isPending, isError, refetch } = useGlobal();
+  const seenCompletions = useDismissTaskCompletions(config ? 0 : undefined);
 
   // Bash session lifecycle (task parity, scope-aware spellings) — the server
   // is tab truth (D-28).
@@ -496,6 +498,9 @@ export default function GlobalTaskPage() {
         {banner}
       </div>
 
+      {seenCompletions.isError && <p role="alert" className="text-sm text-destructive">
+        Could not archive completion messages. <button className="underline" onClick={seenCompletions.retry}>Retry</button>
+      </p>}
       <RemoveArtifactDialog artifact={removingArtifact} taskId={0} onClose={() => setRemovingArtifact(null)} />
       {renameArtifact.error && <p role="alert" className="text-sm text-destructive">{renameArtifact.error.message}</p>}
       {artifactQuery.error && <p role="alert" className="text-sm text-destructive">Artifacts could not be refreshed. {artifactQuery.error.message}</p>}
