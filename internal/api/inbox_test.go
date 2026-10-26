@@ -304,3 +304,52 @@ func TestInboxTerminalDelivery(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskCompletionSnapshotHTTP(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "snapshot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	svc := inbox.New(db, func(string) inbox.Session { return inbox.Session{Global: true, Live: true} })
+	defer svc.Close()
+	created, err := svc.Complete(context.Background(), inbox.Identity{SessionID: "scratch"}, inbox.Create{Key: "done", Abstract: "Done", Summary: "Done", Context: "Verified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	InboxRoutes(mux, svc, "token")
+	for _, tc := range []struct {
+		task          string
+		status, count int
+	}{
+		{"0", 200, 1}, {"1", 200, 0}, {"-1", 400, 0}, {"invalid", 400, 0},
+	} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/inbox/tasks/"+tc.task+"/completions", nil))
+		if w.Code != tc.status {
+			t.Fatalf("task %s: %d %s", tc.task, w.Code, w.Body.String())
+		}
+		if tc.status != 200 {
+			continue
+		}
+		var items []inbox.Question
+		if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != tc.count {
+			t.Fatalf("task %s: %+v", tc.task, items)
+		}
+		if tc.count == 1 && (items[0].ID != created.Question.ID || items[0].Revision != created.Question.Revision) {
+			t.Fatalf("wrong snapshot: %+v", items)
+		}
+	}
+	// Reading a snapshot alone must not archive its messages.
+	q, err := svc.Get(context.Background(), created.Question.ID)
+	if err != nil || q.Status != "pending" {
+		t.Fatalf("read changed message: %+v, %v", q, err)
+	}
+}

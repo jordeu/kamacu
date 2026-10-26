@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
 
@@ -69,4 +70,39 @@ export function feedbackOutcomeMessage(result: FeedbackResult) {
     return "Next prompt sent.";
   }
   return result.question.status === "dismissed" ? "Message dismissed and archived." : "Answer sent. The question has been archived.";
+}
+
+// The server snapshots all pending completions for this task in one read.
+// Revision checks preserve messages reopened after that snapshot.
+export async function dismissTaskCompletions(taskId: number, signal: AbortSignal) {
+  const completions = await get<FeedbackQuestion[]>(`/api/inbox/tasks/${taskId}/completions`, { signal });
+  for (const question of completions) {
+    signal.throwIfAborted();
+    await post<FeedbackResult>(`/api/inbox/${question.id}/dismiss`, { revision: question.revision }, { signal });
+  }
+}
+
+export function useDismissTaskCompletions(taskId: number | undefined) {
+  const client = useQueryClient();
+  const visit = useRef<AbortController | null>(null);
+  const action = useMutation({
+    mutationFn: ({ taskId, signal }: { taskId: number; signal: AbortSignal }) => dismissTaskCompletions(taskId, signal),
+    onSettled: () => { void client.invalidateQueries({ queryKey: ["inbox"] }); },
+  });
+  const { mutate } = action;
+  useEffect(() => {
+    const controller = new AbortController();
+    visit.current = controller;
+    if (taskId !== undefined) mutate({ taskId, signal: controller.signal });
+    // A delayed snapshot must never dismiss reports after leaving this task.
+    return () => controller.abort();
+  }, [taskId, mutate]);
+  return {
+    ...action,
+    retry: () => {
+      if (taskId !== undefined && visit.current && !visit.current.signal.aborted) {
+        mutate({ taskId, signal: visit.current.signal });
+      }
+    },
+  };
 }

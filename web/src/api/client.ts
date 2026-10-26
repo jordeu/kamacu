@@ -60,8 +60,9 @@ export function get<T>(path: string, init?: RequestInit): Promise<T> {
   return api<T>(path, init);
 }
 
-export function post<T>(path: string, body?: unknown): Promise<T> {
+export function post<T>(path: string, body?: unknown, init?: Pick<RequestInit, "signal">): Promise<T> {
   return api<T>(path, {
+    ...init,
     method: "POST",
     body: body === undefined ? undefined : JSON.stringify(body),
   });

@@ -582,3 +582,30 @@ func (s *Service) List(ctx context.Context, who *Identity, archived bool, offset
 	}
 	return page, nil
 }
+
+// PendingCompletions returns one task's complete snapshot under the same lock
+// used by writers. It deliberately does not paginate the mutable pending inbox.
+func (s *Service) PendingCompletions(ctx context.Context, taskID int64) ([]Question, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if taskID < 0 {
+		return nil, ErrInvalid
+	}
+	if err := s.reconcile(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, selectQuestion+` WHERE q.task_id IS NULLIF(?,0) AND q.kind='completion' AND q.status='pending'`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Question{}
+	for rows.Next() {
+		q, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, q)
+	}
+	return items, rows.Err()
+}
