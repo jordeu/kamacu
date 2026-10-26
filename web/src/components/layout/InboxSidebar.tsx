@@ -17,6 +17,10 @@ export function InboxSidebar() {
       return !current;
     });
   }
+  function collapse() {
+    localStorage.setItem("kamacu:inbox-collapsed", "1");
+    setCollapsed(true);
+  }
   const count = inbox.data?.pending_count;
   return <aside aria-label="Inbox sidebar" className={`relative shrink-0 border-l border-border bg-sidebar pb-9 ${collapsed ? "w-12" : "w-12 sm:w-96"}`}>
     {exited && <AgentExitDialog taskId={exited.task_id} projectId={exited.project_id} onClose={() => setExited(null)} />}
@@ -34,14 +38,14 @@ export function InboxSidebar() {
         {inbox.isError && <div role="alert" className="p-3 text-sm">Couldn’t refresh inbox.<Button variant="ghost" size="sm" onClick={() => void inbox.refetch()}>Retry</Button></div>}
         {inbox.isPending && <p className="p-4 text-sm text-muted-foreground">Loading messages…</p>}
         {inbox.data?.items.length === 0 && <p className="p-4 text-sm text-muted-foreground">{offset ? "No more pending messages." : "No messages waiting."}</p>}
-        {inbox.data?.items.map((q) => <CompactMessage key={`${q.id}:${q.revision}`} question={q} onResult={(message, exit) => { setNotice(message); if (exit && exit.task_id > 0) setExited(exit); }} />)}
+        {inbox.data?.items.map((q) => <CompactMessage key={`${q.id}:${q.revision}`} question={q} onOpenTask={collapse} onResult={(message, exit) => { setNotice(message); if (exit && exit.task_id > 0) setExited(exit); }} />)}
         {(offset > 0 || inbox.data?.has_more) && <nav aria-label="Sidebar inbox pages" className="flex justify-between p-3"><Button variant="ghost" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}><ChevronLeft className="size-4" />Previous</Button><Button variant="ghost" size="sm" disabled={!inbox.data?.has_more} onClick={() => setOffset(offset + 50)}>Next</Button></nav>}
       </div>}
     </div>
   </aside>;
 }
 
-function CompactMessage({ question: q, onResult }: { question: FeedbackQuestion; onResult: (message: string, exited?: FeedbackQuestion) => void }) {
+function CompactMessage({ question: q, onOpenTask, onResult }: { question: FeedbackQuestion; onOpenTask: () => void; onResult: (message: string, exited?: FeedbackQuestion) => void }) {
   const action = useFeedbackAction();
   const navigate = useNavigate();
   const completion = q.kind === "completion";
@@ -50,7 +54,10 @@ function CompactMessage({ question: q, onResult }: { question: FeedbackQuestion;
       // Await the mutation directly: polling can unmount this card before it finishes.
       const result = await action.mutateAsync({ question: q, action: kind, option_id });
       onResult(feedbackOutcomeMessage(result), option_id === "exit" && result.outcome !== "stale_revision" && result.question.kind === "completion" && result.question.reason === "exit" ? result.question : undefined);
-      if (openTask && result.outcome !== "stale_revision" && result.question.status !== "pending") navigate(feedbackTaskURL(q));
+      if (openTask && result.outcome !== "stale_revision" && result.question.status !== "pending") {
+        onOpenTask();
+        navigate(feedbackTaskURL(q));
+      }
     } catch {
       // The mutation exposes its error to the inline alert.
     }
