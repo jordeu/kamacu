@@ -1,10 +1,19 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useUpdateTask } from "@/api/mutations";
 import type { Task } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+
+const markdownComponents: Components = {
+  a: ({ href, title, children }) => (
+    <a href={href} title={title} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
+};
 
 /**
  * Read-only markdown body (a PR review — Phase 12 D-11): the same prose block,
@@ -18,7 +27,9 @@ function ReadOnlyDescription({ source }: { source: string }) {
   }
   return (
     <div className="prose prose-invert prose-sm max-w-none prose-a:text-blue-500">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {source}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -98,7 +109,7 @@ function EditableDescription({
     return (
       <div className="space-y-3">
         <div className="prose prose-invert prose-sm max-w-none prose-a:text-blue-500">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {task.description}
           </ReactMarkdown>
         </div>
