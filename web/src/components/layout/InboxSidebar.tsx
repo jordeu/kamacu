@@ -4,6 +4,7 @@ import { ArrowUpRight, ChevronLeft, ChevronRight, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, type FeedbackQuestion } from "@/api/inbox";
 import { AgentExitDialog } from "@/components/task/AgentExitDialog";
+import { useInboxFavicon } from "@/lib/useInboxFavicon";
 
 export function InboxSidebar() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("kamacu:inbox-collapsed") !== "0");
@@ -11,6 +12,8 @@ export function InboxSidebar() {
   const [notice, setNotice] = useState("");
   const [exited, setExited] = useState<FeedbackQuestion | null>(null);
   const inbox = useInbox("pending", offset);
+  // Keep the global count subscribed to a stable query while message pages load.
+  const pendingCount = useInbox();
   function toggle() {
     setCollapsed((current) => {
       localStorage.setItem("kamacu:inbox-collapsed", current ? "0" : "1");
@@ -21,16 +24,17 @@ export function InboxSidebar() {
     localStorage.setItem("kamacu:inbox-collapsed", "1");
     setCollapsed(true);
   }
-  const count = inbox.data?.pending_count;
+  const count = pendingCount.data?.pending_count;
+  useInboxFavicon(count);
   return <aside aria-label="Inbox sidebar" className={`relative shrink-0 border-l border-border bg-sidebar pb-9 ${collapsed ? "w-12" : "w-12 sm:w-96"}`}>
     {exited && <AgentExitDialog taskId={exited.task_id} projectId={exited.project_id} onClose={() => setExited(null)} />}
     <div className={collapsed ? "flex h-full flex-col items-center gap-3 py-3" : "absolute inset-y-0 right-0 z-20 flex w-[min(24rem,calc(100vw-3rem))] flex-col border-l border-border bg-sidebar pb-9 sm:static sm:h-full sm:w-full sm:border-0 sm:pb-0"}>
       <div className={`flex items-center gap-2 ${collapsed ? "flex-col" : "border-b border-border p-3"}`}>
-        <Button size="icon-sm" variant={collapsed && (count ?? 0) > 0 ? "secondary" : "ghost"} className={collapsed && (count ?? 0) > 0 ? "bg-blue-500/15 text-blue-400 ring-1 ring-blue-400/50 hover:bg-blue-500/25" : undefined} onClick={toggle} aria-expanded={!collapsed} aria-controls="inbox-sidebar-messages" aria-label={`${collapsed ? "Expand" : "Collapse"} inbox sidebar`} title={collapsed ? "Expand inbox" : "Collapse inbox"}>
+        <Button size="icon-sm" variant={collapsed && (count ?? 0) > 0 ? "secondary" : "ghost"} className={collapsed && (count ?? 0) > 0 ? "bg-orange-500/15 text-orange-400 ring-1 ring-orange-400/50 hover:bg-orange-500/25" : undefined} onClick={toggle} aria-expanded={!collapsed} aria-controls="inbox-sidebar-messages" aria-label={`${collapsed ? "Expand" : "Collapse"} inbox sidebar`} title={collapsed ? "Expand inbox" : "Collapse inbox"}>
           {collapsed ? <Inbox className="size-4" /> : <ChevronRight className="size-4" />}
         </Button>
         {!collapsed && <Link to="/inbox" className="min-w-0 flex-1 text-sm font-semibold hover:underline">Inbox</Link>}
-        <span aria-label={count === undefined ? "Loading pending messages" : `${count} pending messages`} aria-live="polite" className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${(count ?? 0) > 0 ? "bg-blue-500/20 text-blue-400" : "text-muted-foreground"}`}>{count === undefined ? "…" : count}</span>
+        <span aria-label={count === undefined ? "Loading pending messages" : `${count} pending messages`} aria-live="polite" className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${(count ?? 0) > 0 ? "bg-orange-500/20 text-orange-400" : "text-muted-foreground"}`}>{count === undefined ? "…" : count}</span>
         {!collapsed && <Button asChild size="icon-sm" variant="ghost"><Link to="/inbox" aria-label="Open full inbox"><ArrowUpRight className="size-4" /></Link></Button>}
       </div>
       {!collapsed && <div id="inbox-sidebar-messages" className="min-h-0 flex-1 overflow-y-auto">

@@ -8,6 +8,8 @@ const assert = require('node:assert/strict');
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   let pending = true, answer, paginated = false, completion = false, dismissMode = "accept";
   let releaseArchive;
+  let releaseNextPage;
+  let holdNextPage = false;
   const q = {id:'sidebar-question',task_id:1,project_id:1,task_title:'Improve navigation',project_name:'Kamacu',session_id:'s',abstract:'Task links currently preserve the selected tab, adding a click before replying. I recommend focusing the originating agent terminal only when opening a task from an inbox message; ordinary task navigation would keep the current tab. Choose whether inbox task links should focus the terminal.',summary:'Detailed task summary',context:'Decision context',question:'Focus terminal when opening a task?',options:[{id:'yes',label:'Focus terminal'}],status:'pending',revision:1,created_at:Date.now(),updated_at:Date.now(),kind:'question'};
   await page.route('**/api/**', async route => {
    q.kind = completion ? 'completion' : 'question';
@@ -16,6 +18,9 @@ const assert = require('node:assert/strict');
    let data = [];
    if(path === '/api/inbox') {
     const params = new URL(route.request().url()).searchParams;
+    if (holdNextPage && params.get('offset') === '50') {
+     await new Promise(resolve => { releaseNextPage = resolve; });
+    }
     const firstPage = paginated && params.get('offset') !== '50';
     data={items:params.get('view') === 'archived' || !pending ? [] : firstPage ? [{...q,id:'first-page',abstract:'Another message'}] : [q],pending_count:pending?paginated?51:1:0,has_more:firstPage};
    }
@@ -35,7 +40,9 @@ const assert = require('node:assert/strict');
   await page.goto(process.argv[2]+'/settings');
   const sidebar = page.getByRole('complementary',{name:'Inbox sidebar'});
   await sidebar.getByLabel('1 pending messages',{exact:true}).waitFor();
-  assert.match(await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).getAttribute('class'), /ring-blue/);
+  assert.match(await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).getAttribute('class'), /ring-orange/);
+  assert.match(await page.locator('link[rel=icon]').getAttribute('href'), /^data:image\/svg\+xml,/);
+  assert.match(decodeURIComponent(await page.locator('link[rel=icon]').getAttribute('href')), />1<\/text>/);
   await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).click();
   await sidebar.getByText(q.abstract,{exact:true}).waitFor();
   await page.screenshot({path:'/tmp/inbox-sidebar-desktop.png'});
@@ -46,6 +53,7 @@ const assert = require('node:assert/strict');
   await sidebar.getByRole('button',{name:'Focus terminal',exact:true}).click();
   await sidebar.getByRole('status').waitFor();
   assert.equal(new URL(page.url()).pathname,'/settings'); assert.equal(answer.option_id,'yes'); assert.equal(answer.revision,1);
+  await page.waitForFunction(() => document.querySelector('link[rel=icon]').getAttribute('href') === '/favicon.svg');
   pending=true; await page.reload();
   await sidebar.getByText(q.abstract,{exact:true}).waitFor();
   assert.equal(await sidebar.locator('textarea').count(),0);
@@ -93,7 +101,16 @@ const assert = require('node:assert/strict');
   await page.locator('#message-sidebar-question[open]').waitFor();
   paginated=true;
   await page.reload();
+  await page.waitForFunction(() => decodeURIComponent(document.querySelector('link[rel=icon]').getAttribute('href')).includes('>51</text>'));
+  holdNextPage = true;
+  const nextPageRequest = page.waitForRequest(request => new URL(request.url()).searchParams.get('offset') === '50');
   await sidebar.getByRole('button',{name:'Next',exact:true}).click();
+  await nextPageRequest;
+  await sidebar.getByText('Loading messages…',{exact:true}).waitFor();
+  await sidebar.getByLabel('51 pending messages',{exact:true}).waitFor();
+  assert.match(decodeURIComponent(await page.locator('link[rel=icon]').getAttribute('href')), />51<\/text>/);
+  holdNextPage = false;
+  releaseNextPage();
   await sidebar.getByRole('link',{name:'Full context / custom reply',exact:true}).click();
   await page.locator('#message-sidebar-question[open]').waitFor();
   await page.reload();
