@@ -35,6 +35,7 @@ export function useInbox(view: "pending" | "archived" = "pending", offset = 0) {
     queryKey: ["inbox", view, offset],
     queryFn: () => get<InboxPage>(`/api/inbox?view=${view}&offset=${offset}`),
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
   });
 }
 export function useInboxMessage(id: string | null) {
