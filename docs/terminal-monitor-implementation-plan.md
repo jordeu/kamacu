@@ -4,7 +4,7 @@ Implementation plan incorporating the user decisions. This implements the termin
 
 ## Agreed requirements
 
-- Kamacu observes terminal output to infer session activity and publish inbox messages. Neither feature depends on agents calling tools, installing skills, or emitting hooks.
+- Kamacu observes terminal output to infer session activity and publish inbox messages. Neither feature depends on agents calling tools or emitting hooks.
 - One monitor result drives status indicators and inbox decisions for all agent engines, including custom commands and Scratchpad sessions.
 - The monitor lives in Kamacu's Go server. Its model is configured independently of the coding agent and may be local or hosted.
 - Prioritize installed Claude Code and Codex login reuse, including user subscription access. Also support direct API keys and local endpoints.
@@ -72,7 +72,7 @@ Extend `internal/inbox/service.go` and migrations with observer origin, attentio
 
 Group related questions in one current episode per session to match the existing pending-message constraint. Update a pending card when its evidence changes and increment its revision so old answers cannot apply. Archive a superseded card explicitly, without fabricating a user answer. A later genuine recurrence of the same question gets a new episode after observed intervening progress; uncertainty must not cause repeated notifications.
 
-Apply the presence gate below immediately before publication. Generate existing abstract/summary/context fields from the evidence, respecting current limits. Publish questions and completions; represent blocking errors or unsupported native dialogs as attention cards with Open terminal. During migration, prevent explicit legacy skill messages from producing duplicate observer cards.
+Apply the presence gate below immediately before publication. Generate existing abstract/summary/context fields from the evidence, respecting current limits. Publish questions and completions; represent blocking errors or unsupported native dialogs as attention cards with Open terminal. During migration, prevent explicit tool messages from producing duplicate observer cards.
 
 Acceptance: one visible situation creates one card, dismissal survives replay/restart, changed questions reject old replies, and simultaneous sessions remain isolated.
 
@@ -100,7 +100,7 @@ A PTY write cannot prove the agent processed the answer. Never blindly retry a w
 
 Agreed initial boundary: native approval menus/forms offer Open terminal. Direct actions require separately tested terminal interaction profiles and fresh screen validation; the model never invents keystrokes or grants approval autonomously. Direct menu actions are deferred beyond this first release.
 
-Acceptance: browser answer versus terminal typing races cannot silently apply an obsolete answer; crash windows expose uncertainty; ordinary replies require no agent skill.
+Acceptance: browser answer versus terminal typing races cannot silently apply an obsolete answer; crash windows expose uncertainty; ordinary replies arrive as plain terminal input.
 
 ## 6. Restart and hook removal
 
@@ -120,7 +120,7 @@ Run the actual selected model in shadow mode on a labeled corpus. Report precisi
 
 Implement in reviewable slices: observation/replay → installed-login adapters and global/workspace configuration → unified status → presence-aware inbox → reply delivery → recovery/hook cleanup → HTTP provider adapters and end-to-end validation. Enable publication only after shadow-mode results are reviewed. This is an implementation validation step, not an ongoing dependency on hooks.
 
-Run focused Go tests and race tests for observer/inbox concurrency, migration/recovery tests, frontend type checks and status/inbox tests, then browser scenarios for task, board, sidebar, and Scratchpad. The release must demonstrate a complete question → inbox → reply → resumed output flow with no skill or hooks.
+Run focused Go tests and race tests for observer/inbox concurrency, migration/recovery tests, frontend type checks and status/inbox tests, then browser scenarios for task, board, sidebar, and Scratchpad. The release must demonstrate a complete question → inbox → reply → resumed output flow without hooks or explicit feedback tools.
 
 ## Final notification rules
 

@@ -1,6 +1,6 @@
 # Proactive inbox monitoring
 
-Kamacu should own a terminal-output monitor inside its Go server. Terminal output is the sole source for detecting questions, permission prompts, completion, and errors. Call a user-selected LLM to interpret rendered output and produce inbox summaries. The monitor must work without agent hooks, skills, transcript files, plugins, or engine-specific server protocols. Keep Scratchpad as a user conversation. A continuously reasoning supervisor or a full agent SDK is unnecessary for the initial feature.
+Kamacu should own a terminal-output monitor inside its Go server. Terminal output is the sole source for detecting questions, permission prompts, completion, and errors. Call a user-selected LLM to interpret rendered output and produce inbox summaries. The monitor must work without agent hooks, transcript files, plugins, or engine-specific server protocols. Keep Scratchpad as a user conversation. A continuously reasoning supervisor or a full agent SDK is unnecessary for the initial feature.
 
 This is an architecture proposal based on repository inspection and official integration documentation, checked on 2026-10-29. Detection accuracy, latency, and local-model quality still need measurement against real session recordings.
 
@@ -15,7 +15,7 @@ The [implementation plan](terminal-monitor-implementation-plan.md) incorporates 
 - `internal/session/codex_status.go`: reuse the VT-emulation experience, but keep the new monitor independent of its engine-specific lifecycle reducer. Generalize terminal rendering for every engine rather than gating observation on the engine name.
 - `internal/session/session.go`: custom engines report `running`; a quiet terminal is currently insufficient to infer a question or completion. Non-Codex waiting also clears on attach, so the UI status alone is not a durable attention signal.
 - `internal/inbox/service.go`: durable questions, revisions, identity validation, deduplication keys, and session expiry can be reused. Introduce a trusted internal publication path with explicit origin and evidence rather than impersonating an agent through its MCP credentials.
-- `internal/api/inbox.go`: answers currently inject an MCP-specific envelope instructing the agent to acknowledge feedback. That delivery contract must change for observer-created messages if the feature is to work without the skill.
+- `internal/api/inbox.go`: answers currently inject an MCP-specific envelope instructing the agent to acknowledge feedback. That delivery contract must change for observer-created messages to support plain terminal replies.
 
 ## Options
 
@@ -38,13 +38,13 @@ A local model and an SDK are different choices: one selects where inference runs
 4. Send the current rendered screen, recent rendered history, a short prior observation, and task title to a stateless LLM call. All decision evidence must come from terminal output. Return `working`, `needs_input`, `completed`, `error`, or `unknown`, plus supporting text spans, a summary, the question, and only choices actually visible. Treat quoted questions in logs as distinct from the agent asking the user.
 5. Require affirmative visible evidence before publishing. Silence alone does not distinguish thinking, a long command, a broken process, or waiting for input. A generic blank prompt is insufficient for completion. For ambiguous screens, wait for changed evidence or show a low-priority “possibly needs attention” state rather than manufacture a question. Confidence scores alone are insufficient.
 6. Before committing a classification, compare the session generation, meaningful screen revision, evidence sequence, and local input generation. Cancel or discard stale results when the user interacts or the relevant screen changes. Use a stable evidence fingerprint to assign an attention episode; do not deduplicate solely by the rendered screen hash, because the same question can legitimately recur later.
-7. Publish through the inbox service with observer origin, evidence excerpt, episode ID, inference version, and delivery mode. Preserve dismissed and handled episode fingerprints so unchanged output cannot repost a card. During migration, suppress duplicates from existing skill publications without requiring those publications for detection.
+7. Publish through the inbox service with observer origin, evidence excerpt, episode ID, inference version, and delivery mode. Preserve dismissed and handled episode fingerprints so unchanged output cannot repost a card. During migration, suppress duplicates from explicit tool publications without requiring those publications for detection.
 
 The monitor reads output only for semantic detection. Kamacu may still use its own session identity, process exit, resize, and terminal-input bookkeeping for cleanup and stale-result protection; those are local transport facts, not agent lifecycle hooks. On reconnect or server restart, restore VT state/history or mark an incomplete replay uncertain until fresh evidence arrives. Do not infer a new turn merely because a browser reattached.
 
 Terminal text is evidence, not instructions to the monitor. The classifier needs no shell, MCP, repository-write, or approval tools. Validate schemas and evidence locally. Keep timeouts, concurrency limits, a circuit breaker, and bounded request sizes. If inference is unavailable, keep terminal access and show monitoring unavailable; do not silently claim no attention is needed.
 
-## Replies without the skill
+## Plain terminal replies
 
 Publishing and answering must be designed together:
 
@@ -80,7 +80,7 @@ Hooks, ACP, Codex App Server, and OpenCode event APIs are outside this proposal.
 
 1. Add generic VT rendering, bounded output history, and a background monitor behind a feature flag. Disable hook inputs to the monitor in all evaluation runs. Capture explicitly opted-in, redacted fixtures. Run in shadow mode with no inbox publications; label questions, approvals, completion, errors, and ongoing work.
 2. Enable automatic cards for visibly supported questions, completions, and errors. Include evidence and Open terminal. Add configurable hosted and local inference through the same contract, plus a no-model degraded mode.
-3. Add normal conversational reply delivery without MCP acknowledgements, stale-card invalidation, durable delivery status, and deduplication with existing skill messages.
+3. Add normal conversational reply delivery without MCP acknowledgements, stale-card invalidation, durable delivery status, and deduplication with explicit tool messages.
 4. Add native approval/form replies only through tested terminal interaction profiles. Retain Open terminal for unsupported or ambiguous interfaces.
 
 Evaluate visible-prompt-to-card latency, classification precision/recall by category and engine, duplicate rate, stale-card rate, delivery outcomes, tokens/cost per turn, and local CPU/RAM. Include silent long commands, TUI repaints, questions quoted in tool output, auto-approved permissions, partial output, multiple sessions, direct terminal answers, dismissal, restart, provider failure, and model timeout. Include animated waiting screens, recurring identical questions, resize, scrollback loss, alternate screens, and restart replay. Prioritize few false alerts without hiding clearly visible requests; do not rely on a model's self-reported confidence alone.

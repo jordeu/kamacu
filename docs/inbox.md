@@ -1,6 +1,6 @@
 # Terminal monitoring and inbox
 
-Kamacu observes each running agent's terminal, including custom agents and Scratchpad. Terminal activity drives the working indicator. A configured LLM detects questions, permission dialogs, blocking errors, and completed responses. No agent skill, status hook, or feedback tool call is required. Process exit is still determined directly from the process.
+Kamacu observes each running agent's terminal, including custom agents and Scratchpad. Terminal activity drives the working indicator. A configured LLM detects questions, permission dialogs, blocking errors, and completed responses. No status hook or feedback tool call is required. Process exit is still determined directly from the process.
 
 ## Setup
 
@@ -19,7 +19,7 @@ OpenAI-compatible endpoints must support Chat Completions with JSON-schema respo
 - An unanswered question appears after leaving, without requiring more terminal output. Returning hides its card and attention count; leaving restores the same card. Dismissal is permanent for that episode.
 - A completion produced while watching is considered seen, even if inference finishes after leaving. Unrelated screen repaints preserve the evidence's original time.
 - Explicit choices in conversational questions appear as clickable answer buttons. Clicking one sends its displayed text; you can also write your own answer. Updated choices invalidate older buttons.
-- Ordinary conversational answers are saved and sent as plain terminal text. No acknowledgement skill is needed. Native approval menus offer **Open task** / **Open Scratchpad** so the user handles them in the terminal.
+- Ordinary conversational answers are saved and sent as plain terminal text. Native approval menus offer **Open task** / **Open Scratchpad** so the user handles them in the terminal.
 - Replies check the screen revision and input generation before writing. If delivery is uncertain, the saved answer remains in Archived for manual recovery. After a server restart, interrupted delivery is explicitly marked uncertain. Other message writers and keyboard input cannot interleave between a reply’s paste and submit key. Kamacu never automatically resends it: a successful PTY write is not proof that the agent processed it.
 - Completion cards support Open task, Dismiss, and OK, exit session. Tasks are never automatically moved to Done.
 
@@ -37,7 +37,7 @@ The active-session bar lists open agent terminals until their processes exit, in
 
 Installed-login inference uses a fresh temporary directory, disables project instructions, action tools, hooks and MCP, and removes inherited Kamacu task identity. It runs outside the ordinary session manager so the monitor cannot monitor itself. API adapters have no tools. Terminal contents are treated as untrusted data and model decisions must cite current visible evidence.
 
-On upgrade, new agent launches stop injecting Claude status hooks or selecting the Codex hook profile. Unchanged former Kamacu Codex/OpenCode hook files are retired; user-edited files are preserved with a diagnostic. Optional artifact/MCP tools and user configuration remain available. Restart agents to load updated skill/MCP instructions.
+On upgrade, new agent launches stop injecting Claude status hooks or selecting the Codex hook profile. Unchanged former Kamacu Codex/OpenCode hook files are retired; user-edited files are preserved with a diagnostic. Optional artifact/MCP tools and user configuration remain available. Restart agents to load updated MCP configuration.
 
 ## Recovery and current limits
 

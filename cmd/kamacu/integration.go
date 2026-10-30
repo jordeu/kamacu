@@ -15,7 +15,7 @@ type integrationCmd struct{}
 
 func (integrationCmd) Name() string { return "integration" }
 func (integrationCmd) Synopsis() string {
-	return "Install, inspect, repair, or remove agent MCP and skill integration"
+	return "Install, inspect, repair, or remove agent MCP integration"
 }
 func (integrationCmd) Usage() string {
 	return `integration status
@@ -23,9 +23,8 @@ integration enable <claude|codex|opencode>
 integration repair <claude|codex|opencode>
 integration remove <claude|codex|opencode>
 
-Installs the bundled task skill and a user-level MCP registration. Repair preserves
-user edits. Remove deletes only unchanged managed files; shared skills stay while
-another integration uses them. Restart agent sessions after changes.
+Registers a user-level MCP server. Repair preserves user edits. Remove deletes
+only unchanged managed registrations. Restart agent sessions after changes.
 `
 }
 func (integrationCmd) SetFlags(*flag.FlagSet) {}

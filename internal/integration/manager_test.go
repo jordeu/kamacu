@@ -61,87 +61,50 @@ func TestInstallUpdateRepairAndRemove(t *testing.T) {
 			m := testManager(t)
 			ctx := context.Background()
 			out, err := m.Enable(ctx, engine)
+			if err != nil || !out.Enabled || out.MCP != "registered" {
+				t.Fatal(out, err)
+			}
+			original, err := m.readRegistration(ctx, engine)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !out.Enabled || out.Skill != "installed" || out.MCP != "registered" {
-				t.Fatalf("%+v", out)
-			}
-			p := m.skillPath(engine)
-			first, _ := os.Stat(p)
 			if _, err = m.Enable(ctx, engine); err != nil {
 				t.Fatal(err)
 			}
-			next, _ := os.Stat(p)
-			if first.ModTime() != next.ModTime() {
-				t.Fatal("unchanged skill rewritten")
+			next, err := m.readRegistration(ctx, engine)
+			if err != nil || !bytes.Equal(original.entry, next.entry) {
+				t.Fatal("unchanged registration rewritten", err)
 			}
-			m.source = append(m.source, []byte("\nUpdated guidance.\n")...)
+			m.binary = "/new/path/kamacu"
 			if err = m.Sync(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(read(t, p), m.source) {
-				t.Fatal("upgrade not applied")
+			updated, err := m.readRegistration(ctx, engine)
+			if err != nil || !m.compatible(updated) {
+				t.Fatal("binary upgrade not applied", err)
 			}
-			if err = os.Remove(p); err != nil {
+			if err = m.writeRegistration(ctx, updated, true); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = m.Enable(ctx, engine); err != nil {
-				t.Fatal(err)
+			if out, err = m.Enable(ctx, engine); err != nil || out.MCP != "registered" {
+				t.Fatal("missing registration not repaired", out, err)
 			}
 			out, err = m.Disable(ctx, engine)
-			if err != nil || out.Message != "" {
-				t.Fatalf("%+v %v", out, err)
-			}
-			if _, err = os.Stat(p); !os.IsNotExist(err) {
-				t.Fatal("skill retained")
+			if err != nil || out.Enabled || out.Message != "" {
+				t.Fatal(out, err)
 			}
 			if err = m.Sync(ctx); err != nil {
 				t.Fatal(err)
-			}
-			if _, err = os.Stat(p); !os.IsNotExist(err) {
-				t.Fatal("removed skill reinstalled")
 			}
 			r, err := m.readRegistration(ctx, engine)
 			if err != nil || len(r.entry) != 0 {
-				t.Fatalf("registration retained: %v", err)
+				t.Fatal("registration retained or reinstalled", err)
 			}
 		})
 	}
 }
-func TestPreserveEditedSkill(t *testing.T) {
-	m := testManager(t)
-	ctx := context.Background()
-	if _, err := m.Enable(ctx, "claude"); err != nil {
-		t.Fatal(err)
-	}
-	p := m.skillPath("claude")
-	edited := []byte("my edited skill")
-	write(t, p, edited)
-	if err := m.Sync(ctx); err == nil {
-		t.Fatal("edited skill silently updated")
-	}
-	out, err := m.Disable(ctx, "claude")
-	if err != nil || !strings.Contains(out.Message, "preserved") {
-		t.Fatalf("%+v %v", out, err)
-	}
-	if !bytes.Equal(read(t, p), edited) {
-		t.Fatal("edits lost")
-	}
-}
 func TestPreserveUnownedFilesAndMalformedConfig(t *testing.T) {
 	ctx := context.Background()
-	t.Run("unowned skill", func(t *testing.T) {
-		m := testManager(t)
-		p := m.skillPath("claude")
-		write(t, p, []byte("mine"))
-		if _, err := m.Enable(ctx, "claude"); err == nil {
-			t.Fatal("accepted collision")
-		}
-		if string(read(t, p)) != "mine" {
-			t.Fatal("clobbered skill")
-		}
-	})
 	for _, config := range []string{`{"mcpServers":{"kamacu":{"command":"someone-else"}}}`, `{broken`, `null`, `{"mcpServers":42}`} {
 		t.Run(config, func(t *testing.T) {
 			m := testManager(t)
@@ -171,7 +134,7 @@ func TestPreserveUnownedFilesAndMalformedConfig(t *testing.T) {
 		}
 	})
 }
-func TestSharedSkillAndConfigComments(t *testing.T) {
+func TestIndependentRegistrationsAndConfigComments(t *testing.T) {
 	m := testManager(t)
 	ctx := context.Background()
 	p := filepath.Join(m.configHome, "opencode", "opencode.jsonc")
@@ -185,8 +148,9 @@ func TestSharedSkillAndConfigComments(t *testing.T) {
 	if _, err := m.Disable(ctx, "codex"); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(read(t, m.skillPath("codex")), m.source) {
-		t.Fatal("shared skill removed")
+	remaining, err := m.readRegistration(ctx, "opencode")
+	if err != nil || !m.compatible(remaining) {
+		t.Fatal("other registration removed", err)
 	}
 	if _, err := m.Disable(ctx, "opencode"); err != nil {
 		t.Fatal(err)
@@ -231,22 +195,56 @@ func TestNoOptInNoInstallAndSymlinkPreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, engine := range engines {
-		if _, err := os.Stat(m.skillPath(engine)); !os.IsNotExist(err) {
-			t.Fatal("installed without opt-in")
+		r, err := m.readRegistration(ctx, engine)
+		if err != nil || len(r.entry) != 0 {
+			t.Fatal("installed without opt-in", err)
 		}
 	}
-	target := filepath.Join(m.home, "custom-skill")
-	write(t, target, m.source)
-	p := m.skillPath("claude")
-	os.MkdirAll(filepath.Dir(p), 0700)
-	if err := os.Symlink(target, p); err != nil {
+	target := filepath.Join(m.home, "custom-config.json")
+	original := []byte(`{"other":"preserve"}`)
+	write(t, target, original)
+	if err := os.Symlink(target, filepath.Join(m.home, ".claude.json")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.Enable(ctx, "claude"); err == nil {
 		t.Fatal("replaced symlink")
 	}
-	if !bytes.Equal(read(t, target), m.source) {
+	if !bytes.Equal(read(t, target), original) {
 		t.Fatal("symlink target changed")
+	}
+}
+
+func TestUnknownManifestMetadataDoesNotManageFiles(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+	if _, err := m.Enable(ctx, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	untouched := filepath.Join(m.home, "unrelated-resource")
+	content := []byte("preserve this file")
+	write(t, untouched, content)
+	var state map[string]any
+	if err := json.Unmarshal(read(t, m.statePath), &state); err != nil {
+		t.Fatal(err)
+	}
+	state["files"] = map[string]string{untouched: digest(content)}
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, m.statePath, encoded)
+	if err = m.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := m.Status(ctx)
+	if err != nil || !statuses[0].Enabled || statuses[0].MCP != "registered" {
+		t.Fatal(statuses, err)
+	}
+	if _, err = m.Disable(ctx, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(read(t, untouched), content) {
+		t.Fatal("unrelated file changed")
 	}
 }
 func TestConcurrentConfigChangeRejected(t *testing.T) {

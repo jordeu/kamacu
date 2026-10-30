@@ -243,7 +243,7 @@ const path = require('node:path');
     if(directory) await page.screenshot({path:path.join(directory,'monitoring-mobile.png'),fullPage:true});
     await page.getByRole('button', {name: 'Enable Claude Code integration', exact: true}).click();
     await page.getByRole('button', {name: 'Repair Claude Code integration', exact: true}).waitFor();
-    await page.getByText('Enabled · MCP registered and task skill available.', {exact:true}).waitFor();
+    await page.getByText('Enabled · MCP registered.', {exact:true}).waitFor();
     await page.setViewportSize({width:1440,height:1000});
     if (directory) await page.screenshot({path:path.join(directory,'integration-desktop.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});
