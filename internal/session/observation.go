@@ -38,6 +38,7 @@ func (s *Session) WriteObserved(revision, input uint64, body, submit []byte) err
 		return errors.New("terminal changed; review the current question before replying")
 	}
 	s.observer.Input()
+	s.lastInputSource = "external"
 	s.mu.Unlock()
 	if _, err := s.ptmx.Write(body); err != nil {
 		return err
@@ -52,11 +53,11 @@ func (s *Session) WriteObserved(revision, input uint64, body, submit []byte) err
 func (s *Session) WriteMessage(body, submit []byte) error {
 	s.inputMu.Lock()
 	defer s.inputMu.Unlock()
-	if err := s.writeInput(body); err != nil {
+	if err := s.writeInput(body, "external"); err != nil {
 		return err
 	}
 	time.Sleep(100 * time.Millisecond)
-	return s.writeInput(submit)
+	return s.writeInput(submit, "external")
 }
 
 // terminalAgentStatus is engine-independent. Quiet means no recent terminal

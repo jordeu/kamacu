@@ -12,6 +12,7 @@ export interface TermSession {
   kind?: "bash" | "agent"; // session discriminator (04-02 server Info JSON)
   engine?: string; // agent engine reported by the server
   agentStatus?: "working" | "idle" | "waiting" | "exited" | "error"; // agent sessions only
+  exitSource?: "terminal" | "external";
   stopRequested?: boolean; // Kamacu-initiated stop (gray-dot discriminator)
   // Restored tmux survivor (TMUX-05, D-88): a DB-derived ghost (id "") the
   // server emits for a tmux session that outlived a Kamacu restart. orphaned
@@ -135,7 +136,7 @@ export function useResumeAgent(taskId: number) {
 export function useStopSession() {
   const queryClient = useQueryClient();
   return useMutation<void, ApiError, string>({
-    mutationFn: (id: string) => post<void>(`/api/sessions/${id}/stop`),
+    mutationFn: (id: string) => post<void>(`/api/sessions/${id}/stop`, { source: "terminal" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },

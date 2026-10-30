@@ -128,25 +128,42 @@ export default function TaskPage() {
   // Newest agent session (server list is newest-first).
   const agentSession = (sessions ?? []).find((s) => s.kind === "agent");
 
+  const [activeTab, setActiveTab] = useState("agent");
   const observedAgent = useRef<ViewedAgent | null>(null);
+  useEffect(() => {
+    // Do not defer an exit prompt until the user returns to this window.
+    const clearWhenAway = () => {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) observedAgent.current = null;
+    };
+    window.addEventListener("blur", clearWhenAway);
+    document.addEventListener("visibilitychange", clearWhenAway);
+    return () => {
+      window.removeEventListener("blur", clearWhenAway);
+      document.removeEventListener("visibilitychange", clearWhenAway);
+    };
+  }, []);
   useEffect(() => {
     // Ignore cached exits on revisit: only a process observed running during
     // this visit can take the user back to the board.
     if (!sessionsFetched || !task || !agentSession) return;
     const previous = observedAgent.current;
+    const activelyViewing = activeTab === "agent" && document.visibilityState === "visible" && document.hasFocus();
+    if (!activelyViewing) {
+      observedAgent.current = null;
+      return;
+    }
     if (agentSession.status === "running") {
       observedAgent.current = { taskId, sessionId: agentSession.id };
       return;
     }
-    if (!hasViewedAgentExited(previous, taskId, agentSession)) return;
     observedAgent.current = null;
+    if (!hasViewedAgentExited(previous, taskId, agentSession, activelyViewing)) return;
     navigate(`/projects/${projectId}`, {
       state: { exitedAgentTaskId: task.source === "manual" ? taskId : undefined },
     });
-  }, [agentSession, sessionsFetched, task, taskId, projectId, navigate]);
+  }, [agentSession, sessionsFetched, task, taskId, projectId, navigate, activeTab]);
 
-  // D-39: opening a task ALWAYS lands on the Agent tab — no smart selection.
-  const [activeTab, setActiveTab] = useState("agent");
+  // Opening a feedback link selects the Agent tab.
   useEffect(() => {
     if (!feedbackSession) return;
     const frame = requestAnimationFrame(() => setActiveTab("agent"));

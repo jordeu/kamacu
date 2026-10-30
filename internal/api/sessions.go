@@ -854,7 +854,22 @@ func (h *sessionHandlers) stop(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	go sess.Stop()
+	var req struct {
+		Source string `json:"source"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid stop request")
+		return
+	}
+	switch req.Source {
+	case "terminal":
+		go sess.StopFromTerminal()
+	case "", "external":
+		go sess.Stop()
+	default:
+		writeError(w, http.StatusBadRequest, "invalid stop source")
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
 }
 

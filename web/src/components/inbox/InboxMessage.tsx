@@ -12,7 +12,7 @@ function Context({ text }: { text: string }) {
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: () => null }}>{text}</ReactMarkdown>
   </div>;
 }
-export function InboxMessage({ question: q, onResult, expanded, dialog = false, onNavigate }: { question: FeedbackQuestion; onNavigate?: () => void; expanded?: boolean; dialog?: boolean; onResult: (message: string, exited?: FeedbackQuestion, keepOpen?: boolean) => void }) {
+export function InboxMessage({ question: q, onResult, expanded, dialog = false, onNavigate }: { question: FeedbackQuestion; onNavigate?: () => void; expanded?: boolean; dialog?: boolean; onResult: (message: string, keepOpen?: boolean) => void }) {
   const [answer, setAnswer] = useState("");
   const action = useFeedbackAction();
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       // Await the mutation directly: polling can unmount this card before it finishes.
       const result = await action.mutateAsync({ question: q, action: kind, option_id, answer: kind === "answer" && !option_id ? answer : undefined });
       if (openTask && result.outcome !== "stale_revision" && result.question.status !== "pending") navigateToTask();
-      onResult(feedbackOutcomeMessage(result), option_id === "exit" && result.outcome !== "stale_revision" && result.question.kind === "completion" && result.question.reason === "exit" ? result.question : undefined, result.outcome === "stale_revision");
+      onResult(feedbackOutcomeMessage(result), result.outcome === "stale_revision");
     } catch {
       // The mutation exposes its error to the inline alert.
     }

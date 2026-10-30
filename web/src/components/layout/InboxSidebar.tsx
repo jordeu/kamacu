@@ -3,20 +3,19 @@ import { Link, useNavigate } from "react-router";
 import { ArrowUpRight, ChevronLeft, ChevronRight, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
-import { AgentExitDialog } from "@/components/task/AgentExitDialog";
 import { useInboxFavicon } from "@/lib/useInboxFavicon";
 
 import { InboxMessage } from "@/components/inbox/InboxMessage";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
-function MessageDialog({ question, onOpenChange, onResult, onRestoreFocus }: { question: FeedbackQuestion; onRestoreFocus: () => void; onOpenChange: (open: boolean) => void; onResult: (message: string, exited?: FeedbackQuestion) => void }) {
+function MessageDialog({ question, onOpenChange, onResult, onRestoreFocus }: { question: FeedbackQuestion; onRestoreFocus: () => void; onOpenChange: (open: boolean) => void; onResult: (message: string) => void }) {
   const selected = useInboxMessage(question.id);
   const [notice, setNotice] = useState("");
   return <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl" aria-describedby={undefined} onCloseAutoFocus={(event) => { event.preventDefault(); onRestoreFocus(); }}>
     <DialogTitle className="pr-8">Inbox message</DialogTitle>
     {selected.isError && <p role="alert">Couldn’t refresh this message. <Button variant="ghost" onClick={() => void selected.refetch()}>Retry</Button></p>}
     {notice && <p role="status">{notice}</p>}
-    <InboxMessage onNavigate={() => onOpenChange(false)} key={selected.data?.revision ?? question.revision} question={selected.data ?? question} dialog onResult={(message, exited, keepOpen) => { if (keepOpen) setNotice(message); else onOpenChange(false); onResult(message, exited); }} />
+    <InboxMessage onNavigate={() => onOpenChange(false)} key={selected.data?.revision ?? question.revision} question={selected.data ?? question} dialog onResult={(message, keepOpen) => { if (keepOpen) setNotice(message); else onOpenChange(false); onResult(message); }} />
   </DialogContent>;
 }
 
@@ -27,7 +26,6 @@ export function InboxSidebar() {
   const [selected, setSelected] = useState<FeedbackQuestion | null>(null);
   const [offset, setOffset] = useState(0);
   const [notice, setNotice] = useState("");
-  const [exited, setExited] = useState<FeedbackQuestion | null>(null);
   const inbox = useInbox("pending", offset);
   // Keep the global count subscribed to a stable query while message pages load.
   const pendingCount = useInbox();
@@ -44,7 +42,6 @@ export function InboxSidebar() {
   const count = pendingCount.data?.pending_count;
   useInboxFavicon(count);
   return <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null); }}><aside aria-label="Inbox sidebar" className={`relative shrink-0 border-l border-border bg-sidebar pb-9 ${collapsed ? "w-12" : "w-12 sm:w-96"}`}>
-    {exited && <AgentExitDialog taskId={exited.task_id} projectId={exited.project_id} onClose={() => setExited(null)} />}
     <div className={collapsed ? "flex h-full flex-col items-center gap-3 py-3" : "absolute inset-y-0 right-0 z-20 flex w-[min(24rem,calc(100vw-3rem))] flex-col border-l border-border bg-sidebar pb-9 sm:static sm:h-full sm:w-full sm:border-0 sm:pb-0"}>
       <div className={`flex items-center gap-2 ${collapsed ? "flex-col" : "border-b border-border p-3"}`}>
         <Button ref={toggleButton} size="icon-sm" variant={collapsed && (count ?? 0) > 0 ? "secondary" : "ghost"} className={collapsed && (count ?? 0) > 0 ? "bg-orange-500/15 text-orange-400 ring-1 ring-orange-400/50 hover:bg-orange-500/25" : undefined} onClick={toggle} aria-expanded={!collapsed} aria-controls="inbox-sidebar-messages" aria-label={`${collapsed ? "Expand" : "Collapse"} inbox sidebar`} title={collapsed ? "Expand inbox" : "Collapse inbox"}>
@@ -59,15 +56,15 @@ export function InboxSidebar() {
         {inbox.isError && <div role="alert" className="p-3 text-sm">Couldn’t refresh inbox.<Button variant="ghost" size="sm" onClick={() => void inbox.refetch()}>Retry</Button></div>}
         {inbox.isPending && <p className="p-4 text-sm text-muted-foreground">Loading messages…</p>}
         {inbox.data?.items.length === 0 && <p className="p-4 text-sm text-muted-foreground">{offset ? "No more pending messages." : "No messages waiting."}</p>}
-        {inbox.data?.items.map((q) => <CompactMessage key={`${q.id}:${q.revision}`} question={q} onOpenTask={collapse} onOpenMessage={(button) => { opener.current = button; setSelected(q); }} onResult={(message, exit) => { setNotice(message); if (exit && exit.task_id > 0) setExited(exit); }} />)}
+        {inbox.data?.items.map((q) => <CompactMessage key={`${q.id}:${q.revision}`} question={q} onOpenTask={collapse} onOpenMessage={(button) => { opener.current = button; setSelected(q); }} onResult={setNotice} />)}
         {(offset > 0 || inbox.data?.has_more) && <nav aria-label="Sidebar inbox pages" className="flex justify-between p-3"><Button variant="ghost" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}><ChevronLeft className="size-4" />Previous</Button><Button variant="ghost" size="sm" disabled={!inbox.data?.has_more} onClick={() => setOffset(offset + 50)}>Next</Button></nav>}
       </div>}
     </div>
-    {selected && <MessageDialog onRestoreFocus={() => { (opener.current?.isConnected ? opener.current : toggleButton.current)?.focus(); }} question={selected} onOpenChange={() => setSelected(null)} onResult={(message, exit) => { setNotice(message); if (exit && exit.task_id > 0) setExited(exit); }} />}
+    {selected && <MessageDialog onRestoreFocus={() => { (opener.current?.isConnected ? opener.current : toggleButton.current)?.focus(); }} question={selected} onOpenChange={() => setSelected(null)} onResult={setNotice} />}
   </aside></Dialog>;
 }
 
-function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { question: FeedbackQuestion; onOpenTask: () => void; onOpenMessage: (button: HTMLButtonElement) => void; onResult: (message: string, exited?: FeedbackQuestion) => void }) {
+function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { question: FeedbackQuestion; onOpenTask: () => void; onOpenMessage: (button: HTMLButtonElement) => void; onResult: (message: string) => void }) {
   const action = useFeedbackAction();
   const navigate = useNavigate();
   const completion = q.kind === "completion";
@@ -75,7 +72,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
     try {
       // Await the mutation directly: polling can unmount this card before it finishes.
       const result = await action.mutateAsync({ question: q, action: kind, option_id });
-      onResult(feedbackOutcomeMessage(result), option_id === "exit" && result.outcome !== "stale_revision" && result.question.kind === "completion" && result.question.reason === "exit" ? result.question : undefined);
+      onResult(feedbackOutcomeMessage(result));
       if (openTask && result.outcome !== "stale_revision" && result.question.status !== "pending") {
         onOpenTask();
         navigate(feedbackTaskURL(q));

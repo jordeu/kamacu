@@ -8,9 +8,11 @@ const path = require('node:path');
   const base = process.argv[2];
   const browser = await chromium.launch({ headless: true, executablePath: process.env.KAMACU_BROWSER_EXECUTABLE, args: ['--no-sandbox'] });
   const headers = { 'X-Kamacu-Token': 'test-token', 'X-Kamacu-Task-ID': '1', 'X-Kamacu-Session-ID': 'browser-session' };
-  const task = { id: 1, project_id: 1, title: 'Improve task navigation', description: 'Task navigation', status: 'todo', position: 0, source: 'manual', worktree_path: null, recurrent: false };
+  const task = { id: 1, project_id: 1, title: 'Improve task navigation', description: 'Task navigation', status: 'in_progress', position: 0, source: 'manual', worktree_path: null, recurrent: false };
   const errors = [];
   let agentEntries = [];
+  let taskSession = { id: 'browser-session', taskId: 1, kind: 'agent', engine: 'custom', status: 'running', label: 'Agent', createdAt: new Date().toISOString() };
+  let taskSocket;
   async function agent(action, body) {
     const response = await fetch(`${base}/api/agent-feedback/${action}`, { method: 'POST', headers, body: JSON.stringify(body) });
     assert.equal(response.status, 200, await response.clone().text());
@@ -23,7 +25,7 @@ const path = require('node:path');
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     page.setDefaultTimeout(15_000);
     page.on('pageerror', e => errors.push(e.message));
-    await page.routeWebSocket('**/api/sessions/*/ws', socket => { socket.onMessage(() => {}); });
+    await page.routeWebSocket('**/api/sessions/*/ws', socket => { if (socket.url().includes('/browser-session/')) taskSocket = socket; socket.onMessage(() => {}); });
     await page.route('**/api/**', async route => {
       const name = new URL(route.request().url()).pathname;
       if (name.startsWith('/api/test-monitor') || name.startsWith('/api/monitor') || name.startsWith('/api/inbox') || name.startsWith('/api/agent-feedback') || name.startsWith('/api/integrations') || name.startsWith('/api/artifact-') || /^\/api\/tasks\/0\/artifact/.test(name)) return route.continue();
@@ -31,7 +33,8 @@ const path = require('node:path');
         : name === '/api/projects' ? [{ id: 1, name: 'Kamacu', workspace_id: 1, icon_letters: 'KA', icon_color: 'blue' }]
         : name === '/api/tasks/1' ? task
         : name === '/api/sessions' && new URL(route.request().url()).searchParams.get('scope') === 'global' ? [{ id:'scratch-session', taskId:0, global:true, kind:'agent', engine:'custom', status:'running', label:'Agent', createdAt:new Date().toISOString() }]
-        : name === '/api/sessions' ? [{ id: 'browser-session', taskId: 1, kind: 'agent', engine: 'custom', status: 'running', label: 'Agent', createdAt: new Date().toISOString() }]
+        : name === '/api/sessions' ? [taskSession]
+        : name === '/api/projects/1/tasks' ? [task]
         : name === '/api/settings' ? Object.fromEntries(['worktree_base', 'shell', 'branch_template', 'done_session_ttl', 'github_integration', 'pr_review_seed'].map(key => [key, {value: '', default: '', source: 'default'}]))
         : name === '/api/worktrees' ? {counts:{total:0,orphaned:0},projects:[]}
         : name === '/api/global' ? {root_path:'/tmp/scratchpad', agent_id:1, root_exists:true, live:{agent:1,bash:0,tmux:0}, agent:{id:1,name:'Custom',engine:'custom'}}
@@ -96,7 +99,15 @@ const path = require('node:path');
       const result = await agent('wait', {question_id:completed.question.id,wait_seconds:0});
       assert.equal(result.question.status,mode === 'dismiss' ? 'dismissed' : 'answered');
       assert.equal(result.question.reason,mode === 'dismiss' ? '' : 'exit');
+      assert.equal(await page.getByRole('dialog',{name:'Agent session ended',exact:true}).count(),0,'inbox exit opened the task-status dialog');
     }
+    await agent('complete', {request_key:'completed-sidebar', abstract:'Completed through the sidebar.', summary:'Updated inbox completion handling.', context:'Verified terminal exit behavior.'});
+    await page.getByRole('button',{name:'Expand inbox sidebar',exact:true}).click();
+    const sidebar = page.getByRole('complementary',{name:'Inbox sidebar',exact:true});
+    await sidebar.getByRole('button',{name:'OK, exit session',exact:true}).click();
+    await sidebar.getByText('Message archived. Agent session is closing.',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('dialog',{name:'Agent session ended',exact:true}).count(),0,'sidebar exit opened the task-status dialog');
+    await page.getByRole('button',{name:'Collapse inbox sidebar',exact:true}).click();
     const first = await ask('options');
     const firstRow = page.locator('details').filter({has:page.locator(`#question-${first.question.id}`)}).first();
     await firstRow.waitFor({state:'attached'});
@@ -148,6 +159,35 @@ const path = require('node:path');
     await page.getByRole('tab', { name: 'Agent', exact: true }).waitFor();
     assert.equal(await page.getByRole('tab', { name: 'Agent', exact: true }).getAttribute('aria-selected'), 'true');
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
+    // External exits stay on the task, even while its terminal is focused.
+    // A terminal exit prompts only while the agent tab is actively viewed.
+    for (const scenario of ['external', 'other-tab', 'terminal']) {
+      taskSession = {...taskSession, status:'running', exitCode:undefined, exitSource:undefined, stopRequested:false};
+      taskSocket = undefined;
+      await page.goto(base+'/projects/1/tasks/1?feedback_session=browser-session');
+      await page.bringToFront();
+      await page.getByRole('tab',{name:'Agent',exact:true}).waitFor();
+      await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
+      assert.ok(taskSocket,'agent terminal did not connect');
+      if (scenario === 'other-tab') await page.getByRole('tab',{name:'Description',exact:true}).click();
+      taskSession = {...taskSession, status:'exited', exitCode:143, stopRequested:true, exitSource:scenario === 'external' ? 'external' : 'terminal'};
+      const refresh = page.waitForResponse(response => new URL(response.url()).pathname === '/api/sessions' && new URL(response.url()).searchParams.get('task_id') === '1');
+      taskSocket.send(Buffer.from('x'+JSON.stringify({code:143})));
+      await refresh;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      if (scenario === 'terminal') {
+        await page.waitForURL('**/projects/1');
+        await page.getByRole('dialog',{name:'Agent session ended',exact:true}).waitFor();
+        await page.getByRole('button',{name:'Keep In Progress',exact:true}).click();
+      } else {
+        // Let the UI render the exit, then confirm revisiting the tab stays quiet.
+        await page.getByRole('tab',{name:'Agent',exact:true}).click();
+        await page.getByRole('button',{name:'Reset session',exact:true}).waitFor();
+        assert.ok(new URL(page.url()).pathname === '/projects/1/tasks/1','external/background exit navigated away');
+        assert.equal(await page.getByRole('dialog',{name:'Agent session ended',exact:true}).count(),0);
+      }
+    }
+    taskSession = {...taskSession, status:'running', exitCode:undefined, exitSource:undefined, stopRequested:false};
     // Exercise Scratchpad using the same real inbox and artifact APIs.
     headers['X-Kamacu-Task-ID'] = '0';
     headers['X-Kamacu-Session-ID'] = 'scratch-session';

@@ -44,14 +44,15 @@ const (
 
 // Info is a JSON-ready snapshot of a session for the REST layer.
 type Info struct {
-	ID        string    `json:"id"`
-	Label     string    `json:"label"`
-	Status    Status    `json:"status"`
-	ExitCode  *int      `json:"exitCode,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	TaskID    int64     `json:"taskId,omitempty"` // 0 omitted for dev sessions
-	Kind      Kind      `json:"kind,omitempty"`   // "bash" or "agent"
-	Engine    string    `json:"engine,omitempty"` // agent only: "claude" | "custom" — lets the status handler/UI distinguish
+	ID         string    `json:"id"`
+	Label      string    `json:"label"`
+	Status     Status    `json:"status"`
+	ExitCode   *int      `json:"exitCode,omitempty"`
+	ExitSource string    `json:"exitSource,omitempty"` // terminal interaction or external request
+	CreatedAt  time.Time `json:"createdAt"`
+	TaskID     int64     `json:"taskId,omitempty"` // 0 omitted for dev sessions
+	Kind       Kind      `json:"kind,omitempty"`   // "bash" or "agent"
+	Engine     string    `json:"engine,omitempty"` // agent only: "claude" | "custom" — lets the status handler/UI distinguish
 
 	// Agent-only fields (kind == "agent").
 	Monitor       MonitorStatus `json:"monitor"`
@@ -117,13 +118,15 @@ type Session struct {
 	setsizeCalls int         // recorded pty.Setsize invocations (test observability)
 
 	// Agent status state machine (D-47); all zero/unused for KindBash.
-	lastActivity  time.Time  // effective output/input activity for working-vs-idle
-	waiting       bool       // sticky until attach/stdin/Stop-hook/exit
-	hooksAlive    bool       // set by SessionStart hook POST; gates the BEL fallback
-	stopHookAt    time.Time  // last Stop hook — settle window anchor (Pitfall 1)
-	stopRequested bool       // Stop() was called server-side (exit-143-is-gray)
-	bel           belScanner // OSC-aware bare-BEL scanner, state across chunks
-	detachedAlive bool       // tmux only: attach client exited but has-session said alive
+	lastActivity    time.Time  // effective output/input activity for working-vs-idle
+	waiting         bool       // sticky until attach/stdin/Stop-hook/exit
+	hooksAlive      bool       // set by SessionStart hook POST; gates the BEL fallback
+	stopHookAt      time.Time  // last Stop hook — settle window anchor (Pitfall 1)
+	lastInputSource string     // keyboard versus inbox/API input; passive terminal reports do not change it
+	exitSource      string     // frozen on exit, or chosen by an explicit stop request
+	stopRequested   bool       // Stop() was called server-side (exit-143-is-gray)
+	bel             belScanner // OSC-aware bare-BEL scanner, state across chunks
+	detachedAlive   bool       // tmux only: attach client exited but has-session said alive
 	//                          (manual Ctrl+B d) — recorded for Phase 9's resume reconcile
 
 	done      chan struct{} // closed after the exit watcher finishes
@@ -218,6 +221,12 @@ func (s *Session) markExited(code int) {
 	}
 	s.status = StatusExited
 	s.exitCode = code
+	if !s.stopRequested {
+		s.exitSource = s.lastInputSource
+		if s.exitSource == "" {
+			s.exitSource = "external"
+		}
+	}
 	for id, q := range s.conns {
 		delete(s.conns, id)
 		close(q)
@@ -250,6 +259,7 @@ func (s *Session) Info() Info {
 	if s.status == StatusExited {
 		code := s.exitCode
 		info.ExitCode = &code
+		info.ExitSource = s.exitSource
 	}
 	return info
 }
@@ -440,17 +450,18 @@ func (s *Session) Detach(connID string) {
 func (s *Session) WriteInput(p []byte) error {
 	s.inputMu.Lock()
 	defer s.inputMu.Unlock()
-	return s.writeInput(p)
+	return s.writeInput(p, "terminal")
 }
 
 // writeInput requires inputMu; a whole message can hold it across paste/Enter.
-func (s *Session) writeInput(p []byte) error {
+func (s *Session) writeInput(p []byte, source string) error {
 	s.mu.Lock()
 	if s.status == StatusExited {
 		s.mu.Unlock()
 		return errors.New("session exited")
 	}
 	if s.kind == KindAgent && isUserInput(p) {
+		s.lastInputSource = source
 		if s.observer != nil {
 			s.observer.Input()
 		}
@@ -547,7 +558,12 @@ func (s *Session) setsizeLocked(ws pty.Winsize) error {
 // would silently break). Known limit (shared with every terminal
 // multiplexer): a child that itself calls setsid() escapes the session and
 // cannot be caught.
-func (s *Session) Stop() {
+func (s *Session) Stop() { s.stop("external") }
+
+// StopFromTerminal records an explicit stop from the browser terminal controls.
+func (s *Session) StopFromTerminal() { s.stop("terminal") }
+
+func (s *Session) stop(source string) {
 	select {
 	case <-s.done:
 		return // already exited — nothing to do
@@ -557,7 +573,12 @@ func (s *Session) Stop() {
 		// Server-initiated stop: the resulting exit (143 after SIGTERM) was
 		// asked for — the UI renders it gray, never red (research OQ4).
 		s.mu.Lock()
+		if s.status == StatusExited {
+			s.mu.Unlock()
+			return
+		}
 		s.stopRequested = true
+		s.exitSource = source
 		s.mu.Unlock()
 		if s.killer != nil {
 			// Per-session stop strategy (assigned at Spawn): for tmux tabs this is

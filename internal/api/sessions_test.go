@@ -1226,6 +1226,46 @@ func TestSessionStop(t *testing.T) {
 	}
 }
 
+func TestSessionStopSource(t *testing.T) {
+	for _, source := range []string{"", "external", "terminal", "invalid"} {
+		t.Run(source, func(t *testing.T) {
+			srv, mgr := newSessionServer(t)
+			status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+			if status != http.StatusCreated {
+				t.Fatalf("create: %d %v", status, body)
+			}
+			id := body["id"].(string)
+			var request any
+			if source != "" {
+				request = map[string]string{"source": source}
+			}
+			status, _ = doJSON(t, "POST", srv.URL+"/api/sessions/"+id+"/stop", request)
+			sess, _ := mgr.Get(id)
+			if source == "invalid" {
+				if status != http.StatusBadRequest || sess.Info().Status != session.StatusRunning {
+					t.Fatalf("invalid source: status=%d session=%+v", status, sess.Info())
+				}
+				return
+			}
+			if status != http.StatusAccepted {
+				t.Fatalf("stop: %d", status)
+			}
+			select {
+			case <-sess.Done():
+			case <-time.After(15 * time.Second):
+				t.Fatal("session did not exit")
+			}
+			want := source
+			if want == "" {
+				want = "external"
+			}
+			if got := sess.Info().ExitSource; got != want {
+				t.Fatalf("exit source = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestSessionDelete(t *testing.T) {
 	srv, mgr := newSessionServer(t)
 
