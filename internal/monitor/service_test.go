@@ -472,3 +472,38 @@ func TestMessageFallsBackToOriginalEvidence(t *testing.T) {
 		t.Fatal(page, err)
 	}
 }
+
+func TestSuggestedRepliesBecomeClickableOptions(t *testing.T) {
+	svc, sess, _, _ := reviewFixture(t, classifierFunc(func(context.Context, Profile, observation.Snapshot) (Decision, error) {
+		return Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Summary: "Ready for the next step.", Context: "Should I continue?", InputMode: "text", OptionsSuggested: true, Options: []string{"Yes, continue", "Explain the next step first"}}, nil
+	}))
+	ctx := context.Background()
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	page, err := svc.Inbox.List(ctx, nil, false, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal(page, err)
+	}
+	q := page.Items[0]
+	if len(q.Options) != 2 || q.Options[1].Label != "Explain the next step first" || q.DeliveryMode != "text" {
+		t.Fatalf("missing suggested replies: %+v", q)
+	}
+	var raw string
+	if err := svc.DB.QueryRow(`SELECT decision FROM monitor_episodes WHERE session_id=?`, sess.Info().ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var saved Decision
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil || !saved.OptionsSuggested {
+		t.Fatal("suggestion source not persisted", saved, err)
+	}
+	answer, err := svc.Inbox.Answer(ctx, nil, q.ID, q.Revision, "", q.Options[1].ID)
+	if err != nil || answer.Question.Answer != "Explain the next step first" {
+		t.Fatal(answer, err)
+	}
+	if err := sess.WriteObserved(answer.Question.EvidenceRevision, answer.Question.InputGeneration, []byte(answer.Question.Answer), []byte("\r")); err != nil {
+		t.Fatal(err)
+	}
+	if sess.Observation().Input <= q.InputGeneration {
+		t.Fatal("suggested reply was not delivered as terminal input")
+	}
+}

@@ -207,9 +207,12 @@ func TestInstalledLoginChoices(t *testing.T) {
 			for _, tc := range []struct {
 				name, screen, mode string
 				count              int
+				suggested          bool
 			}{
-				{"conversation", "Agent: Which approach should I implement?\n1. Keep the existing layout\n2. Replace it with a dialog\nReply with your preferred option.\n> ", "text", 2},
-				{"permission", "Allow this command?\n  git status\n❯ 1. Yes\n  2. No\nEnter to confirm, Esc to cancel", "terminal", 0},
+				{"explicit", "Agent: Which approach should I implement?\n1. Keep the existing layout\n2. Replace it with a dialog\nReply with your preferred option.\n> ", "text", 2, false},
+				{"yes_no", "I finished the implementation and all tests passed. Should I start the review?\n> ", "text", 0, true},
+				{"missing_information", "Which hostname should I configure for the production deployment?\n> ", "text", 0, true},
+				{"permission", "Allow this command?\n  git status\n❯ 1. Yes\n  2. No\nEnter to confirm, Esc to cancel", "terminal", 0, false},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -218,12 +221,81 @@ func TestInstalledLoginChoices(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if d.InputMode != tc.mode || len(d.Options) != tc.count {
+					if d.InputMode != tc.mode || d.OptionsSuggested != tc.suggested {
 						t.Fatalf("unexpected choices: %+v", d)
 					}
+					if tc.suggested {
+						if len(d.Options) < 2 || len(d.Options) > 3 {
+							t.Fatalf("expected two or three suggestions: %+v", d)
+						}
+						if tc.name == "missing_information" {
+							for _, label := range d.Options {
+								if strings.Contains(label, "example.com") || strings.Contains(label, "localhost") || strings.Contains(label, "127.0.0.1") {
+									t.Fatalf("invented hostname: %q", label)
+								}
+							}
+						}
+					} else if len(d.Options) != tc.count {
+						t.Fatalf("unexpected copied choices: %+v", d)
+					}
+					t.Logf("suggested=%v replies=%q", d.OptionsSuggested, d.Options)
 				})
 			}
 		})
+	}
+}
+
+func TestSuggestedRepliesValidation(t *testing.T) {
+	obs := observation.Snapshot{Screen: "Should I start the review?\n> "}
+	base := Decision{State: "waiting", Kind: "question", Evidence: "Should I start the review?", Question: "Should I start the review?", Summary: "Implementation is ready for review.", InputMode: "text", OptionsSuggested: true, Options: []string{"Yes, start the review", "Explain the changes first"}}
+	for _, choices := range [][]string{base.Options, append(append([]string{}, base.Options...), "Not yet")} {
+		d := base
+		d.Options = choices
+		if err := validateDecision(d, obs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name       string
+		options    []string
+		kind, mode string
+		suggested  bool
+	}{
+		{"none", nil, "question", "text", true},
+		{"one", []string{"Yes"}, "question", "text", true},
+		{"four", []string{"A", "B", "C", "D"}, "question", "text", true},
+		{"empty", []string{"Yes", " "}, "question", "text", true},
+		{"duplicate", []string{"Yes", "Yes"}, "question", "text", true},
+		{"control", []string{"Yes", "No\x1b"}, "question", "text", true},
+		{"too long", []string{"Yes", strings.Repeat("a", 501)}, "question", "text", true},
+		{"claimed copied", base.Options, "question", "text", false},
+		{"permission", base.Options, "permission", "terminal", true},
+		{"menu", base.Options, "question", "terminal", true},
+		{"completion", base.Options, "completion", "none", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := base
+			d.Options = tc.options
+			d.Kind = tc.kind
+			d.InputMode = tc.mode
+			d.OptionsSuggested = tc.suggested
+			if validateDecision(d, obs) == nil {
+				t.Fatal("invalid suggestions accepted")
+			}
+		})
+	}
+}
+
+func TestClassifierSuggestedRepliesHTTP(t *testing.T) {
+	response := Decision{State: "waiting", Kind: "question", Evidence: "Start the review?", Question: "Start the review?", Summary: "The implementation is ready for review.", Context: "I finished the implementation.", InputMode: "text", OptionsSuggested: true, Options: []string{"Yes, start the review", "Explain the changes first"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := json.Marshal(response)
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(raw)}}}})
+	}))
+	defer srv.Close()
+	got, err := (Backend{}).Classify(context.Background(), Profile{Backend: "openai_compatible", Endpoint: srv.URL, Model: "test"}, observation.Snapshot{Screen: "Start the review?\n> "})
+	if err != nil || !got.OptionsSuggested || len(got.Options) != 2 {
+		t.Fatal(got, err)
 	}
 }
 

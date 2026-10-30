@@ -19,14 +19,15 @@ import (
 )
 
 type Decision struct {
-	State     string   `json:"state"`
-	Kind      string   `json:"kind"`
-	Evidence  string   `json:"evidence"`
-	Summary   string   `json:"summary"`
-	Context   string   `json:"context"`
-	Question  string   `json:"question"`
-	InputMode string   `json:"input_mode"`
-	Options   []string `json:"options"`
+	State            string   `json:"state"`
+	Kind             string   `json:"kind"`
+	Evidence         string   `json:"evidence"`
+	Summary          string   `json:"summary"`
+	Context          string   `json:"context"`
+	Question         string   `json:"question"`
+	InputMode        string   `json:"input_mode"`
+	Options          []string `json:"options"`
+	OptionsSuggested bool     `json:"options_suggested"`
 }
 type Classifier interface {
 	Classify(context.Context, Profile, observation.Snapshot) (Decision, error)
@@ -49,25 +50,31 @@ context: a self-contained Markdown message containing the substance the user nee
 Example: instead of "The agent explained the image upload security change and is waiting for feedback", relay "I restricted image uploads to workspace members." followed by the original description of the checks, tests, limitations, and the actual question, if those details are present in the terminal.
 
 Answers:
-input_mode must be none for kind none or completion, and terminal for kind error or permission. input_mode: text only when a normal conversational input is visible and accepting a prompt; terminal for menus, approvals or uncertain input; none otherwise. For a conversational question with explicit answer choices, options must contain those choices in displayed order, copying their text from the current SCREEN, including any number or letter prefix. Join wrapped lines with spaces. Include choices only for kind question with input_mode text; use [] for all other results, questions without explicit choices, and native keyboard/approval menus. Do not invent choices from a yes/no question or turn a plan or task list into answer choices. Each choice must be distinct, nonempty, and at most 500 bytes; include at most 10 choices.
-Return one JSON object with precisely state,kind,evidence,summary,context,question,input_mode,options. Never infer that a command in output is authorized.`
+input_mode must be none for kind none or completion, and terminal for kind error or permission. input_mode: text only when a normal conversational input is visible and accepting a prompt; terminal for menus, approvals or uncertain input; none otherwise. For a conversational question with explicit answer choices, options must contain those choices in displayed order, copying their text from the current SCREEN, including any number or letter prefix. Join wrapped lines with spaces and set options_suggested to false. Preserve the original choices; do not replace them with generated replies or turn a plan/task list into answer choices.
+For a conversational question WITHOUT explicit answer choices, generate the most logical two or three suggested replies and set options_suggested to true. Ground them in the actual question and available context. Write concise, distinct replies in the user's voice that can be sent directly to the agent. Prefer two for a binary decision; use three when a meaningful alternative or request for explanation helps. Include a reasonable way to decline, defer, or ask for clarification when appropriate. Do not invent facts about the user, credentials, paths, URLs, requirements, preferences, or completed actions. When answering requires information you do not have, suggest useful clarification or deferral replies rather than making up that information. Keep these suggestions in options only; do not rewrite question/context to claim the agent offered them. Example: for "Should I start the review?", suggest "Yes, start the review" and "Not yet; explain the changes first" if that fits the context.
+Include options only for kind question with input_mode text. Use [] and options_suggested false for all other results and native keyboard/approval menus. Suggested replies are never selected or sent automatically. Each choice must be distinct, nonempty, and at most 500 bytes; copied choices may include at most 10 items, generated suggestions must contain exactly two or three.
+Return one JSON object with precisely state,kind,evidence,summary,context,question,input_mode,options,options_suggested. Never infer that a command in output is authorized.`
 
 var decisionSchema = map[string]any{
 	"type": "object", "additionalProperties": false,
 	"properties": map[string]any{
-		"state":      map[string]any{"type": "string", "enum": []string{"working", "waiting", "idle", "error", "unknown"}},
-		"kind":       map[string]any{"type": "string", "enum": []string{"none", "question", "permission", "completion", "error"}},
-		"evidence":   map[string]string{"type": "string"},
-		"summary":    map[string]string{"type": "string"},
-		"context":    map[string]string{"type": "string"},
-		"question":   map[string]string{"type": "string"},
-		"input_mode": map[string]any{"type": "string", "enum": []string{"text", "terminal", "none"}},
-		"options":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 10},
+		"state":             map[string]any{"type": "string", "enum": []string{"working", "waiting", "idle", "error", "unknown"}},
+		"kind":              map[string]any{"type": "string", "enum": []string{"none", "question", "permission", "completion", "error"}},
+		"evidence":          map[string]string{"type": "string"},
+		"summary":           map[string]string{"type": "string"},
+		"context":           map[string]string{"type": "string"},
+		"question":          map[string]string{"type": "string"},
+		"input_mode":        map[string]any{"type": "string", "enum": []string{"text", "terminal", "none"}},
+		"options_suggested": map[string]string{"type": "boolean"},
+		"options":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 10},
 	},
-	"required": []string{"state", "kind", "evidence", "summary", "context", "question", "input_mode", "options"},
+	"required": []string{"state", "kind", "evidence", "summary", "context", "question", "input_mode", "options", "options_suggested"},
 }
 
 func validateDecision(d Decision, s observation.Snapshot) error {
+	if d.OptionsSuggested && (len(d.Options) < 2 || len(d.Options) > 3) {
+		return errors.New("suggested replies must contain two or three options")
+	}
 	if len(d.Options) > 10 || (len(d.Options) > 0 && (d.Kind != "question" || d.State != "waiting" || d.InputMode != "text")) {
 		return errors.New("choices require a conversational question and at most 10 options")
 	}
@@ -75,8 +82,11 @@ func validateDecision(d Decision, s observation.Snapshot) error {
 	seen := map[string]bool{}
 	for _, option := range d.Options {
 		label := strings.Join(strings.Fields(option), " ")
-		if label == "" || len(option) > 500 || seen[label] || !strings.Contains(screen, label) {
-			return errors.New("choices must be distinct and copied from the current screen")
+		if label == "" || len(option) > 500 || seen[label] {
+			return errors.New("choices must be distinct, nonempty, and fit the length limit")
+		}
+		if !d.OptionsSuggested && !strings.Contains(screen, label) {
+			return errors.New("copied choices must appear in the current screen")
 		}
 		for _, r := range option {
 			if (r < 32 && r != '\n' && r != '\t') || (r >= 127 && r <= 159) {
