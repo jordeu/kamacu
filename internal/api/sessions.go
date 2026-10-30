@@ -551,47 +551,47 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// conversation back, not a blank terminal). transcriptExists is
 			// cwd-agnostic (resume.go), so the claude check works verbatim
 			// against the global root's transcripts.
-		if agentEngine == "opencode" {
-			if !ocsid.Valid {
-				writeError(w, http.StatusConflict, "no global opencode session to resume")
-				return
-			}
-			// opts.ResumeSessionID stays "" — the `-s <id>` append in the
-			// custom spawn arm below keys off ocsid, which the singleton
-			// scan already filled.
-		} else if agentEngine == "codex" {
-			// Codex global resume: keys off the persisted codex_session_id
-			// alone (captured from hook payloads); the `resume <id>` subcommand
-			// append below keys off cxid.
-			if !cxid.Valid {
-				writeError(w, http.StatusConflict, "no global codex session to resume")
-				return
-			}
-		} else {
+			if agentEngine == "opencode" {
+				if !ocsid.Valid {
+					writeError(w, http.StatusConflict, "no global opencode session to resume")
+					return
+				}
+				// opts.ResumeSessionID stays "" — the `-s <id>` append in the
+				// custom spawn arm below keys off ocsid, which the singleton
+				// scan already filled.
+			} else if agentEngine == "codex" {
+				// Codex global resume: keys off the persisted codex_session_id
+				// alone (captured from hook payloads); the `resume <id>` subcommand
+				// append below keys off cxid.
+				if !cxid.Valid {
+					writeError(w, http.StatusConflict, "no global codex session to resume")
+					return
+				}
+			} else {
 				if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
 					writeError(w, http.StatusConflict, "no global claude session to resume")
 					return
 				}
 				opts.ResumeSessionID = csid.String
 			}
-	} else if agentEngine == "opencode" {
-		if !ocsid.Valid {
-			writeError(w, http.StatusConflict, "no session to resume")
-			return
-		}
-		// opts.ResumeSessionID stays "" — opencode does NOT route through
-		// claude's --resume (MEM027); the `-s <id>` flag is appended to
-		// AgentArgs in the custom spawn arm below.
-	} else if agentEngine == "codex" {
-		// Codex task resume: keys off the persisted codex_session_id alone —
-		// codex has no kamacu-side transcript glob (its sessions live under
-		// ~/.codex). The `resume <id>` subcommand is appended to AgentArgs in
-		// the custom spawn arm below.
-		if !cxid.Valid {
-			writeError(w, http.StatusConflict, "no session to resume")
-			return
-		}
-	} else {
+		} else if agentEngine == "opencode" {
+			if !ocsid.Valid {
+				writeError(w, http.StatusConflict, "no session to resume")
+				return
+			}
+			// opts.ResumeSessionID stays "" — opencode does NOT route through
+			// claude's --resume (MEM027); the `-s <id>` flag is appended to
+			// AgentArgs in the custom spawn arm below.
+		} else if agentEngine == "codex" {
+			// Codex task resume: keys off the persisted codex_session_id alone —
+			// codex has no kamacu-side transcript glob (its sessions live under
+			// ~/.codex). The `resume <id>` subcommand is appended to AgentArgs in
+			// the custom spawn arm below.
+			if !cxid.Valid {
+				writeError(w, http.StatusConflict, "no session to resume")
+				return
+			}
+		} else {
 			if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
 				writeError(w, http.StatusConflict, "no session to resume")
 				return
@@ -904,11 +904,7 @@ func (h *sessionHandlers) input(w http.ResponseWriter, r *http.Request) {
 
 func sendTerminalMessage(sess *session.Session, message string) error {
 	body, submit := wrapInputForWrite(message)
-	if err := sess.WriteInput([]byte(body)); err != nil {
-		return err
-	}
-	time.Sleep(100 * time.Millisecond)
-	return sess.WriteInput([]byte(submit))
+	return sess.WriteMessage([]byte(body), []byte(submit))
 }
 
 // wrapInputForWrite decomposes a request message into the ordered pair of
@@ -1084,7 +1080,7 @@ func (h *sessionHandlers) delete(w http.ResponseWriter, r *http.Request) {
 // the right project AND the recorded directory matches the filter.
 var discoverOpenCodeSession = func(ctx context.Context, dir string) (string, error) {
 	cmd := exec.CommandContext(ctx, "opencode", "session", "list", "--format", "json")
-	cmd.Dir = dir                       // scope the listing to the worktree's project
+	cmd.Dir = dir                              // scope the listing to the worktree's project
 	cmd.Env = append(os.Environ(), "PWD="+dir) // opencode resolves the project from $PWD
 	out, err := cmd.Output()
 	if err != nil {
@@ -1399,8 +1395,8 @@ type sessionDetail struct {
 type sessionOutputEnvelope struct {
 	Encoding string `json:"encoding"` // always "base64" — PTY output is arbitrary bytes; text frames would corrupt split UTF-8
 	Output   string `json:"output"`
-	Bytes    int    `json:"bytes"`    // the number of raw PTY bytes encoded (≤ requested)
-	Clamped  bool   `json:"clamped"`  // true when the requested bytes value exceeded maxOutputBytes
+	Bytes    int    `json:"bytes"`   // the number of raw PTY bytes encoded (≤ requested)
+	Clamped  bool   `json:"clamped"` // true when the requested bytes value exceeded maxOutputBytes
 }
 
 // sessionContext bundles the per-task DB columns attached to a session.Info

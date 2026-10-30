@@ -1,130 +1,61 @@
-# Agent feedback inbox
+# Terminal monitoring and inbox
 
-The global Inbox collects completion summaries and questions from task agents across all workspaces and the global Scratchpad. Each
-question includes its task summary, Markdown decision context, optional answer
-buttons, a free-text answer field on the full Inbox page, and an **Open task** button. Opening a pending message’s task archives it as dismissed without replying to the agent. The button selects the
-Agent tab and focuses the originating terminal if that session is still available.
-Answered, dismissed, and unanswered questions appear in Archived.
+Kamacu observes each running agent's terminal, including custom agents and Scratchpad. A configured LLM classifies activity and detects questions, permission dialogs, blocking errors, and completed responses. No agent skill, status hook, or feedback tool call is required. Process exit is still determined directly from the process.
 
-## Agent protocol
+## Setup
 
-Enable the bundled task skill and MCP registration in **Settings → Agents →
-Kamacu integration**, or run `kamacu integration enable <claude|codex|opencode>`.
-See [integration setup](agent-integration.md). Start the
-agent from Kamacu so its MCP subprocess inherits `KAMACU_TASK_ID`,
-`KAMACU_SESSION_ID`, `KAMACU_HOOK_BASE`, and `KAMACU_HOOK_TOKEN`. Task and session
-identity are taken from that environment, not model-supplied tool arguments.
-Existing agents must be restarted to receive the new task identity. Scratchpad
-uses `KAMACU_TASK_ID=0`; the server verifies that its session is a live Scratchpad
-agent. Its messages show **Scratchpad** and an **Open Scratchpad** link to the
-originating terminal. Agents launched outside Kamacu cannot create inbox questions.
-Scratchpad questions share the same delivery, expiry, answer and resume protocol.
-Built-in Claude, Codex, and OpenCode engines receive connection credentials;
-custom engines receive task/session identity but retain their existing credential
-configuration requirements.
+1. Open **Settings → Terminal monitoring → Add monitoring model**.
+2. Choose **Installed Claude Code login** or **Installed Codex login** to reuse the CLI's authentication on the Kamacu server. Sign in using that CLI first. Leave Model empty to use its default, or specify a model available to your account. Kamacu invokes the unmodified CLI; it does not copy OAuth tokens. Existing environment authentication overrides and provider subscription limits still apply.
+3. Alternatively choose **OpenAI-compatible API or local endpoint**, or **Anthropic API**. Enter a base URL including its API version, such as `http://localhost:11434/v1` or `https://api.anthropic.com/v1`, and a model ID. For authenticated endpoints, name an environment variable containing the API key on the Kamacu server. Leave it empty for unauthenticated local endpoints. Keys are not stored in these settings or returned to the browser.
+4. Use **Test connection**, save, and select the global default. Scratchpad uses this default. Choose a workspace override under **Workspace models** or **Manage workspaces → Monitoring model**.
 
-Agents first display the question and numbered options in the terminal, then send the same question to the inbox and end their turn. Kamacu delivers the answer directly into the originating terminal.
+A model must be configured before starting new agents. A workspace without an override inherits the global default. A failing explicit override stays unavailable; Kamacu never silently sends its terminal text to another provider. Changes apply to running sessions. The selected model receives rendered terminal text, so choose its endpoint accordingly.
 
-The inbox starts with collapsed message rows; expand any row to review context and answer. A global right sidebar shows an inbox icon and pending count when collapsed. Pending messages highlight the collapsed icon and count. Expand it to read self-contained messages and the question, choose an option, open the task, or dismiss. There is no free-text field in the sidebar; question messages link to the full inbox for context and custom replies. Completion cards offer only Open task, OK, exit session, and Dismiss. Its expanded state persists across navigation and reloads. Full context / custom reply expands that question on the full-width Inbox page. On narrow screens the expanded panel overlays content.
+OpenAI-compatible endpoints must support Chat Completions with JSON-schema response formatting. Compatibility varies by server/model; test the actual endpoint. Monitoring is independent of the coding agent's provider.
 
-The MCP server advertises workflow instructions and these tools:
+## Notifications and replies
 
-| Tool | Purpose |
-| --- | --- |
-| `report_completion` | Required when work is finished, even without a question. Supply `request_key`, `abstract`, `summary`, and Markdown `context` describing changes, verification, and limitations. |
-| `ask_feedback` | Create a question with `request_key`, `abstract`, `summary`, `context`, `question`, and optional `options: [{id, label}]`. Reuse the key when retrying the same request. |
-| `resolve_feedback` | Report a terminal answer using `question_id`, `revision`, and either `answer` or `option_id`. Call before acting on the answer. |
-| `acknowledge_feedback` | Confirm receipt of an archived result using `question_id` and `revision`. Acknowledge inbox answers before acting. |
-| `list_feedback` | Recover questions for the current task, including archived questions and previous sessions. Ten per page; advance `offset` by 10 when `has_more` is true. |
-| `reopen_feedback` | Explicitly reopen an unanswered question using its ID and revision. A dismissed question additionally requires `user_requested: true`, only after the user asks to reopen it. |
+- Watching a terminal suppresses its notifications, while status continues updating. Viewing means that exact terminal is selected in a visible, focused browser window. Any fresh window viewing it counts.
+- An unanswered question appears after leaving, without requiring more terminal output. Returning hides its card and attention count; leaving restores the same card. Dismissal is permanent for that episode.
+- A completion produced while watching is considered seen, even if inference finishes after leaving. Unrelated screen repaints preserve the evidence's original time.
+- Ordinary conversational answers are saved and sent as plain terminal text. No acknowledgement skill is needed. Native approval menus offer **Open task** / **Open Scratchpad** so the user handles them in the terminal.
+- Replies check the screen revision and input generation before writing. If delivery is uncertain, the saved answer remains in Archived for manual recovery. After a server restart, interrupted delivery is explicitly marked uncertain. Other message writers and keyboard input cannot interleave between a reply’s paste and submit key. Kamacu never automatically resends it: a successful PTY write is not proof that the agent processed it.
+- Completion cards support Open task, Dismiss, and OK, exit session. Tasks are never automatically moved to Done.
 
-A typical interaction:
+The sidebar and full Inbox share pending counts. Hidden cards do not count. Model rewording updates the same attention episode rather than reopening a dismissed card. Fresh request evidence after user input starts a new episode, even if the question text repeats. Questions superseded by observed progress and questions belonging to stopped sessions are archived as unanswered, without inventing a user response. Existing inbox history and compatibility tools remain available for recovering older messages; there is no legacy status-monitoring mode.
 
-1. Call `ask_feedback`, providing enough context to decide without opening the task.
-   Present the same question as ordinary terminal text. Do not open a blocking
-   native selection dialog.
-2. End the turn once the question is posted. Do not poll or hold a tool call open.
-3. An inbox answer arrives as a terminal prompt with the question ID and revision.
-   Call `acknowledge_feedback` before acting and use its returned answer. For an
-   answer to pending feedback typed directly in the terminal, call `resolve_feedback` first. Explicit new instructions after dismissal are fresh requests and must not be resolved against the archive.
-4. Clarifications leave the question open. Dismissed or expired means there is no
-   answer, never implicit approval.
+Presence updates on terminal selection, navigation, focus, and visibility, with five-second heartbeats. Each document has its own identity and ordered beacons, so duplicated tabs and delayed requests cannot overwrite a newer viewing state. Page departure sends an explicit away beacon. If a browser disappears without a final update, its presence expires after fifteen seconds.
 
-The first answer recorded by Kamacu wins. `already_resolved` returns the current
-question and winning answer; `stale_revision` means the question was reopened
-since the submitted form/result was obtained. Review the current state rather
-than replaying stale input. Reads do not consume answers, so saved answers can be recovered after a delivery failure. One session can have only one pending question; `existing_pending`
-returns it instead of creating a duplicate. Reusing a creation key returns the
-original record, even if it is archived.
+## Operation
 
-## Completion summaries
+The Go server renders terminal bytes continuously, independently of browser attachment. Input and screen revisions guard delayed model results and replies. The renderer uses bounded screen/history storage and preserves split UTF-8/ANSI sequences. It matches terminal dimensions down to a single cell; terminals larger than 300 columns or 100 rows show monitoring unavailable rather than trusting clipped output. Resize invalidates pending replies. Rendering is synchronous to avoid dropped bytes; model inference runs outside the PTY/session locks.
 
-Agents must call `report_completion` before ending a completed unit of work, even when they have no question. Messages show what changed, verification and remaining limitations. The inbox provides three actions:
+The scheduler checks once a second, debounces stable output for two seconds, and limits calls to at most one per session every five seconds. Continuously changing output is reconsidered after ten seconds. Four workers prioritize the oldest attempt. User input or model configuration changes cancel obsolete calls; changed screens reject old results. Each call has a thirty-second timeout, bounded input/output, and provider failures back off. Stable unchanged screens require no repeated calls. There is no spending cutoff.
 
-- **Open task:** archives the message as dismissed and focuses its originating terminal, where the user can send another prompt.
-- **OK, exit session:** archives the message and stops its originating session. For eligible tasks, the existing dialog offers moving the task to Done.
-- **Dismiss:** archives without replying or stopping the session.
+Status is unknown until classification succeeds. Provider/auth/quota failures show unknown/unavailable instead of pretending the agent is idle. Hover the status dot for the diagnostic. Settings show calls, failures, timeouts, last latency, and tokens when the adapter receives usage data; these counters reset on server restart. Codex's current final-text adapter does not expose token counts.
 
-Opening a task view from any entry point (including a board card or direct URL), or opening Scratchpad, also dismisses that task’s pending completion messages. Questions remain pending, and completions arriving after the view is opened stay in the inbox until another visit.
+Installed-login inference uses a fresh temporary directory, disables project instructions, action tools, hooks and MCP, and removes inherited Kamacu task identity. It runs outside the ordinary session manager so the monitor cannot monitor itself. API adapters have no tools. Terminal contents are treated as untrusted data and model decisions must cite current visible evidence.
 
-Completion messages use the same identity, retry keys, revisions and recovery rules as questions. Only an explicit exit option stops a session; free text containing the button label is still a next prompt. The result’s `reason` is `exit` for session exit, and empty for a text prompt. Legacy messages may still return `seen`. Dismissal and expiry never imply more work or permission to exit. An explicit new instruction typed in the terminal after dismissal (including Open task) is a fresh request. Agents must not resolve it against the archived message or treat an empty archived answer as overriding it; reopening still requires the user’s explicit request.
+On upgrade, new agent launches stop injecting Claude status hooks or selecting the Codex hook profile. Unchanged former Kamacu Codex/OpenCode hook files are retired; user-edited files are preserved with a diagnostic. Optional artifact/MCP tools and user configuration remain available. Restart agents to load updated skill/MCP instructions.
 
-Existing installations receive the updated bundled skill through integration sync; restart agents to load the updated workflow and MCP tool list.
+## Recovery and current limits
 
-## Session lifetime and recovery
+Agent terminals are direct PTYs, not persistent tmux sessions; a server restart ends those agents. Shell tmux tabs retain their existing recovery behavior. Inbox history and episode decisions are durable, and a new agent session cannot inherit another session's pending decision.
 
-- Pending questions stay open while their originating agent session is alive.
-  They no longer require polling or expire after five minutes of silence.
-- Session exit archives pending questions as **Unanswered**. A reconciliation
-  sweep also handles missing sessions after restart.
-- Saved answers survive failed terminal delivery. The browser reports delivery
-  failures; open the terminal and ask the agent to recover using `list_feedback`.
-  Delivery is attempted once per accepted browser answer; repeating the HTTP
-  request does not inject a duplicate prompt.
-- A live successor on the same task can acknowledge recovered answers. Reopening
-  an unanswered question transfers ownership and increments its revision.
-- Reopening a dismissed question requires the user's explicit instruction.
+Claude retains its explicit conversation ID. OpenCode retains its existing session-list discovery. Codex's normal exit footer supplies its resume ID without hooks, and already saved IDs resume normally. A fresh Codex process killed before emitting that footer may have no saved resume ID; automatic crash recovery of that conversation is a remaining limitation. Kamacu deliberately does not guess from unrelated conversations in the same directory.
 
-Question changes and lifecycle history are persisted in SQLite. Answering and
-archiving happen together; acknowledgment is tracked separately so the UI can
-show **Awaiting agent** after the user has answered. Deleting a task deletes its
-questions and history along with it.
-
-## Limits and transport
-
-Questions allow up to 10 options. Maximum UTF-8 sizes: request key 200 bytes,
-summary and question 4,000 bytes each, context 32,000 bytes, option ID 100 bytes,
-option label 500 bytes, answer 16,000 bytes. The HTTP body limit is 96 KiB.
-
-Answers use the existing bracketed-paste terminal transport followed by a separate
-Enter key. The payload is JSON-encoded so control characters in answers cannot
-break out of the paste. Legacy **Seen** delivers a prompt to acknowledge and stop;
-**OK, exit session** stops the session directly without injection.
-
-The legacy HTTP wait action remains available for older clients, but new MCP
-sessions no longer advertise `wait_for_feedback`. Restart agents after integration
-sync to load the new skill and tool list.
+Strict screen-generation checks favor avoiding stale notifications. A continuously repainting UI or a slow/limited provider can exceed the intended 10–15 second response time. The implementation has synthetic installed-login checks and a recorded Codex renderer replay; broad live-terminal accuracy and 1/5/10-session load benchmarks remain necessary before treating that latency as a production guarantee.
 
 ## Verification
-
-Automated tests cover routing, duplicate suppression, delivery failures, durable
-answer recovery, and pending questions surviving without polls. Live CLI timing
-still needs checking with Claude, Codex, and OpenCode: an answer can arrive while
-an agent is finishing its previous turn, or while its prompt contains a draft.
-
-Browser acceptance uses a disposable database and the built frontend:
 
 ```sh
 npm ci --prefix web
 npm run build --prefix web
-KAMACU_BROWSER_TEST=1 \
-KAMACU_PLAYWRIGHT_PACKAGE=/absolute/path/to/playwright \
-go test ./internal/api -run '^TestInboxBrowser$' -count=1
+npm test --prefix web
+go test ./...
+KAMACU_MONITOR_CORPUS=1 go test ./internal/monitor -run TestInstalledLoginCorpus -v
+KAMACU_BROWSER_TEST=1 KAMACU_PLAYWRIGHT_PACKAGE=/absolute/path/to/playwright \
+  go test ./internal/api -run '^TestInboxBrowser$' -count=1
 ```
 
-Optionally set `KAMACU_BROWSER_EXECUTABLE` to an installed Chromium executable and
-`KAMACU_INBOX_SCREENSHOTS` to a directory for desktop/mobile captures.
-
-Codex filters the environment of stdio MCP subprocesses. At launch, Kamacu inspects enabled local Kamacu MCP registrations and adds the four `KAMACU_*` variable names to their existing `env_vars` allowlist using process-local configuration overrides. Credentials remain in the environment; user configuration is not rewritten. Register the server as `kamacu` if you use a wrapper command. Discovery failures stop launch with a diagnostic instead of starting with broken inbox identity.
-
-New questions and completion reports require a self-contained plain-text `abstract` of at most 480 Unicode characters. The sidebar wraps this abstract and option labels; detailed summaries and context remain available in the full inbox. Existing messages retain their stored abstract. Abstracts should include concrete findings, tradeoffs and recommendations for decisions, or outcomes, verification and limitations for completed work, rather than repeat a title. Agents must display the same full summary and context in the terminal before posting to the inbox.
+The live corpus is opt-in and submits only synthetic fixtures to the current Claude/Codex logins. The deterministic PTY test covers question → deferred inbox → plain reply → completion, including completion inference finishing after departure. Browser checks cover desktop/mobile inbox, task and Scratchpad navigation, model selection/inheritance, and optional integrations. Set `KAMACU_BROWSER_EXECUTABLE` to an installed Chromium executable if needed. Race detection additionally requires a C compiler and `CGO_ENABLED=1`.

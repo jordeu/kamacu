@@ -3,6 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
 
 export interface FeedbackQuestion {
+ origin?: string;
+ hidden?: boolean;
+ delivery_mode?: string;
+ delivery_status?: string;
   kind?: "question" | "completion";
   id: string;
   task_id: number;

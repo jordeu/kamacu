@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -35,6 +36,10 @@ func InboxTerminalRoutes(mux *http.ServeMux, service *inbox.Service, token strin
 		info := sess.Info()
 		if info.Kind != session.KindAgent || info.Status != session.StatusRunning || info.StopRequested || info.TaskID != q.TaskID || info.Global != (q.TaskID == 0) {
 			return fmt.Errorf("originating agent is unavailable")
+		}
+		if q.Origin == "observer" {
+			body, submit := wrapInputForWrite(q.Answer)
+			return sess.WriteObserved(q.EvidenceRevision, q.InputGeneration, []byte(body), []byte(submit))
 		}
 		return sendTerminalMessage(sess, feedbackMessage(q))
 	}, stop)
@@ -143,13 +148,30 @@ func (h *inboxHandlers) answer(w http.ResponseWriter, r *http.Request) {
 		inboxError(w, err)
 		return
 	}
+	// Once accepted, finish recording the outcome even if the browser disconnects.
+	deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancelDelivery()
 	// Inject only the newly accepted browser answer; retries and terminal answers
 	// must not submit a second prompt. Persist first so recovery is always possible.
 	if out.Outcome == "accepted" && out.Question.Reason != "exit" && h.deliver != nil {
+		if out.Question.Origin == "observer" {
+			if err := h.service.RecordDelivery(deliveryCtx, out.Question.ID, "attempting"); err != nil {
+				inboxError(w, err)
+				return
+			}
+		}
 		if err := h.deliver(out.Question); err != nil {
+			if out.Question.Origin == "observer" {
+				_ = h.service.RecordDelivery(deliveryCtx, out.Question.ID, "uncertain")
+			}
+
 			slog.Error("deliver inbox answer", "question", out.Question.ID, "error", err)
-			writeError(w, http.StatusBadGateway, "Answer saved, but terminal delivery failed. Open the agent terminal and ask it to recover the answer using list_feedback.")
+			writeError(w, http.StatusBadGateway, "Answer saved, but terminal delivery could not be confirmed. Open the terminal and review the saved answer before submitting it manually.")
 			return
+		}
+		if out.Question.Origin == "observer" {
+			_ = h.service.RecordDelivery(deliveryCtx, out.Question.ID, "submitted")
+			out.Question.DeliveryStatus = "submitted"
 		}
 	}
 	// Only the winning explicit exit option can stop the originating session.

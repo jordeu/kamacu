@@ -25,7 +25,7 @@ const path = require('node:path');
     await page.routeWebSocket('**/api/sessions/*/ws', socket => { socket.onMessage(() => {}); });
     await page.route('**/api/**', async route => {
       const name = new URL(route.request().url()).pathname;
-      if (name.startsWith('/api/inbox') || name.startsWith('/api/agent-feedback') || name.startsWith('/api/integrations') || name.startsWith('/api/artifact-') || /^\/api\/tasks\/0\/artifact/.test(name)) return route.continue();
+      if (name.startsWith('/api/test-monitor') || name.startsWith('/api/monitor') || name.startsWith('/api/inbox') || name.startsWith('/api/agent-feedback') || name.startsWith('/api/integrations') || name.startsWith('/api/artifact-') || /^\/api\/tasks\/0\/artifact/.test(name)) return route.continue();
       const data = name === '/api/workspaces' ? [{ id: 1, name: 'Work' }]
         : name === '/api/projects' ? [{ id: 1, name: 'Kamacu', workspace_id: 1, icon_letters: 'KA', icon_color: 'blue' }]
         : name === '/api/tasks/1' ? task
@@ -153,7 +153,44 @@ const path = require('node:path');
 
     const scratchResult = await agent('wait',{question_id:scratch.question.id,wait_seconds:0});
     assert.equal(scratchResult.question.status,'dismissed');
+    // Observer cards keep their identity when opened, hidden, and restored.
+    const observed=await (await fetch(base+'/api/test-monitor/observe',{method:'POST'})).json();
+    await page.goto(base+'/inbox');
+    await expand(observed.question);
+    await page.getByRole('button',{name:'Open Scratchpad',exact:true}).click();
+    await page.waitForURL('**/global?feedback_session=scratch-session');
+    let observedState=await (await fetch(base+`/api/inbox/${observed.question.id}`)).json();
+    assert.equal(observedState.status,'pending','opening an observer question dismissed it');
+    await fetch(base+'/api/test-monitor/hide',{method:'POST'});
+    await page.goto(base+'/inbox');
+    await page.getByText('No messages waiting',{exact:true}).waitFor();
+    await fetch(base+'/api/test-monitor/show',{method:'POST'});
+    await expand(observed.question);
+    await page.getByLabel('Write your own answer').fill('Yes, continue.');
+    await page.getByRole('button',{name:'Send answer',exact:true}).click();
+    await page.getByText('No messages waiting',{exact:true}).waitFor();
+    observedState=await (await fetch(base+`/api/inbox/${observed.question.id}`)).json();
+    assert.equal(observedState.answer,'Yes, continue.');
     await page.goto(base + '/settings');
+    const monitoring = page.getByRole('region', {name:'Terminal monitoring'});
+    await monitoring.getByRole('button', {name:'Add monitoring model'}).click();
+    await monitoring.getByLabel('Name', {exact:true}).fill('Installed Codex');
+    await monitoring.getByLabel('Connection', {exact:true}).selectOption('codex_cli');
+    await monitoring.getByRole('button', {name:'Test connection'}).click();
+    await monitoring.getByText('Connection test passed.').waitFor();
+    await monitoring.getByRole('button', {name:'Save',exact:true}).click();
+    await monitoring.getByLabel('Global default (including Scratchpad)').selectOption({label:'Installed Codex'});
+    await monitoring.getByText('Monitoring model updated.', {exact:true}).waitFor();
+    await monitoring.locator('summary').filter({hasText:'Workspace models'}).click();
+    const workspaceSelect=monitoring.locator('select[id="monitor-scope-1"]');
+    await workspaceSelect.selectOption({label:'Installed Codex'});
+    await monitoring.getByText('Monitoring model updated.', {exact:true}).waitFor();
+    await workspaceSelect.selectOption('');
+    await monitoring.getByText('Monitoring model updated.', {exact:true}).waitFor();
+    const cfg=await (await fetch(base+'/api/monitor')).json();
+    assert.ok(cfg.default_profile_id);
+    assert.equal(cfg.workspaces[0].profile_id,null);
+    if(directory) await page.screenshot({path:path.join(directory,'monitoring-mobile.png'),fullPage:true});
     await page.getByRole('button', {name: 'Enable Claude Code integration', exact: true}).click();
     await page.getByRole('button', {name: 'Repair Claude Code integration', exact: true}).waitFor();
     await page.getByText('Enabled · MCP registered and task skill available.', {exact:true}).waitFor();

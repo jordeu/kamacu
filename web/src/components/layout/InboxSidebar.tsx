@@ -95,7 +95,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
       {q.options.map((option) => <Button key={option.id} variant="outline" size="sm" className="h-auto min-h-9 max-w-full justify-start whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
     </div>}
     <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" size="sm" disabled={action.isPending} title="Archive this message and open its agent terminal" onClick={() => submit("dismiss", undefined, true)}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"}<ArrowUpRight className="size-3" /></Button>
+      <Button variant="outline" size="sm" disabled={action.isPending} title={q.origin === "observer" && !completion ? "Open its agent terminal" : "Archive this message and open its agent terminal"} onClick={() => { if(q.origin==="observer" && !completion){onOpenTask();navigate(feedbackTaskURL(q));}else void submit("dismiss", undefined, true); }}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"}<ArrowUpRight className="size-3" /></Button>
       {completion && <Button variant="outline" size="sm" disabled={action.isPending} onClick={() => submit("answer", "exit")}>OK, exit session</Button>}
       <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>
     </div>

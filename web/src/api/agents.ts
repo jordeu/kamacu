@@ -2,10 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { get } from "./client";
 
 export interface AgentStatusEntry {
+  monitor?: {
+    state: string;
+    health: string;
+    detail?: string;
+    observed_at?: string;
+  };
   taskId: number;
   projectId: number;
   sessionId: string;
-  status: "working" | "idle" | "waiting" | "exited" | "running"; // M001: custom engines report running/exited only
+  status:
+    "working" | "idle" | "waiting" | "exited" | "unknown" | "error" | "running"; // All engines share terminal-derived status.
   exitCode: number | null;
   stopRequested: boolean;
   resumable: boolean;

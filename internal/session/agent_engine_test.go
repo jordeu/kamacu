@@ -29,7 +29,7 @@ func TestCustomEngineStatusRunningExited(t *testing.T) {
 	if info.Engine != "custom" {
 		t.Errorf("Engine = %q, want \"custom\"", info.Engine)
 	}
-	if info.AgentStatus != "running" {
+	if info.AgentStatus != "unknown" {
 		t.Errorf("alive AgentStatus = %q, want \"running\" (custom = running/exited only)", info.AgentStatus)
 	}
 	if info.Status != StatusRunning {
@@ -89,9 +89,9 @@ func TestClaudeEngineKeepsHeuristicStates(t *testing.T) {
 		t.Errorf("Engine = %q, want \"claude\"", info.Engine)
 	}
 	switch info.AgentStatus {
-	case "working", "idle", "waiting":
+	case "unknown":
 		// ok -- heuristic path intact, NOT collapsed to "running"
 	default:
-		t.Errorf("claude AgentStatus = %q, want one of working/idle/waiting (heuristics intact, not collapsed to running)", info.AgentStatus)
+		t.Errorf("claude AgentStatus = %q, want unknown before first observation (heuristics intact, not collapsed to running)", info.AgentStatus)
 	}
 }

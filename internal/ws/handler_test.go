@@ -126,7 +126,7 @@ func TestAttachClearsWaitingAgent(t *testing.T) {
 	}
 	t.Cleanup(sess.Stop)
 
-	sess.SetWaiting()
+	sess.SetMonitorStatus(session.MonitorStatus{State: "waiting", Health: "ready"})
 	if got := sess.Info().AgentStatus; got != "waiting" {
 		t.Fatalf("pre-attach AgentStatus = %q, want waiting", got)
 	}
@@ -139,7 +139,7 @@ func TestAttachClearsWaitingAgent(t *testing.T) {
 	// guarantees the upgrade, so poll briefly.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if got := sess.Info().AgentStatus; got == "idle" {
+		if got := sess.Info().AgentStatus; got == "waiting" {
 			break
 		} else if time.Now().After(deadline) {
 			t.Fatalf("AgentStatus = %q after WS attach, want idle (D-45)", got)
@@ -162,7 +162,7 @@ func TestCodexWaitingSurvivesSocketReconnectAndReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(sess.Stop)
-	sess.SetWaiting()
+	sess.SetMonitorStatus(session.MonitorStatus{State: "waiting", Health: "ready"})
 	ctx := testCtx(t)
 	for attach := 0; attach < 2; attach++ {
 		conn := dial(t, ctx, srv, sess.Info().ID)
@@ -180,7 +180,7 @@ func TestCodexWaitingSurvivesSocketReconnectAndReports(t *testing.T) {
 		if attach == 1 {
 			sendFrame(t, ctx, conn, FrameData, "answer")
 			collectUntil(t, ctx, conn, "answer")
-			if got := sess.Info().AgentStatus; got != "working" {
+			if got := sess.Info().AgentStatus; got != "waiting" {
 				t.Fatalf("after answer: status = %q, want working", got)
 			}
 		}

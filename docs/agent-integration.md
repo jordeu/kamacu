@@ -1,9 +1,12 @@
 # Agent integration
 
-Kamacu bundles a `kamacu-task` skill with the application executable. The skill
-teaches task agents to use the feedback inbox, include enough context to decide,
-poll while waiting, and reconcile terminal answers. Agents discover it through
-their native skill system; Kamacu does not inject a startup prompt.
+Session status and inbox notifications come from terminal monitoring. Configure
+its model in **Settings → Terminal monitoring**; agents do not need a skill or MCP
+registration for those features. See [the inbox guide](inbox.md).
+
+The optional bundled `kamacu-task` skill and MCP registration provide HTML
+artifacts and other Kamacu tools. The updated skill tells agents to ask questions
+and show completion reports normally in the terminal.
 
 ## Enable
 

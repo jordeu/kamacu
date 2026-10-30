@@ -116,3 +116,33 @@ func HookConfigSource() []byte {
 	copy(out, hookConfigSource)
 	return out
 }
+
+// RetireHookConfig removes only the byte-identical former Kamacu integration.
+// Modified user files are preserved and reported for manual review.
+func RetireHookConfig() error {
+	base, err := defaultCodexHome()
+	if err != nil {
+		return err
+	}
+	return retireManaged(filepath.Join(base, ProfileFilename), hookConfigSource)
+}
+func retireManaged(path string, expected []byte) error {
+	st, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("preserving non-regular legacy integration %s", path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(b, expected) {
+		return fmt.Errorf("preserving modified legacy integration %s; remove its Kamacu status hook manually", path)
+	}
+	return os.Remove(path)
+}

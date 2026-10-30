@@ -42,35 +42,43 @@ type Option struct {
 	Label string `json:"label"`
 }
 type Question struct {
-	Kind           string   `json:"kind"`
-	ID             string   `json:"id"`
-	TaskID         int64    `json:"task_id"`
-	ProjectID      int64    `json:"project_id"`
-	TaskTitle      string   `json:"task_title"`
-	ProjectName    string   `json:"project_name"`
-	SessionID      string   `json:"session_id"`
-	Abstract       string   `json:"abstract"`
-	Summary        string   `json:"summary"`
-	Context        string   `json:"context"`
-	Question       string   `json:"question"`
-	Options        []Option `json:"options"`
-	Status         string   `json:"status"`
-	Reason         string   `json:"reason"`
-	Answer         string   `json:"answer"`
-	AnswerSource   string   `json:"answer_source"`
-	Revision       int64    `json:"revision"`
-	CreatedAt      int64    `json:"created_at"`
-	UpdatedAt      int64    `json:"updated_at"`
-	HeartbeatAt    int64    `json:"heartbeat_at"`
-	AcknowledgedAt *int64   `json:"acknowledged_at"`
+	Origin           string   `json:"origin"`
+	Hidden           bool     `json:"hidden"`
+	DeliveryMode     string   `json:"delivery_mode"`
+	DeliveryStatus   string   `json:"delivery_status"`
+	EvidenceRevision uint64   `json:"evidence_revision"`
+	InputGeneration  uint64   `json:"input_generation"`
+	Kind             string   `json:"kind"`
+	ID               string   `json:"id"`
+	TaskID           int64    `json:"task_id"`
+	ProjectID        int64    `json:"project_id"`
+	TaskTitle        string   `json:"task_title"`
+	ProjectName      string   `json:"project_name"`
+	SessionID        string   `json:"session_id"`
+	Abstract         string   `json:"abstract"`
+	Summary          string   `json:"summary"`
+	Context          string   `json:"context"`
+	Question         string   `json:"question"`
+	Options          []Option `json:"options"`
+	Status           string   `json:"status"`
+	Reason           string   `json:"reason"`
+	Answer           string   `json:"answer"`
+	AnswerSource     string   `json:"answer_source"`
+	Revision         int64    `json:"revision"`
+	CreatedAt        int64    `json:"created_at"`
+	UpdatedAt        int64    `json:"updated_at"`
+	HeartbeatAt      int64    `json:"heartbeat_at"`
+	AcknowledgedAt   *int64   `json:"acknowledged_at"`
 }
 type Create struct {
-	Key      string   `json:"request_key"`
-	Abstract string   `json:"abstract"`
-	Summary  string   `json:"summary"`
-	Context  string   `json:"context"`
-	Question string   `json:"question"`
-	Options  []Option `json:"options"`
+	origin, deliveryMode              string
+	evidenceRevision, inputGeneration uint64
+	Key                               string   `json:"request_key"`
+	Abstract                          string   `json:"abstract"`
+	Summary                           string   `json:"summary"`
+	Context                           string   `json:"context"`
+	Question                          string   `json:"question"`
+	Options                           []Option `json:"options"`
 }
 type Result struct {
 	Outcome  string   `json:"outcome"`
@@ -82,14 +90,15 @@ type Page struct {
 	HasMore      bool       `json:"has_more"`
 }
 type Service struct {
-	db       *sql.DB
-	lookup   Lookup
-	mu       sync.Mutex
-	changed  chan struct{}
-	now      func() time.Time
-	ctx      context.Context
-	cancel   context.CancelFunc
-	watching map[string]bool
+	terminalManaged bool
+	db              *sql.DB
+	lookup          Lookup
+	mu              sync.Mutex
+	changed         chan struct{}
+	now             func() time.Time
+	ctx             context.Context
+	cancel          context.CancelFunc
+	watching        map[string]bool
 }
 
 func New(db *sql.DB, lookup Lookup) *Service {
@@ -125,12 +134,12 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var opts string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract)
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
@@ -270,6 +279,12 @@ func (s *Service) Create(ctx context.Context, who Identity, c Create) (Result, e
 func (s *Service) create(ctx context.Context, who Identity, c Create, kind string) (Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.terminalManaged {
+		return Result{}, fmt.Errorf("%w: Kamacu now creates inbox messages from terminal output; display your question or completion in the terminal", ErrInvalid)
+	}
+	return s.createLocked(ctx, who, c, kind)
+}
+func (s *Service) createLocked(ctx context.Context, who Identity, c Create, kind string) (Result, error) {
 	if err := s.valid(who); err != nil {
 		return Result{}, err
 	}
@@ -296,10 +311,13 @@ func (s *Service) create(ctx context.Context, who Identity, c Create, kind strin
 	if c.Options == nil {
 		c.Options = []Option{}
 	}
+	if c.origin == "" {
+		c.origin, c.deliveryMode = "agent", "legacy"
+	}
 	opts, _ := json.Marshal(c.Options)
 	id := uuid.NewString()
 	now := s.now().UnixMilli()
-	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract)
+	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract,origin,delivery_mode,evidence_revision,input_generation) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract, c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration)
 	if err != nil {
 		return Result{}, err
 	}
@@ -384,6 +402,9 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	if q.Status != "pending" {
 		return Result{"already_resolved", q}, nil
 	}
+	if q.Origin == "observer" && (q.Hidden || (q.DeliveryMode != "text" && q.Kind != "completion")) {
+		return Result{}, fmt.Errorf("%w: open the terminal to respond", ErrConflict)
+	}
 	if optionID != "" {
 		if answer != "" {
 			return Result{}, fmt.Errorf("%w: choose an option or provide text", ErrInvalid)
@@ -401,6 +422,13 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	answer = strings.TrimSpace(answer)
 	if answer == "" || len(answer) > 16000 {
 		return Result{}, fmt.Errorf("%w: answer must contain 1–16000 bytes", ErrInvalid)
+	}
+	if q.Origin == "observer" {
+		for _, r := range answer {
+			if (r < 32 && r != '\n' && r != '\t') || (r >= 127 && r <= 159) {
+				return Result{}, fmt.Errorf("%w: answer contains terminal control characters", ErrInvalid)
+			}
+		}
 	}
 	source := "inbox"
 	var ack any
@@ -449,6 +477,9 @@ func (s *Service) Dismiss(ctx context.Context, id string, revision int64) (Resul
 func (s *Service) Reopen(ctx context.Context, who Identity, id string, revision int64, userRequested bool) (Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.terminalManaged {
+		return Result{}, fmt.Errorf("%w: display the current question in the terminal for monitoring", ErrInvalid)
+	}
 	if err := s.valid(who); err != nil {
 		return Result{}, err
 	}
@@ -544,7 +575,7 @@ func (s *Service) List(ctx context.Context, who *Identity, archived bool, offset
 	if err := s.reconcile(ctx); err != nil {
 		return page, err
 	}
-	where := "WHERE q.status='pending'"
+	where := "WHERE q.status='pending' AND q.hidden=0"
 	args := []any{}
 	if archived {
 		where = "WHERE q.status!='pending'"
@@ -553,7 +584,7 @@ func (s *Service) List(ctx context.Context, who *Identity, archived bool, offset
 		where = "WHERE q.task_id IS NULLIF(?,0)"
 		args = append(args, who.TaskID)
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox_questions WHERE status='pending'`).Scan(&page.PendingCount); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox_questions WHERE status='pending' AND hidden=0`).Scan(&page.PendingCount); err != nil {
 		return page, err
 	}
 	pageSize := 50

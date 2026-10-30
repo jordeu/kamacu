@@ -178,6 +178,9 @@ func TestRecoveryLifecycle(t *testing.T) {
 		if status != http.StatusCreated {
 			t.Fatalf("agent spawn = %d, want 201; body=%v", status, sess)
 		}
+		// Wait until this process has actually recorded its arguments before
+		// the simulated restart can remove the shared capture file.
+		_ = readArgv(t, argsFile)
 		// One bash session — also left RUNNING (D-58: it must vanish on restart,
 		// no stub left behind).
 		status, bash := doJSON(t, "POST", proc1.srv.URL+"/api/sessions", map[string]any{"task_id": tid})
@@ -281,8 +284,8 @@ func TestRecoveryLifecycle(t *testing.T) {
 				hasSettings = true
 			}
 		}
-		if !hasSettings {
-			t.Errorf("resume argv missing --settings (hook overlay must apply on resume); argv=%v", args)
+		if hasSettings {
+			t.Errorf("resume argv unexpectedly injects a hook overlay; argv=%v", args)
 		}
 
 		// Same-id persistence: the post-spawn UPDATE rewrote the SAME value.

@@ -41,6 +41,10 @@ function agentRail(
   status: AgentStatusEntry["status"],
 ): { barClass: string; pulse: boolean; label: string } {
   switch (status) {
+    case "unknown":
+      return { barClass: "bg-zinc-500", pulse: false, label: "status uncertain" };
+    case "error":
+      return { barClass: "bg-red-500", pulse: false, label: "needs attention" };
     case "working":
       return { barClass: "bg-green-500", pulse: false, label: "working" };
     case "waiting":

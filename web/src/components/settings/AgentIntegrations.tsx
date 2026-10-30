@@ -33,7 +33,7 @@ export function AgentIntegrations() {
     <div className="mt-3 flex flex-col gap-3 border-t pt-4">
       <h3 className="text-sm font-medium">Kamacu integration</h3>
       <p className="text-xs text-muted-foreground">
-        Installs MCP tools and a task skill on this host so agents can ask for feedback in your inbox.
+        Installs optional MCP tools and a task skill for previews and other Kamacu tools. Terminal monitoring handles inbox notifications automatically.
         Managed files update with Kamacu; your edits are preserved. No startup prompts are added.
       </p>
       {query.isPending && <p role="status" className="text-xs text-muted-foreground">Checking agent integrations…</p>}

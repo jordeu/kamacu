@@ -21,6 +21,7 @@ import (
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
 
+	"kamacu/internal/observation"
 	"kamacu/internal/tmux"
 )
 
@@ -53,8 +54,9 @@ type Info struct {
 	Engine    string    `json:"engine,omitempty"` // agent only: "claude" | "custom" — lets the status handler/UI distinguish
 
 	// Agent-only fields (kind == "agent").
-	AgentStatus   string `json:"agentStatus,omitempty"`   // working | idle | waiting | exited
-	StopRequested bool   `json:"stopRequested,omitempty"` // server-initiated Stop (exit 143 renders gray, not red)
+	Monitor       MonitorStatus `json:"monitor"`
+	AgentStatus   string        `json:"agentStatus,omitempty"`   // working | idle | waiting | exited
+	StopRequested bool          `json:"stopRequested,omitempty"` // server-initiated Stop (exit 143 renders gray, not red)
 
 	// Orphaned restored-tmux fields (TMUX-05, D-88). These are NOT produced by
 	// any live Session — the sessions REST handler synthesizes them from
@@ -103,6 +105,9 @@ type Session struct {
 	cmd  *exec.Cmd
 	ptmx *os.File
 
+	inputMu      sync.Mutex
+	observer     *observation.Terminal
+	monitor      MonitorStatus
 	mu           sync.Mutex
 	ring         *circbuf.Buffer        // 1 MiB raw output ring (replay source)
 	conns        map[string]chan []byte // per-conn output queues, buffered 256
@@ -140,6 +145,9 @@ func (s *Session) pump() {
 		if n > 0 {
 			chunk := append([]byte(nil), buf[:n]...)
 			s.mu.Lock()
+			if s.observer != nil {
+				s.observer.Feed(chunk)
+			}
 			s.noteAgentOutputLocked(chunk)
 			_, _ = s.ring.Write(chunk)
 			for id, q := range s.conns {
@@ -235,6 +243,7 @@ func (s *Session) Info() Info {
 	}
 	if s.kind == KindAgent {
 		info.AgentStatus = s.agentStatusLocked()
+		info.Monitor = s.monitor
 		info.Engine = s.engine
 	}
 	info.StopRequested = s.stopRequested
@@ -291,6 +300,9 @@ func (s *Session) DetachedAlive() bool {
 // counts as activity inside the post-Stop settle window (Pitfall 1).
 // Caller holds s.mu. No-op for bash sessions.
 func (s *Session) noteAgentOutputLocked(chunk []byte) {
+	if s.observer != nil {
+		return
+	}
 	if s.kind != KindAgent {
 		return
 	}
@@ -358,6 +370,9 @@ func (s *Session) MarkHooksAlive() {
 // no-op for bash sessions and non-waiting agents. Codex permission requests
 // remain pending across attaches/reconnects until answered or the turn ends.
 func (s *Session) ClearWaitingOnAttach() {
+	if s.observer != nil {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.kind == KindAgent && s.engine != "codex" && s.waiting {
@@ -369,6 +384,15 @@ func (s *Session) ClearWaitingOnAttach() {
 // agentStatusLocked lazily computes the D-47 status. No ticker goroutine —
 // the 5s poll is the only consumer. Caller holds s.mu.
 func (s *Session) agentStatusLocked() string {
+	if s.observer != nil {
+		if s.status == StatusExited {
+			return "exited"
+		}
+		if s.monitor.State == "" {
+			return "unknown"
+		}
+		return s.monitor.State
+	}
 	if s.status == StatusExited {
 		return "exited"
 	}
@@ -422,12 +446,22 @@ func (s *Session) Detach(connID string) {
 // For agents, user input clears waiting and marks the session working.
 // Automatic terminal reports are forwarded without changing agent status.
 func (s *Session) WriteInput(p []byte) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	return s.writeInput(p)
+}
+
+// writeInput requires inputMu; a whole message can hold it across paste/Enter.
+func (s *Session) writeInput(p []byte) error {
 	s.mu.Lock()
 	if s.status == StatusExited {
 		s.mu.Unlock()
 		return errors.New("session exited")
 	}
 	if s.kind == KindAgent && isUserInput(p) {
+		if s.observer != nil {
+			s.observer.Input()
+		}
 		s.waiting = false
 		s.lastActivity = time.Now()
 		if s.engine == "codex" {
@@ -474,12 +508,15 @@ func (s *Session) Resize(cols, rows uint16, forceRedraw bool) error {
 	if s.status == StatusExited {
 		return errors.New("session exited")
 	}
+	if cols == 0 || rows == 0 {
+		return errors.New("terminal dimensions must be positive")
+	}
 	want := pty.Winsize{Rows: rows, Cols: cols}
 	if want != s.lastWinsize {
 		// A real change delivers SIGWINCH by itself.
 		return s.setsizeLocked(want)
 	}
-	if !forceRedraw {
+	if !forceRedraw || rows == 1 {
 		return nil
 	}
 	// Same size + forceRedraw: jiggle through rows-1 so two real changes
@@ -495,6 +532,9 @@ func (s *Session) setsizeLocked(ws pty.Winsize) error {
 	s.setsizeCalls++
 	if err := pty.Setsize(s.ptmx, &ws); err != nil {
 		return err
+	}
+	if s.observer != nil {
+		s.observer.Resize(int(ws.Cols), int(ws.Rows))
 	}
 	s.lastWinsize = ws
 	if s.codexState != nil && s.codexState.terminal != nil && ws.Cols > 0 && ws.Rows > 0 {

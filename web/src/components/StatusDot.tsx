@@ -10,9 +10,23 @@ import type { AgentStatusEntry } from "@/api/agents";
  *  code 143) render GRAY, not red — only the color softens; the tooltip
  *  always shows the real exit code (research OQ4). */
 export function dotMeta(
-  entry: Pick<AgentStatusEntry, "status" | "exitCode" | "stopRequested">,
+  entry: Pick<
+    AgentStatusEntry,
+    "status" | "exitCode" | "stopRequested" | "monitor"
+  >,
 ): { className: string; tooltip: string } {
   switch (entry.status) {
+    case "unknown":
+      return {
+        className: "bg-zinc-500",
+        tooltip:
+          entry.monitor?.detail ||
+          (entry.monitor?.health === "ready"
+            ? "Status uncertain"
+            : "Monitoring unavailable — check settings"),
+      };
+    case "error":
+      return { className: "bg-red-500", tooltip: "Agent needs attention" };
     case "working":
       return { className: "bg-green-500", tooltip: "Working" };
     case "waiting":
@@ -50,7 +64,10 @@ export function StatusDot({
   entry,
   className,
 }: {
-  entry: Pick<AgentStatusEntry, "status" | "exitCode" | "stopRequested">;
+  entry: Pick<
+    AgentStatusEntry,
+    "status" | "exitCode" | "stopRequested" | "monitor"
+  >;
   className?: string;
 }) {
   const { className: dotClassName, tooltip } = dotMeta(entry);

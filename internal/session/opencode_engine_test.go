@@ -82,10 +82,10 @@ func TestOpencodeEngineKeepsHeuristicStates(t *testing.T) {
 		t.Errorf("Engine = %q, want \"opencode\"", info.Engine)
 	}
 	switch info.AgentStatus {
-	case "working", "idle", "waiting":
+	case "unknown":
 		// ok — heuristic path intact, NOT collapsed to "running" (D013)
 	default:
-		t.Errorf("opencode AgentStatus = %q, want one of working/idle/waiting (heuristics intact, not collapsed to running)", info.AgentStatus)
+		t.Errorf("opencode AgentStatus = %q, want unknown before first observation (heuristics intact, not collapsed to running)", info.AgentStatus)
 	}
 }
 

@@ -229,8 +229,8 @@ func TestAgentStatusRunningNotResumable(t *testing.T) {
 	if e["sessionId"] != sid {
 		t.Errorf("sessionId = %v, want the live session %q", e["sessionId"], sid)
 	}
-	if e["status"] != "working" {
-		t.Errorf("status = %v, want %q", e["status"], "working")
+	if e["status"] != "unknown" {
+		t.Errorf("status = %v, want %q", e["status"], "unknown")
 	}
 	if e["resumable"] != false {
 		t.Errorf("resumable = %v, want false for a running agent", e["resumable"])
@@ -416,8 +416,8 @@ func TestAgentStatusSingleEntry(t *testing.T) {
 	if entry["sessionId"] != sid {
 		t.Errorf("sessionId = %v, want %q", entry["sessionId"], sid)
 	}
-	if entry["status"] != "working" {
-		t.Errorf("status = %v, want %q", entry["status"], "working")
+	if entry["status"] != "unknown" {
+		t.Errorf("status = %v, want %q", entry["status"], "unknown")
 	}
 	if v, present := entry["exitCode"]; !present || v != nil {
 		t.Errorf("exitCode = %v (present=%v), want explicit null while running", v, present)
@@ -477,7 +477,7 @@ func TestAgentStatusNewestWins(t *testing.T) {
 	if list[0]["sessionId"] != second {
 		t.Errorf("sessionId = %v, want newest %q", list[0]["sessionId"], second)
 	}
-	if list[0]["status"] != "working" {
-		t.Errorf("status = %v, want %q", list[0]["status"], "working")
+	if list[0]["status"] != "unknown" {
+		t.Errorf("status = %v, want %q", list[0]["status"], "unknown")
 	}
 }

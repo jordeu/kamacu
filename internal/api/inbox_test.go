@@ -153,6 +153,24 @@ func TestInboxBrowser(t *testing.T) {
 	})
 	defer svc.Close()
 	mux := http.NewServeMux()
+	MonitorRoutes(mux, db, sampleMonitor{})
+	mux.HandleFunc("POST /api/test-monitor/{action}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("action") == "observe" {
+			out, err := svc.Observe(r.Context(), inbox.Identity{TaskID: 0, SessionID: "scratch-session"}, inbox.Create{Key: "observed-browser", Abstract: "Continue with the changes?", Summary: "Continue with the changes?", Context: "The terminal asks whether to continue.", Question: "Continue with the changes?"}, "question", "text", 1, 0)
+			if err != nil {
+				inboxError(w, err)
+				return
+			}
+			writeJSON(w, 200, out)
+			return
+		}
+		if err := svc.HideObserved(r.Context(), "scratch-session", r.PathValue("action") == "hide"); err != nil {
+			inboxError(w, err)
+			return
+		}
+		w.WriteHeader(204)
+	})
+
 	InboxRoutes(mux, svc, "test-token")
 	artifacts, err := artifact.New(db, t.TempDir())
 	if err != nil {
