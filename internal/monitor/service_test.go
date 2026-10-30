@@ -293,7 +293,7 @@ func TestProfileChangeCancelsOldClassification(t *testing.T) {
 	svc.tick(ctx)
 	svc.jobs.Wait()
 	page, err := svc.Inbox.List(ctx, nil, false, 0)
-	if err != nil || len(page.Items) != 0 || sess.Info().AgentStatus != "unknown" {
+	if err != nil || len(page.Items) != 0 || sess.Info().AgentStatus != "working" {
 		t.Fatal("accepted obsolete configuration", page, sess.Info(), err)
 	}
 }

@@ -25,6 +25,7 @@ type agentHandlers struct {
 
 // agentStatusEntry is the exact JSON contract the 04-03 frontend consumes.
 type agentStatusEntry struct {
+	Live          bool                  `json:"live"` // process lifetime, independent of inferred activity
 	Monitor       session.MonitorStatus `json:"monitor"`
 	TaskID        int64                 `json:"taskId"`
 	ProjectID     int64                 `json:"projectId"`
@@ -145,6 +146,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 				ProjectID:     m.projectID,
 				SessionID:     info.ID,
 				Status:        info.AgentStatus,
+				Live:          info.Status == session.StatusRunning,
 				Monitor:       info.Monitor,
 				ExitCode:      info.ExitCode,
 				StopRequested: info.StopRequested,
@@ -190,6 +192,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			ProjectID:     0,
 			SessionID:     globalAgent.ID,
 			Status:        globalAgent.AgentStatus,
+			Live:          globalAgent.Status == session.StatusRunning,
 			Monitor:       globalAgent.Monitor,
 			ExitCode:      globalAgent.ExitCode,
 			StopRequested: globalAgent.StopRequested,

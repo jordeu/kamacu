@@ -10,6 +10,7 @@ const path = require('node:path');
   const headers = { 'X-Kamacu-Token': 'test-token', 'X-Kamacu-Task-ID': '1', 'X-Kamacu-Session-ID': 'browser-session' };
   const task = { id: 1, project_id: 1, title: 'Improve task navigation', description: 'Task navigation', status: 'todo', position: 0, source: 'manual', worktree_path: null, recurrent: false };
   const errors = [];
+  let agentEntries = [];
   async function agent(action, body) {
     const response = await fetch(`${base}/api/agent-feedback/${action}`, { method: 'POST', headers, body: JSON.stringify(body) });
     assert.equal(response.status, 200, await response.clone().text());
@@ -34,11 +35,41 @@ const path = require('node:path');
         : name === '/api/settings' ? Object.fromEntries(['worktree_base', 'shell', 'branch_template', 'done_session_ttl', 'github_integration', 'pr_review_seed'].map(key => [key, {value: '', default: '', source: 'default'}]))
         : name === '/api/worktrees' ? {counts:{total:0,orphaned:0},projects:[]}
         : name === '/api/global' ? {root_path:'/tmp/scratchpad', agent_id:1, root_exists:true, live:{agent:1,bash:0,tmux:0}, agent:{id:1,name:'Custom',engine:'custom'}}
-        : name === '/api/agents/status' ? [] : [];
+        : name === '/api/agents/status' ? agentEntries : [];
       return route.fulfill({ json: data });
     });
     await page.goto(base + '/inbox');
     await page.getByText('No messages waiting', { exact: true }).waitFor();
+    // Membership follows terminal lifetime across activity/error transitions.
+    const barEntry = (id, status, live) => ({taskId:id, projectId:1,
+      sessionId:`active-${id}`, taskTitle:`Open terminal ${id}`, projectName:'Kamacu',
+      source:'manual', status, live, exitCode:null, stopRequested:false, resumable:false, prNumber:null});
+    agentEntries = [barEntry(11,'working',true),barEntry(12,'waiting',true),
+      barEntry(13,'idle',true),barEntry(14,'error',true),barEntry(15,'exited',false),
+      barEntry(16,'working',false)];
+    await page.reload();
+    await page.getByText('4 active',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Expand active sessions',exact:true}).click();
+    for (const id of [11,12,13,14]) {
+      await page.getByRole('button',{name:`Open Open terminal ${id} in Kamacu`,exact:true}).waitFor();
+    }
+    for (const id of [15,16]) {
+      assert.equal(await page.getByRole('button',{name:`Open Open terminal ${id} in Kamacu`,exact:true}).count(),0);
+    }
+    agentEntries[0].status = 'error';
+    agentEntries[1].status = 'idle';
+    agentEntries[2].status = 'working';
+    agentEntries[3].status = 'waiting';
+    await page.getByRole('button',{name:'Active agent sessions: 1 working, 1 waiting, 1 idle, 1 need attention — collapse',exact:true}).waitFor();
+    // Wait for a poll containing changed counts as well as changed row states.
+    agentEntries[1].status = 'error';
+    await page.getByRole('button',{name:'Active agent sessions: 1 working, 1 waiting, 0 idle, 2 need attention — collapse',exact:true}).waitFor();
+    for (const id of [11,12,13,14]) {
+      await page.getByRole('button',{name:`Open Open terminal ${id} in Kamacu`,exact:true}).waitFor();
+    }
+    agentEntries = [];
+    await page.getByRole('button',{name:'Collapse active sessions',exact:true}).click();
+    await page.reload();
     const directory = process.env.KAMACU_INBOX_SCREENSHOTS;
     if (directory) fs.mkdirSync(directory, {recursive:true});
     async function expand(question) {

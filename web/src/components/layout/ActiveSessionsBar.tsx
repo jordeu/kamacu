@@ -31,8 +31,8 @@ import { cn } from "@/lib/utils";
  * `fixed inset-x-0 bottom-0`), so main content and the height-sensitive xterm
  * terminals NEVER reflow or resize (D-03). Collapse state persists in
  * localStorage under a single GLOBAL key, default collapsed (SBAR-07 / D-04).
- * Only LIVE sessions appear; `exited` (incl. DB-derived post-restart) entries are
- * filtered out client-side (D-09).
+ * Only LIVE sessions appear; historical and exited entries are
+ * excluded by the process-derived live flag.
  */
 export function ActiveSessionsBar() {
   // --- Collapse persistence — mirror ReviewColumn exactly, GLOBAL key
@@ -84,16 +84,8 @@ export function ActiveSessionsBar() {
   // a global row's currency is derived from the pathname instead.
   const location = useLocation();
 
-  // --- LIVE filter (D-09): working / waiting / idle (claude) AND running
-  // (custom-engine, M001). `exited` (incl. the DB-derived/post-restart
-  // resumable rows) never appears. ---
-  const live = (data ?? []).filter(
-    (e) =>
-      e.status === "working" ||
-      e.status === "waiting" ||
-      e.status === "idle" ||
-      e.status === "running",
-  );
+  // Process lifetime controls membership; classification only changes the dot.
+  const live = (data ?? []).filter((entry) => entry.live);
 
   // --- D-12 flip: the global entry is NOT a list row — it drives the globe
   // icon's status dot instead. List + counters are task-scoped. ---
@@ -103,13 +95,19 @@ export function ActiveSessionsBar() {
   const working = taskLive.filter((e) => e.status === "working").length;
   const waiting = taskLive.filter((e) => e.status === "waiting").length;
   const idle = taskLive.filter((e) => e.status === "idle").length;
-  const running = taskLive.filter((e) => e.status === "running").length;
+  const errors = taskLive.filter((e) => e.status === "error").length;
   const total = taskLive.length;
 
   // --- Sorted list (SBAR-05 / D-05), attention-first, STABLE within a state
   // (Array.prototype.sort is stable in modern engines, so equal-rank rows keep
   // feed order — avoids 5s jitter). ---
-  const rank = { waiting: 0, working: 1, running: 2, idle: 3 } as const;
+  const rank = {
+    error: 0,
+    waiting: 1,
+    working: 2,
+    idle: 3,
+    exited: 4,
+  } as const;
   const sorted = [...taskLive].sort(
     (a, b) =>
       rank[a.status as keyof typeof rank] - rank[b.status as keyof typeof rank],
@@ -136,7 +134,7 @@ export function ActiveSessionsBar() {
 
   // --- Collapsed-bar aria-label describing current counts (mirror ReviewColumn /
   // ProjectSidebar pluralized count aria). ---
-  const barAriaLabel = `Active agent sessions: ${working} working, ${waiting} waiting, ${idle} idle, ${running} running — ${
+  const barAriaLabel = `Active agent sessions: ${working} working, ${waiting} waiting, ${idle} idle, ${errors} need attention — ${
     collapsed ? "expand" : "collapse"
   }`;
 
@@ -152,7 +150,7 @@ export function ActiveSessionsBar() {
                 No active sessions
               </div>
               <div className="text-xs text-muted-foreground">
-                Agent sessions appear here while they're running.
+                Agent sessions appear here while their terminals are open.
               </div>
             </div>
           ) : (
@@ -160,8 +158,8 @@ export function ActiveSessionsBar() {
               {sorted.map((entry) => (
                 <SessionRow
                   // Keyed by sessionId (P6). Empty sessionIds occur only on
-                  // DB-derived exited rows, which the LIVE filter above
-                  // removes before render — live rows always carry unique
+                  // DB-derived exited rows, which the live flag excludes
+                  // before render — live rows always carry unique
                   // sessionIds (16-RESEARCH Pitfall 5).
                   key={entry.sessionId}
                   entry={entry}
@@ -231,8 +229,10 @@ export function ActiveSessionsBar() {
             <CountGroup status="waiting" count={waiting} />
             {/* Idle count */}
             <CountGroup status="idle" count={idle} />
-            {/* Running count (M001 custom-engine agents; no finer state) */}
-            <CountGroup status="running" count={running} />
+            {errors > 0 && <CountGroup status="error" count={errors} />}
+            <span className="text-xs text-muted-foreground">
+              {total} active
+            </span>
           </>
         )}
 
@@ -240,7 +240,9 @@ export function ActiveSessionsBar() {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={collapsed ? "Expand active sessions" : "Collapse active sessions"}
+          aria-label={
+            collapsed ? "Expand active sessions" : "Collapse active sessions"
+          }
           onClick={(e) => {
             e.stopPropagation();
             toggle();
@@ -268,7 +270,7 @@ function CountGroup({
   status,
   count,
 }: {
-  status: "working" | "waiting" | "idle" | "running";
+  status: "working" | "waiting" | "idle" | "error";
   count: number;
 }) {
   const { className: dotClassName, tooltip } = dotMeta({
@@ -306,7 +308,7 @@ function SessionRow({
   isCurrent: boolean;
   onOpen: () => void;
 }) {
-  const { className: dotClassName } = dotMeta(entry);
+  const { className: dotClassName, tooltip } = dotMeta(entry);
   return (
     <div
       role="button"
@@ -324,7 +326,10 @@ function SessionRow({
         isCurrent && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
     >
-      <span className={cn("size-2 rounded-full shrink-0", dotClassName)} />
+      <span
+        title={tooltip}
+        className={cn("size-2 rounded-full shrink-0", dotClassName)}
+      />
       <span className="shrink-0 text-muted-foreground">
         {entry.projectName}
       </span>

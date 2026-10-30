@@ -1,6 +1,6 @@
 # Terminal monitoring and inbox
 
-Kamacu observes each running agent's terminal, including custom agents and Scratchpad. A configured LLM classifies activity and detects questions, permission dialogs, blocking errors, and completed responses. No agent skill, status hook, or feedback tool call is required. Process exit is still determined directly from the process.
+Kamacu observes each running agent's terminal, including custom agents and Scratchpad. Terminal activity drives the working indicator. A configured LLM detects questions, permission dialogs, blocking errors, and completed responses. No agent skill, status hook, or feedback tool call is required. Process exit is still determined directly from the process.
 
 ## Setup
 
@@ -32,7 +32,7 @@ The Go server renders terminal bytes continuously, independently of browser atta
 
 The scheduler checks once a second, debounces stable output for two seconds, and limits calls to at most one per session every five seconds. Continuously changing output is reconsidered after ten seconds. Four workers prioritize the oldest attempt. User input or model configuration changes cancel obsolete calls; changed screens reject old results. Each call has a thirty-second timeout, bounded input/output, and provider failures back off. Stable unchanged screens require no repeated calls. There is no spending cutoff.
 
-Status is unknown until classification succeeds. Provider/auth/quota failures show unknown/unavailable instead of pretending the agent is idle. Hover the status dot for the diagnostic. Settings show calls, failures, timeouts, last latency, and tokens when the adapter receives usage data; these counters reset on server restart. Codex's current final-text adapter does not expose token counts.
+The active-session bar lists open agent terminals until their processes exit, independently of classification. Meaningful terminal output or user input marks an agent working immediately, with a 15-second activity window. Identical repaints and resizing do not count as activity. Without recent activity, the terminal is idle; this does not mean the task is complete. A current model decision can identify waiting, errors, or an idle prompt. New activity invalidates that decision. This works for every agent engine, including custom agents. Provider/auth/quota failures remain monitoring diagnostics and do not hide sessions or introduce an unknown status. Settings show calls, failures, timeouts, last latency, and tokens when the adapter receives usage data; these counters reset on server restart. Codex's current final-text adapter does not expose token counts.
 
 Installed-login inference uses a fresh temporary directory, disables project instructions, action tools, hooks and MCP, and removes inherited Kamacu task identity. It runs outside the ordinary session manager so the monitor cannot monitor itself. API adapters have no tools. Terminal contents are treated as untrusted data and model decisions must cite current visible evidence.
 

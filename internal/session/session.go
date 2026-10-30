@@ -388,18 +388,10 @@ func (s *Session) agentStatusLocked() string {
 		if s.status == StatusExited {
 			return "exited"
 		}
-		if s.monitor.State == "" {
-			return "unknown"
-		}
-		return s.monitor.State
+		return terminalAgentStatus(s.observer.Snapshot(), s.monitor, time.Now())
 	}
 	if s.status == StatusExited {
 		return "exited"
-	}
-	// Custom engines have no known lifecycle contract. Supported engines
-	// keep working/waiting/idle; Codex uses its own lifecycle/screen reducer.
-	if s.engine != "" && s.engine != "claude" && s.engine != "opencode" && s.engine != "codex" {
-		return "running"
 	}
 	if s.engine == "codex" {
 		return s.codexStatusLocked()

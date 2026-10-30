@@ -222,7 +222,11 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	w.evidence = current
 	w.evidence.At = obs.EvidenceAt(d.Evidence)
 	w.decision = d
-	sess.SetMonitorStatus(session.MonitorStatus{State: d.State, Health: "ready", ObservedAt: obs.At})
+	observedAt := obs.At
+	if obs.InputAt.After(observedAt) {
+		observedAt = obs.InputAt
+	}
+	sess.SetMonitorStatus(session.MonitorStatus{State: d.State, Health: "ready", ObservedAt: observedAt})
 	slog.Debug("terminal classified", "session", info.ID, "state", d.State, "latency_ms", time.Since(start).Milliseconds())
 	if d.Kind == "none" || d.State == "unknown" {
 		if d.State == "working" || d.State == "idle" {

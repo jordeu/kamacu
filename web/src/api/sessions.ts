@@ -11,7 +11,7 @@ export interface TermSession {
   taskId?: number; // omitted for unscoped dev sessions
   kind?: "bash" | "agent"; // session discriminator (04-02 server Info JSON)
   engine?: string; // agent engine reported by the server
-  agentStatus?: "working" | "idle" | "waiting" | "exited" | "unknown" | "error"; // agent sessions only
+  agentStatus?: "working" | "idle" | "waiting" | "exited" | "error"; // agent sessions only
   stopRequested?: boolean; // Kamacu-initiated stop (gray-dot discriminator)
   // Restored tmux survivor (TMUX-05, D-88): a DB-derived ghost (id "") the
   // server emits for a tmux session that outlived a Kamacu restart. orphaned

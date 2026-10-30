@@ -71,10 +71,10 @@ func TestCodexEngineKeepsHeuristicStates(t *testing.T) {
 		t.Errorf("Engine = %q, want \"codex\"", info.Engine)
 	}
 	switch info.AgentStatus {
-	case "unknown":
+	case "idle", "working":
 		// ok — heuristic path intact, NOT collapsed to "running"
 	default:
-		t.Errorf("codex AgentStatus = %q, want unknown before first observation (heuristics intact, not collapsed to running)", info.AgentStatus)
+		t.Errorf("codex AgentStatus = %q, want idle or working from terminal activity", info.AgentStatus)
 	}
 }
 

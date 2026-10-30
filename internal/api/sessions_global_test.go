@@ -899,8 +899,8 @@ func TestGlobalAgentSpawn(t *testing.T) {
 	if body["engine"] != "claude" {
 		t.Errorf("engine = %v, want %q (read-at-use from the singleton's default agent)", body["engine"], "claude")
 	}
-	if body["agentStatus"] != "unknown" {
-		t.Errorf("agentStatus = %q, want %q (awaiting observation)", body["agentStatus"], "unknown")
+	if body["agentStatus"] != "idle" && body["agentStatus"] != "working" {
+		t.Errorf("agentStatus = %q, want %q (awaiting observation)", body["agentStatus"], "idle or working")
 	}
 	sid, _ := body["id"].(string)
 	if sid == "" {
@@ -1272,8 +1272,8 @@ func TestGlobalStatusLiveEntry(t *testing.T) {
 	if e["sessionId"] != gsid {
 		t.Errorf("sessionId = %v, want the live session %q", e["sessionId"], gsid)
 	}
-	if e["status"] != "unknown" {
-		t.Errorf("status = %v, want %q (awaiting observation)", e["status"], "unknown")
+	if e["status"] != "idle" && e["status"] != "working" {
+		t.Errorf("status = %v, want %q (awaiting observation)", e["status"], "idle or working")
 	}
 	if e["taskTitle"] != "Scratchpad" {
 		t.Errorf("taskTitle = %v, want the locked %q (D-09)", e["taskTitle"], "Scratchpad")
@@ -1316,8 +1316,8 @@ func TestGlobalStatusLiveEntry(t *testing.T) {
 	if taskEntry["sessionId"] != tsid {
 		t.Errorf("task entry sessionId = %v, want %q (unchanged)", taskEntry["sessionId"], tsid)
 	}
-	if taskEntry["status"] != "unknown" {
-		t.Errorf("task entry status = %v, want %q (unchanged)", taskEntry["status"], "unknown")
+	if taskEntry["status"] != "idle" && taskEntry["status"] != "working" {
+		t.Errorf("task entry status = %v, want %q (unchanged)", taskEntry["status"], "idle or working")
 	}
 	if taskEntry["taskTitle"] != "Task Peer" {
 		t.Errorf("task entry taskTitle = %v, want %q (unchanged)", taskEntry["taskTitle"], "Task Peer")

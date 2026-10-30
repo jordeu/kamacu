@@ -1028,8 +1028,8 @@ func TestSessionAgentSpawn(t *testing.T) {
 	if body["kind"] != "agent" {
 		t.Errorf("kind = %q, want %q", body["kind"], "agent")
 	}
-	if body["agentStatus"] != "unknown" {
-		t.Errorf("agentStatus = %q, want %q (awaiting first observation)", body["agentStatus"], "unknown")
+	if body["agentStatus"] != "idle" && body["agentStatus"] != "working" {
+		t.Errorf("agentStatus = %q, want %q (awaiting first observation)", body["agentStatus"], "idle or working")
 	}
 
 	// The claude session id is persisted on the task row BEFORE the reply —

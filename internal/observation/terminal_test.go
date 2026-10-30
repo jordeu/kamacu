@@ -118,3 +118,24 @@ func TestRepeatedEvidenceGetsFreshTimestamp(t *testing.T) {
 		t.Fatal("new completion inherited old completion time")
 	}
 }
+
+func TestActivityIgnoresResizeAndIdenticalRepaints(t *testing.T) {
+	v := New(80, 24)
+	v.Feed([]byte("Ready>"))
+	before := v.Snapshot().OutputAt
+	if before.IsZero() {
+		t.Fatal("output activity missing")
+	}
+	v.Feed([]byte("\rReady>\x1b[?25h"))
+	if !v.Snapshot().OutputAt.Equal(before) {
+		t.Fatal("identical repaint counted as activity")
+	}
+	v.Resize(100, 30)
+	if !v.Snapshot().OutputAt.Equal(before) {
+		t.Fatal("resize counted as activity")
+	}
+	v.Feed([]byte("Working"))
+	if !v.Snapshot().OutputAt.After(before) {
+		t.Fatal("new output missing activity")
+	}
+}

@@ -192,8 +192,8 @@ func TestAgentLifecycle(t *testing.T) {
 		if sess["kind"] != "agent" {
 			t.Errorf("kind = %q, want %q", sess["kind"], "agent")
 		}
-		if sess["agentStatus"] != "unknown" {
-			t.Errorf("agentStatus = %q, want %q (awaiting observation)", sess["agentStatus"], "unknown")
+		if sess["agentStatus"] != "idle" && sess["agentStatus"] != "working" {
+			t.Errorf("agentStatus = %q, want %q (awaiting observation)", sess["agentStatus"], "idle or working")
 		}
 		agentSessionID, _ = sess["id"].(string)
 		if agentSessionID == "" {
@@ -245,8 +245,8 @@ func TestAgentLifecycle(t *testing.T) {
 		if entry == nil {
 			t.Fatalf("GET /api/agents/status has no entry for task %d", tid)
 		}
-		if entry["status"] != "unknown" {
-			t.Errorf("status = %q, want %q (hooks do not set status)", entry["status"], "unknown")
+		if entry["status"] != "idle" && entry["status"] != "working" {
+			t.Errorf("status = %q, want %q (hooks do not set status)", entry["status"], "idle or working")
 		}
 		if entry["sessionId"] != agentSessionID {
 			t.Errorf("sessionId = %v, want %q", entry["sessionId"], agentSessionID)
@@ -265,7 +265,7 @@ func TestAgentLifecycle(t *testing.T) {
 		defer conn.Close(websocket.StatusNormalClosure, "")
 
 		// Attaching must not infer a different activity state.
-		waitAgentStatus(t, srv, tid, "unknown", 2*time.Second)
+		waitAgentStatus(t, srv, tid, "working", 2*time.Second)
 	})
 
 	stage("6_stop_exits_143_stop_requested", func(t *testing.T) {
@@ -308,7 +308,7 @@ func TestAgentLifecycle(t *testing.T) {
 		}
 
 		// Newest-wins: the status endpoint now reports the NEW session.
-		entry := waitAgentStatus(t, srv, tid, "unknown", 2*time.Second)
+		entry := waitAgentStatus(t, srv, tid, "working", 2*time.Second)
 		if entry["sessionId"] != newSessionID {
 			t.Errorf("agents status sessionId = %v, want the new session %q", entry["sessionId"], newSessionID)
 		}

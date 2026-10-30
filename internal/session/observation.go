@@ -58,3 +58,24 @@ func (s *Session) WriteMessage(body, submit []byte) error {
 	time.Sleep(100 * time.Millisecond)
 	return s.writeInput(submit)
 }
+
+// terminalAgentStatus is engine-independent. Quiet means no recent terminal
+// activity, not completion. Model uncertainty/availability is diagnostic only.
+func terminalAgentStatus(obs observation.Snapshot, monitor MonitorStatus, now time.Time) string {
+	activity := obs.OutputAt
+	if obs.InputAt.After(activity) {
+		activity = obs.InputAt
+	}
+	// A decision describes only the screen/input that was classified. New
+	// activity immediately invalidates it, without waiting for another LLM call.
+	if !monitor.ObservedAt.IsZero() && !activity.After(monitor.ObservedAt) {
+		switch monitor.State {
+		case "waiting", "idle", "error":
+			return monitor.State
+		}
+	}
+	if !activity.IsZero() && now.Sub(activity) < 15*time.Second {
+		return "working"
+	}
+	return "idle"
+}

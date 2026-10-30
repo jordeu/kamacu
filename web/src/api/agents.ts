@@ -8,11 +8,11 @@ export interface AgentStatusEntry {
     detail?: string;
     observed_at?: string;
   };
+  live: boolean; // The terminal process is open, independent of detected status.
   taskId: number;
   projectId: number;
   sessionId: string;
-  status:
-    "working" | "idle" | "waiting" | "exited" | "unknown" | "error" | "running"; // All engines share terminal-derived status.
+  status: "working" | "idle" | "waiting" | "exited" | "error"; // All engines share terminal-derived status.
   exitCode: number | null;
   stopRequested: boolean;
   resumable: boolean;

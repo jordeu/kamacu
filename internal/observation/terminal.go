@@ -14,6 +14,7 @@ import (
 )
 
 type Snapshot struct {
+	OutputAt        time.Time   `json:"output_at,omitempty"`
 	InputAt         time.Time   `json:"input_at,omitempty"`
 	UnsupportedSize bool        `json:"unsupported_size,omitempty"`
 	Revision        uint64      `json:"revision"`
@@ -41,6 +42,7 @@ func size(cols, rows int) (int, int) { return max(1, min(cols, 300)), max(1, min
 func (t *Terminal) Feed(p []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	screen := t.snap.Screen
 	data := append(t.tail, p...)
 	end := 0
 	for end < len(data) {
@@ -63,6 +65,9 @@ func (t *Terminal) Feed(p []byte) {
 	if start < end {
 		_, _ = t.vt.Write(data[start:end])
 		t.capture()
+	}
+	if t.snap.Screen != screen {
+		t.snap.OutputAt = t.snap.At
 	}
 	t.tail = append([]byte(nil), data[end:]...)
 }

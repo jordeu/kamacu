@@ -229,8 +229,8 @@ func TestAgentStatusRunningNotResumable(t *testing.T) {
 	if e["sessionId"] != sid {
 		t.Errorf("sessionId = %v, want the live session %q", e["sessionId"], sid)
 	}
-	if e["status"] != "unknown" {
-		t.Errorf("status = %v, want %q", e["status"], "unknown")
+	if e["status"] != "idle" && e["status"] != "working" {
+		t.Errorf("status = %v, want %q", e["status"], "idle or working")
 	}
 	if e["resumable"] != false {
 		t.Errorf("resumable = %v, want false for a running agent", e["resumable"])
@@ -416,8 +416,8 @@ func TestAgentStatusSingleEntry(t *testing.T) {
 	if entry["sessionId"] != sid {
 		t.Errorf("sessionId = %v, want %q", entry["sessionId"], sid)
 	}
-	if entry["status"] != "unknown" {
-		t.Errorf("status = %v, want %q", entry["status"], "unknown")
+	if entry["status"] != "idle" && entry["status"] != "working" {
+		t.Errorf("status = %v, want %q", entry["status"], "idle or working")
 	}
 	if v, present := entry["exitCode"]; !present || v != nil {
 		t.Errorf("exitCode = %v (present=%v), want explicit null while running", v, present)
@@ -477,7 +477,30 @@ func TestAgentStatusNewestWins(t *testing.T) {
 	if list[0]["sessionId"] != second {
 		t.Errorf("sessionId = %v, want newest %q", list[0]["sessionId"], second)
 	}
-	if list[0]["status"] != "unknown" {
-		t.Errorf("status = %v, want %q", list[0]["status"], "unknown")
+	if list[0]["status"] != "idle" && list[0]["status"] != "working" {
+		t.Errorf("status = %v, want %q", list[0]["status"], "idle or working")
+	}
+}
+
+func TestAgentStatusLiveTracksProcessNotClassification(t *testing.T) {
+	srv, mgr, db := newAgentServer(t)
+	pid := createProject(t, srv, gitRepoWithCommit(t))
+	id := taskID(t, createTask(t, srv, pid, "Keep open terminal listed"))
+	sid := spawnAgentFor(t, srv, id)
+	sess, _ := mgr.Get(sid)
+	for _, state := range []string{"working", "waiting", "idle", "error", "unknown"} {
+		sess.SetMonitorStatus(session.MonitorStatus{State: state, Health: "ready", ObservedAt: time.Now()})
+		entries := statusEntriesDirect(t, mgr, db, t.TempDir())
+		if len(entries) != 1 || entries[0]["live"] != true || entries[0]["sessionId"] != sid {
+			t.Fatalf("classification %s hid open terminal: %+v", state, entries)
+		}
+		if entries[0]["status"] == "unknown" || entries[0]["status"] == "running" {
+			t.Fatalf("legacy status exposed: %+v", entries[0])
+		}
+	}
+	stopAndWait(t, mgr, sid)
+	entries := statusEntriesDirect(t, mgr, db, t.TempDir())
+	if len(entries) != 1 || entries[0]["live"] != false || entries[0]["status"] != "exited" {
+		t.Fatalf("stopped terminal still live: %+v", entries)
 	}
 }
