@@ -26,9 +26,9 @@ export function InboxSidebar() {
   const [selected, setSelected] = useState<FeedbackQuestion | null>(null);
   const [offset, setOffset] = useState(0);
   const [notice, setNotice] = useState("");
-  const inbox = useInbox("pending", offset);
+  const inbox = useInbox("pending", offset, "oldest");
   // Keep the global count subscribed to a stable query while message pages load.
-  const pendingCount = useInbox();
+  const pendingCount = useInbox("pending", 0, "oldest");
   function toggle() {
     setCollapsed((current) => {
       localStorage.setItem("kamacu:inbox-collapsed", current ? "0" : "1");

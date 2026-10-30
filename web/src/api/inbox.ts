@@ -34,10 +34,10 @@ interface InboxPage {
   has_more: boolean;
 }
 export interface FeedbackResult { outcome: string; question: FeedbackQuestion }
-export function useInbox(view: "pending" | "archived" = "pending", offset = 0) {
+export function useInbox(view: "pending" | "archived" = "pending", offset = 0, order: "newest" | "oldest" = "newest") {
   return useQuery({
-    queryKey: ["inbox", view, offset],
-    queryFn: () => get<InboxPage>(`/api/inbox?view=${view}&offset=${offset}`),
+    queryKey: ["inbox", view, offset, order],
+    queryFn: () => get<InboxPage>(`/api/inbox?view=${view}&offset=${offset}&order=${order}`),
     refetchInterval: 3000,
     refetchIntervalInBackground: true,
   });

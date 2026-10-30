@@ -596,6 +596,12 @@ func (s *Service) Get(ctx context.Context, id string) (Question, error) {
 }
 
 func (s *Service) List(ctx context.Context, who *Identity, archived bool, offset int) (Page, error) {
+	return s.ListWithOrder(ctx, who, archived, offset, false)
+}
+
+// ListWithOrder sorts before pagination. Chronological messages keep their
+// original position when monitoring refreshes their contents.
+func (s *Service) ListWithOrder(ctx context.Context, who *Identity, archived bool, offset int, oldestFirst bool) (Page, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	page := Page{Items: []Question{}}
@@ -624,7 +630,12 @@ func (s *Service) List(ctx context.Context, who *Identity, archived bool, offset
 		pageSize = 10
 	}
 	args = append(args, pageSize+1, offset)
-	rows, err := s.db.QueryContext(ctx, selectQuestion+where+` ORDER BY q.updated_at DESC,q.id DESC LIMIT ? OFFSET ?`, args...)
+	order := `q.updated_at DESC,q.id DESC`
+	if oldestFirst {
+		// rowid preserves insertion order for messages created in the same millisecond.
+		order = `q.created_at ASC,q.rowid ASC`
+	}
+	rows, err := s.db.QueryContext(ctx, selectQuestion+where+` ORDER BY `+order+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return page, err
 	}

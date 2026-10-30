@@ -101,6 +101,11 @@ func inboxDecode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 func (h *inboxHandlers) list(w http.ResponseWriter, r *http.Request) {
+	order := r.URL.Query().Get("order")
+	if order != "" && order != "newest" && order != "oldest" {
+		writeError(w, 400, "order must be newest or oldest")
+		return
+	}
 	view := r.URL.Query().Get("view")
 	if view != "" && view != "pending" && view != "archived" {
 		writeError(w, 400, "view must be pending or archived")
@@ -115,7 +120,7 @@ func (h *inboxHandlers) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	page, err := h.service.List(r.Context(), nil, view == "archived", offset)
+	page, err := h.service.ListWithOrder(r.Context(), nil, view == "archived", offset, order == "oldest")
 	if err != nil {
 		inboxError(w, err)
 		return
