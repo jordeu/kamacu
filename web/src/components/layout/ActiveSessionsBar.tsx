@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * useAgentStatuses() 5s poll (D-12) — no new polling hook.
  *
  * Collapsed (default, SBAR-02/03): per-state colored counts (working / waiting /
- * idle) + a total, with the waiting count amber-emphasized and pulsing ONLY when
+ * idle), with the waiting count amber-emphasized and pulsing ONLY when
  * > 0. Expanded (SBAR-04/05): a flat list across all projects, attention-first
  * (waiting -> working -> idle), each row a clickable [state dot · project · task/
  * PR title] navigating cross-project to that task's agent view (SBAR-06).
@@ -230,9 +230,6 @@ export function ActiveSessionsBar() {
             {/* Idle count */}
             <CountGroup status="idle" count={idle} />
             {errors > 0 && <CountGroup status="error" count={errors} />}
-            <span className="text-xs text-muted-foreground">
-              {total} active
-            </span>
           </>
         )}
 

@@ -56,7 +56,7 @@ const path = require('node:path');
       barEntry(13,'idle',true),barEntry(14,'error',true),barEntry(15,'exited',false),
       barEntry(16,'working',false)];
     await page.reload();
-    await page.getByText('4 active',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Active agent sessions: 1 working, 1 waiting, 1 idle, 1 need attention — expand',exact:true}).waitFor();
     await page.getByRole('button',{name:'Expand active sessions',exact:true}).click();
     for (const id of [11,12,13,14]) {
       await page.getByRole('button',{name:`Open Open terminal ${id} in Kamacu`,exact:true}).waitFor();
