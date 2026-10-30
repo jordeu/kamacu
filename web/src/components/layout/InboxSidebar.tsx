@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ArrowUpRight, ChevronLeft, ChevronRight, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
+import { completionActions, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
 import { useInboxFavicon } from "@/lib/useInboxFavicon";
 
 import { InboxMessage } from "@/components/inbox/InboxMessage";
@@ -93,7 +93,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
     </div>}
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="outline" size="sm" disabled={action.isPending} title={q.origin === "observer" && !completion ? "Open its agent terminal" : "Archive this message and open its agent terminal"} onClick={() => { if(q.origin==="observer" && !completion){onOpenTask();navigate(feedbackTaskURL(q));}else void submit("dismiss", undefined, true); }}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"}<ArrowUpRight className="size-3" /></Button>
-      {completion && <Button variant="outline" size="sm" disabled={action.isPending} onClick={() => submit("answer", "exit")}>OK, exit session</Button>}
+      {completion && completionActions(q).map(option => <Button key={option.id} variant="outline" size="sm" className="h-auto min-h-7 max-w-full whitespace-normal text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
       <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>
     </div>
     {!completion && <Link to={`/inbox?message=${encodeURIComponent(q.id)}#message-${q.id}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">Full context / custom reply<ArrowUpRight className="size-3" /></Link>}

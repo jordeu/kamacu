@@ -56,8 +56,26 @@ export function useFeedbackAction() {
     mutationFn: ({ question, action, answer, option_id }: {
       question: FeedbackQuestion; action: "answer" | "dismiss"; answer?: string; option_id?: string;
     }) => post<FeedbackResult>(`/api/inbox/${question.id}/${action}`, { revision: question.revision, answer, option_id }),
-    onSuccess: () => { void client.invalidateQueries({ queryKey: ["inbox"] }); },
+    onSuccess: (result) => {
+      void client.invalidateQueries({ queryKey: ["inbox"] });
+      if (result.outcome === "accepted" && completionClosesSession(result.question)) {
+        for (const key of ["tasks", "task", "sessions", "agent-statuses"]) void client.invalidateQueries({ queryKey: [key] });
+      }
+    },
   });
+}
+const completionLabels: Record<string, string> = {
+  move_to_review: "Move to review and close session",
+  move_to_done: "Move to done and close session",
+};
+export function completionActions(q: FeedbackQuestion) {
+  if (q.kind !== "completion" || q.task_id === 0) return [];
+  return Object.entries(completionLabels)
+    .filter(([id]) => q.options.some(option => option.id === id))
+    .map(([id, label]) => ({ id, label }));
+}
+export function completionClosesSession(q: FeedbackQuestion) {
+  return q.kind === "completion" && (q.reason === "exit" || Object.hasOwn(completionLabels, q.reason));
 }
 export function feedbackTaskURL(q: FeedbackQuestion) {
   const path = q.task_id === 0 ? "/global" : `/projects/${q.project_id}/tasks/${q.task_id}`;
@@ -70,6 +88,8 @@ export function feedbackOutcomeMessage(result: FeedbackResult) {
     return "This question is no longer waiting for an answer. You can find it in Archived.";
   }
   if (result.question.kind === "completion" && result.question.status === "answered") {
+    if (result.question.reason === "move_to_review") return "Task moved to review. Message archived and agent session is closing.";
+    if (result.question.reason === "move_to_done") return "Task moved to done. Message archived and agent session is closing.";
     if (result.question.reason === "exit") return "Message archived. Agent session is closing.";
     if (result.question.reason === "seen") return "Marked as seen. Agent session stays open.";
     return "Next prompt sent.";

@@ -19,13 +19,13 @@ import (
 
 type classifierFunc func(context.Context, Profile, observation.Snapshot) (Decision, error)
 
-func (f classifierFunc) Classify(ctx context.Context, p Profile, s observation.Snapshot) (Decision, error) {
+func (f classifierFunc) Classify(ctx context.Context, p Profile, s observation.Snapshot, _ ...TaskContext) (Decision, error) {
 	return f(ctx, p, s)
 }
 
 type fixtureClassifier struct{}
 
-func (fixtureClassifier) Classify(_ context.Context, _ Profile, s observation.Snapshot) (Decision, error) {
+func (fixtureClassifier) Classify(_ context.Context, _ Profile, s observation.Snapshot, _ ...TaskContext) (Decision, error) {
 	if strings.Contains(s.Screen, "All done") {
 		return Decision{State: "idle", Kind: "completion", Evidence: "All done", Summary: "All done", InputMode: "none"}, nil
 	}

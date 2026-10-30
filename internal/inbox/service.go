@@ -31,10 +31,12 @@ type Identity struct {
 	SessionID string `json:"session_id"`
 }
 type Session struct {
-	TaskID int64
-	Global bool
-	Live   bool
-	Done   <-chan struct{}
+	Revision uint64
+	Input    uint64
+	TaskID   int64
+	Global   bool
+	Live     bool
+	Done     <-chan struct{}
 }
 type Lookup func(string) Session
 type Option struct {
@@ -42,35 +44,37 @@ type Option struct {
 	Label string `json:"label"`
 }
 type Question struct {
-	Origin           string   `json:"origin"`
-	Hidden           bool     `json:"hidden"`
-	DeliveryMode     string   `json:"delivery_mode"`
-	DeliveryStatus   string   `json:"delivery_status"`
-	EvidenceRevision uint64   `json:"evidence_revision"`
-	InputGeneration  uint64   `json:"input_generation"`
-	Kind             string   `json:"kind"`
-	ID               string   `json:"id"`
-	TaskID           int64    `json:"task_id"`
-	ProjectID        int64    `json:"project_id"`
-	TaskTitle        string   `json:"task_title"`
-	ProjectName      string   `json:"project_name"`
-	SessionID        string   `json:"session_id"`
-	Abstract         string   `json:"abstract"`
-	Summary          string   `json:"summary"`
-	Context          string   `json:"context"`
-	Question         string   `json:"question"`
-	Options          []Option `json:"options"`
-	Status           string   `json:"status"`
-	Reason           string   `json:"reason"`
-	Answer           string   `json:"answer"`
-	AnswerSource     string   `json:"answer_source"`
-	Revision         int64    `json:"revision"`
-	CreatedAt        int64    `json:"created_at"`
-	UpdatedAt        int64    `json:"updated_at"`
-	HeartbeatAt      int64    `json:"heartbeat_at"`
-	AcknowledgedAt   *int64   `json:"acknowledged_at"`
+	CompletionTaskStatus string   `json:"completion_task_status,omitempty"`
+	Origin               string   `json:"origin"`
+	Hidden               bool     `json:"hidden"`
+	DeliveryMode         string   `json:"delivery_mode"`
+	DeliveryStatus       string   `json:"delivery_status"`
+	EvidenceRevision     uint64   `json:"evidence_revision"`
+	InputGeneration      uint64   `json:"input_generation"`
+	Kind                 string   `json:"kind"`
+	ID                   string   `json:"id"`
+	TaskID               int64    `json:"task_id"`
+	ProjectID            int64    `json:"project_id"`
+	TaskTitle            string   `json:"task_title"`
+	ProjectName          string   `json:"project_name"`
+	SessionID            string   `json:"session_id"`
+	Abstract             string   `json:"abstract"`
+	Summary              string   `json:"summary"`
+	Context              string   `json:"context"`
+	Question             string   `json:"question"`
+	Options              []Option `json:"options"`
+	Status               string   `json:"status"`
+	Reason               string   `json:"reason"`
+	Answer               string   `json:"answer"`
+	AnswerSource         string   `json:"answer_source"`
+	Revision             int64    `json:"revision"`
+	CreatedAt            int64    `json:"created_at"`
+	UpdatedAt            int64    `json:"updated_at"`
+	HeartbeatAt          int64    `json:"heartbeat_at"`
+	AcknowledgedAt       *int64   `json:"acknowledged_at"`
 }
 type Create struct {
+	completionTaskStatus              string
 	origin, deliveryMode              string
 	evidenceRevision, inputGeneration uint64
 	Key                               string   `json:"request_key"`
@@ -90,6 +94,7 @@ type Page struct {
 	HasMore      bool       `json:"has_more"`
 }
 type Service struct {
+	moveCompletion  func(context.Context, *sql.Tx, int64, string) (func(), error)
 	terminalManaged bool
 	db              *sql.DB
 	lookup          Lookup
@@ -134,12 +139,12 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var opts string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration)
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
@@ -162,11 +167,19 @@ func result(q Question) Result { return Result{outcome(q), q} }
 
 // transition writes the state and its history together. Call with mu held.
 func (s *Service) transition(ctx context.Context, id, kind, session string, query string, args ...any) error {
+	return s.transitionWith(ctx, nil, id, kind, session, query, args...)
+}
+func (s *Service) transitionWith(ctx context.Context, before func(*sql.Tx) error, id, kind, session string, query string, args ...any) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if before != nil {
+		if err = before(tx); err != nil {
+			return err
+		}
+	}
 	if _, err = tx.ExecContext(ctx, query, args...); err != nil {
 		return err
 	}
@@ -270,7 +283,7 @@ const CompletionExit = "OK, exit session"
 // Complete uses the same durable answer protocol, with server-defined actions.
 func (s *Service) Complete(ctx context.Context, who Identity, c Create) (Result, error) {
 	c.Question = "Work completed"
-	c.Options = []Option{{ID: "exit", Label: CompletionExit}}
+	c.Options = nil
 	return s.create(ctx, who, c, "completion")
 }
 func (s *Service) Create(ctx context.Context, who Identity, c Create) (Result, error) {
@@ -317,7 +330,7 @@ func (s *Service) createLocked(ctx context.Context, who Identity, c Create, kind
 	opts, _ := json.Marshal(c.Options)
 	id := uuid.NewString()
 	now := s.now().UnixMilli()
-	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract,origin,delivery_mode,evidence_revision,input_generation) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract, c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration)
+	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract,origin,delivery_mode,evidence_revision,input_generation,completion_task_status) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract, c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration, c.completionTaskStatus)
 	if err != nil {
 		return Result{}, err
 	}
@@ -385,7 +398,13 @@ func (s *Service) Wait(ctx context.Context, who Identity, id string, wait time.D
 // means browser; browser callers must supply the revision rendered with the form.
 func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision int64, answer, optionID string) (Result, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var afterCommit func()
+	defer func() {
+		s.mu.Unlock()
+		if afterCommit != nil {
+			afterCommit()
+		}
+	}()
 	if err := s.reconcile(ctx); err != nil {
 		return Result{}, err
 	}
@@ -440,14 +459,27 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	if q.Kind == "completion" {
 		reason = optionID
 		// Kamacu handles exit directly; no agent remains to acknowledge it.
-		if optionID == "exit" {
+		if optionID == "exit" || CompletionTarget(optionID) != "" {
 			ack = s.now().UnixMilli()
 		}
 	}
-	err = s.transition(ctx, id, "answered_"+source, q.SessionID, `UPDATE inbox_questions SET status='answered',answer=?,answer_source=?,updated_at=?,acknowledged_at=?,reason=? WHERE id=?`, answer, source, s.now().UnixMilli(), ack, reason, id)
+	var moved func()
+	var before func(*sql.Tx) error
+	if q.Kind == "completion" && CompletionTarget(optionID) != "" {
+		if who != nil {
+			return Result{}, fmt.Errorf("%w: task moves require a user inbox action", ErrInvalid)
+		}
+		before = func(tx *sql.Tx) error {
+			var moveErr error
+			moved, moveErr = s.moveCompletedTask(ctx, tx, q, optionID)
+			return moveErr
+		}
+	}
+	err = s.transitionWith(ctx, before, id, "answered_"+source, q.SessionID, `UPDATE inbox_questions SET status='answered',answer=?,answer_source=?,updated_at=?,acknowledged_at=?,reason=? WHERE id=?`, answer, source, s.now().UnixMilli(), ack, reason, id)
 	if err != nil {
 		return Result{}, err
 	}
+	afterCommit = moved
 	q, err = s.get(ctx, id)
 	return Result{"accepted", q}, err
 }

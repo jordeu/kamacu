@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, type FeedbackQuestion } from "@/api/inbox";
+import { completionActions, completionClosesSession, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, type FeedbackQuestion } from "@/api/inbox";
 
 function Context({ text }: { text: string }) {
   return <div className="prose prose-invert prose-sm max-w-none break-words prose-headings:text-sm prose-a:text-blue-400 prose-pre:overflow-x-auto">
@@ -17,6 +17,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
   const action = useFeedbackAction();
   const navigate = useNavigate();
   const completion = q.kind === "completion";
+  const choices = completion ? completionActions(q) : q.options;
   const pending = q.status === "pending";
   function navigateToTask() {
     onNavigate?.();
@@ -53,7 +54,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
     </div> : <>
       <p className="mt-3 text-sm text-muted-foreground">
         {status} · <time dateTime={new Date(q.updated_at).toISOString()}>{new Date(q.updated_at).toLocaleString()}</time>
-        {q.origin==="observer" && q.status==="answered" && (completion && q.reason==="exit" ? " · Session exit requested" : ` · ${q.delivery_status === "uncertain" ? "Delivery uncertain — review the terminal" : q.delivery_status || "Delivery pending"}`)}
+        {q.origin==="observer" && q.status==="answered" && (completionClosesSession(q) ? " · Session exit requested" : ` · ${q.delivery_status === "uncertain" ? "Delivery uncertain — review the terminal" : q.delivery_status || "Delivery pending"}`)}
  {q.origin!=="observer" && q.status === "answered" && (completion && q.reason === "exit" ? " · Session exit requested" : q.answer_source === "session" ? " · Answered in terminal" : q.acknowledged_at ? " · Received by agent" : " · Awaiting agent")}
         {q.reason === "heartbeat_expired" && " · Agent stopped polling"}
         {q.reason === "session_stopped" && " · Agent session stopped"}
@@ -66,9 +67,9 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       </div>
     </>}
     {pending && <div className="mt-6 space-y-4 border-t border-border pt-5">
-      <p className="text-sm font-medium">{completion ? "What next?" : "Your answer"} {q.options.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <span className="ml-1 font-normal text-muted-foreground">Choose an option to send it immediately.</span>}</p>
-      {q.options.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <div className="flex flex-wrap gap-2" role="group" aria-label="Choose an answer to send immediately">
-        {(completion ? q.options.filter((option) => option.id === "exit") : q.options).map((option) => <Button key={option.id} variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{completion ? "OK, exit session" : option.label}</Button>)}
+      <p className="text-sm font-medium">{completion ? "What next?" : "Your answer"} {choices.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <span className="ml-1 font-normal text-muted-foreground">{completion ? "Choose what happens next." : "Choose an option to send it immediately."}</span>}</p>
+      {choices.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <div className="flex flex-wrap gap-2" role="group" aria-label={completion ? "Completion actions" : "Choose an answer to send immediately"}>
+        {choices.map((option) => <Button key={option.id} variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
       </div>}
       {!completion && q.delivery_mode!=="terminal" && !q.hidden && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) submit("answer"); }}>
         <label htmlFor={`answer-${q.id}`} className="mb-2 block text-sm text-muted-foreground">Write your own answer</label>
@@ -80,7 +81,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       </form>}
       {!completion && (q.delivery_mode==="terminal" || q.hidden) && <p className="text-sm">Open the terminal to respond.</p>}
  {(completion || q.delivery_mode==="terminal") && <Button variant="ghost" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>}
-      {action.isError && <p role="alert" className="text-sm text-destructive">{action.error.message} Your answer has been kept. Check the terminal before retrying.</p>}
+      {action.isError && <p role="alert" className="text-sm text-destructive">{action.error.message} {completion ? "Review the task before retrying." : "Your answer has been kept. Check the terminal before retrying."}</p>}
     </div>}
     </div>
   </article>;

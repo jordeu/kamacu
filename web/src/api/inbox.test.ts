@@ -1,10 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get, post } from "./client";
-import { dismissTaskCompletions } from "./inbox";
+import { completionActions, completionClosesSession, dismissTaskCompletions, feedbackOutcomeMessage, type FeedbackQuestion } from "./inbox";
 
 vi.mock("./client", () => ({ get: vi.fn(), post: vi.fn() }));
 const message = (id: string) => ({ id, revision: 3 });
 beforeEach(() => vi.resetAllMocks());
+
+describe("completion actions", () => {
+  const completion = {
+    kind: "completion", task_id: 1, status: "pending",
+    options: [{ id: "move_to_done", label: "Model wording" }],
+  } as FeedbackQuestion;
+
+  it("shows only offered actions with consistent labels", () => {
+    expect(completionActions(completion)).toEqual([{ id: "move_to_done", label: "Move to done and close session" }]);
+    expect(completionActions({ ...completion, options: [] })).toEqual([]);
+    expect(completionActions({ ...completion, options: [{ id: "exit", label: "Old exit action" }] })).toEqual([]);
+    expect(completionActions({ ...completion, task_id: 0 })).toEqual([]);
+  });
+
+  it("reports the move and close outcome without claiming terminal delivery", () => {
+    for (const [reason, column] of [["move_to_review", "review"], ["move_to_done", "done"]]) {
+      const question = { ...completion, status: "answered" as const, reason };
+      expect(completionClosesSession(question)).toBe(true);
+      expect(feedbackOutcomeMessage({ outcome: "accepted", question })).toBe(`Task moved to ${column}. Message archived and agent session is closing.`);
+    }
+    expect(completionClosesSession({ ...completion, reason: "" })).toBe(false);
+  });
+});
 
 describe("opening a task", () => {
   it("uses one task-scoped snapshot even with more than one inbox page of completions", async () => {

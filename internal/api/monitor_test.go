@@ -14,7 +14,7 @@ import (
 
 type sampleMonitor struct{}
 
-func (sampleMonitor) Classify(_ context.Context, _ monitor.Profile, s observation.Snapshot) (monitor.Decision, error) {
+func (sampleMonitor) Classify(_ context.Context, _ monitor.Profile, s observation.Snapshot, _ ...monitor.TaskContext) (monitor.Decision, error) {
 	return monitor.Decision{State: "waiting", Kind: "question", Evidence: s.Screen, Question: "Would you like me to continue?", Summary: "Continue?", InputMode: "text"}, nil
 }
 func TestMonitorConfiguration(t *testing.T) {

@@ -13,6 +13,11 @@ func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mod
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration = "observer", mode, revision, input
+	if kind == "completion" {
+		if err := s.prepareCompletion(ctx, who, &c); err != nil {
+			return Result{}, err
+		}
+	}
 	out, err := s.createLocked(ctx, who, c, kind)
 	if err != nil {
 		return out, err
@@ -21,7 +26,7 @@ func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mod
 	if out.Outcome == "existing_pending" || q.Status != "pending" {
 		return out, nil
 	}
-	changed := q.Question != c.Question || q.Summary != c.Summary || q.Abstract != c.Abstract || q.Context != c.Context || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input || !slices.Equal(q.Options, c.Options)
+	changed := q.CompletionTaskStatus != c.completionTaskStatus || q.Question != c.Question || q.Summary != c.Summary || q.Abstract != c.Abstract || q.Context != c.Context || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input || !slices.Equal(q.Options, c.Options)
 	if q.Origin == "observer" && !changed {
 		return out, nil
 	}
@@ -33,7 +38,7 @@ func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mod
 		c.Options = []Option{}
 	}
 	options, _ := json.Marshal(c.Options)
-	_, err = s.db.ExecContext(ctx, `UPDATE inbox_questions SET revision=revision+?,origin='observer',delivery_mode=?,evidence_revision=?,input_generation=?,summary=?,abstract=?,context=?,question=?,options=?,updated_at=? WHERE id=?`, bump, mode, revision, input, c.Summary, c.Abstract, c.Context, c.Question, string(options), s.now().UnixMilli(), q.ID)
+	_, err = s.db.ExecContext(ctx, `UPDATE inbox_questions SET revision=revision+?,origin='observer',delivery_mode=?,evidence_revision=?,input_generation=?,summary=?,abstract=?,context=?,question=?,options=?,completion_task_status=?,updated_at=? WHERE id=?`, bump, mode, revision, input, c.Summary, c.Abstract, c.Context, c.Question, string(options), c.completionTaskStatus, s.now().UnixMilli(), q.ID)
 	if err != nil {
 		return out, err
 	}
@@ -87,7 +92,7 @@ func (s *Service) UseTerminalMonitoring() { s.mu.Lock(); s.terminalManaged = tru
 func (s *Service) RecoverDeliveries(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, err := s.db.ExecContext(ctx, `UPDATE inbox_questions SET delivery_status='uncertain' WHERE origin='observer' AND status='answered' AND reason!='exit' AND delivery_status IN ('','attempting')`)
+	r, err := s.db.ExecContext(ctx, `UPDATE inbox_questions SET delivery_status='uncertain' WHERE origin='observer' AND status='answered' AND reason NOT IN ('exit','move_to_review','move_to_done') AND delivery_status IN ('','attempting')`)
 	if err == nil {
 		if n, _ := r.RowsAffected(); n > 0 {
 			s.signal()

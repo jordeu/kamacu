@@ -310,8 +310,10 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 			return inbox.Session{}
 		}
 		info := sess.Info()
-		return inbox.Session{TaskID: info.TaskID, Global: info.Global, Live: info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested, Done: sess.Done()}
+		obs := sess.Observation()
+		return inbox.Session{Revision: obs.Revision, Input: obs.Input, TaskID: info.TaskID, Global: info.Global, Live: info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested, Done: sess.Done()}
 	})
+	api.ConfigureInboxTaskMoves(inboxService, db, wtSvc)
 	inboxService.UseTerminalMonitoring()
 	if err := inboxService.RecoverDeliveries(ctx); err != nil {
 		slog.Error("recovering inbox delivery", "error", err)

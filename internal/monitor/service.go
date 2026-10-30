@@ -30,6 +30,8 @@ type Service struct {
 	workers    chan struct{}
 }
 type watch struct {
+	taskContext          TaskContext
+	inflightTask         TaskContext
 	revision, input      uint64
 	profile              string
 	lastAttempt          time.Time
@@ -115,6 +117,10 @@ func (s *Service) tick(ctx context.Context) {
 		}
 		obs := sess.Observation()
 		p, err := Resolve(ctx, s.DB, info.TaskID)
+		task, taskErr := s.taskContext(ctx, info)
+		if taskErr != nil {
+			err = taskErr
+		}
 		if obs.UnsupportedSize {
 			err = fmt.Errorf("terminal exceeds the supported monitoring size (300 columns, 100 rows)")
 		}
@@ -142,13 +148,13 @@ func (s *Service) tick(ctx context.Context) {
 				w.active = active
 			}
 		}
-		if w.busy && w.cancel != nil && (w.inflightInput != obs.Input || w.inflightProfile != p.Key()) {
+		if w.busy && w.cancel != nil && (w.inflightInput != obs.Input || w.inflightProfile != p.Key() || w.inflightTask != task) {
 			w.cancel()
 		}
 		viewed := s.Presence.ViewingSession(info.ID)
 		// Hide immediately even if inference is busy. Never expose an obsolete
 		// question while its evidence or input generation has changed.
-		stale := obs.Input != w.input || obs.Revision != w.revision || w.profile != p.Key()
+		stale := obs.Input != w.input || obs.Revision != w.revision || w.profile != p.Key() || w.taskContext != task
 		if err := s.visibility(ctx, info.ID, viewed || stale || w.seen || w.decision.State == "unknown"); err != nil {
 			slog.Warn("monitor visibility", "error", err)
 		}
@@ -169,20 +175,21 @@ func (s *Service) tick(ctx context.Context) {
 				w.cancel = cancel
 				w.inflightInput = obs.Input
 				w.inflightProfile = p.Key()
+				w.inflightTask = task
 				s.jobs.Add(1)
-				go func() { defer s.jobs.Done(); s.classify(jobCtx, sess, p, obs) }()
+				go func() { defer s.jobs.Done(); s.classify(jobCtx, sess, p, obs, task) }()
 			default:
 			}
 		}
 		s.mu.Unlock()
 	}
 }
-func (s *Service) classify(parent context.Context, sess *session.Session, p Profile, obs observation.Snapshot) {
+func (s *Service) classify(parent context.Context, sess *session.Session, p Profile, obs observation.Snapshot, task TaskContext) {
 	defer func() { <-s.workers }()
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	start := time.Now()
-	d, err := s.Classifier.Classify(ctx, p, obs)
+	d, err := s.Classifier.Classify(ctx, p, obs, task)
 	info := sess.Info()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -194,7 +201,8 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	}
 	current := sess.Observation()
 	effective, e := Resolve(parent, s.DB, info.TaskID)
-	if info.Status != session.StatusRunning || e != nil || effective.Key() != p.Key() || current.Input != obs.Input || current.UnsupportedSize {
+	currentTask, taskErr := s.taskContext(parent, info)
+	if info.Status != session.StatusRunning || info.StopRequested || taskErr != nil || currentTask != task || e != nil || effective.Key() != p.Key() || current.Input != obs.Input || current.UnsupportedSize {
 		return
 	}
 	// Provider failures must back off even when terminal output kept changing.
@@ -220,6 +228,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	w.revision = current.Revision
 	w.input = current.Input
 	w.profile = p.Key()
+	w.taskContext = task
 	w.evidence = current
 	w.evidence.At = obs.EvidenceAt(d.Evidence)
 	w.decision = d
@@ -284,7 +293,7 @@ func (s *Service) persist(ctx context.Context, id string, w *watch) error {
 }
 func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 	sess, ok := s.Sessions.Get(info.ID)
-	if !ok || sess.Info().Status != session.StatusRunning {
+	if !ok || sess.Info().Status != session.StatusRunning || sess.Info().StopRequested {
 		return
 	}
 	current := sess.Observation()
@@ -292,6 +301,10 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 		return
 	}
 	if s.Presence.ViewingSession(info.ID) {
+		return
+	}
+	task, err := s.taskContext(ctx, info)
+	if err != nil || task != w.taskContext {
 		return
 	}
 	d := w.decision
@@ -308,7 +321,7 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 		kind = "completion"
 		question = "Work completed"
 		mode = "none"
-		options = []inbox.Option{{ID: "exit", Label: inbox.CompletionExit}}
+		options = inbox.CompletionOptions(info.TaskID, w.taskContext.Source, w.taskContext.Status, d.CompletionActions)
 	} else if d.Kind == "permission" || d.Kind == "error" {
 		mode = "terminal"
 		if question == "" {
@@ -334,7 +347,7 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 	if len(abstract) > 480 {
 		abstract = abstract[:480]
 	}
-	err := s.Presence.WhileAway(info.ID, func() error {
+	err = s.Presence.WhileAway(info.ID, func() error {
 		_, err := s.Inbox.Observe(ctx, inbox.Identity{TaskID: info.TaskID, SessionID: info.ID}, inbox.Create{Key: "observer:" + w.episode, Abstract: string(abstract), Summary: summary, Question: question, Context: message, Options: options}, kind, mode, w.revision, w.input)
 		return err
 	})
@@ -356,4 +369,14 @@ func (s *Service) persistenceFailure(ctx context.Context, sess *session.Session,
 	w.decision = Decision{State: "unknown", Kind: "none", InputMode: "none"}
 	_ = s.Inbox.HideObserved(ctx, sess.Info().ID, true)
 	sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: "Could not save monitoring state"})
+}
+
+func (s *Service) taskContext(ctx context.Context, info session.Info) (TaskContext, error) {
+	task := TaskContext{ID: info.TaskID, Engine: info.Engine, Scope: "task"}
+	if info.Global || info.TaskID == 0 {
+		task.Scope = "scratchpad"
+		return task, nil
+	}
+	err := s.DB.QueryRowContext(ctx, `SELECT title,description,status,source FROM tasks WHERE id=?`, info.TaskID).Scan(&task.Title, &task.Description, &task.Status, &task.Source)
+	return task, err
 }

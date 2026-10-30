@@ -435,7 +435,6 @@ func TestScratchpadFeedbackLifecycleAndIsolation(t *testing.T) {
 func TestCompletionActionsAndNextPrompt(t *testing.T) {
 	for _, tc := range []struct{ name, answer, option, reason string }{
 		{"next prompt", "Please add tests", "", ""},
-		{"exit", "", "exit", "exit"},
 		{"text is not exit", CompletionExit, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -446,7 +445,7 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			q := r.Question
-			if q.Kind != "completion" || len(q.Options) != 1 || q.Options[0].ID != "exit" {
+			if q.Kind != "completion" || len(q.Options) != 0 {
 				t.Fatalf("completion: %+v", q)
 			}
 			retry, err := s.Complete(ctx, who, Create{Key: "finished", Abstract: "Compact message", Summary: "Implemented feature", Context: "Tests passed"})

@@ -18,6 +18,11 @@ const path = require('node:path');
     assert.equal(response.status, 200, await response.clone().text());
     return response.json();
   }
+  async function complete(key, actions = [], taskID = 1) {
+    const response = await fetch(base+'/api/test-monitor/complete', {method:'POST', body:JSON.stringify({key, actions, task_id:taskID})});
+    assert.equal(response.status,200,await response.clone().text());
+    return response.json();
+  }
   async function ask(key) {
     return agent('ask', { request_key: key, abstract: 'Compact inbox message.', summary: 'I’m improving how users move between a task and its agent terminal.', context: '**Recommendation:** focus the agent terminal when opening a question’s task.\n\n- This saves a click when replying in the terminal.\n- Keep the current tab for ordinary task navigation.\n\nNo changes have been applied yet.', question: 'Should opening a question’s task focus the agent terminal?', options: [{ id: 'focus', label: 'Focus the agent terminal' }, { id: 'preserve', label: 'Keep the current tab' }] });
   }
@@ -80,8 +85,9 @@ const path = require('node:path');
       await row.waitFor({state:'attached'});
       if (await row.getAttribute('open') === null) await row.locator(':scope > summary').click();
     }
-    for (const mode of ['dismiss', 'exit']) {
-      const completed = await agent('complete', {request_key:'completed-'+mode, abstract: 'Compact inbox message.', summary:'Updated inbox completion handling.', context:'Implemented completion summaries. **Verification:** lifecycle tests passed.'});
+    for (const mode of ['dismiss', 'move_to_review', 'move_to_done', 'no-actions']) {
+      const actions = mode === 'dismiss' ? ['move_to_review','move_to_done'] : mode === 'no-actions' ? [] : [mode];
+      const completed = await complete('completed-'+mode, actions);
       await page.reload();
       await expand(completed.question);
       await page.getByText('What was done', {exact:true}).waitFor();
@@ -94,18 +100,24 @@ const path = require('node:path');
       }
       assert.equal(await page.getByLabel('Send the next prompt', {exact:true}).count(), 0);
       assert.equal(await page.getByRole('button', {name:'Seen',exact:true}).count(), 0);
-      await page.getByRole('button',{name:mode === 'dismiss' ? 'Dismiss' : 'OK, exit session',exact:true}).click();
-      await page.getByText(mode === 'dismiss' ? 'Message dismissed and archived.' : 'Message archived. Agent session is closing.', {exact:true}).waitFor();
+      for (const [id,label] of [['move_to_review','Move to review and close session'],['move_to_done','Move to done and close session']]) {
+        assert.equal(await page.getByRole('button',{name:label,exact:true}).count(),actions.includes(id) ? 1 : 0);
+      }
+      assert.equal(await page.getByRole('button',{name:'OK, exit session',exact:true}).count(),0);
+      await page.getByRole('button',{name:'Dismiss',exact:true}).waitFor();
+      await page.getByRole('button',{name:'Open task: Improve task navigation',exact:true}).waitFor();
+      await page.getByRole('button',{name:mode === 'move_to_review' ? 'Move to review and close session' : mode === 'move_to_done' ? 'Move to done and close session' : 'Dismiss',exact:true}).click();
+      await page.getByText(mode === 'move_to_review' ? 'Task moved to review. Message archived and agent session is closing.' : mode === 'move_to_done' ? 'Task moved to done. Message archived and agent session is closing.' : 'Message dismissed and archived.', {exact:true}).waitFor();
       const result = await agent('wait', {question_id:completed.question.id,wait_seconds:0});
-      assert.equal(result.question.status,mode === 'dismiss' ? 'dismissed' : 'answered');
-      assert.equal(result.question.reason,mode === 'dismiss' ? '' : 'exit');
+      assert.equal(result.question.status,mode.startsWith('move_') ? 'answered' : 'dismissed');
+      assert.equal(result.question.reason,mode.startsWith('move_') ? mode : '');
       assert.equal(await page.getByRole('dialog',{name:'Agent session ended',exact:true}).count(),0,'inbox exit opened the task-status dialog');
     }
-    await agent('complete', {request_key:'completed-sidebar', abstract:'Completed through the sidebar.', summary:'Updated inbox completion handling.', context:'Verified terminal exit behavior.'});
+    await complete('completed-sidebar',['move_to_done']);
     await page.getByRole('button',{name:'Expand inbox sidebar',exact:true}).click();
     const sidebar = page.getByRole('complementary',{name:'Inbox sidebar',exact:true});
-    await sidebar.getByRole('button',{name:'OK, exit session',exact:true}).click();
-    await sidebar.getByText('Message archived. Agent session is closing.',{exact:true}).waitFor();
+    await sidebar.getByRole('button',{name:'Move to done and close session',exact:true}).click();
+    await sidebar.getByText('Task moved to done. Message archived and agent session is closing.',{exact:true}).waitFor();
     assert.equal(await page.getByRole('dialog',{name:'Agent session ended',exact:true}).count(),0,'sidebar exit opened the task-status dialog');
     await page.getByRole('button',{name:'Collapse inbox sidebar',exact:true}).click();
     const first = await ask('options');
@@ -224,6 +236,13 @@ const path = require('node:path');
 
     const scratchResult = await agent('wait',{question_id:scratch.question.id,wait_seconds:0});
     assert.equal(scratchResult.question.status,'dismissed');
+    const scratchCompletion = await complete('scratch-completion', ['move_to_review','move_to_done'], 0);
+    await page.goto(base+'/inbox');
+    await expand(scratchCompletion.question);
+    assert.equal(await page.getByRole('button',{name:/Move to (review|done) and close session/}).count(),0);
+    await page.getByRole('button',{name:'Dismiss',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Open Scratchpad',exact:true}).click();
+    await page.waitForURL('**/global?feedback_session=scratch-session');
     // Observer cards keep their identity when opened, hidden, and restored.
     const observed=await (await fetch(base+'/api/test-monitor/observe',{method:'POST'})).json();
     await page.goto(base+'/inbox');

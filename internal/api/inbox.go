@@ -153,7 +153,7 @@ func (h *inboxHandlers) answer(w http.ResponseWriter, r *http.Request) {
 	defer cancelDelivery()
 	// Inject only the newly accepted browser answer; retries and terminal answers
 	// must not submit a second prompt. Persist first so recovery is always possible.
-	if out.Outcome == "accepted" && out.Question.Reason != "exit" && h.deliver != nil {
+	if out.Outcome == "accepted" && out.Question.Reason != "exit" && inbox.CompletionTarget(out.Question.Reason) == "" && h.deliver != nil {
 		if out.Question.Origin == "observer" {
 			if err := h.service.RecordDelivery(deliveryCtx, out.Question.ID, "attempting"); err != nil {
 				inboxError(w, err)
@@ -179,7 +179,7 @@ func (h *inboxHandlers) answer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 func (h *inboxHandlers) stopCompleted(out inbox.Result) {
-	if h.stop != nil && out.Outcome != "stale_revision" && out.Question.Kind == "completion" && out.Question.Status == "answered" && out.Question.Reason == "exit" {
+	if h.stop != nil && out.Outcome != "stale_revision" && out.Question.Kind == "completion" && out.Question.Status == "answered" && (out.Question.Reason == "exit" || inbox.CompletionTarget(out.Question.Reason) != "") {
 		h.stop(out.Question.SessionID)
 	}
 }

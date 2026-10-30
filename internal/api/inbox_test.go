@@ -38,7 +38,7 @@ func TestInboxHTTPIdentityAndBrowserResolution(t *testing.T) {
 			return inbox.Session{Global: true, Live: true}
 		}
 		if id == "live" {
-			return inbox.Session{TaskID: 1, Live: true}
+			return inbox.Session{TaskID: 1, Live: true, Revision: 1}
 		}
 		return inbox.Session{}
 	})
@@ -147,14 +147,43 @@ func TestInboxBrowser(t *testing.T) {
 			return inbox.Session{Global: true, Live: true}
 		}
 		if id == "browser-session" {
-			return inbox.Session{TaskID: 1, Live: true}
+			return inbox.Session{TaskID: 1, Live: true, Revision: 1}
 		}
 		return inbox.Session{}
 	})
 	defer svc.Close()
 	mux := http.NewServeMux()
 	MonitorRoutes(mux, db, sampleMonitor{})
+	ConfigureInboxTaskMoves(svc, db, nil)
 	mux.HandleFunc("POST /api/test-monitor/{action}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("action") == "complete" {
+			var body struct {
+				Key     string   `json:"key"`
+				Actions []string `json:"actions"`
+				TaskID  int64    `json:"task_id"`
+			}
+			if !inboxDecode(w, r, &body) {
+				return
+			}
+			who := inbox.Identity{TaskID: body.TaskID, SessionID: "browser-session"}
+			if body.TaskID == 0 {
+				who.SessionID = "scratch-session"
+			} else {
+				if _, err := db.Exec(`UPDATE tasks SET status='in_progress' WHERE id=?`, body.TaskID); err != nil {
+					inboxError(w, err)
+					return
+				}
+			}
+			options := inbox.CompletionOptions(body.TaskID, "manual", "in_progress", body.Actions)
+			out, err := svc.Observe(r.Context(), who, inbox.Create{Key: body.Key, Abstract: "Compact inbox message.", Summary: "Updated inbox completion handling.", Context: "Implemented completion summaries. **Verification:** lifecycle tests passed.", Question: "Work completed", Options: options}, "completion", "terminal", 1, 0)
+			if err != nil {
+				inboxError(w, err)
+				return
+			}
+			writeJSON(w, 200, out)
+			return
+		}
+
 		if r.PathValue("action") == "observe" {
 			out, err := svc.Observe(r.Context(), inbox.Identity{TaskID: 0, SessionID: "scratch-session"}, inbox.Create{Key: "observed-browser", Abstract: "Continue with the changes?", Summary: "I restricted image uploads to workspace members. All 12 tests passed.", Context: "## Image upload security\n\nI require authentication and workspace membership before accepting uploads.\n\n- Uploads are limited to 8 MiB.\n- All 12 tests passed.\n\n[Review the PR](https://github.com/example/demo/pull/42)", Question: "Continue with the changes?", Options: []inbox.Option{{ID: "choice-1", Label: "1. Yes, continue."}, {ID: "choice-2", Label: "2. Revise the plan."}}}, "question", "text", 1, 0)
 			if err != nil {
@@ -206,7 +235,7 @@ func TestInboxBrowser(t *testing.T) {
 	}
 }
 
-func TestCompletionExitRequiresWinningOption(t *testing.T) {
+func TestScratchpadCompletionHasNoCloseAction(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "completion.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -215,39 +244,20 @@ func TestCompletionExitRequiresWinningOption(t *testing.T) {
 	if err = store.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	svc := inbox.New(db, func(id string) inbox.Session { return inbox.Session{Global: true, Live: id == "scratch"} })
+	svc := inbox.New(db, func(string) inbox.Session { return inbox.Session{Global: true, Live: true} })
 	defer svc.Close()
-	stopped := ""
+	stopped := false
 	mux := http.NewServeMux()
-	InboxRoutes(mux, svc, "token", func(id string) { stopped = id })
-	for _, tc := range []struct {
-		key, answer, option string
-		exit                bool
-	}{
-		{"text", inbox.CompletionExit, "", false},
-		{"exit", "", "exit", true},
-	} {
-		r, err := svc.Complete(context.Background(), inbox.Identity{TaskID: 0, SessionID: "scratch"}, inbox.Create{Key: tc.key, Abstract: "Compact message", Summary: "Finished", Context: "Verified"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		call := func(answer, option string) {
-			raw, _ := json.Marshal(map[string]any{"revision": r.Question.Revision, "answer": answer, "option_id": option})
-			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/inbox/"+r.Question.ID+"/answer", bytes.NewReader(raw)))
-			if w.Code != 200 {
-				t.Fatal(w.Code, w.Body.String())
-			}
-		}
-		call(tc.answer, tc.option)
-		if (stopped != "") != tc.exit {
-			t.Fatalf("%s: stopped %q", tc.key, stopped)
-		}
-		// A losing exit submission cannot override text or Seen.
-		call("", "exit")
-		if (stopped != "") != tc.exit {
-			t.Fatalf("%s: losing answer stopped session", tc.key)
-		}
+	InboxRoutes(mux, svc, "token", func(string) { stopped = true })
+	r, err := svc.Complete(context.Background(), inbox.Identity{SessionID: "scratch"}, inbox.Create{Key: "done", Abstract: "Done", Summary: "Done", Context: "Verified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(inboxAnswer{Revision: r.Question.Revision, OptionID: "exit"})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/inbox/"+r.Question.ID+"/answer", bytes.NewReader(raw)))
+	if w.Code != 400 || stopped || len(r.Question.Options) != 0 {
+		t.Fatalf("scratchpad close: %d %s stopped=%v", w.Code, w.Body, stopped)
 	}
 }
 
@@ -281,7 +291,7 @@ func TestInboxTerminalDelivery(t *testing.T) {
 				}
 				return nil
 			}, func(string) { stopped++ })
-			for _, action := range []string{"text", "exit"} {
+			for _, action := range []string{"text"} {
 				created, err := svc.Complete(context.Background(), who, inbox.Create{Key: action, Abstract: "Compact message", Summary: "Done", Context: "Tests passed"})
 				if err != nil {
 					t.Fatal(err)
@@ -297,7 +307,7 @@ func TestInboxTerminalDelivery(t *testing.T) {
 					w := httptest.NewRecorder()
 					mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/inbox/"+created.Question.ID+"/answer", bytes.NewReader(raw)))
 					want := 200
-					if fail && action != "exit" && attempt == 0 {
+					if fail && attempt == 0 {
 						want = 502
 					}
 					if w.Code != want {
@@ -305,9 +315,6 @@ func TestInboxTerminalDelivery(t *testing.T) {
 					}
 				}
 				expected := before + 1
-				if action == "exit" {
-					expected = before
-				}
 				if calls != expected {
 					t.Fatalf("%s: delivery calls=%d want=%d", action, calls, expected)
 				}
@@ -316,8 +323,8 @@ func TestInboxTerminalDelivery(t *testing.T) {
 					t.Fatalf("answer not durable: %+v %v", page, err)
 				}
 			}
-			if stopped == 0 {
-				t.Fatal("exit did not stop session")
+			if stopped != 0 {
+				t.Fatal("text reply stopped session")
 			}
 		})
 	}
