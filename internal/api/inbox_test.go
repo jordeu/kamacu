@@ -156,7 +156,7 @@ func TestInboxBrowser(t *testing.T) {
 	MonitorRoutes(mux, db, sampleMonitor{})
 	mux.HandleFunc("POST /api/test-monitor/{action}", func(w http.ResponseWriter, r *http.Request) {
 		if r.PathValue("action") == "observe" {
-			out, err := svc.Observe(r.Context(), inbox.Identity{TaskID: 0, SessionID: "scratch-session"}, inbox.Create{Key: "observed-browser", Abstract: "Continue with the changes?", Summary: "Continue with the changes?", Context: "The terminal asks whether to continue.", Question: "Continue with the changes?", Options: []inbox.Option{{ID: "choice-1", Label: "1. Yes, continue."}, {ID: "choice-2", Label: "2. Revise the plan."}}}, "question", "text", 1, 0)
+			out, err := svc.Observe(r.Context(), inbox.Identity{TaskID: 0, SessionID: "scratch-session"}, inbox.Create{Key: "observed-browser", Abstract: "Continue with the changes?", Summary: "I restricted image uploads to workspace members. All 12 tests passed.", Context: "## Image upload security\n\nI require authentication and workspace membership before accepting uploads.\n\n- Uploads are limited to 8 MiB.\n- All 12 tests passed.\n\n[Review the PR](https://github.com/example/demo/pull/42)", Question: "Continue with the changes?", Options: []inbox.Option{{ID: "choice-1", Label: "1. Yes, continue."}, {ID: "choice-2", Label: "2. Revise the plan."}}}, "question", "text", 1, 0)
 			if err != nil {
 				inboxError(w, err)
 				return

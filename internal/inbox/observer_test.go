@@ -166,3 +166,32 @@ func TestObservedChoicesCanBeRemoved(t *testing.T) {
 		t.Fatal("terminal menu accepted a choice")
 	}
 }
+
+func TestObservedMessageUpdatesWithoutNewTerminalEvidence(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	c := Create{Key: "message", Abstract: "Ready for review", Summary: "Ready for review", Context: "Initial details", Question: "Start the review?"}
+	original, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"context", "summary", "abstract"} {
+		switch field {
+		case "context":
+			c.Context = "I require workspace membership for uploads. All 12 tests passed."
+		case "summary":
+			c.Summary = "I restricted image uploads to workspace members."
+		case "abstract":
+			c.Abstract = c.Summary
+		}
+		updated, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+		if err != nil || updated.Question.ID != original.Question.ID || updated.Question.Revision != original.Question.Revision+1 || updated.Question.Context != c.Context || updated.Question.Summary != c.Summary || updated.Question.Abstract != c.Abstract {
+			t.Fatal(field, updated, err)
+		}
+		old, err := s.Answer(ctx, nil, original.Question.ID, original.Question.Revision, "yes", "")
+		if err != nil || old.Outcome != "stale_revision" {
+			t.Fatal(old, err)
+		}
+		original = updated
+	}
+}

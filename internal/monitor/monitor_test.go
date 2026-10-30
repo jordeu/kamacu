@@ -59,7 +59,7 @@ func TestProfileInheritance(t *testing.T) {
 	}
 }
 func TestClassifierEvidenceAndHTTP(t *testing.T) {
-	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Summary: "Continue?", Question: "Continue?", InputMode: "text", Options: []string{"1. Yes", "2. No"}}
+	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Summary: "Continue?", Question: "Continue?", InputMode: "text", Options: []string{"1. Yes", "2. No"}, Context: "I finished the change. All checks passed.\n\nShould I continue?"}
 	obs := observation.Snapshot{Screen: "Continue?\n1. Yes\n2. No\n>"}
 	if e := validateDecision(d, obs); e != nil {
 		t.Fatal(e)
@@ -76,7 +76,7 @@ func TestClassifierEvidenceAndHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 	got, e := (Backend{}).Classify(context.Background(), Profile{Backend: "openai_compatible", Endpoint: srv.URL + "/v1", Model: "test"}, obs)
-	if e != nil || got.Kind != "question" || len(got.Options) != 2 || got.Options[0] != "1. Yes" {
+	if e != nil || got.Kind != "question" || len(got.Options) != 2 || got.Options[0] != "1. Yes" || got.Context != d.Context {
 		t.Fatal(got, e)
 	}
 }
@@ -221,6 +221,71 @@ func TestInstalledLoginChoices(t *testing.T) {
 					if d.InputMode != tc.mode || len(d.Options) != tc.count {
 						t.Fatalf("unexpected choices: %+v", d)
 					}
+				})
+			}
+		})
+	}
+}
+
+func TestContextLengthLimit(t *testing.T) {
+	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Summary: "Ready for review", Context: strings.Repeat("x", 24000), InputMode: "text"}
+	obs := observation.Snapshot{Screen: "Continue?"}
+	if err := validateDecision(d, obs); err != nil {
+		t.Fatal(err)
+	}
+	d.Context += "x"
+	if validateDecision(d, obs) == nil {
+		t.Fatal("oversized message accepted")
+	}
+}
+
+func TestInstalledLoginAuthoredMessages(t *testing.T) {
+	if os.Getenv("KAMACU_MONITOR_MESSAGES") != "1" {
+		t.Skip("opt-in synthetic message quality check")
+	}
+	description := "I restricted image uploads to workspace members.\n\n## Changes\n- I require authentication and workspace membership before accepting uploads.\n- I limit uploads to 8 MiB and verify PNG/JPEG signatures.\n\n## Verification\nAll 12 tests passed.\n\n## Limitations\nExisting attachments are unchanged.\n\nPR: https://github.com/example/demo/pull/42"
+	question := "Should I start the review?"
+	for _, backend := range []string{"claude_cli", "codex_cli"} {
+		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name, screen, kind string
+				history            []string
+			}{
+				{name: "question", screen: description + "\n\n" + question + "\n> ", kind: "question"},
+				{name: "scrolled_description", screen: question + "\n> ", kind: "question", history: []string{description}},
+				{name: "completion", screen: description + "\n\nImplementation is complete.\n> ", kind: "completion"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+					defer cancel()
+					d, err := (Backend{}).Classify(ctx, Profile{Backend: backend}, observation.Snapshot{Screen: tc.screen, History: tc.history, At: time.Now()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if d.Kind != tc.kind {
+						t.Fatalf("wrong kind: %+v", d)
+					}
+					for _, fact := range []string{"8 MiB", "PNG", "JPEG", "12", "https://github.com/example/demo/pull/42"} {
+						if !strings.Contains(d.Context, fact) {
+							t.Fatalf("missing %q in message: %s", fact, d.Context)
+						}
+					}
+					for _, fact := range []string{"authentication", "membership", "existing attachments"} {
+						if !strings.Contains(strings.ToLower(d.Context), fact) {
+							t.Fatalf("missing %q in message: %s", fact, d.Context)
+						}
+					}
+					text := strings.ToLower(d.Summary + "\n" + d.Context + "\n" + d.Question)
+					for _, narration := range []string{"the agent explained", "the agent is", "the user", "is waiting for", "i detected"} {
+						if strings.Contains(text, narration) {
+							t.Fatalf("observer narration: %s", text)
+						}
+					}
+					if tc.kind == "question" && d.Question != question {
+						t.Fatalf("original question changed: %q", d.Question)
+					}
+					t.Logf("preview: %s\nmessage: %s", d.Summary, d.Context)
 				})
 			}
 		})

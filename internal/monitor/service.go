@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -311,7 +312,7 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 	} else if d.Kind == "permission" || d.Kind == "error" {
 		mode = "terminal"
 		if question == "" {
-			question = "Agent needs attention"
+			question = "Please review this in the terminal."
 		}
 	}
 	if mode != "text" {
@@ -321,12 +322,20 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 	if summary == "" {
 		summary = question
 	}
+	message := d.Context
+	if strings.TrimSpace(message) == "" {
+		// Older saved decisions have only evidence. Relay that text directly.
+		message = d.Evidence
+	}
+	if strings.TrimSpace(message) == "" {
+		message = summary
+	}
 	abstract := []rune(summary)
 	if len(abstract) > 480 {
 		abstract = abstract[:480]
 	}
 	err := s.Presence.WhileAway(info.ID, func() error {
-		_, err := s.Inbox.Observe(ctx, inbox.Identity{TaskID: info.TaskID, SessionID: info.ID}, inbox.Create{Key: "observer:" + w.episode, Abstract: string(abstract), Summary: summary, Question: question, Context: summary + "\n\nTerminal evidence:\n\n" + d.Evidence, Options: options}, kind, mode, w.revision, w.input)
+		_, err := s.Inbox.Observe(ctx, inbox.Identity{TaskID: info.TaskID, SessionID: info.ID}, inbox.Create{Key: "observer:" + w.episode, Abstract: string(abstract), Summary: summary, Question: question, Context: message, Options: options}, kind, mode, w.revision, w.input)
 		return err
 	})
 	if err != nil {

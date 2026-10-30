@@ -21,11 +21,12 @@ func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mod
 	if out.Outcome == "existing_pending" || q.Status != "pending" {
 		return out, nil
 	}
-	if q.Origin == "observer" && q.Question == c.Question && q.DeliveryMode == mode && q.EvidenceRevision == revision && q.InputGeneration == input && slices.Equal(q.Options, c.Options) {
+	changed := q.Question != c.Question || q.Summary != c.Summary || q.Abstract != c.Abstract || q.Context != c.Context || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input || !slices.Equal(q.Options, c.Options)
+	if q.Origin == "observer" && !changed {
 		return out, nil
 	}
 	bump := 0
-	if q.Question != c.Question || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input || !slices.Equal(q.Options, c.Options) {
+	if changed {
 		bump = 1
 	}
 	if c.Options == nil {

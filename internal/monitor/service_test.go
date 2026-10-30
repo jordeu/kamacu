@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -434,5 +435,40 @@ func TestFreshEvidenceAfterInputCreatesNewEpisodeAndSurvivesReload(t *testing.T)
 	page, _ = svc.Inbox.List(ctx, nil, false, 0)
 	if len(page.Items) != 0 {
 		t.Fatal("reloaded episode reopened dismissal", page)
+	}
+}
+
+func TestPublishedMessagePreservesAuthoredContext(t *testing.T) {
+	message := "I restricted image uploads to workspace members.\n\n## Changes\n- Require authentication.\n- Limit uploads to 8 MiB.\n\n## Verification\nAll 12 tests passed.\n\nhttps://github.com/example/demo/pull/42"
+	svc, sess, _, _ := reviewFixture(t, classifierFunc(func(context.Context, Profile, observation.Snapshot) (Decision, error) {
+		return Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Summary: "I restricted image uploads to workspace members. All 12 tests passed.", Context: message, InputMode: "text"}, nil
+	}))
+	svc.tick(context.Background())
+	svc.jobs.Wait()
+	page, err := svc.Inbox.List(context.Background(), nil, false, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal(page, err)
+	}
+	q := page.Items[0]
+	if q.Context != message || q.Abstract != q.Summary || q.Question != "Continue?" {
+		t.Fatalf("authored message replaced: %+v", q)
+	}
+	var raw string
+	if err := svc.DB.QueryRow(`SELECT decision FROM monitor_episodes WHERE session_id=?`, sess.Info().ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var saved Decision
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil || saved.Context != message {
+		t.Fatal("context was not persisted", saved, err)
+	}
+}
+
+func TestMessageFallsBackToOriginalEvidence(t *testing.T) {
+	svc, _, _, _ := reviewFixture(t, fixtureClassifier{})
+	svc.tick(context.Background())
+	svc.jobs.Wait()
+	page, err := svc.Inbox.List(context.Background(), nil, false, 0)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Context != "Continue?" {
+		t.Fatal(page, err)
 	}
 }
