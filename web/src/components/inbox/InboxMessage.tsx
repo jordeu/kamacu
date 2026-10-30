@@ -66,8 +66,8 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       </div>
     </>}
     {pending && <div className="mt-6 space-y-4 border-t border-border pt-5">
-      <p className="text-sm font-medium">{completion ? "What next?" : "Your answer"} {q.options.length > 0 && <span className="ml-1 font-normal text-muted-foreground">Choose an option to send it immediately.</span>}</p>
-      {q.options.length > 0 && <div className="flex flex-wrap gap-2" role="group" aria-label="Choose an answer to send immediately">
+      <p className="text-sm font-medium">{completion ? "What next?" : "Your answer"} {q.options.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <span className="ml-1 font-normal text-muted-foreground">Choose an option to send it immediately.</span>}</p>
+      {q.options.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <div className="flex flex-wrap gap-2" role="group" aria-label="Choose an answer to send immediately">
         {(completion ? q.options.filter((option) => option.id === "exit") : q.options).map((option) => <Button key={option.id} variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{completion ? "OK, exit session" : option.label}</Button>)}
       </div>}
       {!completion && q.delivery_mode!=="terminal" && !q.hidden && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) submit("answer"); }}>

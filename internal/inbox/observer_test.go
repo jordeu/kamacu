@@ -116,3 +116,53 @@ func TestRecoverUncertainDeliveryWithoutRetry(t *testing.T) {
 		t.Fatal(q)
 	}
 }
+
+func TestObservedChoicesUpdateRejectsStaleClicks(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	c := Create{Key: "choices", Abstract: "Which approach?", Summary: "Choose an approach", Context: "Two approaches", Question: "Which approach?"}
+	original, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Options = []Option{{ID: "choice-1", Label: "1. Keep it"}, {ID: "choice-2", Label: "2. Replace it"}}
+	updated, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil || updated.Question.ID != original.Question.ID || updated.Question.Revision != original.Question.Revision+1 || len(updated.Question.Options) != 2 {
+		t.Fatal(updated, err)
+	}
+	unchanged, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil || unchanged.Question.Revision != updated.Question.Revision {
+		t.Fatal(unchanged, err)
+	}
+	c.Options[0].Label = "1. Keep it for now"
+	changed, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil || changed.Question.Revision != updated.Question.Revision+1 {
+		t.Fatal(changed, err)
+	}
+	stale, err := s.Answer(ctx, nil, changed.Question.ID, updated.Question.Revision, "", "choice-1")
+	if err != nil || stale.Outcome != "stale_revision" {
+		t.Fatal(stale, err)
+	}
+	answered, err := s.Answer(ctx, nil, changed.Question.ID, changed.Question.Revision, "", "choice-1")
+	if err != nil || answered.Question.Answer != "1. Keep it for now" {
+		t.Fatal(answered, err)
+	}
+}
+
+func TestObservedChoicesCanBeRemoved(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	c := Create{Key: "choices", Abstract: "Continue?", Summary: "Continue?", Context: "Question", Question: "Continue?", Options: []Option{{ID: "choice-1", Label: "Yes"}}}
+	original, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Options = nil
+	updated, err := s.Observe(ctx, who, c, "question", "terminal", 2, 0)
+	if err != nil || len(updated.Question.Options) != 0 || updated.Question.Revision <= original.Question.Revision {
+		t.Fatal(updated, err)
+	}
+	if _, err = s.Answer(ctx, nil, updated.Question.ID, updated.Question.Revision, "", "choice-1"); err == nil {
+		t.Fatal("terminal menu accepted a choice")
+	}
+}

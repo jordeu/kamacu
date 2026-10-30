@@ -2,7 +2,9 @@ package inbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 )
 
 // Observe keeps a stable message identity for an attention episode. Archived
@@ -19,14 +21,18 @@ func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mod
 	if out.Outcome == "existing_pending" || q.Status != "pending" {
 		return out, nil
 	}
-	if q.Origin == "observer" && q.Question == c.Question && q.DeliveryMode == mode && q.EvidenceRevision == revision && q.InputGeneration == input {
+	if q.Origin == "observer" && q.Question == c.Question && q.DeliveryMode == mode && q.EvidenceRevision == revision && q.InputGeneration == input && slices.Equal(q.Options, c.Options) {
 		return out, nil
 	}
 	bump := 0
-	if q.Question != c.Question || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input {
+	if q.Question != c.Question || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input || !slices.Equal(q.Options, c.Options) {
 		bump = 1
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE inbox_questions SET revision=revision+?,origin='observer',delivery_mode=?,evidence_revision=?,input_generation=?,summary=?,abstract=?,context=?,question=?,updated_at=? WHERE id=?`, bump, mode, revision, input, c.Summary, c.Abstract, c.Context, c.Question, s.now().UnixMilli(), q.ID)
+	if c.Options == nil {
+		c.Options = []Option{}
+	}
+	options, _ := json.Marshal(c.Options)
+	_, err = s.db.ExecContext(ctx, `UPDATE inbox_questions SET revision=revision+?,origin='observer',delivery_mode=?,evidence_revision=?,input_generation=?,summary=?,abstract=?,context=?,question=?,options=?,updated_at=? WHERE id=?`, bump, mode, revision, input, c.Summary, c.Abstract, c.Context, c.Question, string(options), s.now().UnixMilli(), q.ID)
 	if err != nil {
 		return out, err
 	}

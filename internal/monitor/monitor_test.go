@@ -59,8 +59,8 @@ func TestProfileInheritance(t *testing.T) {
 	}
 }
 func TestClassifierEvidenceAndHTTP(t *testing.T) {
-	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Summary: "Continue?", Question: "Continue?", InputMode: "text"}
-	obs := observation.Snapshot{Screen: "Continue?\n>"}
+	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Summary: "Continue?", Question: "Continue?", InputMode: "text", Options: []string{"1. Yes", "2. No"}}
+	obs := observation.Snapshot{Screen: "Continue?\n1. Yes\n2. No\n>"}
 	if e := validateDecision(d, obs); e != nil {
 		t.Fatal(e)
 	}
@@ -76,7 +76,7 @@ func TestClassifierEvidenceAndHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 	got, e := (Backend{}).Classify(context.Background(), Profile{Backend: "openai_compatible", Endpoint: srv.URL + "/v1", Model: "test"}, obs)
-	if e != nil || got.Kind != "question" {
+	if e != nil || got.Kind != "question" || len(got.Options) != 2 || got.Options[0] != "1. Yes" {
 		t.Fatal(got, e)
 	}
 }
@@ -162,5 +162,67 @@ func TestRejectIncoherentClassification(t *testing.T) {
 		if validateDecision(d, observation.Snapshot{Screen: "Continue?"}) == nil {
 			t.Fatalf("accepted incoherent decision: %+v", d)
 		}
+	}
+}
+
+func TestQuestionChoicesValidation(t *testing.T) {
+	obs := observation.Snapshot{Screen: "Which approach?\n1. Keep the existing\n   implementation\n2. Replace it\n> "}
+	base := Decision{State: "waiting", Kind: "question", Evidence: "Which approach?", Summary: "Choose an approach", Question: "Which approach?", InputMode: "text", Options: []string{"1. Keep the existing implementation", "2. Replace it"}}
+	if err := validateDecision(base, obs); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		options    []string
+		mode, kind string
+	}{
+		{"invented", []string{"3. Delete everything"}, "text", "question"},
+		{"empty", []string{" "}, "text", "question"},
+		{"duplicate", []string{"2. Replace it", "2. Replace it"}, "text", "question"},
+		{"too many", make([]string, 11), "text", "question"},
+		{"too long", []string{strings.Repeat("a", 501)}, "text", "question"},
+		{"control bytes", []string{"2. Replace it\r"}, "text", "question"},
+		{"native menu", base.Options, "terminal", "question"},
+		{"permission", base.Options, "terminal", "permission"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := base
+			d.Options = tc.options
+			d.InputMode = tc.mode
+			d.Kind = tc.kind
+			if validateDecision(d, obs) == nil {
+				t.Fatal("invalid choices accepted")
+			}
+		})
+	}
+}
+
+func TestInstalledLoginChoices(t *testing.T) {
+	if os.Getenv("KAMACU_MONITOR_CHOICES") != "1" {
+		t.Skip("opt-in synthetic live choices check")
+	}
+	for _, backend := range []string{"claude_cli", "codex_cli"} {
+		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name, screen, mode string
+				count              int
+			}{
+				{"conversation", "Agent: Which approach should I implement?\n1. Keep the existing layout\n2. Replace it with a dialog\nReply with your preferred option.\n> ", "text", 2},
+				{"permission", "Allow this command?\n  git status\n❯ 1. Yes\n  2. No\nEnter to confirm, Esc to cancel", "terminal", 0},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+					defer cancel()
+					d, err := (Backend{}).Classify(ctx, Profile{Backend: backend}, observation.Snapshot{Screen: tc.screen, At: time.Now()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if d.InputMode != tc.mode || len(d.Options) != tc.count {
+						t.Fatalf("unexpected choices: %+v", d)
+					}
+				})
+			}
+		})
 	}
 }

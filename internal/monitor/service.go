@@ -298,6 +298,11 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 	question := d.Question
 	mode := d.InputMode
 	var options []inbox.Option
+	if d.Kind == "question" && mode == "text" {
+		for i, label := range d.Options {
+			options = append(options, inbox.Option{ID: fmt.Sprintf("choice-%d", i+1), Label: label})
+		}
+	}
 	if d.Kind == "completion" {
 		kind = "completion"
 		question = "Work completed"

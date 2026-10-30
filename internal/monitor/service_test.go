@@ -29,7 +29,11 @@ func (fixtureClassifier) Classify(_ context.Context, _ Profile, s observation.Sn
 		return Decision{State: "idle", Kind: "completion", Evidence: "All done", Summary: "All done", InputMode: "none"}, nil
 	}
 	if strings.Contains(s.Screen, "Continue?") {
-		return Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Summary: "Continue?", InputMode: "text"}, nil
+		d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Summary: "Continue?", InputMode: "text"}
+		if strings.Contains(s.Screen, "1. Yes") {
+			d.Options = []string{"1. Yes", "2. No"}
+		}
+		return d, nil
 	}
 	return Decision{State: "unknown", Kind: "none", InputMode: "none"}, nil
 }
@@ -51,7 +55,7 @@ func TestTerminalToInboxWithoutHooks(t *testing.T) {
 	_, _ = db.Exec(`UPDATE monitor_settings SET default_profile_id=?`, p.ID)
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "agent")
-	if e = os.WriteFile(bin, []byte("#!/bin/sh\nstty sane\nprintf 'Continue?\\r\\n> '\nread answer\nprintf '\\033[2J\\033[HAll done\\r\\n> '\nread next\n"), 0700); e != nil {
+	if e = os.WriteFile(bin, []byte("#!/bin/sh\nstty sane\nprintf 'Continue?\\r\\n1. Yes\\r\\n2. No\\r\\n> '\nread answer\nprintf '\\033[2J\\033[HAll done\\r\\n> '\nread next\n"), 0700); e != nil {
 		t.Fatal(e)
 	}
 	mgr := session.NewManager()
@@ -104,7 +108,10 @@ func TestTerminalToInboxWithoutHooks(t *testing.T) {
 	if len(page.Items) != 1 || page.Items[0].ID != original.ID {
 		t.Fatal("card identity changed", page)
 	}
-	answer, e := in.Answer(ctx, nil, original.ID, original.Revision, "yes", "")
+	if len(original.Options) != 2 || original.Options[0].Label != "1. Yes" {
+		t.Fatalf("missing observed choices: %+v", original)
+	}
+	answer, e := in.Answer(ctx, nil, original.ID, original.Revision, "", original.Options[0].ID)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -126,7 +133,7 @@ func TestTerminalToInboxWithoutHooks(t *testing.T) {
 	svc.mu.Unlock()
 	// Ordinary PTY input, no acknowledge_feedback or agent-side tool.
 	pr.Heartbeat(presence.Beat{ClientID: "tab", SessionID: id, Visible: true})
-	if e = sess.WriteObserved(answer.Question.EvidenceRevision, answer.Question.InputGeneration, []byte("yes"), []byte("\r")); e != nil {
+	if e = sess.WriteObserved(answer.Question.EvidenceRevision, answer.Question.InputGeneration, []byte(answer.Question.Answer), []byte("\r")); e != nil {
 		t.Fatal(e)
 	}
 	wait("completion inference started", func() bool {
