@@ -2,10 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { get } from "./client";
 
 export interface AgentStatusEntry {
+  monitor?: {
+    state: string;
+    health: string;
+    detail?: string;
+    observed_at?: string;
+  };
+  live: boolean; // The terminal process is open, independent of detected status.
   taskId: number;
   projectId: number;
   sessionId: string;
-  status: "working" | "idle" | "waiting" | "exited" | "running"; // M001: custom engines report running/exited only
+  status: "working" | "idle" | "waiting" | "exited" | "error"; // All engines share terminal-derived status.
   exitCode: number | null;
   stopRequested: boolean;
   resumable: boolean;

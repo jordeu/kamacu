@@ -43,14 +43,14 @@ func TestIntegrationRoutes(t *testing.T) {
 	if w := call("POST", "/api/integrations/claude/enable", ""); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	skill := filepath.Join(home, ".claude", "skills", "kamacu-task", "SKILL.md")
-	if _, err := os.Stat(skill); err != nil {
+	config := filepath.Join(home, ".claude.json")
+	if _, err := os.Stat(config); err != nil {
 		t.Fatal(err)
 	}
 	if w := call("GET", "/api/integrations", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":true`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if err := os.Remove(skill); err != nil {
+	if err := os.Remove(config); err != nil {
 		t.Fatal(err)
 	}
 	if w := call("POST", "/api/integrations/claude/repair", ""); w.Code != 200 {
@@ -59,7 +59,8 @@ func TestIntegrationRoutes(t *testing.T) {
 	if w := call("POST", "/api/integrations/claude/remove", ""); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if _, err := os.Stat(skill); !os.IsNotExist(err) {
-		t.Fatal("skill not removed")
+	contents, err := os.ReadFile(config)
+	if err != nil || strings.Contains(string(contents), `"kamacu"`) {
+		t.Fatal("MCP registration not removed", err)
 	}
 }

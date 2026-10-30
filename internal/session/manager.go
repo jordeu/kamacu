@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"kamacu/internal/observation"
+
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
 	"github.com/google/uuid"
@@ -58,6 +60,7 @@ func stripKamacuEnv(env []string) []string {
 // remove) each live in a single method so Phase 4 can add DB writes inside
 // them without restructuring.
 type Manager struct {
+	agentReady    func(int64) error
 	mu            sync.Mutex
 	sessions      map[string]*Session
 	counter       int           // monotonic global "bash #N" label counter; never reused
@@ -144,6 +147,14 @@ func (m *Manager) SetTmuxClient(c tmux.Client) {
 // shell error, and must never register a session. Agents additionally require
 // a non-empty Cwd.
 func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
+	m.mu.Lock()
+	ready := m.agentReady
+	m.mu.Unlock()
+	if opts.Kind == KindAgent && ready != nil {
+		if err := ready(opts.TaskID); err != nil {
+			return nil, err
+		}
+	}
 	kind := opts.Kind
 	if kind == "" {
 		kind = KindBash
@@ -210,11 +221,12 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 			if opts.AgentEngine == "codex" {
 				// Inline mode keeps conversation output in xterm scrollback.
 				// The alternate screen has no history, even with scrollback enabled.
-				prefix := []string{"-p", "kamacu", "--no-alt-screen"}
+				prefix := []string{"--no-alt-screen"}
+				// Preserve optional artifact/MCP tools independently of monitoring.
 				if cfg.CodexMCPEnvArgs != nil {
 					envArgs, err := cfg.CodexMCPEnvArgs(bin, dir)
 					if err != nil {
-						return nil, fmt.Errorf("configure Codex inbox: %w", err)
+						return nil, fmt.Errorf("configure Codex MCP environment: %w", err)
 					}
 					prefix = append(prefix, envArgs...)
 				}
@@ -291,18 +303,8 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 					return nil, fmt.Errorf("claude binary not found on PATH: %w", err)
 				}
 			}
-			// D-53: just the session identity, the inline hook overlay, and the
-			// settings-driven extras. Since Phase 6 the extras come from the
-			// agent_extra_params setting (tokenized by the handler) and the
-			// DEFAULT includes --dangerously-skip-permissions — an intentional
-			// reversal of v1.0's interactive-by-default D-51 posture (AGENT-02);
-			// the user removes the flag in Settings to restore prompts. Extras
-			// append AFTER the fixed flags (composition verified on v2.1.173,
-			// fresh and resume alike). Known sharp edge: a user-supplied
-			// --settings in the extras would override the hook overlay
-			// (last-value-wins) and silently kill status hooks — the SessionStart
-			// canary catches that; policing the pass-through field is out of scope.
-			args := []string{idFlag, claudeSessionID, "--settings", buildOverlayJSON(cfg.BaseURL, cfg.Token, id)}
+			// Pass the conversation identity and configured extras without status hooks.
+			args := []string{idFlag, claudeSessionID}
 			args = append(args, opts.ExtraArgs...)
 			cmd = exec.Command(bin, args...)
 			cmd.Dir = dir
@@ -453,6 +455,8 @@ func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
 		termGrace:       5 * time.Second, // D-14
 	}
 	if kind == KindAgent {
+		s.observer = observation.New(int(initial.Cols), int(initial.Rows))
+		s.monitor = MonitorStatus{State: "unknown", Health: "unavailable", Detail: "Waiting for first terminal observation"}
 		s.lastActivity = time.Now() // spawn -> working: startup output flows immediately
 	}
 	if opts.TmuxName != "" {
@@ -609,4 +613,11 @@ func (m *Manager) Remove(id string) error {
 	}
 	delete(m.sessions, id)
 	return nil
+}
+
+// SetAgentReady installs the required monitoring-configuration gate.
+func (m *Manager) SetAgentReady(ready func(int64) error) {
+	m.mu.Lock()
+	m.agentReady = ready
+	m.mu.Unlock()
 }

@@ -501,14 +501,11 @@ func TestSessionAgentDefaultExtraParamsInArgv(t *testing.T) {
 	}
 
 	args := readArgv(t, argsFile)
-	if len(args) != 5 {
-		t.Fatalf("argv = %q, want 5 args (--session-id <uuid> --settings <json> --dangerously-skip-permissions)", args)
+	if len(args) != 3 {
+		t.Fatalf("argv = %q, want 3 args (--session-id <uuid> --dangerously-skip-permissions)", args)
 	}
-	if args[2] != "--settings" {
-		t.Errorf("argv[2] = %q, want --settings", args[2])
-	}
-	if args[4] != "--dangerously-skip-permissions" {
-		t.Errorf("argv[4] = %q, want the default extra param after the fixed flags", args[4])
+	if args[2] != "--dangerously-skip-permissions" {
+		t.Errorf("argv[2] = %q, want the default extra param after the fixed flags", args[2])
 	}
 }
 
@@ -535,8 +532,8 @@ func TestSessionAgentExtraParamsRemovable(t *testing.T) {
 	}
 
 	args := readArgv(t, argsFile)
-	if len(args) != 4 {
-		t.Fatalf("argv = %q, want exactly 4 args — stored \"\" must yield zero extras", args)
+	if len(args) != 2 {
+		t.Fatalf("argv = %q, want exactly 2 args — stored \"\" must yield zero extras", args)
 	}
 	for _, a := range args {
 		if a == "--dangerously-skip-permissions" {
@@ -566,14 +563,14 @@ func TestSessionAgentResumeCarriesExtraParams(t *testing.T) {
 	}
 
 	args := readArgv(t, argsFile)
-	if len(args) != 5 {
-		t.Fatalf("argv = %q, want 5 args (--resume <uuid> --settings <json> --dangerously-skip-permissions)", args)
+	if len(args) != 3 {
+		t.Fatalf("argv = %q, want 3 args (--resume <uuid> --dangerously-skip-permissions)", args)
 	}
 	if args[0] != "--resume" || args[1] != stored {
 		t.Errorf("argv[0:2] = %q, want [--resume %s]", args[:2], stored)
 	}
-	if args[4] != "--dangerously-skip-permissions" {
-		t.Errorf("argv[4] = %q, want the extra param on the resume spawn too", args[4])
+	if args[2] != "--dangerously-skip-permissions" {
+		t.Errorf("argv[2] = %q, want the extra param on the resume spawn too", args[2])
 	}
 }
 
@@ -1031,8 +1028,8 @@ func TestSessionAgentSpawn(t *testing.T) {
 	if body["kind"] != "agent" {
 		t.Errorf("kind = %q, want %q", body["kind"], "agent")
 	}
-	if body["agentStatus"] != "working" {
-		t.Errorf("agentStatus = %q, want %q (spawn -> working)", body["agentStatus"], "working")
+	if body["agentStatus"] != "idle" && body["agentStatus"] != "working" {
+		t.Errorf("agentStatus = %q, want %q (awaiting first observation)", body["agentStatus"], "idle or working")
 	}
 
 	// The claude session id is persisted on the task row BEFORE the reply —
@@ -1226,6 +1223,46 @@ func TestSessionStop(t *testing.T) {
 	}
 	if body["error"] != "session not found" {
 		t.Errorf("error = %q, want %q", body["error"], "session not found")
+	}
+}
+
+func TestSessionStopSource(t *testing.T) {
+	for _, source := range []string{"", "external", "terminal", "invalid"} {
+		t.Run(source, func(t *testing.T) {
+			srv, mgr := newSessionServer(t)
+			status, body := doJSON(t, "POST", srv.URL+"/api/sessions", nil)
+			if status != http.StatusCreated {
+				t.Fatalf("create: %d %v", status, body)
+			}
+			id := body["id"].(string)
+			var request any
+			if source != "" {
+				request = map[string]string{"source": source}
+			}
+			status, _ = doJSON(t, "POST", srv.URL+"/api/sessions/"+id+"/stop", request)
+			sess, _ := mgr.Get(id)
+			if source == "invalid" {
+				if status != http.StatusBadRequest || sess.Info().Status != session.StatusRunning {
+					t.Fatalf("invalid source: status=%d session=%+v", status, sess.Info())
+				}
+				return
+			}
+			if status != http.StatusAccepted {
+				t.Fatalf("stop: %d", status)
+			}
+			select {
+			case <-sess.Done():
+			case <-time.After(15 * time.Second):
+				t.Fatal("session did not exit")
+			}
+			want := source
+			if want == "" {
+				want = "external"
+			}
+			if got := sess.Info().ExitSource; got != want {
+				t.Fatalf("exit source = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
@@ -1859,7 +1896,7 @@ func TestSubscribe_Happy_ReturnsOctets(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
 		t.Errorf("Content-Type = %q, want %q", ct, "application/octet-stream")
 	}
- streamed, err := io.ReadAll(resp.Body)
+	streamed, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}
@@ -2098,7 +2135,7 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 		t.Fatalf("write post: %v", err)
 	}
 
- streamed, err := io.ReadAll(resp.Body)
+	streamed, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}

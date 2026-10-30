@@ -110,10 +110,8 @@ sleep 300 & wait
 	return path
 }
 
-// TestAttachClearsWaitingAgent proves D-45 server-side: attaching a client to
-// a WAITING agent session clears it to idle — opening the agent tab
-// acknowledges the prompt authoritatively, not just in the client cache.
-func TestAttachClearsWaitingAgent(t *testing.T) {
+// Opening a terminal does not answer a question or change its detected status.
+func TestAttachPreservesWaitingAgent(t *testing.T) {
 	srv, mgr := newWSServer(t)
 	mgr.SetAgentConfig(session.AgentConfig{
 		BaseURL:   "http://127.0.0.1:7333",
@@ -126,7 +124,14 @@ func TestAttachClearsWaitingAgent(t *testing.T) {
 	}
 	t.Cleanup(sess.Stop)
 
-	sess.SetWaiting()
+	deadlineOutput := time.Now().Add(5 * time.Second)
+	for sess.Observation().Screen == "" {
+		if time.Now().After(deadlineOutput) {
+			t.Fatal("initial output missing")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	sess.SetMonitorStatus(session.MonitorStatus{State: "waiting", Health: "ready", ObservedAt: time.Now()})
 	if got := sess.Info().AgentStatus; got != "waiting" {
 		t.Fatalf("pre-attach AgentStatus = %q, want waiting", got)
 	}
@@ -135,14 +140,13 @@ func TestAttachClearsWaitingAgent(t *testing.T) {
 	conn := dial(t, ctx, srv, sess.Info().ID)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	// The handler clears waiting right after Attach; the dial returning only
-	// guarantees the upgrade, so poll briefly.
+	// The dial returning guarantees the upgrade; waiting must remain intact.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if got := sess.Info().AgentStatus; got == "idle" {
+		if got := sess.Info().AgentStatus; got == "waiting" {
 			break
 		} else if time.Now().After(deadline) {
-			t.Fatalf("AgentStatus = %q after WS attach, want idle (D-45)", got)
+			t.Fatalf("AgentStatus = %q after WS attach, want waiting", got)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -162,7 +166,14 @@ func TestCodexWaitingSurvivesSocketReconnectAndReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(sess.Stop)
-	sess.SetWaiting()
+	deadlineOutput := time.Now().Add(5 * time.Second)
+	for sess.Observation().Screen == "" {
+		if time.Now().After(deadlineOutput) {
+			t.Fatal("initial output missing")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	sess.SetMonitorStatus(session.MonitorStatus{State: "waiting", Health: "ready", ObservedAt: time.Now()})
 	ctx := testCtx(t)
 	for attach := 0; attach < 2; attach++ {
 		conn := dial(t, ctx, srv, sess.Info().ID)
@@ -174,8 +185,8 @@ func TestCodexWaitingSurvivesSocketReconnectAndReports(t *testing.T) {
 		// The echo proves the server processed the automatic reports and
 		// forwarded them through the PTY, without acknowledging the prompt.
 		collectUntil(t, ctx, conn, "?1;2c")
-		if got := sess.Info().AgentStatus; got != "waiting" {
-			t.Fatalf("attach %d after reports: status = %q, want waiting", attach, got)
+		if sess.Observation().Input != 0 {
+			t.Fatalf("attach %d: terminal reports counted as user input", attach)
 		}
 		if attach == 1 {
 			sendFrame(t, ctx, conn, FrameData, "answer")

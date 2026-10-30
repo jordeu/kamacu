@@ -26,6 +26,7 @@ import (
 	"kamacu/internal/inbox"
 	"kamacu/internal/integration"
 	"kamacu/internal/migrate"
+	"kamacu/internal/monitor"
 	"kamacu/internal/opencode"
 	"kamacu/internal/presence"
 	"kamacu/internal/quota"
@@ -216,34 +217,6 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 
-	// M002 (opencode built-in agent engine): ship + idempotently install the
-	// env-gated opencode status plugin. opencode cannot take a per-instance hook
-	// command via argv (unlike claude's --settings overlay), so it loads this
-	// static .js from ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/ and curls
-	// the UNCHANGED claude hook receiver with claude-compatible event names
-	// (D013/D014). Silent no-op when opencode is not installed (its config dir is
-	// absent) — never pollutes a non-opencode user's home dir. Skip-on-match is
-	// a cheap no-op on healthy boots; a drifted file is overwritten at startup,
-	// the same regenerate posture as tmux.WriteConfig below. A write failure is
-	// warn-only: status hooks degrade gracefully (session stays on activity-
-	// based status with the BEL fallback armed) and must never block booting.
-	if err := opencode.InstallPlugin(); err != nil {
-		slog.Warn("installing opencode status plugin", "error", err)
-	}
-
-	// Codex built-in agent engine: ship + idempotently install the env-gated
-	// status hook profile to <CODEX_HOME>/kamacu.config.toml, selected at spawn
-	// via `codex -p kamacu` (an exclusive profile layer — the user's own
-	// config.toml/hooks.json are never touched). Byte-stable content keeps
-	// codex's hook-trust hash valid across boots (trust once via /hooks).
-	// Silent no-op when codex is not installed (its home dir is absent) —
-	// never pollutes a non-codex user's home dir. A write failure is warn-only:
-	// status hooks degrade gracefully (activity-based status with the BEL
-	// fallback armed) and must never block booting.
-	if err := codex.InstallHookConfig(); err != nil {
-		slog.Warn("installing codex status hook profile", "error", err)
-	}
-
 	// Kamacu-managed tmux config (D-79 status off, D-80 mouse on), regenerated
 	// at every start in the data dir next to the DB — a stable path that survives
 	// reboots, so a tmux server started by a previous Kamacu run still references
@@ -254,11 +227,8 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 
-	// Per-instance hook token (STAT-02 / research gap #2): generated fresh on
-	// every start, held in memory only — never logged, never persisted. It is
-	// embedded solely in the per-spawn settings overlay and checked by the
-	// hook receiver, so webpages firing no-CORS POSTs at localhost can never
-	// spoof agent status.
+	// Per-instance token for optional artifact/MCP APIs. The legacy environment
+	// variable names remain compatible; status hooks are not registered.
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		slog.Error("generating hook token", "error", err)
@@ -286,9 +256,9 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
 		CodexMCPEnvArgs: codex.FeedbackEnvironmentArgs,
-		// Hooks curl this URL and ALWAYS run on the server host. hookBaseURL
+		// Optional MCP tools run on the server host. hookBaseURL
 		// normalizes a wildcard --addr host (0.0.0.0 / :: / empty) to
-		// 127.0.0.1:<port> so local hooks never target a wildcard/remote
+		// 127.0.0.1:<port> so local tools never target a wildcard/remote
 		// address; a specific IP (loopback or, under --insecure-allow-remote,
 		// a non-loopback IP) is left as-is.
 		BaseURL:   hookBaseURL(c.addr),
@@ -333,23 +303,39 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	api.SessionRoutes(mux, mgr, db, tmuxClient)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr, tmuxClient)
 	api.DiffRoutes(mux, db, wtSvc)
-	api.HookRoutes(mux, mgr, hookToken)
 	api.AgentRoutes(mux, mgr, db)
-	api.PresenceRoutes(mux, presenceTracker, hookToken)
 	inboxService := inbox.New(db, func(id string) inbox.Session {
 		sess, ok := mgr.Get(id)
 		if !ok {
 			return inbox.Session{}
 		}
 		info := sess.Info()
-		return inbox.Session{TaskID: info.TaskID, Global: info.Global, Live: info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested, Done: sess.Done()}
+		obs := sess.Observation()
+		return inbox.Session{Revision: obs.Revision, Input: obs.Input, TaskID: info.TaskID, Global: info.Global, Live: info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested, Done: sess.Done()}
 	})
+	api.ConfigureInboxTaskMoves(inboxService, db, wtSvc)
+	inboxService.UseTerminalMonitoring()
+	if err := inboxService.RecoverDeliveries(ctx); err != nil {
+		slog.Error("recovering inbox delivery", "error", err)
+		return subcommands.ExitFailure
+	}
 	defer inboxService.Close()
+	api.PresenceRoutes(mux, presenceTracker, hookToken, func(id string) {
+		if err := inboxService.HideObserved(ctx, id, true); err != nil {
+			slog.Warn("hide viewed inbox messages", "error", err)
+		}
+	})
 	if err := inboxService.Reconcile(ctx); err != nil {
 		slog.Error("recovering inbox", "error", err)
 		return subcommands.ExitFailure
 	}
 	go inboxService.Run(ctx)
+	monitorMetrics := &monitor.Metrics{}
+	classifier := monitor.Backend{Metrics: monitorMetrics}
+	api.MonitorRoutes(mux, db, classifier, monitorMetrics)
+	mgr.SetAgentReady(func(taskID int64) error { _, err := monitor.Resolve(ctx, db, taskID); return err })
+	terminalMonitor := monitor.New(db, mgr, inboxService, presenceTracker, classifier)
+	go terminalMonitor.Run(ctx)
 	api.InboxTerminalRoutes(mux, inboxService, hookToken, mgr, func(id string) {
 		if sess, ok := mgr.Get(id); ok {
 			go sess.Stop()
@@ -360,6 +346,11 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		slog.Warn("agent integration unavailable", "error", err)
 	} else {
 		if !c.noIntegrationSync {
+			for _, retire := range []func() error{codex.RetireHookConfig, opencode.RetirePlugin} {
+				if err := retire(); err != nil {
+					slog.Warn("retire status hook", "error", err)
+				}
+			}
 			if err := integrationManager.Sync(ctx); err != nil {
 				slog.Warn("agent integration needs attention", "error", err)
 			}

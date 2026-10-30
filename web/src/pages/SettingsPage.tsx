@@ -8,6 +8,7 @@ import { useGithubStatus } from "@/api/queries";
 import { SettingsField } from "@/components/settings/SettingsField";
 import { WorktreeCleanupSection } from "@/components/settings/WorktreeCleanupSection";
 import { AgentsSection } from "@/components/settings/AgentsSection";
+import { MonitoringSection } from "@/components/settings/MonitoringSection";
 import { ScratchpadSection } from "@/components/settings/ScratchpadSection";
 
 /**
@@ -144,7 +145,7 @@ export default function SettingsPage() {
         <h1 className="text-base font-medium">{`Settings`}</h1>
         {/* SET-03 stated once for the whole page, never per field. */}
         <p className="mt-1 text-xs text-muted-foreground">
-          {`Changes apply to the next session or worktree — running sessions are unaffected.`}
+          {`Monitoring changes apply immediately. Other settings apply to the next session or worktree.`}
         </p>
         {isLoading || !settings ? (
           <div className="mt-6 flex flex-col gap-6">
@@ -157,7 +158,8 @@ export default function SettingsPage() {
           </div>
         ) : (
           <div className="mt-6 flex flex-col gap-6">
-            <AgentsSection />
+            <MonitoringSection />
+ <AgentsSection />
             {/* GCONF-05: the Scratchpad summary card + Change-root dialog —
                 directly after AgentsSection (both govern where agents run). */}
             <ScratchpadSection />

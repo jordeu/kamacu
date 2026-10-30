@@ -5,11 +5,8 @@ import (
 	"time"
 )
 
-// TestCustomEngineStatusRunningExited proves a custom-engine agent session
-// reports ONLY "running" (while alive) and "exited" (when dead), never the
-// claude-hook-driven working/waiting/idle heuristics (D-M001-2). Uses `sleep`
-// as the custom agent command so the process is reliably alive for the
-// running-state assertion.
+// Custom agents use the same terminal-activity status as built-in engines.
+// A quiet sleep process is idle but still has a live terminal.
 func TestCustomEngineStatusRunningExited(t *testing.T) {
 	m := NewManager()
 	s, err := m.Spawn(SpawnOpts{
@@ -24,13 +21,13 @@ func TestCustomEngineStatusRunningExited(t *testing.T) {
 	}
 	defer s.Stop()
 
-	// While alive: a custom agent reports "running", never working/idle/waiting.
+	// Lifetime and terminal activity are independent.
 	info := s.Info()
 	if info.Engine != "custom" {
 		t.Errorf("Engine = %q, want \"custom\"", info.Engine)
 	}
-	if info.AgentStatus != "running" {
-		t.Errorf("alive AgentStatus = %q, want \"running\" (custom = running/exited only)", info.AgentStatus)
+	if info.AgentStatus != "idle" && info.AgentStatus != "working" {
+		t.Errorf("alive AgentStatus = %q, want idle or working", info.AgentStatus)
 	}
 	if info.Status != StatusRunning {
 		t.Errorf("alive Status = %q, want %q", info.Status, StatusRunning)
@@ -89,9 +86,9 @@ func TestClaudeEngineKeepsHeuristicStates(t *testing.T) {
 		t.Errorf("Engine = %q, want \"claude\"", info.Engine)
 	}
 	switch info.AgentStatus {
-	case "working", "idle", "waiting":
+	case "idle", "working":
 		// ok -- heuristic path intact, NOT collapsed to "running"
 	default:
-		t.Errorf("claude AgentStatus = %q, want one of working/idle/waiting (heuristics intact, not collapsed to running)", info.AgentStatus)
+		t.Errorf("claude AgentStatus = %q, want idle or working from terminal activity", info.AgentStatus)
 	}
 }

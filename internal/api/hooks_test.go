@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -143,75 +142,13 @@ func TestHookEmptyConfiguredToken(t *testing.T) {
 
 // TestHookNotificationSetsWaiting: a Notification hook POST with the correct
 // token flips a running agent to waiting (D-47).
-func TestHookNotificationSetsWaiting(t *testing.T) {
-	srv, mgr := newHookServer(t)
-	sess := spawnHookAgent(t, mgr)
-
-	body := `{"hook_event_name":"Notification","session_id":"u","notification_type":"permission_prompt"}`
-	if got := postHook(t, hookURL(srv, sess.Info().ID), testHookToken, body); got != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", got)
-	}
-	if got := sess.Info().AgentStatus; got != "waiting" {
-		t.Errorf("AgentStatus = %q, want %q", got, "waiting")
-	}
-}
 
 // TestHookStopSetsIdle: a Stop hook POST flips the agent to idle (D-46 — turn
 // end is idle, never a separate done state).
-func TestHookStopSetsIdle(t *testing.T) {
-	srv, mgr := newHookServer(t)
-	sess := spawnHookAgent(t, mgr)
-
-	if got := postHook(t, hookURL(srv, sess.Info().ID), testHookToken, `{"hook_event_name":"Stop"}`); got != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", got)
-	}
-	if got := sess.Info().AgentStatus; got != "idle" {
-		t.Errorf("AgentStatus = %q, want %q", got, "idle")
-	}
-}
 
 // TestHookSessionStartMarksHooksAlive: SessionStart returns 204 and disables
 // the BEL fallback. Observable contract (Pitfall 2): a bare BEL in PTY output
 // sets waiting ONLY while hooks are not confirmed alive.
-func TestHookSessionStartMarksHooksAlive(t *testing.T) {
-	srv, mgr := newHookServer(t)
-
-	// driveBEL makes the stub emit a bare BEL + marker and waits until the
-	// marker is in the ring — the BEL effect is applied under the same lock,
-	// so the status read after this is deterministic.
-	driveBEL := func(t *testing.T, sess *session.Session, tag string) {
-		t.Helper()
-		if err := sess.WriteInput([]byte(tag + "\n")); err != nil {
-			t.Fatalf("write input: %v", err)
-		}
-		want := []byte("bel-MARK:" + tag)
-		deadline := time.Now().Add(10 * time.Second)
-		for !bytes.Contains(sess.Snapshot(), want) {
-			if time.Now().After(deadline) {
-				t.Fatalf("stub never echoed %q:\n%s", want, sess.Snapshot())
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
-
-	// Control: hooks-dead session — BEL sets waiting (fallback mode works in
-	// this harness).
-	dead := spawnHookAgent(t, mgr)
-	driveBEL(t, dead, "ping-dead")
-	if got := dead.Info().AgentStatus; got != "waiting" {
-		t.Fatalf("hooks-dead BEL: AgentStatus = %q, want %q (fallback broken — alive assertion below would be vacuous)", got, "waiting")
-	}
-
-	// SessionStart-confirmed session — BEL is ignored.
-	alive := spawnHookAgent(t, mgr)
-	if got := postHook(t, hookURL(srv, alive.Info().ID), testHookToken, `{"hook_event_name":"SessionStart","source":"startup"}`); got != http.StatusNoContent {
-		t.Fatalf("SessionStart status = %d, want 204", got)
-	}
-	driveBEL(t, alive, "ping-alive")
-	if got := alive.Info().AgentStatus; got == "waiting" {
-		t.Errorf("hooks-alive BEL flipped status to waiting; BEL must be ignored once SessionStart confirmed the pipeline")
-	}
-}
 
 // TestHookUnknownSession: an unknown session id is a 404.
 func TestHookUnknownSession(t *testing.T) {

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Ellipsis } from "lucide-react";
 import { useTask } from "@/api/queries";
 import { useGlobal } from "@/api/global";
-import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
+import { useAgentStatuses } from "@/api/agents";
 import {
   useResumeAgent,
   useResumeGlobalAgent,
@@ -258,26 +258,6 @@ export function AgentTab({
     </DropdownMenu>
   ) : undefined;
 
-  // D-45 optimistic clear: the open client reflects the waiting→idle
-  // transition immediately on attach; the server clears authoritatively in
-  // the WS attach path, other surfaces converge next poll. (D-09 removed the
-  // connect-time PR-review-seed auto-paste — the seed now enters only via the
-  // Insert review prompt menu item above.) The status entry lookup is
-  // scope-aware: by taskId (task) or by source === "global" (global).
-  const handleConnect = () => {
-    // Viewing or reconnecting to Codex does not answer its permission prompt.
-    if (agentSession.engine === "codex") return;
-    queryClient.setQueryData<AgentStatusEntry[]>(["agent-statuses"], (old) =>
-      old?.map((e) => {
-        if (e.status !== "waiting") return e;
-        const mine = isTask
-          ? e.taskId === scope.taskId
-          : e.source === "global";
-        return mine ? { ...e, status: "idle" } : e;
-      }),
-    );
-  };
-
   // State B — session exists (running or exited). Exited output stays
   // frozen, readable, copyable under the banner (D-15) but renders dimmed
   // so the dead agent looks disabled (checkpoint revision).
@@ -332,7 +312,6 @@ export function AgentTab({
       onReady={(api) => {
         pasteApiRef.current = api;
       }}
-      onConnect={handleConnect}
       headerMenu={agentMenu}
     />
   );

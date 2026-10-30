@@ -167,8 +167,8 @@ func TestSpawnAgentArgvAndIdentity(t *testing.T) {
 		t.Fatalf("read argv file: %v", err)
 	}
 	args := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(args) != 4 {
-		t.Fatalf("argv = %q, want exactly 4 args (--session-id <uuid> --settings <json>)", args)
+	if len(args) != 2 {
+		t.Fatalf("argv = %q, want exactly 2 args (--session-id <uuid>)", args)
 	}
 	if args[0] != "--session-id" {
 		t.Errorf("argv[0] = %q, want --session-id", args[0])
@@ -176,21 +176,9 @@ func TestSpawnAgentArgvAndIdentity(t *testing.T) {
 	if _, err := uuid.Parse(args[1]); err != nil {
 		t.Errorf("argv[1] = %q does not parse as a uuid: %v", args[1], err)
 	}
-	if args[2] != "--settings" {
-		t.Errorf("argv[2] = %q, want --settings", args[2])
-	}
-	var overlayAny map[string]any
-	if err := json.Unmarshal([]byte(args[3]), &overlayAny); err != nil {
-		t.Errorf("argv[3] is not valid JSON: %v\nraw: %s", err, args[3])
-	}
-
 	// The claude session id is captured for Phase 5 --resume.
 	if got := s.ClaudeSessionID(); got != args[1] {
 		t.Errorf("ClaudeSessionID() = %q, want the --session-id value %q", got, args[1])
-	}
-	// The overlay's hook URL embeds the KAMACU session id, not claude's.
-	if !strings.Contains(args[3], "/api/hooks/sessions/"+info.ID) {
-		t.Errorf("overlay does not embed the kamacu session id %s:\n%s", info.ID, args[3])
 	}
 }
 
@@ -225,17 +213,14 @@ func TestSpawnAgentResumeArgv(t *testing.T) {
 	const resumeID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001"
 	s, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1, ResumeSessionID: resumeID})
 
-	if len(args) != 4 {
-		t.Fatalf("argv = %q, want exactly 4 args (--resume <uuid> --settings <json>)", args)
+	if len(args) != 2 {
+		t.Fatalf("argv = %q, want exactly 2 args (--resume <uuid>)", args)
 	}
 	if args[0] != "--resume" {
 		t.Errorf("argv[0] = %q, want --resume", args[0])
 	}
 	if args[1] != resumeID {
 		t.Errorf("argv[1] = %q, want the resume uuid %q", args[1], resumeID)
-	}
-	if args[2] != "--settings" {
-		t.Errorf("argv[2] = %q, want --settings", args[2])
 	}
 	for _, a := range args {
 		if a == "--session-id" {
@@ -255,17 +240,14 @@ func TestSpawnAgentResumeArgv(t *testing.T) {
 func TestSpawnAgentFreshArgv(t *testing.T) {
 	_, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1})
 
-	if len(args) != 4 {
-		t.Fatalf("argv = %q, want exactly 4 args (--session-id <uuid> --settings <json>)", args)
+	if len(args) != 2 {
+		t.Fatalf("argv = %q, want exactly 2 args (--session-id <uuid>)", args)
 	}
 	if args[0] != "--session-id" {
 		t.Errorf("argv[0] = %q, want --session-id", args[0])
 	}
 	if _, err := uuid.Parse(args[1]); err != nil {
 		t.Errorf("argv[1] = %q does not parse as a uuid: %v", args[1], err)
-	}
-	if args[2] != "--settings" {
-		t.Errorf("argv[2] = %q, want --settings", args[2])
 	}
 	for _, a := range args {
 		if a == "--resume" {

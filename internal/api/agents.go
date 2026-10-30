@@ -25,17 +25,19 @@ type agentHandlers struct {
 
 // agentStatusEntry is the exact JSON contract the 04-03 frontend consumes.
 type agentStatusEntry struct {
-	TaskID        int64  `json:"taskId"`
-	ProjectID     int64  `json:"projectId"`
-	SessionID     string `json:"sessionId"`
-	Status        string `json:"status"` // working | idle | waiting | exited (Info.AgentStatus)
-	ExitCode      *int   `json:"exitCode"`
-	StopRequested bool   `json:"stopRequested"`
-	Resumable     bool   `json:"resumable"`   // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
-	PRNumber      *int64 `json:"prNumber"`    // null for source='manual'; the PR number for a github_pr review task (D-15)
-	Source        string `json:"source"`      // "manual" | "github_pr"
-	TaskTitle     string `json:"taskTitle"`   // tasks.title — the bar's row label (SBAR-10)
-	ProjectName   string `json:"projectName"` // projects.name — the bar's row label (SBAR-10)
+	Live          bool                  `json:"live"` // process lifetime, independent of inferred activity
+	Monitor       session.MonitorStatus `json:"monitor"`
+	TaskID        int64                 `json:"taskId"`
+	ProjectID     int64                 `json:"projectId"`
+	SessionID     string                `json:"sessionId"`
+	Status        string                `json:"status"` // working | idle | waiting | exited (Info.AgentStatus)
+	ExitCode      *int                  `json:"exitCode"`
+	StopRequested bool                  `json:"stopRequested"`
+	Resumable     bool                  `json:"resumable"`   // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
+	PRNumber      *int64                `json:"prNumber"`    // null for source='manual'; the PR number for a github_pr review task (D-15)
+	Source        string                `json:"source"`      // "manual" | "github_pr"
+	TaskTitle     string                `json:"taskTitle"`   // tasks.title — the bar's row label (SBAR-10)
+	ProjectName   string                `json:"projectName"` // projects.name — the bar's row label (SBAR-10)
 }
 
 // status handles GET /api/agents/status — one entry per task, newest agent
@@ -129,21 +131,23 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				continue // task deleted under a still-tracked session
 			}
-		info := newest[tid]
-		// Engine-branched resumable derivation (M002/S03 + codex): opencode
-		// and codex key off their persisted *_session_id alone (NO transcript
-		// glob — neither has kamacu-side transcript files, so the claude-only
-		// glob is always false for them); claude keys off csid + the
-		// transcript glob unchanged.
-		resumable := info.AgentStatus == "exited" && m.wtp.Valid &&
-			(m.engine == "opencode" && m.ocsid.Valid ||
-				m.engine == "codex" && m.cxid.Valid ||
-				m.engine != "opencode" && m.engine != "codex" && m.csid.Valid && transcriptExists(a.globRoot, m.csid.String))
+			info := newest[tid]
+			// Engine-branched resumable derivation (M002/S03 + codex): opencode
+			// and codex key off their persisted *_session_id alone (NO transcript
+			// glob — neither has kamacu-side transcript files, so the claude-only
+			// glob is always false for them); claude keys off csid + the
+			// transcript glob unchanged.
+			resumable := info.AgentStatus == "exited" && m.wtp.Valid &&
+				(m.engine == "opencode" && m.ocsid.Valid ||
+					m.engine == "codex" && m.cxid.Valid ||
+					m.engine != "opencode" && m.engine != "codex" && m.csid.Valid && transcriptExists(a.globRoot, m.csid.String))
 			entries = append(entries, agentStatusEntry{
 				TaskID:        tid,
 				ProjectID:     m.projectID,
 				SessionID:     info.ID,
 				Status:        info.AgentStatus,
+				Live:          info.Status == session.StatusRunning,
+				Monitor:       info.Monitor,
 				ExitCode:      info.ExitCode,
 				StopRequested: info.StopRequested,
 				Resumable:     resumable,
@@ -188,6 +192,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			ProjectID:     0,
 			SessionID:     globalAgent.ID,
 			Status:        globalAgent.AgentStatus,
+			Live:          globalAgent.Status == session.StatusRunning,
+			Monitor:       globalAgent.Monitor,
 			ExitCode:      globalAgent.ExitCode,
 			StopRequested: globalAgent.StopRequested,
 			Resumable:     globalAgent.AgentStatus == "exited" && gstate.resumable(a.globRoot),

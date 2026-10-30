@@ -33,6 +33,7 @@ const TypingWindow = 10 * time.Second
 // focused, when known. Visible mirrors document.visibilityState — the UI
 // sends a final visible:false beat when the tab hides.
 type Beat struct {
+	Sequence  uint64 `json:"sequence,omitempty"`
 	ClientID  string `json:"client_id"`
 	Route     string `json:"route"`
 	ProjectID int64  `json:"project_id,omitempty"`
@@ -86,6 +87,7 @@ type Tracker struct {
 	now func() time.Time
 
 	mu            sync.Mutex
+	history       []viewingInterval
 	clients       map[string]*clientState
 	typing        map[string]time.Time
 	lastPresentAt time.Time // last VISIBLE beat, ever
@@ -102,7 +104,7 @@ func NewTracker() *Tracker {
 
 // Heartbeat records one UI beat, upserting the client row and stamping the
 // server's clock. Visible beats also advance lastPresentAt.
-func (t *Tracker) Heartbeat(b Beat) {
+func (t *Tracker) Heartbeat(b Beat) bool {
 	now := t.now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -114,11 +116,25 @@ func (t *Tracker) Heartbeat(b Beat) {
 		c = &clientState{}
 		t.clients[b.ClientID] = c
 	}
+	if ok && c.beat.Sequence > 0 && b.Sequence <= c.beat.Sequence {
+		return false
+	}
+	if c.beat.Visible && c.beat.SessionID != "" {
+		end := now
+		if limit := c.lastSeen.Add(ActiveWindow); end.After(limit) {
+			end = limit
+		}
+		t.history = append(t.history, viewingInterval{c.beat.SessionID, c.lastSeen, end})
+		if len(t.history) > 2048 {
+			t.history = append([]viewingInterval(nil), t.history[len(t.history)-2048:]...)
+		}
+	}
 	c.beat = b
 	c.lastSeen = now
 	if b.Visible {
 		t.lastPresentAt = now
 	}
+	return true
 }
 
 // NoteUserInput records browser-originated stdin for a session (the WS
@@ -143,8 +159,14 @@ func (t *Tracker) Snapshot() Snapshot {
 
 	for id, c := range t.clients {
 		if now.Sub(c.lastSeen) > ActiveWindow {
+			if c.beat.Visible && c.beat.SessionID != "" {
+				t.history = append(t.history, viewingInterval{c.beat.SessionID, c.lastSeen, c.lastSeen.Add(ActiveWindow)})
+			}
 			delete(t.clients, id)
 		}
+	}
+	if len(t.history) > 2048 {
+		t.history = append([]viewingInterval(nil), t.history[len(t.history)-2048:]...)
 	}
 	for id, at := range t.typing {
 		if now.Sub(at) > TypingWindow {
@@ -197,4 +219,41 @@ func (t *Tracker) Snapshot() Snapshot {
 		snap.AwayForSeconds = int64(now.Sub(t.lastPresentAt) / time.Second)
 	}
 	return snap
+}
+
+// ViewingSession checks every fresh client, rather than only the newest tab.
+func (t *Tracker) ViewingSession(id string) bool { return t.ViewingAt(id, t.now()) }
+func (t *Tracker) ViewingAt(id string, at time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, c := range t.clients {
+		if c.beat.Visible && c.beat.SessionID == id && !at.Before(c.lastSeen) && at.Sub(c.lastSeen) <= ActiveWindow {
+			return true
+		}
+	}
+	for _, v := range t.history {
+		if v.session == id && !at.Before(v.start) && at.Before(v.end) {
+			return true
+		}
+	}
+	return false
+}
+
+type viewingInterval struct {
+	session    string
+	start, end time.Time
+}
+
+// WhileAway serializes publication with presence updates. The callback must be
+// short and must not call the tracker. No model or network work belongs here.
+func (t *Tracker) WhileAway(id string, publish func() error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	for _, c := range t.clients {
+		if c.beat.Visible && c.beat.SessionID == id && now.Sub(c.lastSeen) <= ActiveWindow {
+			return nil
+		}
+	}
+	return publish()
 }

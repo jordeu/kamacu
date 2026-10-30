@@ -89,21 +89,20 @@ For Claude Code, Codex, or OpenCode, use the bundled installer:
 <KAMACU_BIN> integration status
 ```
 
-This registers the user-level MCP server and installs the bundled `kamacu-task`
-skill. No separate download or startup prompt is needed. The same controls are
+This registers the user-level MCP server. No separate download or startup prompt is needed. The same controls are
 available under **Settings → Agents → Kamacu integration**. Setup affects the
 user account running Kamacu on the server host; it does not configure a browser
 visitor's computer. Start a new agent session afterward, then verify step 4.
 
 The installer reuses a compatible existing registration without taking ownership
-of it. Conflicting entries or edited skills are preserved and reported. For
+of it. Conflicting or edited entries are preserved and reported. For
 repair, removal, update behavior, and client configuration paths, see
 [Agent integration](agent-integration.md).
 
-### Manual MCP-only registration
+### Manual MCP registration
 
 Use the following instructions for another MCP client or a manually maintained
-configuration. These steps do not install the task skill. Pick your client.
+configuration. Pick your client.
 
 ### Before you add: check for an existing kamacu entry
 

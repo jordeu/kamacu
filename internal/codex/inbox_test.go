@@ -22,7 +22,7 @@ func TestFeedbackEnvironmentArgs(t *testing.T) {
 	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "codex")
-	script := "#!/bin/sh\n[ \"$*\" = '-p kamacu mcp list --json' ] || exit 1\ncat <<'DATA'\n" + data + "\nDATA\n"
+	script := "#!/bin/sh\n[ \"$*\" = 'mcp list --json' ] || exit 1\ncat <<'DATA'\n" + data + "\nDATA\n"
 	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

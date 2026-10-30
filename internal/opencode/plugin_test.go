@@ -192,7 +192,7 @@ func assertPluginContent(t *testing.T, b []byte) {
 		"'SessionStart'",           // session.created -> SessionStart -> MarkHooksAlive
 		"'Stop'",                   // idle -> Stop -> SetIdle
 		"'Notification'",           // permission.ask -> Notification -> SetWaiting
-		"X-Kamacu-Token",          // same header as claude's overlay
+		"X-Kamacu-Token",           // same header as claude's overlay
 		"/api/hooks/sessions/",     // UNCHANGED hook receiver path
 		"__kamacuOpencodePluginV1", // singleton guard
 		"parentID",                 // child-session suppression
@@ -237,4 +237,27 @@ func equalBytes(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+func TestRetireOnlyUnmodifiedIntegration(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "managed")
+	if err := os.WriteFile(target, pluginSource, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := retireManaged(target, pluginSource); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatal("managed integration was not removed")
+	}
+	if err := os.WriteFile(target, []byte("user changes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := retireManaged(target, pluginSource); err == nil {
+		t.Fatal("modified integration was removed")
+	}
+	b, err := os.ReadFile(target)
+	if err != nil || string(b) != "user changes" {
+		t.Fatal("user changes lost", err)
+	}
 }

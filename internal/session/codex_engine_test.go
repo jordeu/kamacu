@@ -71,10 +71,10 @@ func TestCodexEngineKeepsHeuristicStates(t *testing.T) {
 		t.Errorf("Engine = %q, want \"codex\"", info.Engine)
 	}
 	switch info.AgentStatus {
-	case "working", "idle", "waiting":
+	case "idle", "working":
 		// ok — heuristic path intact, NOT collapsed to "running"
 	default:
-		t.Errorf("codex AgentStatus = %q, want one of working/idle/waiting (heuristics intact, not collapsed to running)", info.AgentStatus)
+		t.Errorf("codex AgentStatus = %q, want idle or working from terminal activity", info.AgentStatus)
 	}
 }
 
@@ -142,7 +142,7 @@ func TestCodexSpawnPrependsProfileFlag(t *testing.T) {
 	})
 
 	got := readArgvLines(t, argvFile)
-	want := []string{"-p", "kamacu", "--no-alt-screen", "resume", "0d1a2b3c-1111-2222-3333-444455556666"}
+	want := []string{"--no-alt-screen", "resume", "0d1a2b3c-1111-2222-3333-444455556666"}
 	if len(got) != len(want) {
 		t.Fatalf("codex spawn argv = %q, want %q", got, want)
 	}
