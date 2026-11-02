@@ -67,6 +67,7 @@ export function InboxSidebar() {
 function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { question: FeedbackQuestion; onOpenTask: () => void; onOpenMessage: (button: HTMLButtonElement) => void; onResult: (message: string) => void }) {
   const action = useFeedbackAction();
   const navigate = useNavigate();
+  const notification = q.origin === "notification";
   const completion = q.kind === "completion";
   async function submit(kind: "answer" | "dismiss", option_id?: string, openTask = false) {
     try {
@@ -81,9 +82,9 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
       // The mutation exposes its error to the inline alert.
     }
   }
-  return <article className="space-y-3 border-b border-border p-4" aria-label={`Message from ${q.task_id === 0 ? "Scratchpad" : q.task_title}`}>
+  return <article className="space-y-3 border-b border-border p-4" aria-label={`Message from ${notification ? q.source_name || "Notification" : q.task_id === 0 ? "Scratchpad" : q.task_title}`}>
     <div className="flex items-start justify-between gap-2">
-      <p className="min-w-0 break-words text-xs text-muted-foreground">{q.task_id === 0 ? "Scratchpad" : `${q.project_name} / ${q.task_title}`}</p>
+      <p className="min-w-0 break-words text-xs text-muted-foreground">{notification ? q.source_name || "Notification" : q.task_id === 0 ? "Scratchpad" : `${q.project_name} / ${q.task_title}`}</p>
       <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">{completion ? "Completed" : "Needs reply"}</span>
     </div>
     <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{q.abstract || q.summary}</p>
@@ -92,7 +93,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
       {q.options.map((option) => <Button key={option.id} variant="outline" size="sm" className="h-auto min-h-9 max-w-full justify-start whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
     </div>}
     <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" size="sm" disabled={action.isPending} title={q.origin === "observer" && !completion ? "Open its agent terminal" : "Archive this message and open its agent terminal"} onClick={() => { if(q.origin==="observer" && !completion){onOpenTask();navigate(feedbackTaskURL(q));}else void submit("dismiss", undefined, true); }}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"}<ArrowUpRight className="size-3" /></Button>
+      {notification ? <a href={q.source_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-400">Open notification <ArrowUpRight className="size-3" /></a> : <Button variant="outline" size="sm" disabled={action.isPending} title={q.origin === "observer" && !completion ? "Open its agent terminal" : "Archive this message and open its agent terminal"} onClick={() => { if(q.origin==="observer" && !completion){onOpenTask();navigate(feedbackTaskURL(q));}else void submit("dismiss", undefined, true); }}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"}<ArrowUpRight className="size-3" /></Button>}
       {completion && completionActions(q).map(option => <Button key={option.id} variant="outline" size="sm" className="h-auto min-h-7 max-w-full whitespace-normal text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
       <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>
     </div>
