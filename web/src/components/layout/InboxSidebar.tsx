@@ -96,7 +96,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
       {completion && completionActions(q).map(option => <Button key={option.id} variant="outline" size="sm" className="h-auto min-h-7 max-w-full whitespace-normal text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
       <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>
     </div>
-    {!completion && <Link to={`/inbox?message=${encodeURIComponent(q.id)}#message-${q.id}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">Full context / custom reply<ArrowUpRight className="size-3" /></Link>}
+    {!completion && <Link to={`/inbox?message=${encodeURIComponent(q.id)}#message-${q.id}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">{q.delivery_mode === "claude_question" ? "Full context / choices" : "Full context / custom reply"}<ArrowUpRight className="size-3" /></Link>}
     {action.isPending && <p role="status" className="text-xs text-muted-foreground">Updating message…</p>}
     {action.isError && <p role="alert" className="break-words text-xs text-destructive">{action.error.message} Try again.</p>}
   </article>;

@@ -16,6 +16,7 @@ import (
 	"kamacu/internal/observation"
 	"kamacu/internal/presence"
 	"kamacu/internal/session"
+	"kamacu/internal/terminalchoice"
 )
 
 type Service struct {
@@ -328,7 +329,18 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 			question = "Please review this in the terminal."
 		}
 	}
-	if mode != "text" {
+	// Only the deterministic terminal profile can enable native choice delivery.
+	if info.Engine == "claude" && d.Kind == "question" && d.State == "waiting" {
+		if dialog, ok := terminalchoice.Claude(current.Screen); ok {
+			mode = terminalchoice.Mode
+			question = dialog.Question
+			options = nil
+			for i, label := range dialog.Options {
+				options = append(options, inbox.Option{ID: fmt.Sprintf("choice-%d", i+1), Label: label})
+			}
+		}
+	}
+	if mode != "text" && mode != terminalchoice.Mode {
 		mode = "terminal"
 	}
 	summary := d.Summary
