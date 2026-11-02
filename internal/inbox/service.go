@@ -421,8 +421,11 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	if q.Status != "pending" {
 		return Result{"already_resolved", q}, nil
 	}
-	if q.Origin == "observer" && (q.Hidden || (q.DeliveryMode != "text" && q.Kind != "completion")) {
+	if q.Origin == "observer" && (q.Hidden || (q.DeliveryMode != "text" && q.DeliveryMode != "claude_question" && q.Kind != "completion")) {
 		return Result{}, fmt.Errorf("%w: open the terminal to respond", ErrConflict)
+	}
+	if q.Origin == "observer" && q.DeliveryMode == "claude_question" && optionID == "" {
+		return Result{}, fmt.Errorf("%w: select a displayed option", ErrInvalid)
 	}
 	if optionID != "" {
 		if answer != "" {

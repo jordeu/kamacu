@@ -38,6 +38,9 @@ func InboxTerminalRoutes(mux *http.ServeMux, service *inbox.Service, token strin
 			return fmt.Errorf("originating agent is unavailable")
 		}
 		if q.Origin == "observer" {
+			if q.DeliveryMode == "claude_question" {
+				return sess.WriteObservedChoice(q.EvidenceRevision, q.InputGeneration, q.Answer)
+			}
 			body, submit := wrapInputForWrite(q.Answer)
 			return sess.WriteObserved(q.EvidenceRevision, q.InputGeneration, []byte(body), []byte(submit))
 		}

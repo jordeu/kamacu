@@ -71,7 +71,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       {choices.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <div className="flex flex-wrap gap-2" role="group" aria-label={completion ? "Completion actions" : "Choose an answer to send immediately"}>
         {choices.map((option) => <Button key={option.id} variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
       </div>}
-      {!completion && q.delivery_mode!=="terminal" && !q.hidden && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) submit("answer"); }}>
+      {!completion && q.delivery_mode!=="terminal" && q.delivery_mode!=="claude_question" && !q.hidden && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) submit("answer"); }}>
         <label htmlFor={`answer-${q.id}`} className="mb-2 block text-sm text-muted-foreground">Write your own answer</label>
         <Textarea id={`answer-${q.id}`} value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={16000} rows={3} disabled={action.isPending} className="resize-y" />
         <div className="mt-3 flex items-center justify-between gap-3">
@@ -80,7 +80,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
         </div>
       </form>}
       {!completion && (q.delivery_mode==="terminal" || q.hidden) && <p className="text-sm">Open the terminal to respond.</p>}
- {(completion || q.delivery_mode==="terminal") && <Button variant="ghost" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>}
+ {(completion || q.delivery_mode==="terminal" || q.delivery_mode==="claude_question") && <Button variant="ghost" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>}
       {action.isError && <p role="alert" className="text-sm text-destructive">{action.error.message} {completion ? "Review the task before retrying." : "Your answer has been kept. Check the terminal before retrying."}</p>}
     </div>}
     </div>

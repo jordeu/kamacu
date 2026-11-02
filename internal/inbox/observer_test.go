@@ -195,3 +195,22 @@ func TestObservedMessageUpdatesWithoutNewTerminalEvidence(t *testing.T) {
 		original = updated
 	}
 }
+
+func TestObservedClaudeChoicesRequireExplicitOption(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	c := Create{Key: "native", Abstract: "Choose", Summary: "Choose", Context: "Two options", Question: "Which?", Options: []Option{{ID: "choice-1", Label: "Keep it"}, {ID: "choice-2", Label: "Replace it"}}}
+	q, err := s.Observe(ctx, who, c, "question", "claude_question", 5, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][2]string{{"Keep it", ""}, {"", "unknown"}, {"text", "choice-1"}} {
+		if _, err := s.Answer(ctx, nil, q.Question.ID, q.Question.Revision, args[0], args[1]); err == nil {
+			t.Fatal("invalid native answer accepted", args)
+		}
+	}
+	out, err := s.Answer(ctx, nil, q.Question.ID, q.Question.Revision, "", "choice-2")
+	if err != nil || out.Outcome != "accepted" || out.Question.Answer != "Replace it" {
+		t.Fatal(out, err)
+	}
+}

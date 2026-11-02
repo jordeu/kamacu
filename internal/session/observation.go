@@ -2,9 +2,11 @@ package session
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	"kamacu/internal/observation"
+	"kamacu/internal/terminalchoice"
 )
 
 type MonitorStatus struct {
@@ -79,4 +81,76 @@ func terminalAgentStatus(obs observation.Snapshot, monitor MonitorStatus, now ti
 		return "working"
 	}
 	return "idle"
+}
+
+// WriteObservedChoice navigates a recognized Claude dialog one key at a time.
+// Each movement must be reflected in the rendered screen before Enter is sent.
+// Keyboard input and other inbox writers cannot interleave with this operation.
+func (s *Session) WriteObservedChoice(revision, input uint64, answer string) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	s.mu.Lock()
+	if s.status != StatusRunning || s.stopRequested || s.observer == nil || s.engine != "claude" {
+		s.mu.Unlock()
+		return errors.New("session unavailable")
+	}
+	obs := s.observer.Snapshot()
+	dialog, ok := terminalchoice.Claude(obs.Screen)
+	if !ok || obs.UnsupportedSize || obs.Revision != revision || obs.Input != input {
+		s.mu.Unlock()
+		return errors.New("terminal changed; review the current question before replying")
+	}
+	target := slices.Index(dialog.Options, answer)
+	if target < 0 {
+		s.mu.Unlock()
+		return errors.New("choice is no longer available")
+	}
+	s.observer.Input()
+	generation := s.observer.Snapshot().Input
+	s.lastInputSource = "external"
+	s.mu.Unlock()
+	selected := dialog.Selected
+	for {
+		s.mu.Lock()
+		current := s.observer.Snapshot()
+		next, valid := terminalchoice.Claude(current.Screen)
+		if s.status != StatusRunning || s.stopRequested || current.UnsupportedSize || current.Input != generation || !valid || next.Question != dialog.Question || !slices.Equal(next.Options, dialog.Options) || next.Selected != selected {
+			s.mu.Unlock()
+			return errors.New("terminal dialog changed during selection")
+		}
+		if selected == target {
+			_, err := s.ptmx.Write([]byte("\r"))
+			s.mu.Unlock()
+			return err
+		}
+		step, key := 1, "\x1b[B"
+		if target < selected {
+			step, key = -1, "\x1b[A"
+		}
+		_, err := s.ptmx.Write([]byte(key))
+		s.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		expected := selected + step
+		deadline := time.Now().Add(time.Second)
+		for {
+			current = s.Observation()
+			next, valid = terminalchoice.Claude(current.Screen)
+			if current.Input != generation {
+				return errors.New("terminal input changed during selection")
+			}
+			if valid && next.Question == dialog.Question && slices.Equal(next.Options, dialog.Options) && next.Selected == expected {
+				selected = expected
+				break
+			}
+			if current.Revision != obs.Revision && valid && (next.Question != dialog.Question || !slices.Equal(next.Options, dialog.Options)) {
+				return errors.New("terminal dialog changed during selection")
+			}
+			if time.Now().After(deadline) {
+				return errors.New("terminal did not confirm choice navigation")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }

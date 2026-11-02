@@ -507,3 +507,66 @@ func TestSuggestedRepliesBecomeClickableOptions(t *testing.T) {
 		t.Fatal("suggested reply was not delivered as terminal input")
 	}
 }
+
+func TestClaudeTerminalQuestionPublishesNativeChoices(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "native.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	p, err := SaveProfile(ctx, db, Profile{Name: "fixture", Backend: "codex_cli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`UPDATE monitor_settings SET default_profile_id=?`, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\nprintf '☐ Approach\\r\\nContinue?\\r\\n❯ 1. Yes\\r\\n     Keep going.\\r\\n  2. No\\r\\n     Stop here.\\r\\n  3. Type something.\\r\\nEnter to select · ↑/↓ to navigate · Esc to cancel\\r\\n'\nread answer\n"
+	if err = os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	mgr := session.NewManager()
+	mgr.SetAgentConfig(session.AgentConfig{ClaudeBin: bin})
+	sess, err := mgr.Spawn(session.SpawnOpts{Kind: session.KindAgent, AgentEngine: "claude", Cwd: dir, Global: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Stop()
+	id := sess.Info().ID
+	in := inbox.New(db, func(sid string) inbox.Session { return inbox.Session{Global: true, Live: sid == id, Done: sess.Done()} })
+	defer in.Close()
+	classifier := classifierFunc(func(_ context.Context, _ Profile, o observation.Snapshot) (Decision, error) {
+		return Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Summary: "Choose whether to continue", Question: "Continue?", InputMode: "terminal"}, nil
+	})
+	svc := New(db, mgr, in, presence.NewTracker(), classifier)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.mu.Lock()
+		if w := svc.states[id]; w != nil {
+			w.lastAttempt = time.Time{}
+			w.lastChange = time.Time{}
+		}
+		svc.mu.Unlock()
+		svc.tick(ctx)
+		page, err := in.List(ctx, nil, false, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) > 0 {
+			q := page.Items[0]
+			if q.DeliveryMode != "claude_question" || len(q.Options) != 2 || q.Options[1].Label != "No — Stop here." {
+				t.Fatalf("unexpected native choices: %+v", q)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("native question was not published")
+}
