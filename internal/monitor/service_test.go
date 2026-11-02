@@ -528,7 +528,7 @@ func TestClaudeTerminalQuestionPublishesNativeChoices(t *testing.T) {
 	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "claude")
-	script := "#!/bin/sh\nprintf '☐ Approach\\r\\nContinue?\\r\\n❯ 1. Yes\\r\\n     Keep going.\\r\\n  2. No\\r\\n     Stop here.\\r\\n  3. Type something.\\r\\nEnter to select · ↑/↓ to navigate · Esc to cancel\\r\\n'\nread answer\n"
+	script := "#!/bin/sh\nprintf '☑ Previous  ☐ Approach\\r\\n│ Continue?\\r\\n❯ 1. Yes\\r\\n     Keep going.\\r\\n  2. No\\r\\n     Stop here.\\r\\n  3. Type something.\\r\\nEnter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to cancel\\r\\n'\nread answer\n"
 	if err = os.WriteFile(bin, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

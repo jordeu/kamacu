@@ -9,12 +9,12 @@ import (
 	"kamacu/internal/observation"
 )
 
-const choiceScreen = `☐ Approach
+const choiceScreen = `☑ Previous  ☐ Approach
 Which approach?
 ❯ 1. Keep it
   2. Replace it
   3. Type something.
-Enter to select · ↑/↓ to navigate · Esc to cancel`
+Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to cancel`
 
 func choiceSession(t *testing.T) (*Session, *os.File) {
 	t.Helper()
