@@ -18,6 +18,7 @@ type Dialog struct {
 
 var optionLine = regexp.MustCompile(`^\s*(❯\s*)?([1-9][0-9]*)\. (.+)$`)
 var checkboxLine = regexp.MustCompile(`^\s*(❯\s*)?([1-9][0-9]*\.\s*)?\[([ xX✓])\](\s|$)`)
+var navigationFooter = regexp.MustCompile(`^Enter to select · (↑/↓|Tab/Arrow keys) to navigate( · ctrl\+g to edit in [^·]+)? · Esc to cancel$`)
 
 // Claude recognizes the plain single-select AskUserQuestion layout. Partial,
 // multi-select, preview, and free-text dialogs deliberately remain terminal-only.
@@ -25,9 +26,24 @@ func Claude(screen string) (Dialog, bool) {
 	d := Dialog{Selected: -1}
 	lines := strings.Split(screen, "\n")
 	footer := -1
+	footerEnd := -1
 	for i, line := range lines {
-		if strings.TrimSpace(line) == "Enter to select · ↑/↓ to navigate · Esc to cancel" {
-			footer = i
+		if !strings.HasPrefix(strings.TrimSpace(line), "Enter to select") {
+			continue
+		}
+		joined := ""
+		for j := i; j < len(lines) && j < i+3; j++ {
+			joined += strings.TrimSpace(lines[j])
+			if navigationFooter.MatchString(joined) || navigationFooter.MatchString(strings.Join(strings.Fields(joined), " ")) {
+				footer, footerEnd = i, j
+				break
+			}
+			// Terminal wrapping can split a word or occur at a space. Preserve
+			// spaces already present at the line boundary.
+			joined = strings.TrimRight(joined, " ")
+			if strings.HasSuffix(lines[j], " ") || (j+1 < len(lines) && strings.HasPrefix(lines[j+1], " ")) {
+				joined += " "
+			}
 		}
 	}
 	if footer < 0 {
@@ -35,14 +51,14 @@ func Claude(screen string) (Dialog, bool) {
 	}
 	// The navigation footer must end the active UI. A retained menu above
 	// subsequent output or a new input prompt is not safe to navigate.
-	for _, line := range lines[footer+1:] {
+	for _, line := range lines[footerEnd+1:] {
 		if strings.TrimSpace(line) != "" {
 			return d, false
 		}
 	}
 	start := -1
 	for i := footer - 1; i >= 0; i-- {
-		if strings.Contains(lines[i], "☐") {
+		if strings.ContainsAny(lines[i], "☐☑") {
 			start = i
 			break
 		}
@@ -51,8 +67,10 @@ func Claude(screen string) (Dialog, bool) {
 		return d, false
 	}
 	// A second column, checkbox list, or different navigation mode is not this profile.
-	block := strings.Join(lines[start:footer], "\n")
-	if strings.ContainsAny(block, "│┃") || strings.Contains(block, "☑") {
+	// Completed question tabs may contain ☑. Only the answer area must be
+	// free of checkbox controls and preview columns.
+	block := strings.Join(lines[start+1:footer], "\n")
+	if strings.Contains(block, "☑") {
 		return d, false
 	}
 	first := -1
@@ -63,6 +81,9 @@ func Claude(screen string) (Dialog, bool) {
 			return d, false
 		}
 		m := optionLine.FindStringSubmatch(lines[i])
+		if (first >= 0 || m != nil) && strings.ContainsAny(lines[i], "│┃") {
+			return d, false
+		}
 		if m != nil {
 			m[3] = strings.TrimSpace(m[3])
 			n, _ := strconv.Atoi(m[2])
@@ -98,7 +119,11 @@ func Claude(screen string) (Dialog, bool) {
 	if first < 0 || len(d.Options) < 2 || len(d.Options) > 4 || d.Selected < 0 || d.Selected >= len(d.Options) {
 		return d, false
 	}
-	d.Question = strings.TrimSpace(strings.Join(lines[start+1:first], "\n"))
+	questionLines := append([]string(nil), lines[start+1:first]...)
+	for i, line := range questionLines {
+		questionLines[i] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "│"))
+	}
+	d.Question = strings.TrimSpace(strings.Join(questionLines, "\n"))
 	if d.Question == "" {
 		return d, false
 	}

@@ -34,6 +34,44 @@ func TestClaudeDialog(t *testing.T) {
 	}
 }
 
+func TestClaudeQuestionFooterVariants(t *testing.T) {
+	for _, navigation := range []string{"↑/↓", "Tab/Arrow keys"} {
+		for _, editor := range []string{"", " · ctrl+g to edit in Vim"} {
+			for _, tabs := range []string{"☐ Clarification", "☑ First  ☐ Clarification  ✔ Submit"} {
+				input := strings.Replace(screen, "☐ Clarification", tabs, 1)
+				input = strings.Replace(input, "↑/↓ to navigate", navigation+" to navigate"+editor, 1)
+				d, ok := Claude(input)
+				if !ok || len(d.Options) != 2 || d.Question != "Which approach should I use?" {
+					t.Fatalf("dialog with %q / %q / %q rejected: %+v", navigation, editor, tabs, d)
+				}
+				if _, ok := Claude(input + "\nWorking…"); ok {
+					t.Fatal("inactive variant accepted")
+				}
+			}
+		}
+	}
+}
+
+func TestClaudeQuestionGutter(t *testing.T) {
+	input := strings.Replace(screen, "Which approach should I use?", "│ Which approach should I use?", 1)
+	d, ok := Claude(input)
+	if !ok || d.Question != "Which approach should I use?" || len(d.Options) != 2 {
+		t.Fatalf("question gutter rejected: %+v %v", d, ok)
+	}
+}
+
+func TestClaudeWrappedFooter(t *testing.T) {
+	for _, footer := range []string{
+		"Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to\n cancel",
+		"Enter to select · Tab/Arrow keys to navig\nate · Esc to cancel",
+	} {
+		input := strings.Replace(screen, "Enter to select · ↑/↓ to navigate · Esc to cancel", footer, 1)
+		if _, ok := Claude(input); !ok {
+			t.Fatalf("wrapped footer rejected: %q", footer)
+		}
+	}
+}
+
 func TestClaudeRejectsUnsupportedDialogs(t *testing.T) {
 	for name, s := range map[string]string{
 		"permission":     strings.Replace(screen, "☐ Clarification", "Permission", 1),
