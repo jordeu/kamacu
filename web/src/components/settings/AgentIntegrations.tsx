@@ -7,11 +7,11 @@ const names: Record<IntegrationEngine, string> = { claude: "Claude Code", codex:
 function description(item: IntegrationStatus) {
   if (item.message) return item.message;
   if (!item.available) return "Install this agent on the Kamacu host to enable integration.";
-  if (item.skill === "modified" || item.mcp === "modified") return "Your edits are preserved. Move the edited file aside before repairing.";
+  if (item.mcp === "modified") return "Your edits are preserved. Check the MCP entry in your agent configuration before repairing.";
   if (item.mcp === "conflict") return "A different Kamacu MCP registration already exists. Check your agent configuration.";
-  if (!item.enabled) return "Enable the feedback inbox workflow for task sessions.";
-  if ((item.skill === "installed" || item.skill === "unmanaged") && item.mcp === "registered") return "Enabled · MCP registered and task skill available.";
-  return "Setup needs attention. Repair installs missing files and updates managed copies.";
+  if (!item.enabled) return "Enable MCP tools for previews and other Kamacu features.";
+  if (item.mcp === "registered") return "Enabled · MCP registered.";
+  return "Setup needs attention. Repair restores missing MCP registrations and updates managed entries.";
 }
 
 export function AgentIntegrations() {
@@ -23,7 +23,7 @@ export function AgentIntegrations() {
     setNotice(null);
     try {
       const result = await update.mutateAsync({ engine, action });
-      setNotice({ engine, error: false, text: result.message || (action === "remove" ? "Managed integration removed. Shared skills stay while another agent uses them. Restart existing sessions." : "Integration ready. Start a new task agent session to load the skill and MCP tools.") });
+      setNotice({ engine, error: false, text: result.message || (action === "remove" ? "Managed MCP registration removed. Restart existing sessions." : "Integration ready. Start a new task agent session to load the MCP tools.") });
     } catch (error) {
       setNotice({ engine, error: true, text: error instanceof Error ? error.message : "Could not update integration. Try again." });
     }
@@ -33,8 +33,8 @@ export function AgentIntegrations() {
     <div className="mt-3 flex flex-col gap-3 border-t pt-4">
       <h3 className="text-sm font-medium">Kamacu integration</h3>
       <p className="text-xs text-muted-foreground">
-        Installs MCP tools and a task skill on this host so agents can ask for feedback in your inbox.
-        Managed files update with Kamacu; your edits are preserved. No startup prompts are added.
+        Registers optional MCP tools for previews and other Kamacu features. Terminal monitoring handles inbox notifications automatically.
+        Managed registrations update with Kamacu; your edits are preserved. No startup prompts are added.
       </p>
       {query.isPending && <p role="status" className="text-xs text-muted-foreground">Checking agent integrations…</p>}
       {query.isError && <div role="alert" className="text-xs text-destructive">
@@ -51,7 +51,7 @@ export function AgentIntegrations() {
                 onClick={() => change(item.engine, item.enabled ? "repair" : "enable")}>
                 {update.isPending && update.variables?.engine === item.engine ? "Updating…" : item.enabled ? "Repair" : "Enable integration"}
               </Button>
-              {(item.managed || item.enabled || item.skill === "modified" || item.mcp === "modified") && <Button size="sm" variant="ghost" disabled={update.isPending}
+              {(item.managed || item.enabled || item.mcp === "modified") && <Button size="sm" variant="ghost" disabled={update.isPending}
                 aria-label={`Remove ${names[item.engine]} integration`} onClick={() => change(item.engine, "remove")}>Remove</Button>}
             </div>
           </div>

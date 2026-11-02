@@ -274,10 +274,9 @@ curl -fsS http://127.0.0.1:7333/api/projects -o /dev/null -w '%{http_code}\n'
 
 ## Optional agent integration
 
-The application binary includes the `kamacu-task` skill. Users can enable MCP
-and skill installation under **Settings → Agents → Kamacu integration**, or
+Users can enable MCP registration under **Settings → Agents → Kamacu integration**, or
 with `kamacu integration enable claude` (also `codex` and `opencode`). This is
 opt-in; installing the application alone does not enable it. Once enabled,
-Kamacu refreshes unchanged managed copies when the server starts after an
+Kamacu refreshes unchanged managed registrations when the server starts after an
 upgrade. Restart agent sessions to load changes. See
 [Agent integration](agent-integration.md).

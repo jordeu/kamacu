@@ -109,3 +109,33 @@ func PluginSource() []byte {
 	copy(out, pluginSource)
 	return out
 }
+
+// RetirePlugin removes only the byte-identical former Kamacu integration.
+// Modified user files are preserved and reported for manual review.
+func RetirePlugin() error {
+	base, err := defaultConfigDir()
+	if err != nil {
+		return err
+	}
+	return retireManaged(filepath.Join(base, "opencode", "plugin", PluginFilename), pluginSource)
+}
+func retireManaged(path string, expected []byte) error {
+	st, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("preserving non-regular legacy integration %s", path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(b, expected) {
+		return fmt.Errorf("preserving modified legacy integration %s; remove its Kamacu status hook manually", path)
+	}
+	return os.Remove(path)
+}

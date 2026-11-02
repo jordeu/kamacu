@@ -19,13 +19,17 @@ import (
 //	  snapshot describes the user's attention and is consumed by the MCP
 //	  bridge, which already sends the token on every request — so the extra
 //	  gate costs nothing and keeps the surface closed.
-func PresenceRoutes(mux *http.ServeMux, tr *presence.Tracker, token string) {
+func PresenceRoutes(mux *http.ServeMux, tr *presence.Tracker, token string, onView ...func(string)) {
 	h := &presenceHandlers{tracker: tr, token: token}
+	if len(onView) > 0 {
+		h.onView = onView[0]
+	}
 	mux.HandleFunc("POST /api/presence/heartbeat", h.heartbeat)
 	mux.HandleFunc("GET /api/presence", h.snapshot)
 }
 
 type presenceHandlers struct {
+	onView  func(string)
 	tracker *presence.Tracker
 	token   string // per-instance random token; "" means reject the snapshot read
 }
@@ -36,6 +40,7 @@ type presenceHandlers struct {
 // "visible:false" default hiding a beacon bug.
 func (h *presenceHandlers) heartbeat(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
+		Sequence  uint64 `json:"sequence"`
 		ClientID  string `json:"client_id"`
 		Route     string `json:"route"`
 		ProjectID int64  `json:"project_id"`
@@ -55,7 +60,8 @@ func (h *presenceHandlers) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "visible is required")
 		return
 	}
-	h.tracker.Heartbeat(presence.Beat{
+	accepted := h.tracker.Heartbeat(presence.Beat{
+		Sequence:  payload.Sequence,
 		ClientID:  payload.ClientID,
 		Route:     payload.Route,
 		ProjectID: payload.ProjectID,
@@ -63,6 +69,9 @@ func (h *presenceHandlers) heartbeat(w http.ResponseWriter, r *http.Request) {
 		SessionID: payload.SessionID,
 		Visible:   *payload.Visible,
 	})
+	if accepted && *payload.Visible && payload.SessionID != "" && h.onView != nil {
+		h.onView(payload.SessionID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

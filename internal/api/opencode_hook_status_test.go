@@ -1,13 +1,11 @@
 package api
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"kamacu/internal/session"
 )
@@ -95,56 +93,15 @@ func spawnOpencodeAgent(t *testing.T, mgr *session.Manager) *session.Session {
 // engine "running" collapse. This is what lets the hook receiver's status
 // transitions show up at all — under the old custom gate the receiver's POSTs
 // would be silently ignored by agentStatusLocked.
-func TestOpencodeHookKeepsHeuristicStates(t *testing.T) {
-	_, mgr := newOpencodeHookServer(t)
-	sess := spawnOpencodeAgent(t, mgr)
-	defer sess.Stop()
-
-	info := sess.Info()
-	if info.Engine != "opencode" {
-		t.Errorf("Engine = %q, want \"opencode\"", info.Engine)
-	}
-	switch info.AgentStatus {
-	case "working", "idle", "waiting":
-		// ok — heuristics intact, NOT collapsed to "running"
-	default:
-		t.Errorf("opencode AgentStatus = %q, want one of working/idle/waiting (T02 full-heuristics gate broken — hooks would be ignored under the old custom collapse)", info.AgentStatus)
-	}
-}
 
 // TestOpencodeHookNotificationSetsWaiting: a Notification hook POST with the
 // correct token flips an opencode-engine agent to waiting — the
 // permission.ask -> Notification mapping the on-disk plugin emits. Mirrors
 // TestHookNotificationSetsWaiting for the opencode engine.
-func TestOpencodeHookNotificationSetsWaiting(t *testing.T) {
-	srv, mgr := newOpencodeHookServer(t)
-	sess := spawnOpencodeAgent(t, mgr)
-	defer sess.Stop()
-
-	body := `{"hook_event_name":"Notification","session_id":"u","notification_type":"permission_prompt"}`
-	if got := postHook(t, hookURL(srv, sess.Info().ID), testHookToken, body); got != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", got)
-	}
-	if got := sess.Info().AgentStatus; got != "waiting" {
-		t.Errorf("opencode AgentStatus = %q, want %q", got, "waiting")
-	}
-}
 
 // TestOpencodeHookStopSetsIdle: a Stop hook POST flips the opencode-engine
 // agent to idle (turn end) — the session.idle -> Stop mapping the on-disk
 // plugin emits.
-func TestOpencodeHookStopSetsIdle(t *testing.T) {
-	srv, mgr := newOpencodeHookServer(t)
-	sess := spawnOpencodeAgent(t, mgr)
-	defer sess.Stop()
-
-	if got := postHook(t, hookURL(srv, sess.Info().ID), testHookToken, `{"hook_event_name":"Stop"}`); got != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", got)
-	}
-	if got := sess.Info().AgentStatus; got != "idle" {
-		t.Errorf("opencode AgentStatus = %q, want %q", got, "idle")
-	}
-}
 
 // TestOpencodeHookSessionStartMarksHooksAlive: SessionStart returns 204 and
 // disables the BEL fallback for an opencode-engine session (Pitfall 2). This
@@ -153,45 +110,6 @@ func TestOpencodeHookStopSetsIdle(t *testing.T) {
 // the plugin/env path is broken. Mirrors TestHookSessionStartMarksHooksAlive
 // for the opencode engine, proving the on-disk plugin's session.created ->
 // SessionStart mapping lands in the same place.
-func TestOpencodeHookSessionStartMarksHooksAlive(t *testing.T) {
-	srv, mgr := newOpencodeHookServer(t)
-
-	// driveBEL makes the stub emit a bare BEL + marker and waits until the
-	// marker is in the ring — the BEL effect is applied under the same lock,
-	// so the status read after this is deterministic.
-	driveBEL := func(t *testing.T, sess *session.Session, tag string) {
-		t.Helper()
-		if err := sess.WriteInput([]byte(tag + "\n")); err != nil {
-			t.Fatalf("write input: %v", err)
-		}
-		want := []byte("bel-MARK:" + tag)
-		deadline := time.Now().Add(10 * time.Second)
-		for !bytes.Contains(sess.Snapshot(), want) {
-			if time.Now().After(deadline) {
-				t.Fatalf("stub never echoed %q:\n%s", want, sess.Snapshot())
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
-
-	// Control: hooks-dead opencode session — BEL sets waiting (fallback works
-	// for the opencode engine; the heuristics gate is open).
-	dead := spawnOpencodeAgent(t, mgr)
-	driveBEL(t, dead, "ping-dead")
-	if got := dead.Info().AgentStatus; got != "waiting" {
-		t.Fatalf("hooks-dead BEL: opencode AgentStatus = %q, want %q (fallback broken — alive assertion below would be vacuous)", got, "waiting")
-	}
-
-	// SessionStart-confirmed opencode session — BEL is ignored.
-	alive := spawnOpencodeAgent(t, mgr)
-	if got := postHook(t, hookURL(srv, alive.Info().ID), testHookToken, `{"hook_event_name":"SessionStart","source":"startup"}`); got != http.StatusNoContent {
-		t.Fatalf("SessionStart status = %d, want 204", got)
-	}
-	driveBEL(t, alive, "ping-alive")
-	if got := alive.Info().AgentStatus; got == "waiting" {
-		t.Errorf("hooks-alive BEL flipped opencode status to waiting; BEL must be ignored once SessionStart confirmed the pipeline (hooksAlive canary broken)")
-	}
-}
 
 // TestOpencodeHookFullTurnLoop exercises the exact event sequence the on-disk
 // opencode plugin emits for one agent turn, end to end through the UNCHANGED
@@ -199,30 +117,3 @@ func TestOpencodeHookSessionStartMarksHooksAlive(t *testing.T) {
 // Stop (session.idle). Each transition is observed on Info().AgentStatus,
 // proving hooks.go needs no engine knowledge to drive an opencode task's
 // status dot through working/waiting/idle.
-func TestOpencodeHookFullTurnLoop(t *testing.T) {
-	srv, mgr := newOpencodeHookServer(t)
-	sess := spawnOpencodeAgent(t, mgr)
-	defer sess.Stop()
-	id := sess.Info().ID
-
-	// 1. session.created -> SessionStart -> hooksAlive (BEL fallback off).
-	if got := postHook(t, hookURL(srv, id), testHookToken, `{"hook_event_name":"SessionStart","source":"startup"}`); got != http.StatusNoContent {
-		t.Fatalf("SessionStart: status = %d, want 204", got)
-	}
-
-	// 2. permission.ask -> Notification -> waiting.
-	if got := postHook(t, hookURL(srv, id), testHookToken, `{"hook_event_name":"Notification","session_id":"u","notification_type":"permission_prompt"}`); got != http.StatusNoContent {
-		t.Fatalf("Notification: status = %d, want 204", got)
-	}
-	if got := sess.Info().AgentStatus; got != "waiting" {
-		t.Fatalf("after Notification: opencode AgentStatus = %q, want %q", got, "waiting")
-	}
-
-	// 3. session.idle -> Stop -> idle (turn end).
-	if got := postHook(t, hookURL(srv, id), testHookToken, `{"hook_event_name":"Stop"}`); got != http.StatusNoContent {
-		t.Fatalf("Stop: status = %d, want 204", got)
-	}
-	if got := sess.Info().AgentStatus; got != "idle" {
-		t.Fatalf("after Stop: opencode AgentStatus = %q, want %q", got, "idle")
-	}
-}

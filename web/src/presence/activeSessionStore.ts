@@ -9,6 +9,8 @@ let activeSessionId: string | null = null;
 /** Report the focused terminal session (null on non-terminal tabs / unmount). */
 export function setActiveSession(id: string | null): void {
   activeSessionId = id;
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new Event("kamacu-terminal-view"));
 }
 
 /** The focused terminal session, if any. Read at beat time by the beacon. */

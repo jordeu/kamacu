@@ -34,22 +34,21 @@ function checksIcon(
  *  rail — the old `StatusDot` was removed because a filled dot sitting beside the
  *  line-art CI glyph read as two clashing marks. Any rail = an open review
  *  session; the rail COLOR is the agent state, mirroring StatusDot's `dotMeta`
- *  palette (working green, waiting amber + pulse, idle blue, exited gray). The
+ *  palette (working green, waiting amber + pulse, idle gray, exited gray). The
  *  two signals now live on fully separate channels: left edge = your agent,
  *  right glyph = the PR's CI — nothing sits side-by-side, nothing misaligns. */
 function agentRail(
   status: AgentStatusEntry["status"],
 ): { barClass: string; pulse: boolean; label: string } {
   switch (status) {
+    case "error":
+      return { barClass: "bg-red-500", pulse: false, label: "needs attention" };
     case "working":
       return { barClass: "bg-green-500", pulse: false, label: "working" };
     case "waiting":
       return { barClass: "bg-amber-400", pulse: true, label: "waiting for input" };
     case "idle":
-      return { barClass: "bg-blue-500/60", pulse: false, label: "idle" };
-    case "running":
-      // M001 custom-engine agent review session: alive, no finer state.
-      return { barClass: "bg-blue-500", pulse: false, label: "running" };
+      return { barClass: "bg-zinc-400", pulse: false, label: "idle" };
     case "exited":
       return { barClass: "bg-zinc-600", pulse: false, label: "exited" };
   }

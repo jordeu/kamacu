@@ -438,9 +438,8 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 	// can never receive a board position. Reject it with 409 BEFORE any
 	// position math, even though the position queries already filter PR rows.
 	var projectID int64
-	var source, previousStatus string
-	var recurrent, spawned bool
-	if err := tx.QueryRowContext(ctx, `SELECT project_id, source, status, recurrent, recurrence_spawned FROM tasks WHERE id = ?`, id).Scan(&projectID, &source, &previousStatus, &recurrent, &spawned); err != nil {
+	var source string
+	if err := tx.QueryRowContext(ctx, `SELECT project_id, source FROM tasks WHERE id = ?`, id).Scan(&projectID, &source); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 		} else {
@@ -510,67 +509,18 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. Persist and return the updated task. Stamp the entered status's *_at
-	// column (D-90, last-entry-wins): entering Done sets done_at — the reaper's
-	// clock (REAP-01) — while the other three are banked for future stats.
-	// statusAtCol comes from a fixed map keyed by the ALREADY-validated
-	// req.Status (never raw user input), so concatenating it into the SQL is
-	// safe. Leaving a status never clears its column; the reaper relies on the
-	// status='done' gate, not done_at, to cancel reaping.
-	statusAtCol := map[string]string{
-		"todo":        "todo_at",
-		"in_progress": "in_progress_at",
-		"in_review":   "in_review_at",
-		"done":        "done_at",
-	}[req.Status]
-	t, err := scanTask(tx.QueryRowContext(ctx,
-		`UPDATE tasks SET status = ?, position = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		   `+statusAtCol+` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ? RETURNING `+taskColumns, req.Status, pos, id))
+	t, afterCommit, err := h.persistTaskMove(ctx, tx, id, req.Status, pos)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var successor Task
-	var repoPath string
-	var managed bool
-	if req.Status == "done" && previousStatus != "done" && recurrent && !spawned {
-		// Copy only content and conversation identities. Everything else gets
-		// normal new-task defaults, including a fresh worktree after commit.
-		successor, err = scanTask(tx.QueryRowContext(ctx, `
-			INSERT INTO tasks (project_id, title, description, position, recurrent,
-			                   claude_session_id, opencode_session_id, codex_session_id)
-			SELECT project_id, title, description,
-			       (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks
-			        WHERE project_id = ? AND status = 'todo' AND source = 'manual'),
-			       1, claude_session_id, opencode_session_id, codex_session_id
-			FROM tasks WHERE id = ? RETURNING `+taskColumns, projectID, id))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		// Date only the completed instance, after copying its original title.
-		completedAt, err := time.Parse(time.RFC3339Nano, t.UpdatedAt)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		t.Title += " - " + completedAt.Format("Jan 2")
-		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET title = ?, recurrence_spawned = 1 WHERE id = ?`, t.Title, id); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if err = tx.QueryRowContext(ctx, `SELECT repo_path, managed FROM projects WHERE id = ?`, projectID).Scan(&repoPath, &managed); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
+
 	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if successor.ID != 0 {
-		provisionWorktree(ctx, h.db, h.wt, successor.ID, successor.Title, repoPath, managed)
+	if afterCommit != nil {
+		afterCommit()
 	}
 	writeJSON(w, http.StatusOK, t)
 }
@@ -711,4 +661,69 @@ func (h *taskHandlers) taskTmuxNames(ctx context.Context, taskID int64) ([]strin
 		names = append(names, name)
 	}
 	return names, rows.Err()
+}
+
+// persistTaskMove is shared by board moves and atomic inbox completion actions.
+func (h *taskHandlers) persistTaskMove(ctx context.Context, tx *sql.Tx, id int64, status string, pos float64) (Task, func(), error) {
+	var projectID int64
+	var previousStatus string
+	var recurrent, spawned bool
+	if err := tx.QueryRowContext(ctx, `SELECT project_id,status,recurrent,recurrence_spawned FROM tasks WHERE id=?`, id).Scan(&projectID, &previousStatus, &recurrent, &spawned); err != nil {
+		return Task{}, nil, err
+	}
+	// 5. Persist and return the updated task. Stamp the entered status's *_at
+	// column (D-90, last-entry-wins): entering Done sets done_at — the reaper's
+	// clock (REAP-01) — while the other three are banked for future stats.
+	// statusAtCol comes from a fixed map keyed by the ALREADY-validated
+	// status (never raw user input), so concatenating it into the SQL is
+	// safe. Leaving a status never clears its column; the reaper relies on the
+	// status='done' gate, not done_at, to cancel reaping.
+	statusAtCol := map[string]string{
+		"todo":        "todo_at",
+		"in_progress": "in_progress_at",
+		"in_review":   "in_review_at",
+		"done":        "done_at",
+	}[status]
+	t, err := scanTask(tx.QueryRowContext(ctx,
+		`UPDATE tasks SET status = ?, position = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		   `+statusAtCol+` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE id = ? RETURNING `+taskColumns, status, pos, id))
+	if err != nil {
+		return Task{}, nil, err
+	}
+	var successor Task
+	var repoPath string
+	var managed bool
+	if status == "done" && previousStatus != "done" && recurrent && !spawned {
+		// Copy only content and conversation identities. Everything else gets
+		// normal new-task defaults, including a fresh worktree after commit.
+		successor, err = scanTask(tx.QueryRowContext(ctx, `
+			INSERT INTO tasks (project_id, title, description, position, recurrent,
+			                   claude_session_id, opencode_session_id, codex_session_id)
+			SELECT project_id, title, description,
+			       (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks
+			        WHERE project_id = ? AND status = 'todo' AND source = 'manual'),
+			       1, claude_session_id, opencode_session_id, codex_session_id
+			FROM tasks WHERE id = ? RETURNING `+taskColumns, projectID, id))
+		if err != nil {
+			return Task{}, nil, err
+		}
+		// Date only the completed instance, after copying its original title.
+		completedAt, err := time.Parse(time.RFC3339Nano, t.UpdatedAt)
+		if err != nil {
+			return Task{}, nil, err
+		}
+		t.Title += " - " + completedAt.Format("Jan 2")
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET title = ?, recurrence_spawned = 1 WHERE id = ?`, t.Title, id); err != nil {
+			return Task{}, nil, err
+		}
+		if err = tx.QueryRowContext(ctx, `SELECT repo_path, managed FROM projects WHERE id = ?`, projectID).Scan(&repoPath, &managed); err != nil {
+			return Task{}, nil, err
+		}
+	}
+	var afterCommit func()
+	if successor.ID != 0 {
+		afterCommit = func() { provisionWorktree(ctx, h.db, h.wt, successor.ID, successor.Title, repoPath, managed) }
+	}
+	return t, afterCommit, nil
 }

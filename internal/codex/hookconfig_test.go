@@ -204,3 +204,26 @@ func assertHookConfigContent(t *testing.T, b []byte) {
 		}
 	}
 }
+
+func TestRetireOnlyUnmodifiedIntegration(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "managed")
+	if err := os.WriteFile(target, hookConfigSource, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := retireManaged(target, hookConfigSource); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatal("managed integration was not removed")
+	}
+	if err := os.WriteFile(target, []byte("user changes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := retireManaged(target, hookConfigSource); err == nil {
+		t.Fatal("modified integration was removed")
+	}
+	b, err := os.ReadFile(target)
+	if err != nil || string(b) != "user changes" {
+		t.Fatal("user changes lost", err)
+	}
+}

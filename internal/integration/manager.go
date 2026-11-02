@@ -1,12 +1,9 @@
-// Package integration distributes the bundled task skill and manages opt-in
-// user-level MCP registrations. Hashes, not ownership comments, protect edits.
+// Package integration manages opt-in user-level MCP registrations. Hashes, not ownership comments, protect edits.
 package integration
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,11 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-//go:embed kamacu-task/SKILL.md
-var skill []byte
-
-func SkillSource() []byte { return bytes.Clone(skill) }
-
 var engines = []string{"claude", "codex", "opencode"}
 
 type engineState struct {
@@ -33,15 +25,12 @@ type engineState struct {
 }
 type manifest struct {
 	Engines map[string]engineState `json:"engines"`
-	Files   map[string]string      `json:"files"`
 }
 type Status struct {
 	Engine    string `json:"engine"`
 	Available bool   `json:"available"`
 	Enabled   bool   `json:"enabled"`
 	Managed   bool   `json:"managed"`
-	Skill     string `json:"skill"`
-	SkillPath string `json:"skill_path"`
 	MCP       string `json:"mcp"`
 	Message   string `json:"message,omitempty"`
 }
@@ -51,12 +40,11 @@ type Manager struct {
 	codexHome                           string
 	claudeHome                          string
 	runCodex                            func(context.Context, ...string) ([]byte, error)
-	source                              []byte
 	lookPath                            func(string) (string, error)
 }
 
 func New(home, configHome, binary string) *Manager {
-	return &Manager{home: home, configHome: configHome, binary: binary, codexHome: filepath.Join(home, ".codex"), claudeHome: filepath.Join(home, ".claude"), statePath: filepath.Join(home, ".kamacu", "integrations.json"), source: SkillSource(), lookPath: exec.LookPath}
+	return &Manager{home: home, configHome: configHome, binary: binary, codexHome: filepath.Join(home, ".codex"), claudeHome: filepath.Join(home, ".claude"), statePath: filepath.Join(home, ".kamacu", "integrations.json"), lookPath: exec.LookPath}
 }
 func Default() (*Manager, error) {
 	home, err := os.UserHomeDir()
@@ -81,15 +69,8 @@ func Default() (*Manager, error) {
 	return m, nil
 }
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
-func (m *Manager) skillPath(engine string) string {
-	dir := ".agents"
-	if engine == "claude" {
-		return filepath.Join(m.claudeHome, "skills", "kamacu-task", "SKILL.md")
-	}
-	return filepath.Join(m.home, dir, "skills", "kamacu-task", "SKILL.md")
-}
 func (m *Manager) load() (*manifest, error) {
-	s := &manifest{Engines: map[string]engineState{}, Files: map[string]string{}}
+	s := &manifest{Engines: map[string]engineState{}}
 	b, err := os.ReadFile(m.statePath)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -97,7 +78,7 @@ func (m *Manager) load() (*manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	if json.Unmarshal(b, s) != nil || s.Engines == nil || s.Files == nil {
+	if json.Unmarshal(b, s) != nil || s.Engines == nil {
 		return nil, fmt.Errorf("invalid Kamacu integration state; preserve %s and repair it before continuing", m.statePath)
 	}
 	return s, nil
@@ -158,42 +139,10 @@ func (m *Manager) lock() (func(), error) {
 	}
 	return func() { unix.Flock(int(f.Fd()), unix.LOCK_UN); f.Close(); m.mu.Unlock() }, nil
 }
-func (m *Manager) skillStatus(s *manifest, engine string) (string, error) {
-	p := m.skillPath(engine)
-	st, err := os.Lstat(p)
-	if errors.Is(err, os.ErrNotExist) {
-		return "missing", nil
-	}
-	if err != nil {
-		return "error", err
-	}
-	if !st.Mode().IsRegular() {
-		return "modified", nil
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return "error", err
-	}
-	owned := s.Files[p]
-	if owned == "" {
-		return "unmanaged", nil
-	}
-	if digest(b) != owned {
-		return "modified", nil
-	}
-	if !bytes.Equal(b, m.source) {
-		return "outdated", nil
-	}
-	return "installed", nil
-}
 func (m *Manager) status(ctx context.Context, s *manifest, engine string) Status {
-	out := Status{Engine: engine, Enabled: s.Engines[engine].Enabled, SkillPath: m.skillPath(engine), Managed: s.Engines[engine].Enabled || s.Engines[engine].MCPHash != ""}
+	out := Status{Engine: engine, Enabled: s.Engines[engine].Enabled, Managed: s.Engines[engine].Enabled || s.Engines[engine].MCPHash != ""}
 	_, err := m.lookPath(engine)
 	out.Available = err == nil
-	out.Skill, err = m.skillStatus(s, engine)
-	if err != nil {
-		out.Message = err.Error()
-	}
 	if !out.Available {
 		out.MCP = "unavailable"
 		return out
@@ -232,7 +181,7 @@ func (m *Manager) Status(ctx context.Context) ([]Status, error) {
 	return out, nil
 }
 
-// Enable also repairs missing files. Modified or unowned files are never replaced.
+// Enable also repairs missing registrations. Modified or unowned entries are never replaced.
 func (m *Manager) Enable(ctx context.Context, engine string) (Status, error) {
 	if !slices.Contains(engines, engine) {
 		return Status{}, fmt.Errorf("unsupported agent engine")
@@ -268,38 +217,12 @@ func (m *Manager) enable(ctx context.Context, s *manifest, engine string) error 
 			return fmt.Errorf("%s already has a different kamacu MCP registration; it has been preserved", engine)
 		}
 	}
-	p := m.skillPath(engine)
-	state, err := m.skillStatus(s, engine)
-	if err != nil {
-		return err
-	}
-	if state == "modified" {
-		return fmt.Errorf("skill was edited; preserve or move %s before repairing", p)
-	}
-	if state == "unmanaged" {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(b, m.source) {
-			return fmt.Errorf("a user-owned skill already exists at %s; it has been preserved", p)
-		}
-	}
 	// Record opt-in before writing resources so a partial install can be repaired
 	// or removed. Each completed mutation is journaled before the next action.
 	e.Enabled = true
 	s.Engines[engine] = e
 	if err = m.save(s); err != nil {
 		return err
-	}
-	if state == "missing" || state == "outdated" {
-		if err = atomicWrite(p, m.source, 0644); err != nil {
-			return err
-		}
-		s.Files[p] = digest(m.source)
-		if err = m.save(s); err != nil {
-			return err
-		}
 	}
 	if len(r.entry) == 0 || !m.compatible(r) {
 		if err = m.writeRegistration(ctx, r, false); err != nil {
@@ -320,7 +243,6 @@ func (m *Manager) enable(ctx context.Context, s *manifest, engine string) error 
 }
 
 // Disable stops future updates first, then removes only unchanged managed parts.
-// A shared Codex/OpenCode skill is retained while either integration is enabled.
 func (m *Manager) Disable(ctx context.Context, engine string) (Status, error) {
 	if !slices.Contains(engines, engine) {
 		return Status{}, fmt.Errorf("unsupported agent engine")
@@ -355,28 +277,6 @@ func (m *Manager) Disable(ctx context.Context, engine string) (Status, error) {
 			e.MCPHash = ""
 		}
 		s.Engines[engine] = e
-	}
-	p := m.skillPath(engine)
-	shared := false
-	for other, state := range s.Engines {
-		if other != engine && state.Enabled && m.skillPath(other) == p {
-			shared = true
-		}
-	}
-	if !shared && s.Files[p] != "" {
-		state, err := m.skillStatus(s, engine)
-		if err != nil {
-			notes = append(notes, err)
-		} else if state == "modified" {
-			notes = append(notes, fmt.Errorf("edited skill preserved at %s", p))
-		} else if state == "missing" {
-			delete(s.Files, p)
-		} else if err = os.Remove(p); err != nil {
-			notes = append(notes, err)
-		} else {
-			delete(s.Files, p)
-			_ = os.Remove(filepath.Dir(p))
-		}
 	}
 	if err = m.save(s); err != nil {
 		notes = append(notes, err)

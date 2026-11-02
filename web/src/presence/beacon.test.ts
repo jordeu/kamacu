@@ -62,6 +62,7 @@ describe("startPresenceBeacon", () => {
     expect(h.beats).toHaveLength(1);
     expect(h.beats[0]).toEqual({
       client_id: "tab-1",
+      sequence: expect.any(Number),
       route: "/projects/3/tasks/7",
       project_id: 3,
       task_id: 7,
@@ -72,11 +73,13 @@ describe("startPresenceBeacon", () => {
 
   it("sends on each interval tick while visible, with refreshed values", () => {
     const h = harness({
-      getRoute: vi.fn()
+      getRoute: vi
+        .fn()
         .mockReturnValueOnce("/projects/3/tasks/7")
         .mockReturnValueOnce("/projects/4")
         .mockReturnValueOnce("/global"),
-      getSessionId: vi.fn()
+      getSessionId: vi
+        .fn()
         .mockReturnValueOnce("sess-a")
         .mockReturnValueOnce(undefined)
         .mockReturnValueOnce(undefined),
@@ -86,12 +89,14 @@ describe("startPresenceBeacon", () => {
     expect(h.beats).toHaveLength(3);
     expect(h.beats[1]).toEqual({
       client_id: "tab-1",
+      sequence: expect.any(Number),
       route: "/projects/4",
       project_id: 4,
       visible: true,
     });
     expect(h.beats[2]).toEqual({
       client_id: "tab-1",
+      sequence: expect.any(Number),
       route: "/global",
       visible: true,
     });
@@ -121,4 +126,16 @@ describe("startPresenceBeacon", () => {
     vi.advanceTimersByTime(60_000);
     expect(h.beats).toHaveLength(1);
   });
+});
+
+it("orders transitions across remounts and explicitly announces departure", () => {
+  const h = harness();
+  const first = startPresenceBeacon(h.deps);
+  first.leave();
+  first.stop();
+  const second = startPresenceBeacon(h.deps);
+  second.stop();
+  expect(h.beats.map((b) => b.visible)).toEqual([true, false, true]);
+  expect(h.beats[1].sequence).toBeGreaterThan(h.beats[0].sequence);
+  expect(h.beats[2].sequence).toBeGreaterThan(h.beats[1].sequence);
 });

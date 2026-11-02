@@ -7,8 +7,6 @@ export interface IntegrationStatus {
   available: boolean;
   enabled: boolean;
   managed: boolean;
-  skill: string;
-  skill_path: string;
   mcp: string;
   message?: string;
 }

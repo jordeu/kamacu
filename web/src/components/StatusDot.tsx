@@ -10,9 +10,24 @@ import type { AgentStatusEntry } from "@/api/agents";
  *  code 143) render GRAY, not red — only the color softens; the tooltip
  *  always shows the real exit code (research OQ4). */
 export function dotMeta(
+  entry: Pick<
+    AgentStatusEntry,
+    "status" | "exitCode" | "stopRequested" | "monitor"
+  >,
+): { className: string; tooltip: string } {
+  const meta = activityMeta(entry);
+  if (entry.monitor?.health === "unavailable") {
+    meta.tooltip += ` · Monitoring unavailable${entry.monitor.detail ? `: ${entry.monitor.detail}` : ""}`;
+  }
+  return meta;
+}
+
+function activityMeta(
   entry: Pick<AgentStatusEntry, "status" | "exitCode" | "stopRequested">,
 ): { className: string; tooltip: string } {
   switch (entry.status) {
+    case "error":
+      return { className: "bg-red-500", tooltip: "Agent needs attention" };
     case "working":
       return { className: "bg-green-500", tooltip: "Working" };
     case "waiting":
@@ -22,9 +37,6 @@ export function dotMeta(
       };
     case "idle":
       return { className: "bg-zinc-400", tooltip: "Idle" };
-    case "running":
-      // M001 custom-engine agent: process alive, no finer state available.
-      return { className: "bg-blue-500", tooltip: "Running" };
     case "exited":
       if (entry.exitCode === null && !entry.stopRequested) {
         // Post-restart DB-derived entry (D-57 / Pitfall 3): a resumable past
@@ -50,7 +62,10 @@ export function StatusDot({
   entry,
   className,
 }: {
-  entry: Pick<AgentStatusEntry, "status" | "exitCode" | "stopRequested">;
+  entry: Pick<
+    AgentStatusEntry,
+    "status" | "exitCode" | "stopRequested" | "monitor"
+  >;
   className?: string;
 }) {
   const { className: dotClassName, tooltip } = dotMeta(entry);

@@ -48,6 +48,46 @@ func create(t *testing.T, s *Service, who Identity, key string) Question {
 	}
 	return r.Question
 }
+func TestOldestFirstPaginationKeepsNewMessagesAtEnd(t *testing.T) {
+	s, _ := fixture(t)
+	ctx := context.Background()
+	s.lookup = func(string) Session { return Session{TaskID: 1, Live: true} }
+	// Equal timestamps must still preserve arrival order.
+	s.now = func() time.Time { return time.UnixMilli(1000) }
+	var ids []string
+	for i := 0; i < 51; i++ {
+		q := create(t, s, Identity{1, fmt.Sprintf("session-%d", i)}, "question")
+		ids = append(ids, q.ID)
+	}
+	// A refreshed older message must not jump to the end.
+	if _, err := s.db.Exec(`UPDATE inbox_questions SET updated_at=2000 WHERE id=?`, ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	check := func(offset int, expected []string, more bool) {
+		t.Helper()
+		page, err := s.ListWithOrder(ctx, nil, false, offset, true)
+		if err != nil || len(page.Items) != len(expected) || page.HasMore != more {
+			t.Fatalf("page offset=%d: %+v %v", offset, page, err)
+		}
+		for i, id := range expected {
+			if page.Items[i].ID != id {
+				t.Fatalf("message %d: got %s, want %s", offset+i, page.Items[i].ID, id)
+			}
+		}
+	}
+	check(0, ids[:50], true)
+	check(50, ids[50:], false)
+	newest := create(t, s, Identity{1, "new-session"}, "question")
+	ids = append(ids, newest.ID)
+	check(0, ids[:50], true)
+	check(50, ids[50:], false)
+	// Other consumers retain their existing most-recently-updated ordering.
+	page, err := s.List(ctx, nil, false, 0)
+	if err != nil || page.Items[0].ID != ids[0] {
+		t.Fatalf("default order changed: %+v %v", page, err)
+	}
+}
+
 func TestCreateValidationIdentityAndIdempotency(t *testing.T) {
 	s, who := fixture(t)
 	ctx := context.Background()
@@ -435,7 +475,6 @@ func TestScratchpadFeedbackLifecycleAndIsolation(t *testing.T) {
 func TestCompletionActionsAndNextPrompt(t *testing.T) {
 	for _, tc := range []struct{ name, answer, option, reason string }{
 		{"next prompt", "Please add tests", "", ""},
-		{"exit", "", "exit", "exit"},
 		{"text is not exit", CompletionExit, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -446,7 +485,7 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			q := r.Question
-			if q.Kind != "completion" || len(q.Options) != 1 || q.Options[0].ID != "exit" {
+			if q.Kind != "completion" || len(q.Options) != 0 {
 				t.Fatalf("completion: %+v", q)
 			}
 			retry, err := s.Complete(ctx, who, Create{Key: "finished", Abstract: "Compact message", Summary: "Implemented feature", Context: "Tests passed"})

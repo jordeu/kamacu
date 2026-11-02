@@ -10,10 +10,10 @@ const assert = require('node:assert/strict');
   let releaseArchive;
   let releaseNextPage;
   let holdNextPage = false;
-  const q = {id:'sidebar-question',task_id:1,project_id:1,task_title:'Improve navigation',project_name:'Kamacu',session_id:'s',abstract:'Task links currently preserve the selected tab, adding a click before replying. I recommend focusing the originating agent terminal only when opening a task from an inbox message; ordinary task navigation would keep the current tab. Choose whether inbox task links should focus the terminal.',summary:'Detailed task summary',context:'Decision context',question:'Focus terminal when opening a task?',options:[{id:'yes',label:'Focus terminal'}],status:'pending',revision:1,created_at:Date.now(),updated_at:Date.now(),kind:'question'};
+  const q = {id:'sidebar-question',task_id:1,project_id:1,task_title:'Improve navigation',project_name:'Kamacu',session_id:'s',abstract:'Task links currently preserve the selected tab, adding a click before replying. I recommend focusing the originating agent terminal only when opening a task from an inbox message; ordinary task navigation would keep the current tab. Choose whether inbox task links should focus the terminal.',summary:'Detailed task summary',context:'Details needed to decide',question:'Focus terminal when opening a task?',options:[{id:'yes',label:'Focus terminal'}],status:'pending',revision:1,created_at:Date.now(),updated_at:Date.now(),kind:'question'};
   await page.route('**/api/**', async route => {
    q.kind = completion ? 'completion' : 'question';
-   q.options = completion ? [{id:'seen',label:'Seen'},{id:'exit',label:'Seen and exit session'}] : [{id:'yes',label:'Focus terminal'}];
+   q.options = completion ? [{id:'move_to_review',label:'Move to review and close session'},{id:'move_to_done',label:'Move to done and close session'}] : [{id:'yes',label:'Focus terminal'}];
    const path = new URL(route.request().url()).pathname;
    let data = [];
    if(path === '/api/inbox') {
@@ -28,12 +28,13 @@ const assert = require('node:assert/strict');
    else if(path.endsWith('/dismiss') && dismissMode === 'error') return route.fulfill({status:500,json:{error:'Could not archive'}});
    else if(path.endsWith('/dismiss') && dismissMode === 'stale') data={outcome:'stale_revision',question:{...q,revision:2}};
    else if(path.endsWith('/dismiss')) { answer=route.request().postDataJSON(); pending=false; if (dismissMode === 'hold') await new Promise(resolve => { releaseArchive = resolve; }); data={outcome:'accepted',question:{...q,status:'dismissed'}}; }
-   else if(path.endsWith('/answer')) { answer=route.request().postDataJSON(); pending=false; data={outcome:'accepted',question:{...q,status:'answered',reason:answer.option_id === 'exit' ? 'exit' : '',answer:answer.option_id?'Focus terminal':answer.answer}}; }
+   else if(path.endsWith('/answer')) { answer=route.request().postDataJSON(); pending=false; data={outcome:'accepted',question:{...q,status:'answered',reason:completion ? answer.option_id : '',answer:answer.option_id?'Focus terminal':answer.answer}}; }
    else if(path === '/api/tasks/1') data={id:1,project_id:1,title:'Improve navigation',description:'',status:'todo',position:0};
    else if(path === '/api/projects/1') data={id:1,name:'Kamacu',workspace_id:1};
    else if(path === '/api/workspaces') data=[{id:1,name:'Work'}];
    else if(path === '/api/projects') data=[{id:1,name:'Kamacu',workspace_id:1,icon_letters:'KA',icon_color:'blue'}];
    else if(path === '/api/worktrees') data={counts:{total:0,orphaned:0},projects:[]};
+   else if(path === '/api/monitor') data={profiles:[],default_profile_id:null,workspaces:[],usage:{}};
    else if(path === '/api/settings') data=Object.fromEntries(['worktree_base','shell','branch_template','done_session_ttl','github_integration','pr_review_seed'].map(k=>[k,{value:'',default:'',source:'default'}]));
    await route.fulfill({json:data});
   });
@@ -97,16 +98,16 @@ const assert = require('node:assert/strict');
   assert.equal(await sidebar.getByRole('button',{name:'Seen',exact:true}).count(),0);
   assert.equal(await sidebar.getByRole('link',{name:/Full context/}).count(),0);
   assert.equal(await sidebar.locator('textarea').count(),0);
-  assert.equal(await sidebar.locator('article button').count(),4);
+  assert.equal(await sidebar.locator('article button').count(),5);
   await sidebar.getByRole('button',{name:q.question,exact:true}).click();
   await dialog.getByText('What was done',{exact:true}).waitFor();
-  await dialog.getByRole('button',{name:'OK, exit session',exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'Move to review and close session',exact:true}).waitFor();
   await dialog.getByRole('button',{name:'Dismiss',exact:true}).waitFor();
   await page.keyboard.press('Escape');
   await page.screenshot({path:'/tmp/inbox-sidebar-completion.png'});
-  await sidebar.getByRole('button',{name:'OK, exit session',exact:true}).click();
-  await sidebar.getByText('Message archived. Agent session is closing.',{exact:true}).waitFor();
-  assert.equal(answer.option_id,'exit');
+  await sidebar.getByRole('button',{name:'Move to review and close session',exact:true}).click();
+  await sidebar.getByText('Task moved to review. Message archived and agent session is closing.',{exact:true}).waitFor();
+  assert.equal(answer.option_id,'move_to_review');
   // Failed or stale archive attempts must leave the user on the current page.
   pending=true; dismissMode='error'; await page.reload();
   await sidebar.getByRole('button',{name:'Open task',exact:true}).click();

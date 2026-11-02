@@ -13,6 +13,7 @@
 
 /** One heartbeat payload — the server's presence.Beat wire shape. */
 export interface HeartbeatBody {
+  sequence: number;
   client_id: string;
   route: string;
   project_id?: number;
@@ -36,11 +37,14 @@ export interface BeaconDeps {
 }
 
 const DEFAULT_INTERVAL_MS = 5000;
+// Monotonic across React effect remounts in this document.
+let sequence = 0;
 
 export interface Beacon {
   stop: () => void;
   /** Send one beat now, regardless of visibility. */
   poke: () => void;
+  leave: () => void;
 }
 
 export function startPresenceBeacon(deps: BeaconDeps): Beacon {
@@ -51,6 +55,7 @@ export function startPresenceBeacon(deps: BeaconDeps): Beacon {
     const ids = parseRouteIds(route);
     const body: HeartbeatBody = {
       client_id: deps.getClientId(),
+      sequence: ++sequence,
       route,
       visible: deps.getVisible(),
     };
@@ -72,6 +77,7 @@ export function startPresenceBeacon(deps: BeaconDeps): Beacon {
   return {
     stop: () => clearInterval(timer),
     poke,
+    leave: () => deps.send({ ...build(), visible: false }),
   };
 }
 

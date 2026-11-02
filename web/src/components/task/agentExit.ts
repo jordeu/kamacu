@@ -1,7 +1,7 @@
 import type { TermSession } from "@/api/sessions";
 
 export function shouldHandleAgentExit(session: TermSession): boolean {
-  return session.kind === "agent" && session.status === "exited" &&
+  return session.kind === "agent" && session.status === "exited" && session.exitSource === "terminal" &&
     (session.exitCode === 0 || session.stopRequested === true);
 }
 
@@ -14,7 +14,8 @@ export function hasViewedAgentExited(
   viewed: ViewedAgent | null,
   taskId: number,
   session: TermSession,
+  activelyViewing: boolean,
 ): boolean {
-  return viewed?.taskId === taskId && viewed.sessionId === session.id &&
+  return activelyViewing && viewed?.taskId === taskId && viewed.sessionId === session.id &&
     shouldHandleAgentExit(session);
 }

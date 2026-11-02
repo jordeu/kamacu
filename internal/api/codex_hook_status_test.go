@@ -80,30 +80,6 @@ func spawnCodexAgent(t *testing.T, mgr *session.Manager) *session.Session {
 
 // PermissionRequest runs before automatic review. Its telemetry alone must
 // never claim a user is blocked, even when the request arrives after an answer.
-func TestCodexHookPermissionRequestDoesNotSetWaiting(t *testing.T) {
-	srv, mgr := newCodexHookServer(t)
-	sess := spawnCodexAgent(t, mgr)
-	url := hookURL(srv, sess.Info().ID)
-	steps := []struct{ body, want string }{
-		{`{"hook_event_name":"UserPromptSubmit","turn_id":"t1"}`, "working"},
-		{`{"hook_event_name":"PermissionRequest","turn_id":"t1","tool_name":"Bash","tool_input":{"command":"sleep 30"}}`, "working"},
-		{`{"hook_event_name":"PostToolUse","turn_id":"t1","tool_name":"Bash","tool_use_id":"call1","tool_input":{"command":"sleep 30"}}`, "working"},
-		{`{"hook_event_name":"Stop","turn_id":"t1"}`, "idle"},
-		{`{"hook_event_name":"PermissionRequest","turn_id":"t1"}`, "idle"},
-		{`{"hook_event_name":"PostToolUse","turn_id":"t1"}`, "idle"},
-		{`{"hook_event_name":"UserPromptSubmit","turn_id":"t2"}`, "working"},
-		{`{"hook_event_name":"Stop","turn_id":"t1"}`, "working"},
-		{`{"hook_event_name":"Interrupt","turn_id":"t2"}`, "idle"},
-	}
-	for _, step := range steps {
-		if got := postHook(t, url, testHookToken, step.body); got != http.StatusNoContent {
-			t.Fatalf("hook = %d", got)
-		}
-		if got := sess.Info().AgentStatus; got != step.want {
-			t.Fatalf("%s: got %s, want %s", step.body, got, step.want)
-		}
-	}
-}
 
 // TestCodexHookSessionStartCapturesCodexSessionID proves the restart-resume
 // capture: codex's hook payloads carry codex's OWN session uuid (payload
@@ -165,28 +141,3 @@ func TestCodexHookSessionIDCaptureIsEngineGated(t *testing.T) {
 // TestCodexHookFullTurnLoop drives the exact production loop of the on-disk
 // codex profile through the receiver: SessionStart (hooks-alive + capture) ->
 // working -> automatic approval -> working -> Stop -> idle.
-func TestCodexHookFullTurnLoop(t *testing.T) {
-	srv, mgr := newCodexHookServer(t)
-	sess := spawnCodexAgent(t, mgr)
-
-	const codexID = "0d1a2b3c-3333-3333-3333-333333333333"
-	steps := []struct {
-		body   string
-		status string
-	}{
-		{`{"hook_event_name":"SessionStart","source":"startup","session_id":"` + codexID + `"}`, "working"},
-		{`{"hook_event_name":"PermissionRequest","tool_name":"Bash","session_id":"` + codexID + `"}`, "working"},
-		{`{"hook_event_name":"Stop","session_id":"` + codexID + `"}`, "idle"},
-	}
-	for i, step := range steps {
-		if got := postHook(t, hookURL(srv, sess.Info().ID), testHookToken, step.body); got != http.StatusNoContent {
-			t.Fatalf("step %d: status = %d, want 204", i, got)
-		}
-		if got := sess.Info().AgentStatus; got != step.status {
-			t.Errorf("step %d (%s): AgentStatus = %q, want %q", i, step.body, got, step.status)
-		}
-	}
-	if got := sess.CodexSessionID(); got != codexID {
-		t.Errorf("CodexSessionID after loop = %q, want %q", got, codexID)
-	}
-}

@@ -192,8 +192,8 @@ func TestAgentLifecycle(t *testing.T) {
 		if sess["kind"] != "agent" {
 			t.Errorf("kind = %q, want %q", sess["kind"], "agent")
 		}
-		if sess["agentStatus"] != "working" {
-			t.Errorf("agentStatus = %q, want %q (spawn -> working)", sess["agentStatus"], "working")
+		if sess["agentStatus"] != "idle" && sess["agentStatus"] != "working" {
+			t.Errorf("agentStatus = %q, want %q (awaiting observation)", sess["agentStatus"], "idle or working")
 		}
 		agentSessionID, _ = sess["id"].(string)
 		if agentSessionID == "" {
@@ -234,7 +234,7 @@ func TestAgentLifecycle(t *testing.T) {
 		}
 	})
 
-	stage("4_notification_hook_sets_waiting", func(t *testing.T) {
+	stage("4_legacy_hook_does_not_set_status", func(t *testing.T) {
 		url := srv.URL + "/api/hooks/sessions/" + agentSessionID
 		body := `{"hook_event_name":"Notification","notification_type":"permission_prompt"}`
 		if got := postHook(t, url, agentLifecycleToken, body); got != http.StatusNoContent {
@@ -245,8 +245,8 @@ func TestAgentLifecycle(t *testing.T) {
 		if entry == nil {
 			t.Fatalf("GET /api/agents/status has no entry for task %d", tid)
 		}
-		if entry["status"] != "waiting" {
-			t.Errorf("status = %q, want %q (sticky until answered/attached)", entry["status"], "waiting")
+		if entry["status"] != "idle" && entry["status"] != "working" {
+			t.Errorf("status = %q, want %q (hooks do not set status)", entry["status"], "idle or working")
 		}
 		if entry["sessionId"] != agentSessionID {
 			t.Errorf("sessionId = %v, want %q", entry["sessionId"], agentSessionID)
@@ -256,7 +256,7 @@ func TestAgentLifecycle(t *testing.T) {
 		}
 	})
 
-	stage("5_attach_clears_waiting", func(t *testing.T) {
+	stage("5_attach_preserves_observed_status", func(t *testing.T) {
 		ctx := testWSCtx(t)
 		conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+agentSessionID+"/ws", nil)
 		if err != nil {
@@ -264,9 +264,8 @@ func TestAgentLifecycle(t *testing.T) {
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "")
 
-		// D-45: the handler clears waiting right after Attach; the dial
-		// returning only guarantees the upgrade, so poll briefly.
-		waitAgentStatus(t, srv, tid, "idle", 2*time.Second)
+		// Attaching must not infer a different activity state.
+		waitAgentStatus(t, srv, tid, "working", 2*time.Second)
 	})
 
 	stage("6_stop_exits_143_stop_requested", func(t *testing.T) {

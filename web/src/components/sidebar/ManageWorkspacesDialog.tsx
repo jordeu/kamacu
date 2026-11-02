@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, Settings } from "lucide-react";
 import { useProjects, useWorkspaces } from "@/api/queries";
 import { useDeleteWorkspace } from "@/api/mutations";
 import type { Workspace } from "@/api/types";
@@ -25,6 +25,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { MonitoringSection } from "@/components/settings/MonitoringSection";
 import { WorkspaceNameDialog } from "@/components/sidebar/WorkspaceNameDialog";
 
 export interface ManageWorkspacesDialogProps {
@@ -53,8 +54,11 @@ export function ManageWorkspacesDialog({
   // The name dialog is shared by the create entry and every row's rename.
   const [nameOpen, setNameOpen] = useState(false);
   const [nameMode, setNameMode] = useState<"create" | "rename">("create");
-  const [nameTarget, setNameTarget] = useState<Workspace | undefined>(undefined);
+  const [nameTarget, setNameTarget] = useState<Workspace | undefined>(
+    undefined,
+  );
   // The delete confirm targets one (empty, non-default) workspace at a time.
+  const [monitorTarget, setMonitorTarget] = useState<Workspace | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null);
 
   // Per-workspace project count, keyed by workspace_id (D-05) — mirrors the
@@ -123,6 +127,14 @@ export function ManageWorkspacesDialog({
                   >
                     <Pencil className="size-4" />
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Monitoring model for ${ws.name}`}
+                    onClick={() => setMonitorTarget(ws)}
+                  >
+                    <Settings className="size-4" />
+                  </Button>
                   {deleteDisabled ? (
                     // Keep the disabled delete focusable-with-tooltip: aria-disabled
                     // + a click no-op instead of a raw `disabled` (which would swallow
@@ -140,7 +152,9 @@ export function ManageWorkspacesDialog({
                           <Trash2 className="size-4" />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent side="top">{deleteTooltip}</TooltipContent>
+                      <TooltipContent side="top">
+                        {deleteTooltip}
+                      </TooltipContent>
                     </Tooltip>
                   ) : (
                     <Button
@@ -168,6 +182,21 @@ export function ManageWorkspacesDialog({
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={monitorTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setMonitorTarget(null);
+        }}
+      >
+        <DialogContent aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>{monitorTarget?.name} monitoring</DialogTitle>
+          </DialogHeader>
+          {monitorTarget && (
+            <MonitoringSection workspaceId={monitorTarget.id} />
+          )}
+        </DialogContent>
+      </Dialog>
       <WorkspaceNameDialog
         mode={nameMode}
         workspace={nameTarget}

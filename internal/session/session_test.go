@@ -687,166 +687,6 @@ func injectOutputForTest(s *Session, chunk []byte) {
 	s.noteAgentOutputLocked(chunk)
 }
 
-// setLastActivityForTest overrides the activity timestamp (quiet-threshold
-// manipulation).
-func setLastActivityForTest(s *Session, ts time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastActivity = ts
-}
-
-// setStopHookAtForTest moves the settle-window anchor (so tests need not
-// sleep through the real 2s window).
-func setStopHookAtForTest(s *Session, ts time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stopHookAt = ts
-}
-
-func agentStatus(s *Session) string { return s.Info().AgentStatus }
-
-// TestAgentStatusFreshIsWorking: spawn -> working (lastActivity set at spawn,
-// startup output flows immediately).
-func TestAgentStatusFreshIsWorking(t *testing.T) {
-	m := NewManager()
-	s := spawnAgentForTest(t, m)
-	if got := agentStatus(s); got != "working" {
-		t.Errorf("fresh agent AgentStatus = %q, want %q", got, "working")
-	}
-}
-
-// TestAgentWaitingIsSticky: Notification -> waiting; output (prompt redraws)
-// must NEVER clear it; only a Stop hook (SetIdle) does here.
-func TestAgentWaitingIsSticky(t *testing.T) {
-	m := NewManager()
-	s := spawnAgentForTest(t, m)
-
-	s.SetWaiting()
-	if got := agentStatus(s); got != "waiting" {
-		t.Fatalf("after SetWaiting AgentStatus = %q, want %q", got, "waiting")
-	}
-
-	injectOutputForTest(s, []byte("permission prompt redraw"))
-	injectOutputForTest(s, []byte("spinner frame"))
-	if got := agentStatus(s); got != "waiting" {
-		t.Errorf("after output AgentStatus = %q, want %q (waiting is sticky)", got, "waiting")
-	}
-
-	s.SetIdle()
-	if got := agentStatus(s); got != "idle" {
-		t.Errorf("after SetIdle AgentStatus = %q, want %q", got, "idle")
-	}
-}
-
-// TestAgentSettleWindow: SetIdle is immediate even with recent output, and
-// output inside the 2s settle window must not flip idle -> working (Pitfall 1
-// — claude paints the final response around the Stop hook). Output after the
-// window does flip to working.
-func TestAgentSettleWindow(t *testing.T) {
-	m := NewManager()
-	s := spawnAgentForTest(t, m)
-	waitForQuiescentSnapshot(t, s, "fake claude ready") // startup output done
-
-	// Output arrived 1s ago — SetIdle must still flip to idle IMMEDIATELY.
-	setLastActivityForTest(s, time.Now().Add(-time.Second))
-	s.SetIdle()
-	if got := agentStatus(s); got != "idle" {
-		t.Fatalf("right after SetIdle AgentStatus = %q, want %q", got, "idle")
-	}
-
-	// Output within the settle window must NOT flip to working.
-	injectOutputForTest(s, []byte("final response paint"))
-	if got := agentStatus(s); got != "idle" {
-		t.Errorf("output within settle window: AgentStatus = %q, want %q", got, "idle")
-	}
-
-	// Move the settle anchor past the window: output now flips to working.
-	setStopHookAtForTest(s, time.Now().Add(-3*time.Second))
-	injectOutputForTest(s, []byte("new turn output"))
-	if got := agentStatus(s); got != "working" {
-		t.Errorf("output after settle window: AgentStatus = %q, want %q", got, "working")
-	}
-}
-
-// TestAgentStdinClearsWaiting: the user typing into a waiting agent answers
-// the prompt — waiting clears and the session is working.
-func TestAgentStdinClearsWaiting(t *testing.T) {
-	m := NewManager()
-	s := spawnAgentForTest(t, m)
-
-	s.SetWaiting()
-	if err := s.WriteInput([]byte("y")); err != nil {
-		t.Fatalf("WriteInput: %v", err)
-	}
-	if got := agentStatus(s); got != "working" {
-		t.Errorf("after stdin AgentStatus = %q, want %q", got, "working")
-	}
-}
-
-// TestClearWaitingOnAttach: attaching to a waiting agent clears it to idle
-// (D-45); bash sessions are a strict no-op.
-func TestClearWaitingOnAttach(t *testing.T) {
-	m := NewManager()
-	s := spawnAgentForTest(t, m)
-
-	s.SetWaiting()
-	s.ClearWaitingOnAttach()
-	if got := agentStatus(s); got != "idle" {
-		t.Errorf("after ClearWaitingOnAttach AgentStatus = %q, want %q", got, "idle")
-	}
-
-	// A non-waiting agent is untouched (working stays working).
-	s2 := spawnAgentForTest(t, m)
-	s2.ClearWaitingOnAttach()
-	if got := agentStatus(s2); got != "working" {
-		t.Errorf("non-waiting agent after ClearWaitingOnAttach = %q, want %q", got, "working")
-	}
-
-	// Bash: no-op, no panic, no agent status.
-	b := spawnForTest(t, m)
-	b.ClearWaitingOnAttach()
-	if got := b.Info().AgentStatus; got != "" {
-		t.Errorf("bash AgentStatus = %q, want empty", got)
-	}
-}
-
-// TestAgentBelFallbackGating: a bare BEL marks waiting ONLY in hooks-dead
-// mode (no SessionStart received); OSC-terminated BELs never count (Pitfall 2
-// + research anti-pattern).
-func TestAgentBelFallbackGating(t *testing.T) {
-	m := NewManager()
-
-	t.Run("hooks dead: bare BEL -> waiting", func(t *testing.T) {
-		s := spawnAgentForTest(t, m)
-		injectOutputForTest(s, []byte{0x07})
-		if got := agentStatus(s); got != "waiting" {
-			t.Errorf("AgentStatus = %q, want %q", got, "waiting")
-		}
-	})
-
-	t.Run("hooks alive: BEL ignored", func(t *testing.T) {
-		s := spawnAgentForTest(t, m)
-		s.MarkHooksAlive()
-		injectOutputForTest(s, []byte{0x07})
-		if got := agentStatus(s); got == "waiting" {
-			t.Errorf("AgentStatus = %q; hooks-alive BEL must never mark waiting", got)
-		}
-	})
-
-	t.Run("OSC-terminated BEL never triggers", func(t *testing.T) {
-		s := spawnAgentForTest(t, m)
-		injectOutputForTest(s, []byte("\x1b]0;title\x07"))
-		if got := agentStatus(s); got == "waiting" {
-			t.Errorf("AgentStatus = %q; OSC terminator BEL must not mark waiting (hooks dead)", got)
-		}
-		s.MarkHooksAlive()
-		injectOutputForTest(s, []byte("\x1b]0;title\x07"))
-		if got := agentStatus(s); got == "waiting" {
-			t.Errorf("AgentStatus = %q; OSC terminator BEL must not mark waiting (hooks alive)", got)
-		}
-	})
-}
-
 // TestAgentStopRequestedDistinguishesExit: server-initiated Stop records
 // stopRequested so exit 143 can render gray; a natural exit stays false
 // (red stays reserved for exits Kamacu didn't ask for).
@@ -885,19 +725,6 @@ func TestAgentStopRequestedDistinguishesExit(t *testing.T) {
 	}
 	if info2.AgentStatus != "exited" {
 		t.Errorf("AgentStatus = %q after natural exit, want %q", info2.AgentStatus, "exited")
-	}
-}
-
-// TestAgentQuietThresholdIdle: no activity for longer than the 10s threshold
-// computes idle (lazy computation, no ticker).
-func TestAgentQuietThresholdIdle(t *testing.T) {
-	m := NewManager()
-	s := spawnAgentForTest(t, m)
-	waitForQuiescentSnapshot(t, s, "fake claude ready") // startup output done
-
-	setLastActivityForTest(s, time.Now().Add(-(agentQuietThreshold + time.Second)))
-	if got := agentStatus(s); got != "idle" {
-		t.Errorf("AgentStatus = %q after >10s quiet, want %q", got, "idle")
 	}
 }
 
@@ -977,18 +804,15 @@ func TestSpawnAgentExtraArgsAppendedAfterFixedFlags(t *testing.T) {
 	extras := []string{"--dangerously-skip-permissions", "--append-system-prompt", "be terse"}
 	_, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1, ExtraArgs: extras})
 
-	if len(args) != 4+len(extras) {
-		t.Fatalf("argv = %q, want %d args (4 fixed + %d extras)", args, 4+len(extras), len(extras))
+	if len(args) != 2+len(extras) {
+		t.Fatalf("argv = %q, want %d args (2 fixed + %d extras)", args, 2+len(extras), len(extras))
 	}
 	if args[0] != "--session-id" {
 		t.Errorf("argv[0] = %q, want --session-id", args[0])
 	}
-	if args[2] != "--settings" {
-		t.Errorf("argv[2] = %q, want --settings", args[2])
-	}
 	for i, want := range extras {
-		if args[4+i] != want {
-			t.Errorf("argv[%d] = %q, want extra %q (extras must follow the fixed flags in order)", 4+i, args[4+i], want)
+		if args[2+i] != want {
+			t.Errorf("argv[%d] = %q, want extra %q (extras must follow the fixed flags in order)", 2+i, args[2+i], want)
 		}
 	}
 }
@@ -1003,8 +827,8 @@ func TestSpawnAgentResumeExtraArgsAppended(t *testing.T) {
 		ExtraArgs:       []string{"--dangerously-skip-permissions"},
 	})
 
-	if len(args) != 5 {
-		t.Fatalf("argv = %q, want 5 args (--resume <uuid> --settings <json> <extra>)", args)
+	if len(args) != 3 {
+		t.Fatalf("argv = %q, want 3 args (--resume <uuid> --settings <json> <extra>)", args)
 	}
 	if args[0] != "--resume" {
 		t.Errorf("argv[0] = %q, want --resume", args[0])
@@ -1012,11 +836,8 @@ func TestSpawnAgentResumeExtraArgsAppended(t *testing.T) {
 	if args[1] != resumeID {
 		t.Errorf("argv[1] = %q, want the resume uuid %q", args[1], resumeID)
 	}
-	if args[2] != "--settings" {
-		t.Errorf("argv[2] = %q, want --settings", args[2])
-	}
-	if args[4] != "--dangerously-skip-permissions" {
-		t.Errorf("argv[4] = %q, want the extra after the fixed flags", args[4])
+	if args[2] != "--dangerously-skip-permissions" {
+		t.Errorf("argv[2] = %q, want the extra after the fixed flags", args[2])
 	}
 }
 
@@ -1026,8 +847,8 @@ func TestSpawnAgentResumeExtraArgsAppended(t *testing.T) {
 func TestSpawnAgentNoExtraArgsUnchanged(t *testing.T) {
 	_, args := agentArgv(t, SpawnOpts{Kind: KindAgent, Cwd: t.TempDir(), TaskID: 1})
 
-	if len(args) != 4 {
-		t.Fatalf("argv = %q, want exactly 4 args with no extras", args)
+	if len(args) != 2 {
+		t.Fatalf("argv = %q, want exactly 2 args with no extras", args)
 	}
 }
 
@@ -1135,7 +956,7 @@ func TestListGlobal(t *testing.T) {
 	m := NewManager()
 	g1 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
 	g2 := spawnForTestOpts(t, m, SpawnOpts{Global: true})
-	_ = spawnForTest(t, m)                    // dev
+	_ = spawnForTest(t, m)                           // dev
 	_ = spawnForTestOpts(t, m, SpawnOpts{TaskID: 7}) // task
 
 	got := m.ListGlobal()

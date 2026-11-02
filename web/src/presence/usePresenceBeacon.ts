@@ -9,21 +9,11 @@ import { startPresenceBeacon, type Beacon, type HeartbeatBody } from "./beacon";
 // flips poke an immediate beat; the 5s interval covers the steady state.
 // No indicator, no API reads — the surface is passive by design.
 
-const CLIENT_ID_KEY = "kamacu.presence.client-id";
-
-/** Per-tab identity, stable across reloads within the tab's session. */
+// A duplicated tab inherits sessionStorage; using it for identity would let
+// that tab overwrite the original tab's presence. Each document owns an ID.
+let documentClientId: string | undefined;
 function ensureClientId(): string {
-  try {
-    let id = sessionStorage.getItem(CLIENT_ID_KEY);
-    if (!id) {
-      id = crypto.randomUUID();
-      sessionStorage.setItem(CLIENT_ID_KEY, id);
-    }
-    return id;
-  } catch {
-    // Storage unavailable — a per-mount id still identifies this beacon.
-    return crypto.randomUUID();
-  }
+  return (documentClientId ??= crypto.randomUUID());
 }
 
 /** Fire-and-forget transport; keepalive so the final hide beat survives unload. */
@@ -58,7 +48,7 @@ export function usePresenceBeacon(): void {
       getSessionId: () => getActiveSession() ?? undefined,
       getVisible: () =>
         typeof document === "undefined" ||
-        document.visibilityState === "visible",
+        (document.visibilityState === "visible" && document.hasFocus()),
       send: sendBeat,
     });
     beaconRef.current = beacon;
@@ -67,8 +57,19 @@ export function usePresenceBeacon(): void {
     // return → an immediate visible beat.
     const onVisibility = () => beacon.poke();
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", beacon.leave);
+    window.addEventListener("pageshow", onVisibility);
+    window.addEventListener("focus", onVisibility);
+    window.addEventListener("blur", onVisibility);
+    window.addEventListener("kamacu-terminal-view", onVisibility);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", beacon.leave);
+      window.removeEventListener("pageshow", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+      window.removeEventListener("blur", onVisibility);
+      window.removeEventListener("kamacu-terminal-view", onVisibility);
+      beacon.leave();
       beacon.stop();
       beaconRef.current = null;
     };
