@@ -228,3 +228,28 @@ func TestGitHubMissingIdentityIsStillFatal(t *testing.T) {
 		t.Fatal("missing identity was accepted")
 	}
 }
+
+func TestGitHubEnrichRefreshesSubjectTitle(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+			if missing {
+				return errorResponse(404), errors.New("exit status 1")
+			}
+			return response(`{"title":"Renamed PR","state":"open"}`, ""), nil
+		}}
+		e := event()
+		e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+		e.SubjectTitle = "Old title"
+		got, err := g.Enrich(context.Background(), Source{Config: json.RawMessage(`{}`)}, e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "Renamed PR"
+		if missing {
+			want = ""
+		}
+		if got.SubjectTitle != want {
+			t.Fatalf("title = %q, want %q", got.SubjectTitle, want)
+		}
+	}
+}

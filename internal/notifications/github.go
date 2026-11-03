@@ -229,6 +229,7 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 	// Never present an older stored state or excerpt as a fresh observation.
 	event.Context = ""
 	event.SubjectState = ""
+	event.SubjectTitle = ""
 	event.ContextWarnings = nil
 	host := g.config(s).Hostname
 	path, err := githubPath(host, event.SubjectURL)
@@ -284,6 +285,7 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 		}
 		if p == path {
 			if subject, ok := data.(map[string]any); ok {
+				event.SubjectTitle, _ = subject["title"].(string)
 				event.SubjectState, _ = subject["state"].(string)
 				if merged, ok := subject["merged"].(bool); ok && merged {
 					event.SubjectState = "merged"

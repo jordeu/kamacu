@@ -25,6 +25,7 @@ func (s *Service) enrichSubject(ctx context.Context, source Source, event Event)
 	}
 	event.Context = ""
 	event.SubjectState = ""
+	event.SubjectTitle = ""
 	event.ContextWarnings = []string{"Current subject context is unavailable. Use the raw notification metadata; do not assume the subject is resolved. Ask the user to inspect or clarify when actionability is uncertain."}
 	return event, nil
 }
