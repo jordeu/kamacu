@@ -76,38 +76,9 @@ func (s *Service) ContinueNotification(ctx context.Context, id string) (Question
 	if len(c.Context) > 32000 {
 		c.Context = q.ExecutionResult
 	}
-	return s.publishNotificationLocked(ctx, q.NotificationID, q.SourceName, q.SourceURL, c, false)
+	return s.publishFollowupLocked(ctx, q, c)
 }
 
-// PendingNotification snapshots the attention decision for a source thread.
-func (s *Service) PendingNotification(ctx context.Context, eventID int64) (Question, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.pendingNotificationLocked(ctx, eventID)
-}
 func (s *Service) pendingNotificationLocked(ctx context.Context, eventID int64) (Question, error) {
-	return scan(s.db.QueryRowContext(ctx, selectQuestion+`JOIN notification_events e ON e.id=q.notification_id WHERE q.origin='notification' AND q.status='pending' AND (e.source_id,e.external_id)=(SELECT source_id,external_id FROM notification_events WHERE id=?)`, eventID))
-}
-
-// SupersedeNotification archives only the exact pending decision classified by
-// triage. A changed card is reconsidered; an already answered card stays intact.
-func (s *Service) SupersedeNotification(ctx context.Context, eventID int64, expectedID string, revision int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	q, err := s.pendingNotificationLocked(ctx, eventID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	markIgnored := func(tx *sql.Tx) error {
-		_, e := tx.ExecContext(ctx, `UPDATE notification_events SET state='ignored',last_error='' WHERE id=?`, eventID)
-		return e
-	}
-	if errors.Is(err, ErrNotFound) {
-		_, err = s.db.ExecContext(ctx, `UPDATE notification_events SET state='ignored',last_error='' WHERE id=?`, eventID)
-		return err
-	}
-	if q.ID != expectedID || q.Revision != revision {
-		return ErrConflict
-	}
-	return s.transitionWith(ctx, markIgnored, q.ID, "notification_superseded", "", `UPDATE inbox_questions SET status='unanswered',reason='notification_superseded',revision=revision+1,updated_at=? WHERE id=?`, s.now().UnixMilli(), q.ID)
+	return scan(s.db.QueryRowContext(ctx, selectQuestion+`JOIN notification_events e ON e.id=q.notification_id WHERE q.origin='notification' AND q.status='pending' AND q.notification_group='' AND (e.source_id,e.external_id)=(SELECT source_id,external_id FROM notification_events WHERE id=?)`, eventID))
 }

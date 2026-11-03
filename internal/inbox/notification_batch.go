@@ -1,0 +1,205 @@
+package inbox
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+)
+
+type NotificationBatchAction struct {
+	EventIDs   []int64
+	SourceName string
+	SourceURL  string
+	Request    Create
+}
+type NotificationQuestionRef struct {
+	ID       string `json:"id"`
+	Revision int64  `json:"revision"`
+}
+
+// ApplyNotificationBatch publishes one independent card per action, records its
+// full provenance, supersedes only unchanged questions, and archives the exact
+// raw snapshot in the same transaction as marking the run complete.
+func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, actions []NotificationBatchAction, supersede []NotificationQuestionRef) error {
+	for i := range actions {
+		actions[i].Request.Key = fmt.Sprintf("batch:%s:%d", batchID, i)
+		if err := validate(actions[i].Request); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var status string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM notification_batches WHERE id=?`, batchID).Scan(&status); err != nil {
+		return err
+	}
+	if status == "completed" {
+		return nil
+	}
+	if status != "running" {
+		return ErrConflict
+	}
+	var stale int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM notification_batch_events b JOIN notification_events e ON e.id=b.event_id WHERE b.batch_id=? AND (e.raw_status!='pending' OR e.raw_revision!=b.revision)`, batchID).Scan(&stale); err != nil {
+		return err
+	}
+	if stale > 0 {
+		return ErrConflict
+	}
+	if err = checkNotificationBatchQuestions(ctx, tx, batchID); err != nil {
+		return err
+	}
+	now := s.now().UnixMilli()
+	for _, ref := range supersede {
+		var revision int64
+		var qstatus, origin string
+		if err = tx.QueryRowContext(ctx, `SELECT q.revision,q.status,q.origin FROM notification_batch_questions b JOIN inbox_questions q ON q.id=b.question_id WHERE b.batch_id=? AND q.id=? AND b.revision=?`, batchID, ref.ID, ref.Revision).Scan(&revision, &qstatus, &origin); err != nil {
+			return err
+		}
+		if qstatus != "pending" {
+			continue
+		}
+		if revision != ref.Revision || origin != "notification" {
+			return ErrConflict
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE inbox_questions SET status='unanswered',reason='notification_superseded',revision=revision+1,updated_at=? WHERE id=?`, now, ref.ID); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_events(question_id,kind,session_id,created_at) VALUES(?,'notification_superseded','',?)`, ref.ID, now); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET raw_status='archived',raw_revision=raw_revision+1,state='ignored',last_error='' WHERE id IN (SELECT event_id FROM notification_batch_events WHERE batch_id=?)`, batchID); err != nil {
+		return err
+	}
+	for _, a := range actions {
+		if len(a.EventIDs) == 0 {
+			return ErrInvalid
+		}
+		id := uuid.NewString()
+		c := a.Request
+		if c.Options == nil {
+			c.Options = []Option{}
+		}
+		opts, _ := json.Marshal(c.Options)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?)`, id, "notification:"+id, c.Key, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, a.EventIDs[0], a.SourceName, a.SourceURL, id); err != nil {
+			return err
+		}
+		for _, eventID := range a.EventIDs {
+			var member int
+			if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM notification_batch_events WHERE batch_id=? AND event_id=?`, batchID, eventID).Scan(&member); err != nil {
+				return err
+			}
+			if member != 1 {
+				return ErrInvalid
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO notification_question_events(question_id,event_id) VALUES(?,?)`, id, eventID); err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET state='published' WHERE id=?`, eventID); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_events(question_id,kind,session_id,created_at) VALUES(?,'notification_batch_created','',?)`, id, now); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE notification_batches SET status='completed',action_count=?,updated_at=?,error='' WHERE id=?`, len(actions), now, batchID); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	s.signal()
+	return nil
+}
+
+// RelatedNotificationIDs includes every notification behind a grouped action,
+// falling back to the originating event for pre-batch inbox history.
+func (s *Service) RelatedNotificationIDs(ctx context.Context, questionID string) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT event_id FROM notification_question_events WHERE question_id=? UNION SELECT notification_id FROM inbox_questions WHERE id=? AND notification_id IS NOT NULL ORDER BY 1`, questionID, questionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+func (s *Service) PublishNotificationFollowup(ctx context.Context, questionID string, c Create) (Question, error) {
+	c.Key = uuid.NewString()
+	if err := validate(c); err != nil {
+		return Question{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous, err := s.get(ctx, questionID)
+	if err != nil {
+		return Question{}, err
+	}
+	if previous.Origin != "notification" {
+		return Question{}, ErrInvalid
+	}
+	return s.publishFollowupLocked(ctx, previous, c)
+}
+func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, c Create) (Question, error) {
+	var group string
+	if err := s.db.QueryRowContext(ctx, `SELECT notification_group FROM inbox_questions WHERE id=?`, previous.ID).Scan(&group); err != nil {
+		return Question{}, err
+	}
+	if group == "" {
+		return s.publishNotificationLocked(ctx, previous.NotificationID, previous.SourceName, previous.SourceURL, c, false)
+	}
+	q, err := scan(s.db.QueryRowContext(ctx, selectQuestion+`WHERE q.notification_group=? AND q.status='pending'`, group))
+	if err == nil {
+		return q, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return Question{}, err
+	}
+	id := uuid.NewString()
+	now := s.now().UnixMilli()
+	if c.Options == nil {
+		c.Options = []Option{}
+	}
+	opts, _ := json.Marshal(c.Options)
+	before := func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO notification_question_events(question_id,event_id) SELECT ?,event_id FROM notification_question_events WHERE question_id=?`, id, previous.ID)
+		return err
+	}
+	// Provenance references the newly inserted question, so copy it after insert.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Question{}, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?)`, id, "notification:"+id, id, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, previous.NotificationID, previous.SourceName, previous.SourceURL, group); err != nil {
+		return Question{}, err
+	}
+	if err = before(tx); err != nil {
+		return Question{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_events(question_id,kind,session_id,created_at) VALUES(?,'notification_followup','',?)`, id, now); err != nil {
+		return Question{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Question{}, err
+	}
+	s.signal()
+	return s.get(ctx, id)
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +114,117 @@ func TestGitHubCheckIdentityUsesCurrentCredentials(t *testing.T) {
 	source.Account = ""
 	if err := g.CheckIdentity(context.Background(), source); err == nil {
 		t.Fatal("accepted unbound source")
+	}
+}
+
+func TestGitHubEnrichmentRetainsResolvedStateOutsideLargeExcerpts(t *testing.T) {
+	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		if strings.Contains(path, "?") {
+			return response(`[]`, ""), nil
+		}
+		body, _ := json.Marshal(map[string]any{"state": "closed", "merged": true, "body": strings.Repeat("Long description. ", 1000)})
+		return response(string(body), ""), nil
+	}}
+	e := event()
+	e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+	enriched, err := g.Enrich(context.Background(), Source{Config: json.RawMessage(`{}`)}, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enriched.SubjectState != "merged" {
+		t.Fatalf("lost resolved subject state: %+v", enriched)
+	}
+}
+
+func errorResponse(status int) []byte {
+	return []byte(fmt.Sprintf("HTTP/2.0 %d %s\r\nContent-Type: application/json\r\n\r\n{\"message\":\"resource request failed\"}", status, http.StatusText(status)))
+}
+func TestGitHubHTTPFailuresKeepStatusDespiteCLIExit(t *testing.T) {
+	for _, status := range []int{401, 403, 404, 410, 429, 500} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			g := GitHub{Run: func(context.Context, ...string) ([]byte, error) {
+				return errorResponse(status), errors.New("exit status 1")
+			}}
+			_, _, err := g.api(context.Background(), "github.com", "repos/acme/repo/pulls/7")
+			var httpErr *GitHubHTTPError
+			if !errors.As(err, &httpErr) || httpErr.StatusCode != status {
+				t.Fatalf("lost HTTP status: %v", err)
+			}
+			missing := status == 404 || status == 410
+			if errors.Is(err, ErrContextUnavailable) != missing {
+				t.Fatalf("wrong missing-context classification: %v", err)
+			}
+		})
+	}
+}
+func TestGitHubDeletedOptionalCommentPreservesOtherEvidence(t *testing.T) {
+	paths := []string{}
+	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		paths = append(paths, path)
+		switch {
+		case strings.Contains(path, "/issues/comments/"):
+			return errorResponse(404), errors.New("exit status 1")
+		case strings.Contains(path, "?"):
+			return response(`[]`, ""), nil
+		default:
+			return response(`{"state":"closed","merged":true,"body":"Verified current subject"}`, ""), nil
+		}
+	}}
+	e := event()
+	e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+	e.LatestCommentURL = "https://api.github.com/repos/acme/repo/issues/comments/99"
+	fresh, err := g.Enrich(context.Background(), Source{Config: json.RawMessage(`{}`)}, e)
+	if err != nil || fresh.SubjectState != "merged" || !strings.Contains(fresh.Context, "Verified current subject") || len(fresh.ContextWarnings) != 1 {
+		t.Fatalf("lost partial evidence: %+v %v", fresh, err)
+	}
+	if len(paths) != 4 {
+		t.Fatalf("stopped fetching other evidence after missing comment: %v", paths)
+	}
+}
+func TestGitHubUnavailableSubjectDoesNotReuseStaleEvidence(t *testing.T) {
+	for _, status := range []int{404, 410} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			calls := 0
+			g := GitHub{Run: func(context.Context, ...string) ([]byte, error) {
+				calls++
+				return errorResponse(status), errors.New("exit status 1")
+			}}
+			e := event()
+			e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+			e.Context = "Stale body"
+			e.SubjectState = "merged"
+			fresh, err := g.Enrich(context.Background(), Source{Config: json.RawMessage(`{}`)}, e)
+			if err != nil || fresh.Context != "" || fresh.SubjectState != "" || len(fresh.ContextWarnings) != 1 || calls != 1 {
+				t.Fatalf("missing subject was treated as resolved: %+v %v", fresh, err)
+			}
+		})
+	}
+}
+func TestGitHubOptionalAuthorizationFailuresAreNotHidden(t *testing.T) {
+	for _, status := range []int{401, 403, 429} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+				if strings.Contains(args[len(args)-1], "/issues/comments/") {
+					return errorResponse(status), errors.New("exit status 1")
+				}
+				return response(`{"state":"open"}`, ""), nil
+			}}
+			e := event()
+			e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+			e.LatestCommentURL = "https://api.github.com/repos/acme/repo/issues/comments/99"
+			if _, err := g.Enrich(context.Background(), Source{Config: json.RawMessage(`{}`)}, e); err == nil || errors.Is(err, ErrContextUnavailable) {
+				t.Fatalf("masked authorization/rate failure: %v", err)
+			}
+		})
+	}
+}
+func TestGitHubMissingIdentityIsStillFatal(t *testing.T) {
+	g := GitHub{Run: func(context.Context, ...string) ([]byte, error) {
+		return errorResponse(404), errors.New("exit status 1")
+	}}
+	if err := g.CheckIdentity(context.Background(), Source{Account: "alice", Config: json.RawMessage(`{}`)}); err == nil {
+		t.Fatal("missing identity was accepted")
 	}
 }

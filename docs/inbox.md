@@ -85,23 +85,52 @@ Disconnection preserves inbox history. Pausing retains the checkpoint and catche
 up on activity after resuming. Turning off GitHub integration pauses collection
 and notification actions too.
 
-The global monitoring model interprets notifications with the global
-**Notification instructions** setting. Workspace model overrides do not apply.
-The model receives notification details, bounded PR/comment/review excerpts, and
-matching Kamacu project/task context. It can ignore routine activity or publish a
-question with suggested replies and free-text input. Pending updates to one thread
-are combined, with revisions protecting older answer buttons. Triage also sees
-the existing pending question. Routine ignored updates leave it intact; obsolete
-questions can be superseded and archived without inventing an answer. Superseding
-checks the classified revision and preserves a changed card or a user answer saved
-during inference. Dismissing a card keeps that version dismissed; later activity can create a new decision.
+Collected notifications first appear in the **Notifications** view, with separate
+**Pending** and **Archived** lists. Browsing this view and manually archiving or
+restoring items never invokes the model. Collection does not automatically enrich,
+classify, group, or discard new notifications. Older revisions remain available
+for comparison with newer activity.
+
+The Inbox sidebar shows a separate pending-notification counter, a link to the raw
+list, and **Process pending**, available in both expanded and collapsed layouts.
+The same processing control is available in Notifications. Clicking it captures
+all currently pending notifications in one durable snapshot. Repeated clicks join
+the active run; notifications collected afterward wait for the next run.
+
+Processing uses the global monitoring model and global **Notification instructions**;
+workspace model overrides do not apply. The model reads the whole snapshot with
+current subject state, bounded comment/review excerpts, matching projects/tasks,
+and related pending inbox questions. It groups related activity into one question
+per concrete action, can propose several distinct actions from one thread, and
+discards obsolete activity such as a review request for a merged PR. Existing
+pending questions can be preserved or explicitly superseded. The full related
+pending-question set is checked before inference and again during publication;
+new follow-ups, edits, answers, or dismissals invalidate a stale plan and leave
+its raw notifications pending for another explicit run. Exact duplicate actions
+are deduplicated without merging different actions for the same notification.
+
+On success, every raw notification in the snapshot moves to Archived, including
+notifications represented by inbox actions. Inbox tracks the resulting decisions
+independently. Publishing the actions, superseding old questions, archiving raw
+items, and completing the run commit together. Failed or interrupted processing
+leaves all snapshot notifications pending; retry requires another explicit click.
+Missing subjects or deleted comments are supplied as unavailable-context warnings,
+not as evidence that work is resolved. Missing optional comments preserve any
+verified subject state and other excerpts. Resulting action cards disclose missing
+context, while authentication, identity, rate-limit and transport failures still
+stop the run without consuming notifications.
+
+An oversized snapshot fails visibly instead of silently processing only part of
+the pending list. Notifications in an active snapshot cannot be manually archived
+or restored until the run finishes.
 
 Notification questions belong to their source rather than an agent session and
 survive server restarts. Replies are saved and queued atomically. A bounded
 execution loop uses the existing Kamacu MCP tools to inspect projects/tasks and
 sessions, provision review workspaces, start task agents, and send session
-instructions. Mutations are restricted to the notification's repository, and
-opening a review must match its PR. Other MCP actions, including posting a review,
+instructions. Mutations are restricted to repositories represented by the action's related
+notifications, and opening a review must match one of their PRs. Grouped actions
+and their follow-up questions retain every contributing notification. Other MCP actions, including posting a review,
 deleting resources, and moving tasks, are unavailable. Source content is treated
 as untrusted data; the user's reply supplies action authorization.
 

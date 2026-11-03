@@ -54,6 +54,17 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 	}
 	return b.Buffer.Write(p)
 }
+
+type GitHubHTTPError struct{ StatusCode int }
+
+func (e *GitHubHTTPError) Error() string { return fmt.Sprintf("GitHub returned HTTP %d", e.StatusCode) }
+func (e *GitHubHTTPError) Unwrap() error {
+	if e.StatusCode == http.StatusNotFound || e.StatusCode == http.StatusGone {
+		return ErrContextUnavailable
+	}
+	return nil
+}
+
 func (g GitHub) api(ctx context.Context, host, path string) ([]byte, http.Header, error) {
 	args := []string{"api", "--hostname", host, "--method", "GET", "--include", "-H", "Accept: application/vnd.github+json", path}
 	var raw []byte
@@ -67,19 +78,28 @@ func (g GitHub) api(ctx context.Context, host, path string) ([]byte, http.Header
 		err = cmd.Run()
 		raw = out.Bytes()
 	}
-	if err != nil {
-		return nil, nil, errors.New("GitHub request failed; check gh installation, login, notification access and rate limits")
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
 	}
 	if len(raw) > 2<<20 {
 		return nil, nil, errors.New("GitHub response too large")
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(raw)), nil)
-	if err != nil {
+	// gh exits nonzero on HTTP errors but --include still emits the response.
+	// Preserve the status so missing optional context can be distinguished from
+	// authorization, rate-limit and transport failures without exposing stderr.
+	resp, parseErr := http.ReadResponse(bufio.NewReader(bytes.NewReader(raw)), nil)
+	if parseErr != nil {
+		if err != nil {
+			return nil, nil, errors.New("GitHub request failed; check gh installation, login, notification access and rate limits")
+		}
 		return nil, nil, errors.New("invalid gh API response")
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, resp.Header, fmt.Errorf("GitHub returned HTTP %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.Header, &GitHubHTTPError{StatusCode: resp.StatusCode}
+	}
+	if err != nil {
+		return nil, nil, errors.New("GitHub request failed; check gh installation, login, notification access and rate limits")
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	return data, resp.Header, err
@@ -206,6 +226,10 @@ func githubPath(host, raw string) (string, error) {
 	return strings.TrimPrefix(u.RequestURI(), prefix), nil
 }
 func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error) {
+	// Never present an older stored state or excerpt as a fresh observation.
+	event.Context = ""
+	event.SubjectState = ""
+	event.ContextWarnings = nil
 	host := g.config(s).Hostname
 	path, err := githubPath(host, event.SubjectURL)
 	if err != nil {
@@ -244,12 +268,27 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 			}
 		}
 		if e != nil {
-			return event, e
+			if !errors.Is(e, ErrContextUnavailable) {
+				return event, e
+			}
+			event.ContextWarnings = append(event.ContextWarnings, fmt.Sprintf("Could not load %s: %s. Missing context is not evidence that the notification is resolved.", p, e.Error()))
+			if p == path {
+				break
+			}
+			continue
 		}
 		// Keep useful fields; omit large API link graphs and unrelated user metadata.
 		var data any
 		if e = json.Unmarshal(raw, &data); e != nil {
 			return event, e
+		}
+		if p == path {
+			if subject, ok := data.(map[string]any); ok {
+				event.SubjectState, _ = subject["state"].(string)
+				if merged, ok := subject["merged"].(bool); ok && merged {
+					event.SubjectState = "merged"
+				}
+			}
 		}
 		clipped := compactGitHub(data)
 		body, _ := json.Marshal(clipped)

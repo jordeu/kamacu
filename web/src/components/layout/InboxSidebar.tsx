@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { completionActions, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
 import { useInboxFavicon } from "@/lib/useInboxFavicon";
 
+import { NotificationProcessing } from "@/components/inbox/NotificationProcessing";
 import { InboxMessage } from "@/components/inbox/InboxMessage";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
@@ -51,6 +52,7 @@ export function InboxSidebar() {
         <span aria-label={count === undefined ? "Loading pending messages" : `${count} pending messages`} aria-live="polite" className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${(count ?? 0) > 0 ? "bg-orange-500/20 text-orange-400" : "text-muted-foreground"}`}>{count === undefined ? "…" : count}</span>
         {!collapsed && <Button asChild size="icon-sm" variant="ghost"><Link to="/inbox" aria-label="Open full inbox"><ArrowUpRight className="size-4" /></Link></Button>}
       </div>
+      <NotificationProcessing collapsed={collapsed} onNavigate={collapse} />
       {!collapsed && <div id="inbox-sidebar-messages" className="min-h-0 flex-1 overflow-y-auto">
         {notice && <p role="status" className="border-b border-border p-3 text-xs">{notice}</p>}
         {inbox.isError && <div role="alert" className="p-3 text-sm">Couldn’t refresh inbox.<Button variant="ghost" size="sm" onClick={() => void inbox.refetch()}>Retry</Button></div>}

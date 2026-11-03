@@ -5,11 +5,89 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"kamacu/internal/notifications"
 )
 
 func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
+
+	mux.HandleFunc("GET /api/notifications", func(w http.ResponseWriter, r *http.Request) {
+		status := r.URL.Query().Get("status")
+		if status == "" {
+			status = "pending"
+		}
+		if status != "pending" && status != "archived" {
+			writeError(w, 400, "status must be pending or archived")
+			return
+		}
+		offset := 0
+		var err error
+		if raw := r.URL.Query().Get("offset"); raw != "" {
+			offset, err = strconv.Atoi(raw)
+			if err != nil || offset < 0 {
+				writeError(w, 400, "invalid offset")
+				return
+			}
+		}
+		page, err := service.ListRaw(r.Context(), status, offset)
+		if err != nil {
+			writeError(w, 500, "cannot load notifications")
+			return
+		}
+		writeJSON(w, 200, page)
+	})
+	mux.HandleFunc("GET /api/notifications/status", func(w http.ResponseWriter, r *http.Request) {
+		status, err := service.Status(r.Context())
+		if err != nil {
+			writeError(w, 500, "cannot load notification status")
+			return
+		}
+		writeJSON(w, 200, status)
+	})
+	mux.HandleFunc("POST /api/notifications/process", func(w http.ResponseWriter, r *http.Request) {
+		process, err := service.RequestProcessing(r.Context())
+		if errors.Is(err, notifications.ErrNoPending) {
+			writeError(w, 409, err.Error())
+			return
+		}
+		if err != nil {
+			writeError(w, 500, "cannot start notification processing")
+			return
+		}
+		writeJSON(w, 202, process)
+	})
+	mux.HandleFunc("PATCH /api/notifications/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, 400, "invalid notification id")
+			return
+		}
+		var body struct {
+			Status string `json:"status"`
+		}
+		if !inboxDecode(w, r, &body) {
+			return
+		}
+		if body.Status != "pending" && body.Status != "archived" {
+			writeError(w, 400, "status must be pending or archived")
+			return
+		}
+		err = service.SetRawStatus(r.Context(), id, body.Status)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, 404, "notification not found")
+			return
+		}
+		if errors.Is(err, notifications.ErrProcessing) {
+			writeError(w, 409, err.Error())
+			return
+		}
+		if err != nil {
+			writeError(w, 500, "cannot update notification")
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": body.Status})
+	})
 
 	mux.HandleFunc("POST /api/notifications/messages/{id}/continue", func(w http.ResponseWriter, r *http.Request) {
 		q, err := service.Inbox.ContinueNotification(r.Context(), r.PathValue("id"))

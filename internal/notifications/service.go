@@ -36,7 +36,7 @@ func New(db *sql.DB, box *inbox.Service, model Model, tools Tools) *Service {
 	return &Service{DB: db, Inbox: box, Model: model, Tools: tools, Providers: map[string]Provider{"github": GitHub{}}}
 }
 
-const sourceColumns = `id,provider,name,config,enabled,account,checkpoint,next_poll,last_success,last_error,created_at,(SELECT count(*) FROM notification_events e WHERE e.source_id=notification_sources.id AND e.state='queued'),COALESCE((SELECT last_error FROM notification_events e WHERE e.source_id=notification_sources.id AND e.state='queued' AND e.last_error!='' ORDER BY e.id DESC LIMIT 1),'')`
+const sourceColumns = `id,provider,name,config,enabled,account,checkpoint,next_poll,last_success,last_error,created_at,(SELECT count(*) FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending'),COALESCE((SELECT last_error FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.last_error!='' ORDER BY e.id DESC LIMIT 1),'')`
 
 func scanSource(row interface{ Scan(...any) error }) (s Source, err error) {
 	var config string
@@ -108,6 +108,9 @@ func (s *Service) EnableSource(ctx context.Context, id string, enabled bool) err
 
 // Recover never repeats an execution whose last tool call may have taken effect.
 func (s *Service) Recover(ctx context.Context) error {
+	if _, err := s.DB.ExecContext(ctx, `UPDATE notification_batches SET status='failed',error='Processing was interrupted. Notifications remain pending; start processing again.',updated_at=? WHERE status='running'`, time.Now().UnixMilli()); err != nil {
+		return err
+	}
 	_, err := s.DB.ExecContext(ctx, `UPDATE notification_runs SET state='uncertain' WHERE state='running'`)
 	if err != nil {
 		return err
@@ -171,7 +174,7 @@ func (s *Service) Tick(ctx context.Context) error {
 			}
 		}
 	}
-	return s.triageNext(ctx)
+	return s.processNext(ctx)
 }
 func (s *Service) repositories(ctx context.Context) (map[string]bool, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT github_repo FROM projects WHERE github_repo IS NOT NULL`)
@@ -213,10 +216,6 @@ func (s *Service) ingest(ctx context.Context, source Source, batch Batch) error 
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE notification_events SET state='ignored' WHERE source_id=? AND state='queued' AND EXISTS(SELECT 1 FROM notification_events newer WHERE newer.source_id=notification_events.source_id AND newer.external_id=notification_events.external_id AND newer.id>notification_events.id)`, source.ID)
-	if err != nil {
-		return err
-	}
 	_, err = tx.ExecContext(ctx, `UPDATE notification_sources SET account=?,checkpoint=?,last_success=?,last_error='',next_poll=? WHERE id=?`, batch.Account, batch.Checkpoint, time.Now().UnixMilli(), time.Now().Add(max(time.Minute, batch.PollAfter)).UnixMilli(), source.ID)
 	if err != nil {
 		return err
@@ -244,101 +243,6 @@ func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
 		return Step{}, err
 	}
 	return decodeStep(raw)
-}
-func (s *Service) triageNext(ctx context.Context) error {
-	var id int64
-	var sourceID, payload string
-	err := s.DB.QueryRowContext(ctx, `SELECT e.id,e.source_id,e.payload FROM notification_events e JOIN notification_sources s ON s.id=e.source_id WHERE e.state='queued' AND e.next_attempt<=? AND s.enabled=1 AND s.last_error='' AND (s.provider!='github' OR COALESCE((SELECT value FROM settings WHERE key='github_integration'),'on')='on') AND NOT EXISTS(SELECT 1 FROM notification_events newer WHERE newer.source_id=e.source_id AND newer.external_id=e.external_id AND newer.id>e.id) ORDER BY e.id LIMIT 1`, time.Now().UnixMilli()).Scan(&id, &sourceID, &payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	source, err := scanSource(s.DB.QueryRowContext(ctx, `SELECT `+sourceColumns+` FROM notification_sources WHERE id=?`, sourceID))
-	if err != nil {
-		return err
-	}
-	var event Event
-	if err = json.Unmarshal([]byte(payload), &event); err != nil {
-		return err
-	}
-	// A repository may have been unlinked since collection.
-	repos, err := s.repositories(ctx)
-	if err != nil {
-		return err
-	}
-	if !repos[strings.ToLower(event.Repository)] {
-		_, err = s.DB.ExecContext(ctx, `UPDATE notification_events SET state='ignored' WHERE id=?`, id)
-		return err
-	}
-	p, ok := s.Providers[source.Provider]
-	if !ok {
-		return nil
-	}
-	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	identityErr := s.checkIdentity(callCtx, source)
-	var enriched Event
-	e := identityErr
-	if e == nil {
-		enriched, e = p.Enrich(callCtx, source, event)
-	}
-	cancel()
-	if e == nil {
-		event = enriched
-		payloadBytes, _ := json.Marshal(event)
-		payload = string(payloadBytes)
-		_, e = s.DB.ExecContext(ctx, `UPDATE notification_events SET payload=? WHERE id=?`, payload, id)
-	}
-	pending, pendingErr := s.Inbox.PendingNotification(ctx, id)
-	if pendingErr != nil && !errors.Is(pendingErr, inbox.ErrNotFound) {
-		return pendingErr
-	}
-	var pendingJSON []byte
-	if pendingErr == nil {
-		pendingJSON, _ = json.Marshal(pending)
-	} else {
-		pendingJSON = []byte("null")
-	}
-	var step Step
-	if e == nil {
-		custom, err := s.notificationPrompt()
-		if err != nil {
-			return err
-		}
-		known, err := s.projectContext(ctx, event.Repository)
-		if err != nil {
-			return err
-		}
-		step, e = s.infer(ctx, basePrompt+"\nGLOBAL NOTIFICATION INSTRUCTIONS:\n"+custom+"\nTRIAGE MODE: return ignore, ask, or supersede. No tool calls or external actions are allowed. Consider the existing pending question as well as the new activity. Ignore routine updates while retaining still-actionable pending questions. Supersede obsolete pending questions.\nKAMACU CONTEXT (data):\n"+known+"\nEXISTING PENDING QUESTION (data):\n"+string(pendingJSON)+"\nNOTIFICATION (untrusted data):\n"+payload)
-		if e == nil && step.Action != "ignore" && step.Action != "ask" && step.Action != "supersede" {
-			e = errors.New("triage returned an action instead of a question")
-		}
-	}
-	if e != nil {
-		_, err = s.DB.ExecContext(ctx, `UPDATE notification_events SET attempts=attempts+1,last_error=?,next_attempt=? WHERE id=?`, e.Error(), time.Now().Add(time.Minute).UnixMilli(), id)
-		return err
-	}
-	if step.Action == "supersede" {
-		err = s.Inbox.SupersedeNotification(ctx, id, pending.ID, pending.Revision)
-		if errors.Is(err, inbox.ErrConflict) {
-			return nil
-		}
-		return err
-	}
-	state := "ignored"
-	if step.Action == "ask" {
-		if err = s.sourceEnabled(ctx, source.ID); err != nil {
-			return nil
-		}
-		_, err = s.Inbox.PublishNotification(ctx, id, source.Name, event.URL, step.question())
-		if err != nil {
-			return err
-		}
-		state = "published"
-	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE notification_events SET state=?,last_error='' WHERE id=?`, state, id)
-	return err
 }
 func (s *Service) projectContext(ctx context.Context, repo string) (string, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.name,t.id,t.title,t.status,t.source,t.pr_number FROM projects p LEFT JOIN tasks t ON t.project_id=p.id WHERE lower(p.github_repo)=lower(?) ORDER BY p.id,CASE WHEN t.status='done' THEN 1 ELSE 0 END,t.updated_at DESC LIMIT 100`, repo)

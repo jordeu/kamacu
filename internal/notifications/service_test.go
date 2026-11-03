@@ -45,6 +45,7 @@ func (p *fakeProvider) Enrich(_ context.Context, _ Source, e Event) (Event, erro
 
 type fakeModel struct {
 	steps      []Step
+	responses  []any
 	prompts    []string
 	onGenerate func(string)
 }
@@ -53,6 +54,11 @@ func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt st
 	m.prompts = append(m.prompts, prompt)
 	if m.onGenerate != nil {
 		m.onGenerate(prompt)
+	}
+	if len(m.responses) > 0 {
+		response := m.responses[0]
+		m.responses = m.responses[1:]
+		return json.Marshal(response)
 	}
 	if len(m.steps) == 0 {
 		return nil, errors.New("no model response")
@@ -136,53 +142,7 @@ func publish(t *testing.T, s *Service, id int64) inbox.Question {
 	}
 	return q
 }
-func TestTriageCoalescesAndSurvivesSessionReconciliation(t *testing.T) {
-	s, model, _, source := fixture(t)
-	ctx := context.Background()
-	id := seed(t, s, source, event())
-	model.steps = []Step{ask()}
-	if err := s.triageNext(ctx); err != nil {
-		t.Fatal(err)
-	}
-	page, err := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
-	if err != nil || len(page.Items) != 1 {
-		t.Fatalf("inbox: %+v %v", page, err)
-	}
-	q := page.Items[0]
-	if q.Origin != "notification" || q.NotificationID != id || q.SessionID != "" {
-		t.Fatalf("bad notification: %+v", q)
-	}
-	if err = s.Inbox.Reconcile(ctx); err != nil {
-		t.Fatal(err)
-	}
-	e := event()
-	e.Version = "v2"
-	id2 := seed(t, s, source, e)
-	model.steps = []Step{ask()}
-	if err = s.triageNext(ctx); err != nil {
-		t.Fatal(err)
-	}
-	updated, err := s.Inbox.Get(ctx, q.ID)
-	if err != nil || updated.Revision != q.Revision+1 || updated.NotificationID != id2 {
-		t.Fatalf("coalescing: %+v %v", updated, err)
-	}
-	out, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "yes", "")
-	if err != nil || out.Outcome != "stale_revision" {
-		t.Fatalf("stale answer: %+v %v", out, err)
-	}
-	out, err = s.Inbox.Answer(ctx, nil, q.ID, updated.Revision, "", updated.Options[0].ID)
-	if err != nil || out.Question.DeliveryStatus != "queued" {
-		t.Fatalf("answer: %+v %v", out, err)
-	}
-	if _, err = s.Inbox.Answer(ctx, nil, q.ID, updated.Revision, "yes", ""); err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	s.DB.QueryRow(`SELECT count(*) FROM notification_runs`).Scan(&count)
-	if count != 1 {
-		t.Fatalf("duplicate runs: %d", count)
-	}
-}
+
 func TestExecutionUsesMCPAndRecordsOutcome(t *testing.T) {
 	s, model, tools, source := fixture(t)
 	ctx := context.Background()
@@ -315,28 +275,6 @@ func TestCollectionDedupPauseAndFailedCheckpoint(t *testing.T) {
 	}
 	if err := s.EnableSource(ctx, "missing", true); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal(err)
-	}
-}
-func TestMultipleProvidersAndIgnoredDecisions(t *testing.T) {
-	s, model, _, source := fixture(t)
-	s.Providers["another"] = &fakeProvider{}
-	if _, err := s.AddSource(context.Background(), "another", "Other", json.RawMessage(`{}`)); err != nil {
-		t.Fatal(err)
-	}
-	seed(t, s, source, event())
-	model.steps = []Step{{Action: "ignore"}}
-	if err := s.triageNext(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.triageNext(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(model.prompts) != 1 {
-		t.Fatal("ignored decision inferred again")
-	}
-	sources, err := s.Sources(context.Background())
-	if err != nil || len(sources) != 2 {
-		t.Fatalf("sources: %+v %v", sources, err)
 	}
 }
 
@@ -474,99 +412,5 @@ func TestReplyPromptRetainsDisplayedContextAndPriorToolResults(t *testing.T) {
 	}
 	if strings.Index(prompt, q.ID) > strings.Index(prompt, "CURRENT QUESTION AND USER REPLY") {
 		t.Fatal("prior turn missing from conversation")
-	}
-}
-func TestTriageSupersedesObsoletePendingQuestions(t *testing.T) {
-	s, model, _, source := fixture(t)
-	ctx := context.Background()
-	q := publish(t, s, seed(t, s, source, event()))
-	update := event()
-	update.Version = "v2"
-	update.Title = "PR merged"
-	id := seed(t, s, source, update)
-	model.steps = []Step{{Action: "supersede"}}
-	if err := s.triageNext(ctx); err != nil {
-		t.Fatal(err)
-	}
-	old, err := s.Inbox.Get(ctx, q.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if old.Status != "unanswered" || old.Reason != "notification_superseded" || old.Revision != q.Revision+1 {
-		t.Fatalf("obsolete card: %+v", old)
-	}
-	if !strings.Contains(model.prompts[0], q.ID) || !strings.Contains(model.prompts[0], q.Context) {
-		t.Fatal("triage did not receive existing question")
-	}
-	out, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Start review", "")
-	if err != nil || out.Outcome != "stale_revision" {
-		t.Fatalf("obsolete action accepted: %+v %v", out, err)
-	}
-	var state string
-	if err = s.DB.QueryRow(`SELECT state FROM notification_events WHERE id=?`, id).Scan(&state); err != nil || state != "ignored" {
-		t.Fatalf("event not consumed: %s %v", state, err)
-	}
-	page, err := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
-	if err != nil || page.PendingCount != 0 {
-		t.Fatalf("pending cards: %+v %v", page, err)
-	}
-}
-func TestTriageIgnorePreservesStillActionableQuestion(t *testing.T) {
-	s, model, _, source := fixture(t)
-	ctx := context.Background()
-	q := publish(t, s, seed(t, s, source, event()))
-	update := event()
-	update.Version = "v2"
-	update.Title = "Routine update"
-	seed(t, s, source, update)
-	model.steps = []Step{{Action: "ignore"}}
-	if err := s.triageNext(ctx); err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.Inbox.Get(ctx, q.ID)
-	if err != nil || got.Status != "pending" || got.Revision != q.Revision {
-		t.Fatalf("routine update changed decision: %+v %v", got, err)
-	}
-}
-func TestSupersedeRejectsChangedDecisionAndPreservesAnswers(t *testing.T) {
-	for _, answered := range []bool{false, true} {
-		t.Run(map[bool]string{false: "changed", true: "answered"}[answered], func(t *testing.T) {
-			s, model, _, source := fixture(t)
-			ctx := context.Background()
-			q := publish(t, s, seed(t, s, source, event()))
-			update := event()
-			update.Version = "v2"
-			id := seed(t, s, source, update)
-			model.onGenerate = func(string) {
-				if answered {
-					if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Proceed", ""); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					changed := ask()
-					changed.Context = "New context arrived during inference"
-					if _, err := s.Inbox.PublishNotification(ctx, id, "GitHub", event().URL, changed.question()); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			model.steps = []Step{{Action: "supersede"}}
-			if err := s.triageNext(ctx); err != nil {
-				t.Fatal(err)
-			}
-			got, err := s.Inbox.Get(ctx, q.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if answered {
-				if got.Status != "answered" || got.Answer != "Proceed" {
-					t.Fatalf("supersede overwrote reply: %+v", got)
-				}
-			} else {
-				if got.Status != "pending" || got.Revision != q.Revision+1 {
-					t.Fatalf("supersede overwrote changed card: %+v", got)
-				}
-			}
-		})
 	}
 }

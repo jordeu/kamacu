@@ -5,8 +5,14 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+// ErrContextUnavailable identifies a missing subject/comment, not an auth,
+// rate-limit, transport or identity failure. Providers may return partial evidence
+// with ContextWarnings instead, preserving any subject state they verified.
+var ErrContextUnavailable = errors.New("notification context is unavailable")
 
 type Source struct {
 	PendingEvents   int             `json:"pending_events"`
@@ -24,16 +30,18 @@ type Source struct {
 	CreatedAt       int64           `json:"created_at"`
 }
 type Event struct {
-	ExternalID       string `json:"external_id"`
-	Version          string `json:"version"`
-	Repository       string `json:"repository"`
-	URL              string `json:"url"`
-	Title            string `json:"title"`
-	Reason           string `json:"reason"`
-	SubjectType      string `json:"subject_type"`
-	SubjectURL       string `json:"subject_url"`
-	LatestCommentURL string `json:"latest_comment_url"`
-	Context          string `json:"context"`
+	ExternalID       string   `json:"external_id"`
+	Version          string   `json:"version"`
+	Repository       string   `json:"repository"`
+	URL              string   `json:"url"`
+	Title            string   `json:"title"`
+	Reason           string   `json:"reason"`
+	SubjectType      string   `json:"subject_type"`
+	SubjectURL       string   `json:"subject_url"`
+	LatestCommentURL string   `json:"latest_comment_url"`
+	Context          string   `json:"context"`
+	SubjectState     string   `json:"subject_state,omitempty"`
+	ContextWarnings  []string `json:"context_warnings,omitempty"`
 }
 type Batch struct {
 	Events     []Event
