@@ -44,6 +44,10 @@ type Option struct {
 	Label string `json:"label"`
 }
 type Question struct {
+	NotificationID       int64    `json:"notification_id,omitempty"`
+	SourceName           string   `json:"source_name,omitempty"`
+	SourceURL            string   `json:"source_url,omitempty"`
+	ExecutionResult      string   `json:"execution_result,omitempty"`
 	CompletionTaskStatus string   `json:"completion_task_status,omitempty"`
 	Origin               string   `json:"origin"`
 	Hidden               bool     `json:"hidden"`
@@ -139,12 +143,12 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status,COALESCE(q.notification_id,0),q.source_name,q.source_url,q.execution_result FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var opts string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus)
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus, &q.NotificationID, &q.SourceName, &q.SourceURL, &q.ExecutionResult)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
@@ -192,7 +196,7 @@ func (s *Service) transitionWith(ctx context.Context, before func(*sql.Tx) error
 	return err
 }
 func (s *Service) reconcile(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,heartbeat_at FROM inbox_questions WHERE status='pending'`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,heartbeat_at FROM inbox_questions WHERE status='pending' AND origin!='notification'`)
 	if err != nil {
 		return err
 	}
@@ -468,6 +472,18 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	}
 	var moved func()
 	var before func(*sql.Tx) error
+	if q.Origin == "notification" {
+		if who != nil {
+			return Result{}, ErrOwner
+		}
+		before = func(tx *sql.Tx) error {
+			if _, e := tx.ExecContext(ctx, `INSERT INTO notification_runs(id,updated_at) VALUES(?,?)`, id, s.now().UnixMilli()); e != nil {
+				return e
+			}
+			_, e := tx.ExecContext(ctx, `UPDATE inbox_questions SET delivery_status='queued' WHERE id=?`, id)
+			return e
+		}
+	}
 	if q.Kind == "completion" && CompletionTarget(optionID) != "" {
 		if who != nil {
 			return Result{}, fmt.Errorf("%w: task moves require a user inbox action", ErrInvalid)

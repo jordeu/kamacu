@@ -8,6 +8,7 @@ import { useGithubStatus } from "@/api/queries";
 import { SettingsField } from "@/components/settings/SettingsField";
 import { WorktreeCleanupSection } from "@/components/settings/WorktreeCleanupSection";
 import { AgentsSection } from "@/components/settings/AgentsSection";
+import { NotificationsSection } from "@/components/settings/NotificationsSection";
 import { MonitoringSection } from "@/components/settings/MonitoringSection";
 import { ScratchpadSection } from "@/components/settings/ScratchpadSection";
 
@@ -159,6 +160,7 @@ export default function SettingsPage() {
         ) : (
           <div className="mt-6 flex flex-col gap-6">
             <MonitoringSection />
+ <NotificationsSection settings={settings} />
  <AgentsSection />
             {/* GCONF-05: the Scratchpad summary card + Change-root dialog —
                 directly after AgentsSection (both govern where agents run). */}

@@ -25,12 +25,13 @@ func testDB(t *testing.T) *sql.DB {
 
 func TestDefaultsValues(t *testing.T) {
 	want := map[string]string{
-		settings.KeyWorktreeBase:      "~/.kamacu/worktrees/",
-		settings.KeyShell:             "bash",
-		settings.KeyBranchTemplate:    "task/{slug}-{id}",
-		settings.KeyDoneSessionTTL:    "24h",                                                                                                // REAP-01/D-91
-		settings.KeyGithubIntegration: "on",                                                                                                 // GHSET-01/D-01: absent row = on
-		settings.KeyPRReviewSeed:      `Review PR #<n> "<title>". Summarize the changes, then flag bugs, risky changes, and missing tests.`, // GHREV/12-07
+		settings.KeyNotificationPrompt: `Surface actionable review requests, mentions, and new review feedback. Explain what changed and ask what the user wants to do. Prefer continuing the existing implementation session for review feedback. Ignore routine updates that require no action. Offer concise suggested replies and accept free-text instructions. Ask follow-up questions when the target or intent is unclear.`,
+		settings.KeyWorktreeBase:       "~/.kamacu/worktrees/",
+		settings.KeyShell:              "bash",
+		settings.KeyBranchTemplate:     "task/{slug}-{id}",
+		settings.KeyDoneSessionTTL:     "24h",                                                                                                // REAP-01/D-91
+		settings.KeyGithubIntegration:  "on",                                                                                                 // GHSET-01/D-01: absent row = on
+		settings.KeyPRReviewSeed:       `Review PR #<n> "<title>". Summarize the changes, then flag bugs, risky changes, and missing tests.`, // GHREV/12-07
 	}
 	for k, v := range want {
 		if got := settings.Defaults[k]; got != v {

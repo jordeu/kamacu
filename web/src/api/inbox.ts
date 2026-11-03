@@ -3,6 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
 
 export interface FeedbackQuestion {
+ notification_id?: number;
+ source_name?: string;
+ source_url?: string;
+ execution_result?: string;
  origin?: string;
  hidden?: boolean;
  delivery_mode?: string;
@@ -78,6 +82,7 @@ export function completionClosesSession(q: FeedbackQuestion) {
   return q.kind === "completion" && (q.reason === "exit" || Object.hasOwn(completionLabels, q.reason));
 }
 export function feedbackTaskURL(q: FeedbackQuestion) {
+ if (q.origin === "notification") return `/inbox?message=${encodeURIComponent(q.id)}`;
   const path = q.task_id === 0 ? "/global" : `/projects/${q.project_id}/tasks/${q.task_id}`;
   return `${path}?feedback_session=${encodeURIComponent(q.session_id)}`;
 }
@@ -87,6 +92,7 @@ export function feedbackOutcomeMessage(result: FeedbackResult) {
     if (result.question.status === "answered") return `This question was already answered: ${result.question.answer}`;
     return "This question is no longer waiting for an answer. You can find it in Archived.";
   }
+  if (result.question.origin === "notification") return result.question.status === "dismissed" ? "Notification dismissed. GitHub read state is unchanged." : "Answer saved. Notification action queued; its result will appear in Archived.";
   if (result.question.kind === "completion" && result.question.status === "answered") {
     if (result.question.reason === "move_to_review") return "Task moved to review. Message archived and agent session is closing.";
     if (result.question.reason === "move_to_done") return "Task moved to done. Message archived and agent session is closing.";
@@ -130,4 +136,9 @@ export function useDismissTaskCompletions(taskId: number | undefined) {
       }
     },
   };
+}
+
+export function useContinueNotification() {
+ const client = useQueryClient();
+ return useMutation({ mutationFn: (id: string) => post<FeedbackQuestion>(`/api/notifications/messages/${id}/continue`), onSuccess: () => client.invalidateQueries({ queryKey: ["inbox"] }) });
 }

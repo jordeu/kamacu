@@ -214,12 +214,15 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func runCLI(ctx context.Context, p Profile, prompt string, usage **Usage) ([]byte, error) {
+	return runCLIJSON(ctx, p, prompt, decisionSchema, usage)
+}
+func runCLIJSON(ctx context.Context, p Profile, prompt string, responseSchema any, usage **Usage) ([]byte, error) {
 	dir, e := os.MkdirTemp("", "kamacu-classifier-")
 	if e != nil {
 		return nil, e
 	}
 	defer os.RemoveAll(dir)
-	schema, _ := json.Marshal(decisionSchema)
+	schema, _ := json.Marshal(responseSchema)
 	bin := p.Executable
 	var args []string
 	if p.Backend == "claude_cli" {
@@ -289,6 +292,9 @@ func runCLI(ctx context.Context, p Profile, prompt string, usage **Usage) ([]byt
 	return out.Bytes(), nil
 }
 func (b Backend) http(ctx context.Context, p Profile, prompt string, usage **Usage) ([]byte, error) {
+	return b.httpJSON(ctx, p, prompt, decisionSchema, usage)
+}
+func (b Backend) httpJSON(ctx context.Context, p Profile, prompt string, responseSchema any, usage **Usage) ([]byte, error) {
 	key := ""
 	if p.CredentialEnv != "" {
 		key = os.Getenv(p.CredentialEnv)
@@ -303,7 +309,7 @@ func (b Backend) http(ctx context.Context, p Profile, prompt string, usage **Usa
 		body = map[string]any{"model": p.Model, "max_tokens": 4096, "messages": []any{map[string]string{"role": "user", "content": prompt}}}
 	} else {
 		endpoint += "/chat/completions"
-		body = map[string]any{"model": p.Model, "messages": []any{map[string]string{"role": "user", "content": prompt}}, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "terminal_state", "strict": true, "schema": decisionSchema}}}
+		body = map[string]any{"model": p.Model, "messages": []any{map[string]string{"role": "user", "content": prompt}}, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "structured_response", "strict": true, "schema": responseSchema}}}
 	}
 	data, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(data))
@@ -362,4 +368,18 @@ func (b Backend) http(ctx context.Context, p Profile, prompt string, usage **Usa
 		return nil, errors.New("provider returned no classification")
 	}
 	return []byte(envelope.Choices[0].Message.Content), nil
+}
+
+// GenerateJSON shares monitoring authentication and adapters without enabling tools
+// in the inference process. Callers validate their own response contracts.
+func (b Backend) GenerateJSON(ctx context.Context, p Profile, prompt string, schema any) (raw []byte, err error) {
+	start := time.Now()
+	var usage *Usage
+	defer func() {
+		b.Metrics.record(p.ID, time.Since(start), err != nil, errors.Is(ctx.Err(), context.DeadlineExceeded), usage)
+	}()
+	if p.Backend == "claude_cli" || p.Backend == "codex_cli" {
+		return runCLIJSON(ctx, p, prompt, schema, &usage)
+	}
+	return b.httpJSON(ctx, p, prompt, schema, &usage)
 }

@@ -79,3 +79,11 @@ describe("opening a task", () => {
     expect(post).not.toHaveBeenCalled();
   });
 });
+
+describe("notification messages", () => {
+  const notification = { id: "notification", origin: "notification", kind: "question", task_id: 0, status: "answered" } as FeedbackQuestion;
+  it("reports queued processing without claiming the action was executed", () => {
+    expect(feedbackOutcomeMessage({ outcome: "accepted", question: notification })).toContain("action queued");
+    expect(feedbackOutcomeMessage({ outcome: "dismissed", question: { ...notification, status: "dismissed" } })).toContain("GitHub read state is unchanged");
+  });
+});

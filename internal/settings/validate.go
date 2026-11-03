@@ -60,6 +60,11 @@ func Validate(key, value string) error {
 			return nil
 		}
 		return errors.New("Choose on or off.")
+	case KeyNotificationPrompt:
+		if len(value) > 16000 {
+			return errors.New("Prompt is too long (maximum 16000 bytes).")
+		}
+		return nil
 	case KeyPRReviewSeed:
 		// Free-text seed prompt (12-07). Accept any value; cap length so a
 		// pathological paste can't bloat the KV row. <n>/<title> placeholders

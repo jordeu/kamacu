@@ -25,8 +25,10 @@ import (
 	"kamacu/internal/github"
 	"kamacu/internal/inbox"
 	"kamacu/internal/integration"
+	kamacumcp "kamacu/internal/mcp"
 	"kamacu/internal/migrate"
 	"kamacu/internal/monitor"
+	"kamacu/internal/notifications"
 	"kamacu/internal/opencode"
 	"kamacu/internal/presence"
 	"kamacu/internal/quota"
@@ -333,6 +335,28 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	monitorMetrics := &monitor.Metrics{}
 	classifier := monitor.Backend{Metrics: monitorMetrics}
 	api.MonitorRoutes(mux, db, classifier, monitorMetrics)
+	notificationMCP, err := kamacumcp.NewNotificationClient(ctx, hookBaseURL(c.addr), hookToken)
+	if err != nil {
+		slog.Error("initializing notification MCP", "error", err)
+		return subcommands.ExitFailure
+	}
+	defer notificationMCP.Close()
+	notificationService := notifications.New(db, inboxService, classifier, notificationMCP)
+	notificationService.SessionTask = func(id string) (int64, bool) {
+		sess, ok := mgr.Get(id)
+		if !ok {
+			return 0, false
+		}
+		info := sess.Info()
+		return info.TaskID, info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested
+	}
+	if err := notificationService.Recover(ctx); err != nil {
+		slog.Error("recovering notifications", "error", err)
+		return subcommands.ExitFailure
+	}
+	api.NotificationRoutes(mux, notificationService)
+	go notificationService.Run(ctx)
+
 	mgr.SetAgentReady(func(taskID int64) error { _, err := monitor.Resolve(ctx, db, taskID); return err })
 	terminalMonitor := monitor.New(db, mgr, inboxService, presenceTracker, classifier)
 	go terminalMonitor.Run(ctx)
