@@ -41,7 +41,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
   const shortDate = date.toDateString() === new Date().toDateString()
     ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : date.toLocaleDateString([], { month: "short", day: "numeric" });
-  const content = <article aria-labelledby={`question-${q.id}`} className="border-t border-border px-4 py-6 sm:px-12">
+  const content = <article aria-labelledby={`question-${q.id}`} className={dialog ? "py-2" : "border-t border-border px-4 py-6 sm:px-12"}>
     <div className="min-w-0">
     <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
       <div className="min-w-0 flex-1">

@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { useNotificationStatus, useProcessNotifications, type NotificationStatus } from "@/api/notifications";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { NotificationProcessing } from "./NotificationProcessing";
 
 vi.mock("@/api/notifications", () => ({ useNotificationStatus: vi.fn(), useProcessNotifications: vi.fn() }));
 function show(data: NotificationStatus, collapsed = false) {
  vi.mocked(useNotificationStatus).mockReturnValue({ data, isError: false } as ReturnType<typeof useNotificationStatus>);
- return renderToStaticMarkup(<MemoryRouter><NotificationProcessing collapsed={collapsed} /></MemoryRouter>);
+ return renderToStaticMarkup(<MemoryRouter><TooltipProvider><NotificationProcessing collapsed={collapsed} /></TooltipProvider></MemoryRouter>);
 }
 beforeEach(() => {
  vi.resetAllMocks();
