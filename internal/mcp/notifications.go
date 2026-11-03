@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,7 +14,8 @@ import (
 )
 
 // NotificationClient uses the real MCP tool handlers and transport. Its server
-// exposes only the notification allowlist, with no agent/session identity.
+// exposes the complete Kamacu tool catalog, with no agent/session identity.
+// Agent-scoped compatibility tools retain their normal API identity requirements.
 type NotificationClient struct {
 	client *sdk.ClientSession
 	server *sdk.ServerSession
@@ -36,25 +38,31 @@ func NewNotificationClient(ctx context.Context, base, token string) (*Notificati
 		return nil, err
 	}
 	c := &NotificationClient{client: cs, server: ss}
-	result, err := cs.ListTools(ctx, nil)
-	if err != nil {
-		c.Close()
-		return nil, err
-	}
-	for _, tool := range result.Tools {
-		if !notifications.AllowedTool(tool.Name) {
-			server.RemoveTools(tool.Name)
-			continue
+	for tool, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			c.Close()
+			return nil, err
 		}
-		c.tools = append(c.tools, notifications.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+		description := tool.Description
+		if tool.Name == "get_session_output" || tool.Name == "subscribe_session_output" {
+			description += " For the notification worker, output is decoded to readable UTF-8 and limited to the most recent 12000 bytes. Prefer get_session_output for a quick current snapshot."
+		}
+		c.tools = append(c.tools, notifications.Tool{Name: tool.Name, Description: description, InputSchema: tool.InputSchema})
 	}
 	return c, nil
 }
 func (c *NotificationClient) Close()                                             { _ = c.client.Close(); _ = c.server.Close() }
 func (c *NotificationClient) List(context.Context) ([]notifications.Tool, error) { return c.tools, nil }
 func (c *NotificationClient) Call(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	if !notifications.AllowedTool(name) {
-		return "", errors.New("tool unavailable to notifications")
+	available := false
+	for _, tool := range c.tools {
+		if tool.Name == name {
+			available = true
+			break
+		}
+	}
+	if !available {
+		return "", errors.New("unknown Kamacu MCP tool")
 	}
 	var arguments map[string]any
 	if err := json.Unmarshal(args, &arguments); err != nil {
@@ -74,5 +82,50 @@ func (c *NotificationClient) Call(ctx context.Context, name string, args json.Ra
 	if result.IsError {
 		return "", errors.New(text.String())
 	}
-	return text.String(), nil
+	output := text.String()
+	if name == "get_session_output" || name == "subscribe_session_output" {
+		return readableNotificationTerminal(output)
+	}
+	return output, nil
+}
+
+// The session API transports bytes as base64. Give the notification model
+// readable recent terminal evidence rather than asking it to decode that data.
+func readableNotificationTerminal(raw string) (string, error) {
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return "", err
+	}
+	if envelope["encoding"] != "base64" {
+		return raw, nil
+	}
+	encoded, _ := envelope["output"].(string)
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", err
+	}
+	if len(decoded) > 12000 {
+		decoded = decoded[len(decoded)-12000:]
+		envelope["notification_excerpt_truncated"] = true
+	}
+	envelope["encoding"] = "utf-8"
+	text := strings.ToValidUTF8(string(decoded), "�")
+	// JSON escaping expands ANSI/control characters. Budget the final envelope,
+	// preserving its newest text so downstream limits never cut off the tail.
+	for {
+		envelope["output"] = text
+		result, err := json.Marshal(envelope)
+		if err != nil {
+			return "", err
+		}
+		if len(result) <= notifications.ToolResultLimit {
+			return string(result), nil
+		}
+		if len(text) == 0 {
+			return "", errors.New("terminal metadata exceeds notification tool-result limit")
+		}
+		envelope["notification_excerpt_truncated"] = true
+		drop := min(max(1, len(text)/2), max(1, len(result)-notifications.ToolResultLimit))
+		text = strings.ToValidUTF8(text[drop:], "")
+	}
 }
