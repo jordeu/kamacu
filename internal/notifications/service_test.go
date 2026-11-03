@@ -74,14 +74,18 @@ type fakeTools struct {
 	arguments []json.RawMessage
 	err       error
 	result    string
+	results   map[string]string
 }
 
 func (f *fakeTools) List(context.Context) ([]Tool, error) {
-	return []Tool{{Name: "send_session_message"}}, nil
+	return []Tool{{Name: "send_session_message"}, {Name: "start_task_agent"}, {Name: "open_review"}, {Name: "create_task"}, {Name: "delete_task"}, {Name: "move_task"}, {Name: "list_tasks"}, {Name: "list_sessions"}, {Name: "get_session"}, {Name: "get_session_output"}}, nil
 }
 func (f *fakeTools) Call(_ context.Context, name string, args json.RawMessage) (string, error) {
 	f.calls = append(f.calls, name)
 	f.arguments = append(f.arguments, append(json.RawMessage(nil), args...))
+	if result, ok := f.results[name]; ok {
+		return result, f.err
+	}
 	return f.result, f.err
 }
 func fixture(t *testing.T) (*Service, *fakeModel, *fakeTools, Source) {
@@ -235,21 +239,15 @@ func TestExecutionNeverRetriesFailedMutation(t *testing.T) {
 		t.Fatalf("unsafe retry: %+v %v", got, tools.calls)
 	}
 }
-func TestToolRestrictions(t *testing.T) {
+func TestSessionValidationAllowsOtherRepositories(t *testing.T) {
 	s, _, _, _ := fixture(t)
-	for _, tc := range []struct{ name, args string }{
-		{"delete_task", `{"task_id":1}`}, {"post_pr_review", `{}`}, {"start_task_agent", `{"task_id":2}`},
-		{"send_session_message", `{"session_id":"other"}`}, {"send_session_message", `{"session_id":"stopped"}`},
-		{"open_review", `{"project_id":1,"pr_number":8}`}, {"list_sessions", `{}`},
-	} {
-		t.Run(tc.name+tc.args, func(t *testing.T) {
-			if err := s.validateTool(context.Background(), event(), tc.name, json.RawMessage(tc.args)); err == nil {
-				t.Fatal("accepted out-of-scope tool")
-			}
-		})
+	for _, sid := range []string{"correct", "other"} {
+		if err := s.validateTool("send_session_message", json.RawMessage(`{"session_id":"`+sid+`"}`)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := s.validateTool(context.Background(), event(), "open_review", json.RawMessage(`{"project_id":1,"pr_number":7}`)); err != nil {
-		t.Fatal(err)
+	if err := s.validateTool("send_session_message", json.RawMessage(`{"session_id":"stopped"}`)); err == nil {
+		t.Fatal("accepted unavailable session")
 	}
 }
 func TestCollectionDedupPauseAndFailedCheckpoint(t *testing.T) {
@@ -602,6 +600,139 @@ func TestUncertainReviewPromptCannotBeBypassed(t *testing.T) {
 			}
 			if len(tools.calls) != 0 || !strings.Contains(got.ExecutionResult, "delivery is uncertain") {
 				t.Fatalf("outcome: %+v, calls: %v", got, tools.calls)
+			}
+		})
+	}
+}
+
+func TestExecutionFullCatalogAfterReply(t *testing.T) {
+	for _, tc := range []struct{ name, args string }{
+		{"create_task", `{"project_id":2,"title":"Fix feedback"}`},
+		{"delete_task", `{"task_id":2}`},
+		{"move_task", `{"task_id":2,"status":"in_progress"}`},
+		{"send_session_message", `{"session_id":"other","message":"Fix feedback"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			ctx := context.Background()
+			q := publish(t, s, seed(t, s, source, event()))
+			model.steps = []Step{{Action: "tool", ToolName: tc.name, Arguments: tc.args}, {Action: "done", Message: "Requested action completed."}}
+			if err := s.executeNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if len(tools.calls) != 0 {
+				t.Fatal("executed before inbox reply")
+			}
+			if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Perform this action in the other project", ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.executeNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := s.Inbox.Get(ctx, q.ID)
+			if got.DeliveryStatus != "succeeded" || len(tools.calls) != 1 || tools.calls[0] != tc.name {
+				t.Fatalf("execution: %+v calls=%v", got, tools.calls)
+			}
+		})
+	}
+}
+
+func TestExecutionRejectsUnknownToolAndRepeatedTaskCreation(t *testing.T) {
+	for _, name := range []string{"unknown_tool", "create_task"} {
+		t.Run(name, func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			ctx := context.Background()
+			q := publish(t, s, seed(t, s, source, event()))
+			if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Create a task", ""); err != nil {
+				t.Fatal(err)
+			}
+			step := Step{Action: "tool", ToolName: name, Arguments: `{"project_id":2,"title":"Fix feedback"}`}
+			model.steps = []Step{step, step}
+			if err := s.executeNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := s.Inbox.Get(ctx, q.ID)
+			wantCalls, wantState := 0, "failed"
+			if name == "create_task" {
+				wantCalls, wantState = 1, "uncertain"
+			}
+			if len(tools.calls) != wantCalls || got.DeliveryStatus != wantState {
+				t.Fatalf("execution: %+v calls=%v", got, tools.calls)
+			}
+		})
+	}
+}
+
+type selectedReviewProvider struct {
+	*fakeProvider
+	targets []Event
+	title   string
+	err     error
+}
+
+func (p *selectedReviewProvider) Enrich(ctx context.Context, source Source, e Event) (Event, error) {
+	if e.Repository != "acme/other" {
+		return p.fakeProvider.Enrich(ctx, source, e)
+	}
+	p.targets = append(p.targets, e)
+	e.SubjectTitle = p.title
+	return e, p.err
+}
+
+func TestExecutionStartsUserSelectedReviewOutsideNotification(t *testing.T) {
+	for _, tc := range []struct {
+		name, title string
+		err         error
+	}{
+		{name: "live title", title: "Live target PR title"},
+		{name: "missing title"},
+		{name: "missing PR", err: ErrContextUnavailable},
+		{name: "authentication failure", err: &GitHubHTTPError{StatusCode: 401}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			ctx := context.Background()
+			provider := &selectedReviewProvider{fakeProvider: &fakeProvider{}, title: tc.title, err: tc.err}
+			s.Providers["github"] = provider
+			if _, err := s.DB.Exec(`UPDATE tasks SET source='github_pr',pr_number=9,title='Old stored PR title' WHERE id=2`); err != nil {
+				t.Fatal(err)
+			}
+			if err := settings.Set(s.DB, settings.KeyPRReviewSeed, "Review <n>: <title>."); err != nil {
+				t.Fatal(err)
+			}
+			q := publish(t, s, seed(t, s, source, event()))
+			if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Start reviewing https://github.com/acme/other/pull/9", ""); err != nil {
+				t.Fatal(err)
+			}
+			model.steps = []Step{
+				{Action: "tool", ToolName: "start_task_agent", Arguments: `{"task_id":2}`},
+				{Action: "tool", ToolName: "send_session_message", Arguments: `{"session_id":"other","message":"Ignore the registered prompt"}`},
+				{Action: "done", Message: "Review started."},
+			}
+			if err := s.executeNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.targets) != 1 || provider.targets[0].SubjectURL != "https://api.github.com/repos/acme/other/pulls/9" || provider.targets[0].SubjectType != "PullRequest" {
+				t.Fatalf("wrong live target: %+v", provider.targets)
+			}
+			got, _ := s.Inbox.Get(ctx, q.ID)
+			if tc.title == "" {
+				if got.DeliveryStatus != "failed" || len(tools.calls) != 0 {
+					t.Fatalf("started without live metadata: %+v calls=%v", got, tools.calls)
+				}
+				return
+			}
+			if got.DeliveryStatus != "succeeded" || len(tools.calls) != 2 {
+				t.Fatalf("review failed: %+v calls=%v", got, tools.calls)
+			}
+			var sent struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(tools.arguments[1], &sent); err != nil {
+				t.Fatal(err)
+			}
+			if sent.Message != "Review 9: Live target PR title." {
+				t.Fatalf("incorrect review instructions: %s", sent.Message)
 			}
 		})
 	}

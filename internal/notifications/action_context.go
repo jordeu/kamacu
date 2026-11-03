@@ -71,21 +71,6 @@ func (s *Service) loadActionContext(ctx context.Context, questionID string) (act
 	}
 	return out, nil
 }
-func (s *Service) validateActionTool(ctx context.Context, events []Event, name string, args json.RawMessage) error {
-	var last error
-	for _, event := range events {
-		if err := s.validateTool(ctx, event, name, args); err == nil {
-			return nil
-		} else {
-			last = err
-		}
-	}
-	if last != nil {
-		return last
-	}
-	return errors.New("action has no permitted notification targets")
-}
-
 func subjectKey(sourceID string, event Event) string {
 	subject := event.SubjectURL
 	if subject == "" {

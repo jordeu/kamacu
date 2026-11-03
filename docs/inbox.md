@@ -126,13 +126,17 @@ or restored until the run finishes.
 
 Notification questions belong to their source rather than an agent session and
 survive server restarts. Replies are saved and queued atomically. A bounded
-execution loop uses the existing Kamacu MCP tools to inspect projects/tasks and
-sessions, provision review workspaces, start task agents, and send session
-instructions. Mutations are restricted to repositories represented by the action's related
-notifications, and opening a review must match one of their PRs. Grouped actions
-and their follow-up questions retain every contributing notification. Other MCP actions, including posting a review,
-deleting resources, and moving tasks, are unavailable. Source content is treated
-as untrusted data; the user's reply supplies action authorization.
+execution loop exposes the full registered Kamacu MCP tool catalog after a user
+reply, including creating tasks, moving tasks, deleting resources, and posting
+reviews when requested. The reply determines the target project, task, or session;
+targets may be outside the notification repositories. Grouped actions and their
+follow-up questions retain every contributing notification. Source content is
+treated as untrusted data; the user's reply supplies action authorization.
+During triage, the model can use read-only MCP tools to inspect active sessions
+and recent terminal output before proposing actions, avoiding duplicate review
+requests when a review is already underway. Mutations require an inbox reply.
+Agent-scoped legacy feedback tools keep their API identity requirements; this worker has no agent
+identity and uses notification follow-up questions and outcomes instead.
 
 Execution results appear with the saved answer in **Archived**. **Reply again**
 opens another question without replacing earlier answers. Reply processing keeps

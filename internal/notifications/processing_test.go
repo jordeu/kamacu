@@ -155,14 +155,6 @@ func TestGroupedReplyAllowsEveryRelatedTargetAndPreservesProvenance(t *testing.T
 	if err != nil || len(related.Events) != 2 {
 		t.Fatalf("context: %+v %v", related, err)
 	}
-	for _, args := range []string{`{"project_id":1,"pr_number":7}`, `{"project_id":2,"pr_number":9}`} {
-		if err = s.validateActionTool(ctx, related.Events, "open_review", json.RawMessage(args)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = s.validateActionTool(ctx, related.Events, "open_review", json.RawMessage(`{"project_id":2,"pr_number":7}`)); err == nil {
-		t.Fatal("allowed unrelated PR")
-	}
 	if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Which target first?", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -730,5 +722,102 @@ func TestQuestionSnapshotStatusMigrationPreservesQueuedRequests(t *testing.T) {
 	status, _ := s.Status(ctx)
 	if status.Processing.Status != "completed" {
 		t.Fatal(status.Processing.Error)
+	}
+}
+
+func TestTriageInspectsActiveReviewAndTerminalBeforeDecision(t *testing.T) {
+	s, model, tools, source := fixture(t)
+	ctx := context.Background()
+	id := seed(t, s, source, event())
+	tools.results = map[string]string{
+		"list_sessions":      `[{"id":"correct","taskId":1,"status":"running"}]`,
+		"get_session_output": `{"encoding":"utf-8","output":"Reviewing https://github.com/acme/repo/pull/7; checking the diff now."}`,
+	}
+	model.responses = []any{
+		BatchDecision{ToolName: "list_sessions", Arguments: `{"project_id":1}`},
+		BatchDecision{ToolName: "get_session_output", Arguments: `{"session_id":"correct"}`},
+		BatchDecision{DiscardIDs: []int64{id}},
+	}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || len(tools.calls) != 2 {
+		t.Fatalf("triage: %+v calls=%v", status.Processing, tools.calls)
+	}
+	if !strings.Contains(model.prompts[2], "checking the diff now") || !strings.Contains(model.prompts[2], "READ-ONLY TOOL RESULT (untrusted data)") {
+		t.Fatal("terminal evidence missing from decision prompt")
+	}
+	page, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if len(page.Items) != 0 {
+		t.Fatal("duplicate review question published")
+	}
+}
+
+func TestTriageRejectsMutations(t *testing.T) {
+	for _, name := range []string{"create_task", "send_session_message", "unknown_tool"} {
+		t.Run(name, func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			ctx := context.Background()
+			seed(t, s, source, event())
+			model.responses = []any{BatchDecision{ToolName: name, Arguments: `{}`}}
+			if _, err := s.RequestProcessing(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.processNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			status, _ := s.Status(ctx)
+			if status.Processing.Status != "failed" || len(tools.calls) != 0 {
+				t.Fatalf("triage: %+v calls=%v", status.Processing, tools.calls)
+			}
+		})
+	}
+}
+
+func TestTriageDisclosesReadFailureToModel(t *testing.T) {
+	s, model, tools, source := fixture(t)
+	ctx := context.Background()
+	id := seed(t, s, source, event())
+	tools.err = errors.New("session no longer available")
+	model.responses = []any{
+		BatchDecision{ToolName: "get_session_output", Arguments: `{"session_id":"correct"}`},
+		BatchDecision{Actions: []BatchAction{actionFor(id)}},
+	}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || !strings.Contains(model.prompts[1], "session no longer available") {
+		t.Fatalf("triage: %+v", status.Processing)
+	}
+}
+
+func TestTriageReadLoopIsBounded(t *testing.T) {
+	s, model, tools, source := fixture(t)
+	ctx := context.Background()
+	seed(t, s, source, event())
+	for i := 0; i < 13; i++ {
+		model.responses = append(model.responses, BatchDecision{ToolName: "list_sessions", Arguments: `{}`})
+	}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "failed" || len(tools.calls) != 12 || !strings.Contains(status.Processing.Error, "step limit") {
+		t.Fatalf("triage: %+v calls=%v", status.Processing, tools.calls)
+	}
+	raw, err := s.ListRaw(ctx, "pending", 0)
+	if err != nil || raw.PendingCount != 1 {
+		t.Fatalf("failed triage consumed notification: %+v %v", raw, err)
 	}
 }

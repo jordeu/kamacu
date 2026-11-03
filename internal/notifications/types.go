@@ -56,6 +56,10 @@ type Provider interface {
 	Collect(context.Context, Source, map[string]bool) (Batch, error)
 	Enrich(context.Context, Source, Event) (Event, error)
 }
+
+// ToolResultLimit is the serialized tool-result budget used in model prompts.
+const ToolResultLimit = 16000
+
 type Tool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
