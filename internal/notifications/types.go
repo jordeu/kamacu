@@ -40,6 +40,7 @@ type Event struct {
 	SubjectURL       string   `json:"subject_url"`
 	LatestCommentURL string   `json:"latest_comment_url"`
 	Context          string   `json:"context"`
+	SubjectTitle     string   `json:"subject_title,omitempty"`
 	SubjectState     string   `json:"subject_state,omitempty"`
 	ContextWarnings  []string `json:"context_warnings,omitempty"`
 }
