@@ -10,13 +10,14 @@ const assert = require('node:assert/strict');
   let releaseArchive;
   let releaseNextPage;
   let holdNextPage = false;
-  const q = {id:'sidebar-question',task_id:1,project_id:1,task_title:'Improve navigation',project_name:'Kamacu',session_id:'s',abstract:'Task links currently preserve the selected tab, adding a click before replying. I recommend focusing the originating agent terminal only when opening a task from an inbox message; ordinary task navigation would keep the current tab. Choose whether inbox task links should focus the terminal.',summary:'Detailed task summary',context:'Details needed to decide',question:'Focus terminal when opening a task?',options:[{id:'yes',label:'Focus terminal'}],status:'pending',revision:1,created_at:Date.now(),updated_at:Date.now(),kind:'question'};
+  const q = {id:'sidebar-question',task_id:1,project_id:1,task_title:'Improve navigation',project_name:'Kamacu workspace with a very long project name that must not hide its task',session_id:'s',abstract:'Task links currently preserve the selected tab, adding a click before replying. I recommend focusing the originating agent terminal only when opening a task from an inbox message; ordinary task navigation would keep the current tab. Choose whether inbox task links should focus the terminal.',summary:'Detailed task summary',context:'Details needed to decide',question:'Focus terminal when opening a task?',options:[{id:'yes',label:'Focus terminal'}],status:'pending',revision:1,created_at:Date.now(),updated_at:Date.now(),kind:'question'};
   await page.route('**/api/**', async route => {
    q.kind = completion ? 'completion' : 'question';
    q.options = completion ? [{id:'move_to_review',label:'Move to review and close session'},{id:'move_to_done',label:'Move to done and close session'}] : [{id:'yes',label:'Focus terminal'}];
    const path = new URL(route.request().url()).pathname;
    let data = [];
-   if(path === '/api/inbox') {
+   if(path === '/api/notifications/status') data={pending_count:7,processing:null};
+   else if(path === '/api/inbox') {
     const params = new URL(route.request().url()).searchParams;
     if (holdNextPage && params.get('offset') === '50') {
      await new Promise(resolve => { releaseNextPage = resolve; });
@@ -41,6 +42,10 @@ const assert = require('node:assert/strict');
   await page.goto(process.argv[2]+'/settings');
   const sidebar = page.getByRole('complementary',{name:'Inbox sidebar'});
   await sidebar.getByLabel('1 pending messages',{exact:true}).waitFor();
+  await sidebar.getByLabel('7 pending notifications',{exact:true}).waitFor();
+  await sidebar.getByRole('link',{name:'Open raw notifications'}).focus();
+  await page.getByRole('tooltip').filter({hasText:'Notifications · 7 pending'}).waitFor();
+  await page.screenshot({path:'/tmp/inbox-sidebar-collapsed.png'});
   assert.match(await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).getAttribute('class'), /ring-orange/);
   assert.match(await page.locator('link[rel=icon]').getAttribute('href'), /^data:image\/svg\+xml,/);
   const faviconSVG = decodeURIComponent(await page.locator('link[rel=icon]').getAttribute('href'));
@@ -49,6 +54,16 @@ const assert = require('node:assert/strict');
   assert.match(faviconSVG, /font-size="24"/);
   await sidebar.getByRole('button',{name:'Expand inbox sidebar'}).click();
   await sidebar.getByText(q.abstract,{exact:true}).waitFor();
+  const preview = sidebar.getByText(q.abstract,{exact:true});
+  const collapsedHeight = (await preview.boundingBox()).height;
+  await sidebar.getByRole('button',{name:'Show more',exact:true}).click();
+  assert.ok((await preview.boundingBox()).height > collapsedHeight, 'full abstract can be expanded');
+  assert.equal(await preview.evaluate(el => el.scrollHeight <= el.clientHeight),true);
+  await sidebar.getByRole('button',{name:'Show less',exact:true}).click();
+  assert.equal((await preview.boundingBox()).height,collapsedHeight);
+  const messageBounds = await sidebar.locator('article').first().boundingBox();
+  const notificationBounds = await sidebar.getByRole('link',{name:'Open raw notifications'}).boundingBox();
+  assert.ok(notificationBounds.y > messageBounds.y + messageBounds.height, 'notification processing follows the message list');
   // Message titles open the shared full view without navigating or remounting the current page.
   const underlyingInput = page.locator('main input').first();
   const hasInput = await underlyingInput.count();
@@ -81,6 +96,13 @@ const assert = require('node:assert/strict');
   await title.waitFor();
   await page.screenshot({path:'/tmp/inbox-sidebar-desktop.png'});
   await page.setViewportSize({width:390,height:844});
+  for (const name of [q.project_name,q.task_title]) {
+   const source = sidebar.getByText(name,{exact:true});
+   assert.equal(await source.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight),true,'full source remains readable on mobile');
+  }
+  await sidebar.getByRole('button',{name:'Show more',exact:true}).click();
+  assert.equal(await sidebar.getByText(q.abstract,{exact:true}).evaluate(el => el.scrollHeight <= el.clientHeight),true);
+  await sidebar.getByRole('button',{name:'Show less',exact:true}).click();
   await page.screenshot({path:'/tmp/inbox-sidebar-question-mobile.png'});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.setViewportSize({width:1440,height:1000});
@@ -98,7 +120,7 @@ const assert = require('node:assert/strict');
   assert.equal(await sidebar.getByRole('button',{name:'Seen',exact:true}).count(),0);
   assert.equal(await sidebar.getByRole('link',{name:/Full context/}).count(),0);
   assert.equal(await sidebar.locator('textarea').count(),0);
-  assert.equal(await sidebar.locator('article button').count(),5);
+  assert.equal(await sidebar.locator('article button:not([aria-controls])').count(),5);
   await sidebar.getByRole('button',{name:q.question,exact:true}).click();
   await dialog.getByText('What was done',{exact:true}).waitFor();
   await dialog.getByRole('button',{name:'Move to review and close session',exact:true}).waitFor();
