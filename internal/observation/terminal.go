@@ -14,16 +14,18 @@ import (
 )
 
 type Snapshot struct {
-	OutputAt        time.Time   `json:"output_at,omitempty"`
-	InputAt         time.Time   `json:"input_at,omitempty"`
-	UnsupportedSize bool        `json:"unsupported_size,omitempty"`
-	Revision        uint64      `json:"revision"`
-	Input           uint64      `json:"input_generation"`
-	Screen          string      `json:"screen"`
-	History         []string    `json:"history"`
-	At              time.Time   `json:"at"`
-	LineTimes       []time.Time `json:"-"`
-	Digest          string      `json:"digest"`
+	OutputAt         time.Time     `json:"output_at,omitempty"`
+	InputAt          time.Time     `json:"input_at,omitempty"`
+	UnsupportedSize  bool          `json:"unsupported_size,omitempty"`
+	Revision         uint64        `json:"revision"`
+	Input            uint64        `json:"input_generation"`
+	Screen           string        `json:"screen"`
+	HistoryAt        []time.Time   `json:"history_at,omitempty"`
+	HistoryLineTimes [][]time.Time `json:"-"`
+	History          []string      `json:"history"`
+	At               time.Time     `json:"at"`
+	LineTimes        []time.Time   `json:"-"`
+	Digest           string        `json:"digest"`
 }
 
 type Terminal struct {
@@ -78,6 +80,8 @@ func (t *Terminal) capture() {
 	}
 	if t.snap.Screen != "" {
 		t.snap.History = append(t.snap.History, t.snap.Screen)
+		t.snap.HistoryAt = append(t.snap.HistoryAt, t.snap.At)
+		t.snap.HistoryLineTimes = append(t.snap.HistoryLineTimes, append([]time.Time(nil), t.snap.LineTimes...))
 	}
 	// Bound evidence by bytes as well as snapshots. History is rendered text,
 	// not raw escape codes, and no terminal query is ever answered here.
@@ -86,6 +90,8 @@ func (t *Terminal) capture() {
 		total += len(t.snap.History[i])
 		if total > 24000 || len(t.snap.History)-i > 8 {
 			t.snap.History = append([]string(nil), t.snap.History[i+1:]...)
+			t.snap.HistoryAt = append([]time.Time(nil), t.snap.HistoryAt[i+1:]...)
+			t.snap.HistoryLineTimes = append([][]time.Time(nil), t.snap.HistoryLineTimes[i+1:]...)
 			break
 		}
 	}
@@ -130,6 +136,8 @@ func (t *Terminal) Resize(cols, rows int) {
 		// fresh output after SIGWINCH instead of trusting the clipped screen.
 		t.vt = vt10x.New(vt10x.WithSize(c, r), vt10x.WithWriter(io.Discard))
 		t.snap.History = nil
+		t.snap.HistoryAt = nil
+		t.snap.HistoryLineTimes = nil
 	} else {
 		t.vt.Resize(c, r)
 	}
@@ -146,6 +154,11 @@ func (t *Terminal) Snapshot() Snapshot {
 	defer t.mu.Unlock()
 	s := t.snap
 	s.History = append([]string(nil), s.History...)
+	s.HistoryAt = append([]time.Time(nil), s.HistoryAt...)
+	s.HistoryLineTimes = make([][]time.Time, len(t.snap.HistoryLineTimes))
+	for i, ts := range t.snap.HistoryLineTimes {
+		s.HistoryLineTimes[i] = append([]time.Time(nil), ts...)
+	}
 	s.LineTimes = append([]time.Time(nil), s.LineTimes...)
 	return s
 }
@@ -153,17 +166,56 @@ func (t *Terminal) Snapshot() Snapshot {
 // EvidenceAt is when all lines of a cited excerpt were present. Fall back to
 // the capture timestamp for synthetic or older snapshots without line timing.
 func (s Snapshot) EvidenceAt(excerpt string) time.Time {
-	start := strings.LastIndex(s.Screen, excerpt)
-	if start < 0 || excerpt == "" {
+	if excerpt == "" {
 		return s.At
 	}
-	first := strings.Count(s.Screen[:start], "\n")
+	if strings.Contains(s.Screen, excerpt) {
+		return excerptAt(s.Screen, s.LineTimes, s.At, excerpt)
+	}
+	for i := len(s.History) - 1; i >= 0; i-- {
+		if strings.Contains(s.History[i], excerpt) {
+			at := s.At
+			if i < len(s.HistoryAt) {
+				at = s.HistoryAt[i]
+			}
+			var times []time.Time
+			if i < len(s.HistoryLineTimes) {
+				times = s.HistoryLineTimes[i]
+			}
+			return excerptAt(s.History[i], times, at, excerpt)
+		}
+	}
+	return s.At
+}
+
+// ContainsEvidence accepts an intact excerpt from a single rendered snapshot,
+// never a fabricated concatenation across screen/history boundaries.
+func (s Snapshot) ContainsEvidence(excerpt string) bool {
+	if strings.TrimSpace(excerpt) == "" {
+		return false
+	}
+	if strings.Contains(s.Screen, excerpt) {
+		return true
+	}
+	for _, screen := range s.History {
+		if strings.Contains(screen, excerpt) {
+			return true
+		}
+	}
+	return false
+}
+func excerptAt(screen string, times []time.Time, fallback time.Time, excerpt string) time.Time {
+	start := strings.LastIndex(screen, excerpt)
+	if start < 0 {
+		return fallback
+	}
+	first := strings.Count(screen[:start], "\n")
 	last := first + strings.Count(excerpt, "\n")
-	if last >= len(s.LineTimes) {
-		return s.At
+	if last >= len(times) {
+		return fallback
 	}
-	at := s.LineTimes[first]
-	for _, v := range s.LineTimes[first : last+1] {
+	at := times[first]
+	for _, v := range times[first : last+1] {
 		if v.After(at) {
 			at = v
 		}

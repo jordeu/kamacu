@@ -12,6 +12,7 @@ import (
 
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
+	"kamacu/internal/store"
 	"kamacu/internal/tmux"
 	"kamacu/internal/worktree"
 )
@@ -24,18 +25,20 @@ import (
 // (D-26): worktree_path set → active; worktree_error set → failed (Retry);
 // both NULL → absent ("Create worktree"). No status enum.
 type Task struct {
-	ID            int64   `json:"id"`
-	ProjectID     int64   `json:"project_id"`
-	Title         string  `json:"title"`
-	Description   string  `json:"description"`
-	Status        string  `json:"status"`
-	Recurrent     bool    `json:"recurrent"`
-	Position      float64 `json:"position"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	Branch        *string `json:"branch"`
-	WorktreePath  *string `json:"worktree_path"`
-	WorktreeError *string `json:"worktree_error"`
+	PRLinks       []store.PRLink      `json:"pr_links,omitempty"`
+	ObservedWork  []store.SessionWork `json:"observed_work,omitempty"`
+	ID            int64               `json:"id"`
+	ProjectID     int64               `json:"project_id"`
+	Title         string              `json:"title"`
+	Description   string              `json:"description"`
+	Status        string              `json:"status"`
+	Recurrent     bool                `json:"recurrent"`
+	Position      float64             `json:"position"`
+	CreatedAt     string              `json:"created_at"`
+	UpdatedAt     string              `json:"updated_at"`
+	Branch        *string             `json:"branch"`
+	WorktreePath  *string             `json:"worktree_path"`
+	WorktreeError *string             `json:"worktree_error"`
 	// Issue provenance is a one-time snapshot; imported issues remain board tasks.
 	IssueRepo   *string `json:"issue_repo"`
 	IssueNumber *int64  `json:"issue_number"`
@@ -333,6 +336,16 @@ func (h *taskHandlers) get(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	t.PRLinks, err = store.PRLinks(r.Context(), h.db, t.ID, "", 0)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	t.ObservedWork, err = store.WorkForTask(r.Context(), h.db, t.ID)
+	if err != nil {
+		writeError(w, 500, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, t)

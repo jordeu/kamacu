@@ -1,9 +1,11 @@
 package observation
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRenderingAndInput(t *testing.T) {
@@ -137,5 +139,39 @@ func TestActivityIgnoresResizeAndIdenticalRepaints(t *testing.T) {
 	v.Feed([]byte("Working"))
 	if !v.Snapshot().OutputAt.After(before) {
 		t.Fatal("new output missing activity")
+	}
+}
+
+func TestHistoricalEvidenceRetainsOriginalTime(t *testing.T) {
+	terminal := New(100, 3)
+	evidence := "Created https://github.com/acme/repo/pull/7"
+	terminal.Feed([]byte(evidence))
+	original := terminal.Snapshot().EvidenceAt(evidence)
+	terminal.Feed([]byte("\x1b[2J\x1b[HRunning tests\r\n"))
+	snap := terminal.Snapshot()
+	if strings.Contains(snap.Screen, evidence) || !snap.ContainsEvidence(evidence) {
+		t.Fatal("expected scrolled evidence in history", snap)
+	}
+	if !snap.EvidenceAt(evidence).Equal(original) {
+		t.Fatalf("historical evidence became new: %s vs %s", original, snap.EvidenceAt(evidence))
+	}
+	if snap.ContainsEvidence("tests\nCreated") {
+		t.Fatal("combined unrelated snapshots into evidence")
+	}
+	// Returned history metadata must not alias the observer's internal buffers.
+	for i := range snap.HistoryLineTimes {
+		for j := range snap.HistoryLineTimes[i] {
+			snap.HistoryLineTimes[i][j] = time.Time{}
+		}
+	}
+	if !terminal.Snapshot().EvidenceAt(evidence).Equal(original) {
+		t.Fatal("snapshot mutation changed retained timing")
+	}
+	for i := 0; i < 20; i++ {
+		terminal.Feed([]byte(fmt.Sprintf("line %d\r\n", i)))
+	}
+	snap = terminal.Snapshot()
+	if len(snap.History) != len(snap.HistoryAt) || len(snap.History) != len(snap.HistoryLineTimes) {
+		t.Fatal("history timing lost alignment after trimming")
 	}
 }

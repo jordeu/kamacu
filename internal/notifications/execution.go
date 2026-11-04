@@ -95,7 +95,7 @@ func (step Step) question() inbox.Create {
 // Unknown and newly registered tools are conservatively treated as mutations.
 func mutation(name string) bool {
 	switch name {
-	case "list_projects", "get_project", "list_tasks", "get_task", "list_sessions", "get_session", "get_session_output", "subscribe_session_output", "list_workspaces", "list_pending_reviews", "list_recently_reviewed", "list_artifacts", "get_user_activity", "list_feedback":
+	case "get_pr_context", "get_task_pr_context", "list_projects", "get_project", "list_tasks", "get_task", "list_sessions", "get_session", "get_session_output", "subscribe_session_output", "list_workspaces", "list_pending_reviews", "list_recently_reviewed", "list_artifacts", "get_user_activity", "list_feedback":
 		return false
 	default:
 		return true

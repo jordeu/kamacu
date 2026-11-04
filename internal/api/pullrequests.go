@@ -12,7 +12,9 @@ import (
 
 	"kamacu/internal/github"
 	"kamacu/internal/settings"
+	"kamacu/internal/store"
 	"kamacu/internal/worktree"
+	"time"
 )
 
 // viewPR is the PR-metadata read seam (defaults to github.ViewPR). It is a
@@ -251,6 +253,11 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+		}
+
+		if err = store.PutPRLink(r.Context(), db, store.PRLink{TaskID: t.ID, Repository: repo.String, Number: n, Role: "review", Source: "review_task", Evidence: "Opened review workspace", ObservedAt: time.Now()}); err != nil {
+			writeError(w, 500, err.Error())
+			return
 		}
 
 		// PROVISION the detached PR-head worktree (GHREV-01/05). Failure lands in

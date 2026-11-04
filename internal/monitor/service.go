@@ -16,6 +16,7 @@ import (
 	"kamacu/internal/observation"
 	"kamacu/internal/presence"
 	"kamacu/internal/session"
+	"kamacu/internal/store"
 	"kamacu/internal/terminalchoice"
 )
 
@@ -79,6 +80,13 @@ func (s *Service) tick(ctx context.Context) {
 	// The scheduler alone mutates state, except classify results under mu.
 
 	infos := s.Sessions.List()
+	processes := map[string]bool{}
+	for _, info := range infos {
+		processes[info.ID] = info.Status == session.StatusRunning
+	}
+	if err := store.ReconcileSessionStates(ctx, s.DB, processes, time.Now()); err != nil {
+		slog.Warn("reconcile session work lifecycle", "error", err)
+	}
 	// Oldest attempt first prevents busy recent sessions starving other workspaces.
 	s.mu.Lock()
 	sort.SliceStable(infos, func(i, j int) bool {
@@ -190,7 +198,46 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	start := time.Now()
-	d, err := s.Classifier.Classify(ctx, p, obs, task)
+	inferenceTask := task
+	if task.ID == 0 {
+		work, e := store.WorkForSession(ctx, s.DB, sess.Info().ID)
+		if e == nil {
+			raw, _ := json.Marshal(work)
+			inferenceTask.PreviousWork = string(raw)
+		}
+	}
+	if task.ID > 0 {
+		links, e := store.PRLinks(ctx, s.DB, task.ID, "", 0)
+		work, we := store.WorkForTask(ctx, s.DB, task.ID)
+		if e == nil && we == nil {
+			// Prior context is a compact continuation aid, not another terminal
+			// transcript. Full evidence remains available through MCP.
+			type priorLink struct {
+				Repository string
+				Number     int64
+				Role       string
+				Corrected  bool
+			}
+			type priorWork struct {
+				SessionID  string
+				Summary    string
+				State      string
+				Stale      bool
+				ObservedAt time.Time
+			}
+			priorLinks := []priorLink{}
+			for _, l := range links {
+				priorLinks = append(priorLinks, priorLink{l.Repository, l.Number, l.Role, l.Corrected})
+			}
+			priorSessions := []priorWork{}
+			for _, w := range work[:min(3, len(work))] {
+				priorSessions = append(priorSessions, priorWork{w.SessionID, w.Summary, w.State, w.Stale, w.ObservedAt})
+			}
+			raw, _ := json.Marshal(map[string]any{"links": priorLinks, "sessions": priorSessions})
+			inferenceTask.PreviousWork = string(raw)
+		}
+	}
+	d, err := s.Classifier.Classify(ctx, p, obs, inferenceTask)
 	info := sess.Info()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -224,6 +271,35 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: err.Error()})
 		w.lastAttempt = time.Now().Add(20 * time.Second)
 		return
+	}
+	var taskID *int64
+	if info.TaskID > 0 {
+		id := info.TaskID
+		taskID = &id
+	}
+	if err = store.PutSessionState(parent, s.DB, info.ID, taskID, d.State, start); err != nil {
+		s.persistenceFailure(parent, sess, w)
+		return
+	}
+	if d.WorkSummary != "" {
+		if err = store.PutSessionWork(parent, s.DB, store.SessionWork{SessionID: info.ID, TaskID: taskID, State: d.State, Summary: d.WorkSummary, Evidence: d.WorkEvidence, Uncertainty: d.WorkUncertainty, ObservedAt: obs.EvidenceAt(d.WorkEvidence)}); err != nil {
+			s.persistenceFailure(parent, sess, w)
+			return
+		}
+	}
+	for _, link := range d.PRLinks {
+		observedLink := store.PRLink{TaskID: info.TaskID, Repository: link.Repository, Number: link.Number, Role: link.Role, Source: "terminal:" + info.ID, Evidence: link.Evidence, Uncertainty: link.Uncertainty, ObservedAt: obs.EvidenceAt(link.Evidence)}
+		if err = store.PutSessionPRLink(parent, s.DB, info.ID, observedLink); err != nil {
+			s.persistenceFailure(parent, sess, w)
+			return
+		}
+		if info.TaskID <= 0 {
+			continue
+		}
+		if err = store.PutPRLink(parent, s.DB, store.PRLink{TaskID: info.TaskID, Repository: link.Repository, Number: link.Number, Role: link.Role, Source: "terminal:" + info.ID, Evidence: link.Evidence, Uncertainty: link.Uncertainty, ObservedAt: obs.EvidenceAt(link.Evidence)}); err != nil {
+			s.persistenceFailure(parent, sess, w)
+			return
+		}
 	}
 	freshRequest := w.episodeInput != current.Input && !obs.InputAt.IsZero() && obs.EvidenceAt(d.Evidence).After(obs.InputAt)
 	w.revision = current.Revision

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"kamacu/internal/store"
 	"time"
 )
 
@@ -30,19 +31,24 @@ type Source struct {
 	CreatedAt       int64           `json:"created_at"`
 }
 type Event struct {
-	ExternalID       string   `json:"external_id"`
-	Version          string   `json:"version"`
-	Repository       string   `json:"repository"`
-	URL              string   `json:"url"`
-	Title            string   `json:"title"`
-	Reason           string   `json:"reason"`
-	SubjectType      string   `json:"subject_type"`
-	SubjectURL       string   `json:"subject_url"`
-	LatestCommentURL string   `json:"latest_comment_url"`
-	Context          string   `json:"context"`
-	SubjectTitle     string   `json:"subject_title,omitempty"`
-	SubjectState     string   `json:"subject_state,omitempty"`
-	ContextWarnings  []string `json:"context_warnings,omitempty"`
+	WorkContextTruncated bool                `json:"work_context_truncated,omitempty"`
+	WorkContextLookup    string              `json:"work_context_lookup,omitempty"`
+	RelatedSessions      []store.SessionWork `json:"related_sessions,omitempty"`
+	PRFacts              *PRFacts            `json:"pr_facts,omitempty"`
+	RelatedWork          []store.RelatedTask `json:"related_work,omitempty"`
+	ExternalID           string              `json:"external_id"`
+	Version              string              `json:"version"`
+	Repository           string              `json:"repository"`
+	URL                  string              `json:"url"`
+	Title                string              `json:"title"`
+	Reason               string              `json:"reason"`
+	SubjectType          string              `json:"subject_type"`
+	SubjectURL           string              `json:"subject_url"`
+	LatestCommentURL     string              `json:"latest_comment_url"`
+	Context              string              `json:"context"`
+	SubjectTitle         string              `json:"subject_title,omitempty"`
+	SubjectState         string              `json:"subject_state,omitempty"`
+	ContextWarnings      []string            `json:"context_warnings,omitempty"`
 }
 type Batch struct {
 	Events     []Event
