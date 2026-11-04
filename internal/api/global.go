@@ -230,10 +230,8 @@ func (h *globalHandlers) loadGlobalConfig() (globalConfig, error) {
 }
 
 // deriveGlobalState fills the read-time half of the wire shape (D-17):
-// root_exists via an inline os.Stat IsDir check (the api package has no
-// dirExists helper — do not import internal/migrate for one) and the live
-// counts. An empty RootPath never probes the filesystem. The stat is honest
-// about a vanished root at GET time without violating D-08's no-boot-
+// root_exists via an inline os.Stat IsDir check and the live counts. An empty
+// RootPath never probes the filesystem. The stat is honest about a vanished root at GET time without violating D-08's no-boot-
 // revalidation — nothing is revalidated or repaired here.
 func (h *globalHandlers) deriveGlobalState(ctx context.Context, g *globalConfig) {
 	if g.RootPath != "" {
