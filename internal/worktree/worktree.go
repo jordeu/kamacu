@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,7 +52,16 @@ func gitRun(ctx context.Context, repo string, args ...string) (string, error) {
 	return gitCommand(ctx, repo, false, args...)
 }
 
-func gitCommand(ctx context.Context, repo string, network bool, args ...string) (string, error) {
+func gitCommand(ctx context.Context, repo string, network bool, args ...string) (result string, resultErr error) {
+	start := time.Now()
+	operation := ""
+	if len(args) > 0 {
+		operation = args[0]
+	}
+	defer func() {
+		slog.Debug("git operation finished", "repo", repo, "operation", operation, "network", network, "duration_ms", time.Since(start).Milliseconds(), "failed", resultErr != nil)
+	}()
+
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
 	if network {
 		cmd.WaitDelay = time.Second

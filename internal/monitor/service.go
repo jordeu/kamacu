@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"kamacu/internal/diagnostics"
 	"kamacu/internal/inbox"
 	"kamacu/internal/observation"
 	"kamacu/internal/presence"
@@ -198,6 +200,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	start := time.Now()
+	ctx = diagnostics.WithGroup(ctx, diagnostics.Group{Kind: "session", ID: sess.Info().ID, SessionID: sess.Info().ID, StartedAt: sess.Info().CreatedAt, TaskID: task.ID, TaskTitle: task.Title, ProjectID: task.ProjectID, ProjectName: task.ProjectName})
 	inferenceTask := task
 	if task.ID == 0 {
 		work, e := store.WorkForSession(ctx, s.DB, sess.Info().ID)
@@ -237,6 +240,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 			inferenceTask.PreviousWork = string(raw)
 		}
 	}
+	slog.Debug("classifying terminal", "session", sess.Info().ID, "profile", p.ID, "revision", obs.Revision)
 	d, err := s.Classifier.Classify(ctx, p, obs, inferenceTask)
 	info := sess.Info()
 	s.mu.Lock()
@@ -251,10 +255,12 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	effective, e := Resolve(parent, s.DB, info.TaskID)
 	currentTask, taskErr := s.taskContext(parent, info)
 	if info.Status != session.StatusRunning || info.StopRequested || taskErr != nil || currentTask != task || e != nil || effective.Key() != p.Key() || current.Input != obs.Input || current.UnsupportedSize {
+		slog.Debug("discarding obsolete terminal classification", "session", info.ID)
 		return
 	}
 	// Provider failures must back off even when terminal output kept changing.
 	if err != nil {
+		slog.Debug("terminal classification failed; backing off", "session", info.ID, "error", err, "backoff_seconds", 20)
 		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: err.Error()})
 		_ = s.Inbox.HideObserved(parent, info.ID, true)
 		w.lastAttempt = time.Now().Add(20 * time.Second)
@@ -263,6 +269,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	// An old question can remain visible after progress. Never accept an old
 	// screen merely because its evidence excerpt is still present.
 	if current.Revision != obs.Revision {
+		slog.Debug("terminal changed during classification", "session", info.ID, "revision", obs.Revision, "current_revision", current.Revision)
 		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "ready", Detail: "Terminal changed during analysis; waiting for stable evidence"})
 		_ = s.Inbox.HideObserved(parent, info.ID, true)
 		return
@@ -465,6 +472,6 @@ func (s *Service) taskContext(ctx context.Context, info session.Info) (TaskConte
 		task.Scope = "scratchpad"
 		return task, nil
 	}
-	err := s.DB.QueryRowContext(ctx, `SELECT title,description,status,source FROM tasks WHERE id=?`, info.TaskID).Scan(&task.Title, &task.Description, &task.Status, &task.Source)
+	err := s.DB.QueryRowContext(ctx, `SELECT t.title,t.description,t.status,t.source,p.id,p.name FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?`, info.TaskID).Scan(&task.Title, &task.Description, &task.Status, &task.Source, &task.ProjectID, &task.ProjectName)
 	return task, err
 }

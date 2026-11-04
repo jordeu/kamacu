@@ -22,6 +22,7 @@ import (
 	"kamacu/internal/api"
 	"kamacu/internal/artifact"
 	"kamacu/internal/codex"
+	"kamacu/internal/diagnostics"
 	"kamacu/internal/github"
 	"kamacu/internal/inbox"
 	"kamacu/internal/integration"
@@ -46,6 +47,7 @@ import (
 // a thin dispatcher; this Command is the explicit `kamacu serve` subcommand
 // (D-01..D-05).
 type serveCmd struct {
+	debug               bool
 	addr                string
 	db                  string
 	claudeBin           string
@@ -61,11 +63,12 @@ func (serveCmd) Synopsis() string {
 }
 
 func (serveCmd) Usage() string {
-	return `kamacu serve [--addr A] [--db D] [--claude-bin B] [--dev-origin H] [--insecure-allow-remote] [--no-integration-sync]
+	return `kamacu serve [--debug] [--addr A] [--db D] [--claude-bin B] [--dev-origin H] [--insecure-allow-remote] [--no-integration-sync]
 `
 }
 
 func (c *serveCmd) SetFlags(f *flag.FlagSet) {
+	f.BoolVar(&c.debug, "debug", false, "enable debug logs and save full LLM prompts/responses under ~/.kamacu/llm")
 	f.BoolVar(&c.noIntegrationSync, "no-integration-sync", false, "skip startup updates to user-level agent integrations (for disposable servers)")
 	f.StringVar(&c.addr, "addr", "127.0.0.1:7333", "listen address (localhost-only by design)")
 	f.StringVar(&c.db, "db", "~/.kamacu/kamacu.db", "path to SQLite database file")
@@ -78,6 +81,19 @@ func (c *serveCmd) SetFlags(f *flag.FlagSet) {
 }
 
 func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subcommands.ExitStatus {
+	logDir, err := settings.ExpandHome("~/.kamacu")
+	if err != nil {
+		slog.Error("resolving log directory", "error", err)
+		return subcommands.ExitFailure
+	}
+	closeLogs, err := diagnostics.Configure(logDir, c.debug)
+	if err != nil {
+		slog.Error("initializing logs", "error", err)
+		return subcommands.ExitFailure
+	}
+	defer closeLogs()
+	slog.Info("server starting", "debug", c.debug, "log_dir", logDir)
+
 	// D-21: localhost-only is enforced, not aspirational. The opt-in
 	// --insecure-allow-remote escape hatch bypasses the bind gate (and the
 	// hostCheck / WS Origin layers below); with the flag absent, behavior is
@@ -98,6 +114,17 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		slog.Error("resolving db path", "path", c.db, "error", err)
 		return subcommands.ExitFailure
 	}
+
+	var transcripts *diagnostics.Recorder
+	if c.debug {
+		transcripts, err = diagnostics.NewRecorder(logDir)
+		if err != nil {
+			slog.Error("initializing LLM transcripts", "error", err)
+			return subcommands.ExitFailure
+		}
+		defer transcripts.Close()
+	}
+	slog.Debug("startup configuration", "addr", c.addr, "db", dbPath, "integration_sync", !c.noIntegrationSync)
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		slog.Error("creating db directory", "dir", filepath.Dir(dbPath), "error", err)
@@ -297,7 +324,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	}
 	go inboxService.Run(ctx)
 	monitorMetrics := &monitor.Metrics{}
-	classifier := monitor.Backend{Metrics: monitorMetrics}
+	classifier := monitor.Backend{Metrics: monitorMetrics, Transcripts: transcripts}
 	api.MonitorRoutes(mux, db, classifier, monitorMetrics)
 	notificationMCP, err := kamacumcp.NewNotificationClient(ctx, hookBaseURL(c.addr), hookToken)
 	if err != nil {
@@ -422,6 +449,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	if c.insecureAllowRemote {
 		handler = guarded
 	}
+	handler = debugRequests(handler)
 	if err := http.ListenAndServe(c.addr, handler); err != nil {
 		slog.Error("server stopped", "error", err)
 		return subcommands.ExitFailure
@@ -553,5 +581,21 @@ func hostCheck(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"forbidden host"}`))
 		}
+	})
+}
+
+// Keep the original ResponseWriter so streaming and websocket interfaces survive.
+func debugRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !slog.Default().Enabled(r.Context(), slog.LevelDebug) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		slog.Debug("HTTP request started", "method", r.Method, "path", r.URL.Path)
+		defer func() {
+			slog.Debug("HTTP request finished", "method", r.Method, "path", r.URL.Path, "duration_ms", time.Since(start).Milliseconds())
+		}()
+		next.ServeHTTP(w, r)
 	})
 }

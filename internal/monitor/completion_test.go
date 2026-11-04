@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"kamacu/internal/diagnostics"
 	"kamacu/internal/inbox"
 	"kamacu/internal/observation"
 	"kamacu/internal/presence"
@@ -100,7 +102,12 @@ func TestCompletionTaskContextAndReclassification(t *testing.T) {
 	id := sess.Info().ID
 	in := inbox.New(db, func(string) inbox.Session { return inbox.Session{TaskID: 1, Live: true, Done: sess.Done()} })
 	defer in.Close()
-	svc := New(db, mgr, in, presence.NewTracker(), Backend{})
+	captureDir := t.TempDir()
+	recorder, err := diagnostics.NewRecorder(captureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db, mgr, in, presence.NewTracker(), Backend{Transcripts: recorder})
 	defer svc.jobs.Wait()
 	wait := func(status string, count int) inbox.Question {
 		t.Helper()
@@ -138,4 +145,29 @@ func TestCompletionTaskContextAndReclassification(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait("done", 0)
+	daily := filepath.Join(captureDir, "llm", "monitoring", "session-"+id, time.Now().UTC().Format("2006-01-02"))
+	data, err := os.ReadFile(filepath.Join(daily, "group.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct{ Group diagnostics.Group }
+	if err = json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Group.SessionID != id || manifest.Group.TaskTitle != "Improve uploads" || manifest.Group.ProjectName != "Project" {
+		t.Fatalf("group: %+v", manifest.Group)
+	}
+	entries, err := os.ReadDir(daily)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			count++
+		}
+	}
+	if count < 3 {
+		t.Fatalf("missing reclassification transcripts: %d", count)
+	}
 }

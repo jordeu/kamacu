@@ -17,8 +17,9 @@ import (
 	"kamacu/internal/settings"
 )
 
+// Model validates response contracts before reporting or recording the outcome.
 type Model interface {
-	GenerateJSON(context.Context, monitor.Profile, string, any) ([]byte, error)
+	GenerateValidatedJSON(context.Context, monitor.Profile, string, any, func([]byte) error) ([]byte, error)
 }
 type Service struct {
 	DB          *sql.DB
@@ -193,6 +194,7 @@ func (s *Service) repositories(ctx context.Context) (map[string]bool, error) {
 	return out, rows.Err()
 }
 func (s *Service) ingest(ctx context.Context, source Source, batch Batch) error {
+	slog.Debug("ingesting notifications", "source", source.ID, "events", len(batch.Events))
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -238,11 +240,20 @@ func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	raw, err := s.Model.GenerateJSON(callCtx, p, prompt, stepSchema)
+	start := time.Now()
+	slog.Debug("notification inference started", "profile", p.ID, "prompt_bytes", len(prompt))
+	var step Step
+	_, err = s.Model.GenerateValidatedJSON(callCtx, p, prompt, stepSchema, func(raw []byte) error {
+		var validationErr error
+		step, validationErr = decodeStep(raw)
+		return validationErr
+	})
+	slog.Debug("notification inference finished", "profile", p.ID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
 	if err != nil {
 		return Step{}, err
 	}
-	return decodeStep(raw)
+
+	return step, nil
 }
 func (s *Service) projectContext(ctx context.Context, repo string) (string, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.name,t.id,t.title,t.status,t.source,t.pr_number FROM projects p LEFT JOIN tasks t ON t.project_id=p.id WHERE lower(p.github_repo)=lower(?) ORDER BY p.id,CASE WHEN t.status='done' THEN 1 ELSE 0 END,t.updated_at DESC LIMIT 100`, repo)

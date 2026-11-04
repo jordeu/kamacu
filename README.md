@@ -69,6 +69,63 @@ make build           # Vite production build, then the Go binary → bin/kamacu
 ./bin/kamacu serve
 ```
 
+Run `kamacu serve --debug` to enable debug-level console and file logs and
+record monitoring and notification LLM interactions for troubleshooting.
+Server logs are always written to `~/.kamacu/kamacu.log`, rotating at 10 MiB
+with five numbered backups (`.1` is newest).
+
+Debug transcripts are grouped for manual review:
+
+```text
+~/.kamacu/llm/
+├── notifications/YYYY-MM-DD/HHMMSS.nanoseconds_batch-<batch-id>/
+│   ├── summary.md
+│   ├── group.json
+│   ├── 001_<interaction-id>/
+│   │   ├── prompt.md
+│   │   ├── response.md
+│   │   ├── metadata.json
+│   │   ├── schema.json
+│   │   └── provider.json
+│   └── 002_<interaction-id>/...
+└── monitoring/session-<session-id>/
+    ├── summary.md
+    └── YYYY-MM-DD/
+        ├── summary.md
+        ├── group.json
+        └── 001_<interaction-id>/...
+```
+
+Open `summary.md` for links to the calls in order. Notification processing
+keeps all repository groups, retries, and model/tool follow-ups in one batch
+folder. Notification reply execution uses a separate `reply-<run-id>` folder.
+Monitoring groups calls by terminal session and UTC day, with task and project
+context in the summaries. All timestamps and date folders use UTC. Calls
+without workflow context (such as profile tests) get their own `call-<id>` folder.
+
+`prompt.md` preserves the full prompt. `response.md` pretty-prints JSON responses
+in a Markdown code block and preserves non-JSON responses as text.
+`metadata.json` records the model/profile, interaction and group IDs, timings,
+errors (including notification response-validation failures), and token usage
+when available. `schema.json` holds the response schema;
+`provider.json` preserves raw provider output, HTTP status, or CLI stderr.
+Interaction folders appear only once all their files are written.
+
+Transcripts are created only in debug mode. Cleanup runs at startup and up to
+once per minute when captures are written. It removes whole completed batch
+folders or monitoring days older than seven days, then the oldest completed
+groups to target 256 MiB total. Active notification workflows and the current
+monitoring day are protected, so usage may temporarily exceed that target.
+Copy groups elsewhere to retain them longer. Existing JSONL captures from
+older versions are left untouched and are outside this retention policy.
+Malformed or incomplete group manifests are preserved and skipped with a
+warning, allowing startup and cleanup of valid groups to continue.
+
+These files may contain private terminal, task, and notification content.
+Directories use owner-only permissions (`0700`), and files use `0600`.
+Provider authorization headers and configured credentials are not added to
+transcripts.
+
 `make build` embeds the frontend into the binary — no separate frontend server
 in production. For frontend development with hot-reload, run `make dev-backend`
 and `make dev-frontend` (Vite dev server with HMR, proxying `/api` — the JSON

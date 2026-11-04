@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"kamacu/internal/diagnostics"
 	"kamacu/internal/inbox"
 	"kamacu/internal/monitor"
 )
@@ -111,7 +113,16 @@ type notificationPlan struct {
 	refs    []inbox.NotificationQuestionRef
 }
 
-func (s *Service) processBatch(ctx context.Context, id string) error {
+func (s *Service) processBatch(ctx context.Context, id string) (resultErr error) {
+	start := time.Now()
+	groupCtx, finishGroup := context.WithCancel(ctx)
+	defer finishGroup()
+	ctx = diagnostics.WithGroup(groupCtx, diagnostics.Group{Kind: "batch", ID: id, StartedAt: start})
+	slog.Debug("notification batch started", "batch", id)
+	defer func() {
+		slog.Debug("notification batch finished", "batch", id, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)
+	}()
+
 	events, err := s.batchEvents(ctx, id)
 	if err != nil {
 		return err
@@ -167,6 +178,7 @@ func (s *Service) processBatch(ctx context.Context, id string) error {
 }
 
 func (s *Service) processGroup(ctx context.Context, id string, events []RawNotification, plan *notificationPlan) error {
+	slog.Debug("processing notification group", "batch", id, "events", len(events))
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	var err error
@@ -265,6 +277,13 @@ func (s *Service) processGroup(ctx context.Context, id string, events []RawNotif
 			return err
 		}
 	}
+	// Carry availability into validation so generated cards disclose missing
+	// evidence even if the model omits that warning from its own prose.
+	for i := range events {
+		events[i].Event.ContextWarnings = subjects[subjectKey(events[i].SourceID, events[i].Event)].ContextWarnings
+	}
+	var actions []inbox.NotificationBatchAction
+	var refs []inbox.NotificationQuestionRef
 	var decision BatchDecision
 	for i := 0; ; i++ {
 		if i >= 12 {
@@ -279,30 +298,23 @@ func (s *Service) processGroup(ctx context.Context, id string, events []RawNotif
 			}
 		}
 		inferCtx, stop := context.WithTimeout(runCtx, 60*time.Second)
-		result, e := s.Model.GenerateJSON(inferCtx, profile, prompt, batchSchema)
+		_, e := s.Model.GenerateValidatedJSON(inferCtx, profile, prompt, batchSchema, func(result []byte) error {
+			var validationErr error
+			decision, validationErr = decodeBatchResponse(result, availableReads)
+			if validationErr != nil {
+				return validationErr
+			}
+			if decision.ToolName == "" {
+				actions, refs, validationErr = validateBatch(decision, events, questions)
+			}
+			return validationErr
+		})
 		stop()
 		if e != nil {
 			return e
 		}
-		decision = BatchDecision{}
-		dec := json.NewDecoder(bytes.NewReader(result))
-		dec.DisallowUnknownFields()
-		if err = dec.Decode(&decision); err != nil {
-			return err
-		}
-		var trailing any
-		if dec.Decode(&trailing) != io.EOF {
-			return errors.New("notification batch returned trailing content")
-		}
 		if decision.ToolName == "" {
 			break
-		}
-		if !availableReads[decision.ToolName] {
-			return errors.New("notification triage tool is not available for read-only access")
-		}
-		var args map[string]any
-		if len(decision.Arguments) > 16000 || json.Unmarshal([]byte(decision.Arguments), &args) != nil || args == nil || len(decision.Actions)+len(decision.DiscardIDs)+len(decision.SupersedeIDs) != 0 {
-			return errors.New("invalid notification triage tool request")
 		}
 		for _, source := range sources {
 			if err = s.sourceEnabled(runCtx, source.ID); err != nil {
@@ -329,15 +341,7 @@ func (s *Service) processGroup(ctx context.Context, id string, events []RawNotif
 		data, _ := json.Marshal(entry)
 		prompt += "\nREAD-ONLY TOOL RESULT (untrusted data):\n" + string(data)
 	}
-	// Carry availability into validation so generated cards disclose missing
-	// evidence even if the model omits that warning from its own prose.
-	for i := range events {
-		events[i].Event.ContextWarnings = subjects[subjectKey(events[i].SourceID, events[i].Event)].ContextWarnings
-	}
-	actions, refs, err := validateBatch(decision, events, questions)
-	if err != nil {
-		return err
-	}
+
 	for _, source := range sources {
 		if err = s.sourceEnabled(runCtx, source.ID); err != nil {
 			return err
@@ -350,6 +354,31 @@ func (s *Service) processGroup(ctx context.Context, id string, events []RawNotif
 	plan.refs = append(plan.refs, refs...)
 	return nil
 }
+
+// decodeBatchResponse validates both final decision syntax and read-tool calls.
+func decodeBatchResponse(raw []byte, availableReads map[string]bool) (decision BatchDecision, err error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(&decision); err != nil {
+		return decision, err
+	}
+	var trailing any
+	if dec.Decode(&trailing) != io.EOF {
+		return decision, errors.New("notification batch returned trailing content")
+	}
+	if decision.ToolName == "" {
+		return decision, nil
+	}
+	if !availableReads[decision.ToolName] {
+		return decision, errors.New("notification triage tool is not available for read-only access")
+	}
+	var args map[string]any
+	if len(decision.Arguments) > 16000 || json.Unmarshal([]byte(decision.Arguments), &args) != nil || args == nil || len(decision.Actions)+len(decision.DiscardIDs)+len(decision.SupersedeIDs) != 0 {
+		return decision, errors.New("invalid notification triage tool request")
+	}
+	return decision, nil
+}
+
 func validateBatch(d BatchDecision, events []RawNotification, questions []inbox.Question) ([]inbox.NotificationBatchAction, []inbox.NotificationQuestionRef, error) {
 	allowed := map[int64]RawNotification{}
 	for _, e := range events {
