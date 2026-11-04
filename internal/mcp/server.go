@@ -84,6 +84,7 @@ func (ServeCommand) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subc
 // `any`; a plain map satisfies the type:"object" requirement without
 // jsonschema-go.
 func registerTools(s *mcp.Server, b *bridge) {
+	registerPRContextTools(s, b)
 	registerTaskTools(s, b)
 	registerArtifactTools(s, b)
 	registerProjectTools(s, b)

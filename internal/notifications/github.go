@@ -227,6 +227,7 @@ func githubPath(host, raw string) (string, error) {
 }
 func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error) {
 	// Never present an older stored state or excerpt as a fresh observation.
+	event.PRFacts = nil
 	event.Context = ""
 	event.SubjectState = ""
 	event.SubjectTitle = ""

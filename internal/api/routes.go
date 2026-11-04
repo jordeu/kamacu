@@ -46,6 +46,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.M
 	mux.HandleFunc("PATCH /api/tasks/{id}", t.update)
 	mux.HandleFunc("POST /api/tasks/{id}/move", t.move)
 	mux.HandleFunc("DELETE /api/tasks/{id}", afterArtifactDelete(t.delete, afterDelete))
+	prContextRoutes(mux, db, mgr)
 	SettingsRoutes(mux, db)
 }
 

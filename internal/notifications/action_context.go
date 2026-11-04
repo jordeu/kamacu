@@ -64,6 +64,7 @@ func (s *Service) loadActionContext(ctx context.Context, questionID string) (act
 		if e != nil {
 			return out, e
 		}
+		compactWorkDecoration(&fresh, min(workDecorationLimit, 32000/max(1, len(out.Subjects))))
 		if len(fresh.Context) > budget {
 			fresh.Context = strings.ToValidUTF8(fresh.Context[:budget], "") + "\n[truncated]"
 		}

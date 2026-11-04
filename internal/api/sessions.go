@@ -23,6 +23,7 @@ import (
 
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
+	"kamacu/internal/store"
 	"kamacu/internal/tmux"
 )
 
@@ -1399,6 +1400,8 @@ const maxOutputBytes = 512 * 1024
 // Dev sessions (TaskID==0) keep empty JOIN fields (omitted on the wire via
 // omitempty).
 type sessionDetail struct {
+	PRLinks      []store.PRLink     `json:"pr_links,omitempty"`
+	ObservedWork *store.SessionWork `json:"observed_work,omitempty"`
 	session.Info
 	TaskTitle   string `json:"taskTitle,omitempty"`
 	ProjectName string `json:"projectName,omitempty"`
@@ -1490,12 +1493,22 @@ func (h *sessionHandlers) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := sess.Info()
+	links, err := store.SessionPRLinks(r.Context(), h.db, info.ID)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	work, err := store.WorkForSession(r.Context(), h.db, info.ID)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 	// Global entries get the honest synthesized labels (GINT-02) — same
 	// per-entry gating as the list loop, never a 0-keyed ctxByTask lookup.
 	if info.Global {
 		gctx := h.globalSessionContext()
 		writeJSON(w, http.StatusOK, sessionDetail{
-			Info:        info,
+			Info: info, PRLinks: links, ObservedWork: work,
 			TaskTitle:   "Scratchpad",
 			ProjectName: "Global",
 			AgentName:   gctx.agentName,
@@ -1505,7 +1518,7 @@ func (h *sessionHandlers) getSession(w http.ResponseWriter, r *http.Request) {
 	ctxByTask := h.joinSessionContext([]session.Info{info})
 	ctx := ctxByTask[info.TaskID]
 	writeJSON(w, http.StatusOK, sessionDetail{
-		Info:        info,
+		Info: info, PRLinks: links, ObservedWork: work,
 		TaskTitle:   ctx.taskTitle,
 		ProjectName: ctx.projectName,
 		AgentName:   ctx.agentName,
