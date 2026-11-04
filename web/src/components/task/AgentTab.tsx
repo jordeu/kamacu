@@ -54,6 +54,7 @@ export function AgentTab({
   description,
   seed,
   autoFocus,
+  taskSpawnMutation,
 }: {
   scope: AgentTabScope;
   agentSession: TermSession | undefined;
@@ -65,6 +66,9 @@ export function AgentTab({
   // prompt into the agent once, after the session connects. Task scope only.
   seed?: string;
   autoFocus?: boolean;
+  // Share the task page mutation so automatic startup and manual retries
+  // use the same pending and error state.
+  taskSpawnMutation?: ReturnType<typeof useSpawnAgent>;
 }) {
   const isTask = scope.kind === "task";
   // Both hook sets are declared unconditionally (rules-of-hooks); the set a
@@ -76,7 +80,7 @@ export function AgentTab({
   const taskResume = useResumeAgent(taskId);
   const globalSpawn = useSpawnGlobalAgent();
   const globalResume = useResumeGlobalAgent();
-  const spawn = isTask ? taskSpawn : globalSpawn;
+  const spawn = isTask ? (taskSpawnMutation ?? taskSpawn) : globalSpawn;
   const resume = isTask ? taskResume : globalResume;
   // Stop is scope-blind: it targets a session id either way.
   const stopSession = useStopSession();

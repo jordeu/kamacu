@@ -1,7 +1,7 @@
 import { useDismissTaskCompletions } from "@/api/inbox";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { useArtifacts, useRenameArtifact, type Artifact } from "@/api/artifacts";
@@ -19,6 +19,7 @@ import {
   useRenameSession,
   useSessions,
   useSpawnSession,
+  useSpawnAgent,
   useStopSession,
 } from "@/api/sessions";
 import { Button } from "@/components/ui/button";
@@ -75,6 +76,9 @@ export default function TaskPage() {
   const isClaudeAgent = projectEngine === "claude";
   const taskId = Number(taskIdParam);
   const navigate = useNavigate();
+  const location = useLocation();
+  const startAgent = useSpawnAgent(taskId);
+  const autoStartAttempt = useRef<number | null>(null);
   const [searchParams] = useSearchParams();
   const feedbackSession = searchParams.get("feedback_session");
   const queryClient = useQueryClient();
@@ -89,6 +93,15 @@ export default function TaskPage() {
   const updateTask = useUpdateTask(projectId);
   const updateRecurrence = useUpdateTask(projectId);
   const createWorktree = useCreateWorktree(taskId, projectId);
+
+  // Consume the create-and-start navigation once, including under StrictMode.
+  useEffect(() => {
+    if (!location.state?.startAgent || !task || task.id !== taskId || autoStartAttempt.current === taskId) return;
+    autoStartAttempt.current = taskId;
+    navigate(location.pathname + location.search, { replace: true, state: null });
+    // Provisioning failures are already explained by the worktree banner.
+    if (task.worktree_path) startAgent.mutate();
+  }, [location, task, taskId, navigate, startAgent]);
 
   // Bash session lifecycle (D-27..D-30) — the server is tab truth (D-28).
   const { data: sessions, isFetchedAfterMount: sessionsFetched } =
@@ -441,6 +454,7 @@ export default function TaskPage() {
           <AgentTab
             scope={{ kind: "task", taskId: task.id }}
             agentSession={agentSession}
+            taskSpawnMutation={startAgent}
             description={task.description}
             seed={seed}
             autoFocus={feedbackSession === agentSession?.id}

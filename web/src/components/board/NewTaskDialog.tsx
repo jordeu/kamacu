@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import {
   Dialog,
   DialogContent,
@@ -28,18 +29,22 @@ export function NewTaskDialog({
 }: NewTaskDialogProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const navigate = useNavigate();
   const createTask = useCreateTask(projectId);
 
-  function handleSubmit() {
+  function handleSubmit(startAgent = false) {
     const trimmed = title.trim();
     if (trimmed === "" || createTask.isPending) return;
     createTask.mutate(
       { title: trimmed, description },
       {
-        onSuccess: () => {
+        onSuccess: (task) => {
           setTitle("");
           setDescription("");
           onOpenChange(false);
+          if (startAgent) {
+            navigate(`/projects/${projectId}/tasks/${task.id}`, { state: { startAgent: true } });
+          }
         },
       },
     );
@@ -58,7 +63,7 @@ export function NewTaskDialog({
             placeholder="Task title"
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleSubmit();
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) handleSubmit(true);
             }}
           />
           <Textarea
@@ -68,15 +73,27 @@ export function NewTaskDialog({
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
+        {createTask.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            Could not create the task. {createTask.error.message}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
-            onClick={handleSubmit}
+            variant="outline"
+            onClick={() => handleSubmit()}
             disabled={title.trim() === "" || createTask.isPending}
           >
             Create task
+          </Button>
+          <Button
+            onClick={() => handleSubmit(true)}
+            disabled={title.trim() === "" || createTask.isPending}
+          >
+            Create &amp; Start
           </Button>
         </DialogFooter>
       </DialogContent>
