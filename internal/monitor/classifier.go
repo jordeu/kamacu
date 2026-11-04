@@ -334,15 +334,19 @@ func runCLIJSON(ctx context.Context, p Profile, prompt string, responseSchema an
 	}
 	if p.Backend == "claude_cli" {
 		var envelope struct {
-			Usage      *Usage          `json:"usage"`
-			Structured json.RawMessage `json:"structured_output"`
-			Result     string          `json:"result"`
-			IsError    bool            `json:"is_error"`
+			TotalCostUSD float64         `json:"total_cost_usd"`
+			Usage        *Usage          `json:"usage"`
+			Structured   json.RawMessage `json:"structured_output"`
+			Result       string          `json:"result"`
+			IsError      bool            `json:"is_error"`
 		}
 		if json.Unmarshal(out.Bytes(), &envelope) != nil || envelope.IsError {
 			return out.Bytes(), errors.New("Claude classifier failed; check login/model/quota")
 		}
 		*usage = envelope.Usage
+		if *usage != nil {
+			(*usage).ReportedCostUSD = envelope.TotalCostUSD
+		}
 		if len(envelope.Structured) > 0 {
 			return envelope.Structured, nil
 		}

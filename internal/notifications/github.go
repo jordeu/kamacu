@@ -226,86 +226,163 @@ func githubPath(host, raw string) (string, error) {
 	return strings.TrimPrefix(u.RequestURI(), prefix), nil
 }
 func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error) {
-	// Never present an older stored state or excerpt as a fresh observation.
 	event.PRFacts = nil
 	event.Context = ""
 	event.SubjectState = ""
 	event.SubjectTitle = ""
+	event.SubjectUpdatedAt = ""
 	event.ContextWarnings = nil
+	event.Evidence = nil
+	event.EvidenceComplete = true
+	event.EvidenceObservedAt = time.Now()
+	if g.Now != nil {
+		event.EvidenceObservedAt = g.Now()
+	}
 	host := g.config(s).Hostname
 	path, err := githubPath(host, event.SubjectURL)
 	if err != nil {
 		return event, err
 	}
-	// Subject and latest comment provide the concrete reason for attention. PR
-	// inline comments are a separate API and must also be included.
 	paths := []string{path}
 	if event.LatestCommentURL != "" {
 		p, e := githubPath(host, event.LatestCommentURL)
 		if e != nil {
 			return event, e
 		}
-		paths = append(paths, p)
+		if p != path {
+			paths = append(paths, p)
+		}
 	}
+	issuePath := strings.Replace(path, "/pulls/", "/issues/", 1)
+	paths = append(paths, issuePath+"/comments?per_page=100")
 	if event.SubjectType == "PullRequest" {
-		paths = append(paths, path+"/comments?sort=updated&direction=desc&per_page=30", path+"/reviews?per_page=30")
+		paths = append(paths, path+"/comments?per_page=100", path+"/reviews?per_page=100")
 	}
-	var context strings.Builder
-	for _, p := range paths {
-		raw, headers, e := g.api(ctx, host, p)
-		// Reviews are oldest-first. Fetch the last page when available so new
-		// review bodies are included even for long-lived PRs.
-		if e == nil && strings.Contains(p, "/reviews?") {
-			for _, part := range strings.Split(headers.Get("Link"), ",") {
-				if strings.Contains(part, `rel="last"`) {
+	var prose strings.Builder
+	seen := map[string]bool{}
+	evidenceBytes := 0
+	for _, first := range paths {
+		next := first
+		for page := 0; next != ""; page++ {
+			if page >= 10 || evidenceBytes >= 96000 {
+				event.EvidenceComplete = false
+				event.ContextWarnings = append(event.ContextWarnings, "Thread evidence exceeded its bounded retrieval budget; absence of a mention is unknown.")
+				break
+			}
+			currentPath := next
+			raw, h, e := g.api(ctx, host, currentPath)
+			if e != nil {
+				if !errors.Is(e, ErrContextUnavailable) {
+					return event, e
+				}
+				event.EvidenceComplete = false
+				event.ContextWarnings = append(event.ContextWarnings, fmt.Sprintf("Could not load %s: %s. Missing context is not evidence that the notification is resolved.", currentPath, e))
+				if currentPath == path {
+					return event, nil
+				}
+				break
+			}
+			var data any
+			if e = json.Unmarshal(raw, &data); e != nil {
+				return event, e
+			}
+			if currentPath == path {
+				if subject, ok := data.(map[string]any); ok {
+					event.SubjectTitle, _ = subject["title"].(string)
+					event.SubjectState, _ = subject["state"].(string)
+					event.SubjectUpdatedAt, _ = subject["updated_at"].(string)
+					if merged, _ := subject["merged"].(bool); merged {
+						event.SubjectState = "merged"
+					}
+				}
+			}
+			items := []any{data}
+			if list, ok := data.([]any); ok {
+				items = list
+			}
+			for _, item := range items {
+				v, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				body, _ := v["body"].(string)
+				link, _ := v["html_url"].(string)
+				if link == "" {
+					link = "https://" + host + "/" + strings.TrimPrefix(currentPath, "repos/")
+				}
+				if seen[link] {
+					continue
+				}
+				seen[link] = true
+				actor := ""
+				if u, ok := v["user"].(map[string]any); ok {
+					actor, _ = u["login"].(string)
+				}
+				updated, _ := v["updated_at"].(string)
+				created, _ := v["created_at"].(string)
+				if updated == "" {
+					updated, _ = v["submitted_at"].(string)
+				}
+				complete := true
+				if len(body) > 12000 {
+					body = strings.ToValidUTF8(body[:12000], "")
+					complete = false
+					event.EvidenceComplete = false
+				}
+				if evidenceBytes+len(body) > 96000 {
+					event.EvidenceComplete = false
+					break
+				}
+				evidenceBytes += len(body)
+				event.Evidence = append(event.Evidence, SubjectEvidence{ID: link, URL: link, Actor: actor, Text: body, CreatedAt: created, UpdatedAt: updated, Complete: complete})
+			}
+			clipped, _ := json.Marshal(compactGitHub(data))
+			if prose.Len()+len(clipped) < 48000 {
+				prose.WriteString(currentPath + "\n")
+				prose.Write(clipped)
+				prose.WriteByte('\n')
+			}
+			next = ""
+			for _, part := range strings.Split(h.Get("Link"), ",") {
+				if strings.Contains(part, `rel="next"`) {
 					target, _, ok := strings.Cut(strings.TrimSpace(part), ">")
 					if ok {
-						last, parseErr := githubPath(host, strings.TrimPrefix(target, "<"))
-						if parseErr != nil {
-							return event, parseErr
+						next, e = githubPath(host, strings.TrimPrefix(target, "<"))
+						if e != nil {
+							return event, e
 						}
-						raw, _, e = g.api(ctx, host, last)
 					}
 				}
 			}
 		}
-		if e != nil {
-			if !errors.Is(e, ErrContextUnavailable) {
-				return event, e
-			}
-			event.ContextWarnings = append(event.ContextWarnings, fmt.Sprintf("Could not load %s: %s. Missing context is not evidence that the notification is resolved.", p, e.Error()))
-			if p == path {
-				break
-			}
-			continue
-		}
-		// Keep useful fields; omit large API link graphs and unrelated user metadata.
-		var data any
-		if e = json.Unmarshal(raw, &data); e != nil {
-			return event, e
-		}
-		if p == path {
-			if subject, ok := data.(map[string]any); ok {
-				event.SubjectTitle, _ = subject["title"].(string)
-				event.SubjectState, _ = subject["state"].(string)
-				if merged, ok := subject["merged"].(bool); ok && merged {
-					event.SubjectState = "merged"
-				}
-			}
-		}
-		clipped := compactGitHub(data)
-		body, _ := json.Marshal(clipped)
-		if context.Len()+len(body) > 48000 {
-			context.WriteString("[Additional context omitted because of size limits. Fetch full current feedback in the target agent session.]\n")
-			break
-		}
-		context.WriteString(p + " (bounded excerpt; fetch full feedback before fixing)\n")
-		context.Write(body)
-		context.WriteByte('\n')
 	}
-	event.Context = context.String()
+	event.Context = prose.String()
+	for i := range event.Evidence {
+		event.Evidence[i].Current = scopeEvidence([]RawNotification{{Event: event}}, event, event.Evidence[i]) == evidenceCurrent
+	}
 	return event, nil
 }
+
+// SubjectVersion is a lightweight publication-time check for both issues and
+// PRs. PR approval history is revalidated independently through PRContext.
+func (g GitHub) SubjectVersion(ctx context.Context, s Source, event Event) (string, error) {
+	path, err := githubPath(g.config(s).Hostname, event.SubjectURL)
+	if err != nil {
+		return "", err
+	}
+	raw, _, err := g.api(ctx, g.config(s).Hostname, path)
+	if err != nil {
+		return "", err
+	}
+	var subject struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err = json.Unmarshal(raw, &subject); err != nil {
+		return "", err
+	}
+	return subject.UpdatedAt, nil
+}
+
 func compactGitHub(v any) any {
 	switch x := v.(type) {
 	case []any:

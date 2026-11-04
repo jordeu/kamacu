@@ -31,6 +31,10 @@ type Source struct {
 	CreatedAt       int64           `json:"created_at"`
 }
 type Event struct {
+	SubjectUpdatedAt     string              `json:"subject_updated_at,omitempty"`
+	Evidence             []SubjectEvidence   `json:"evidence,omitempty"`
+	EvidenceComplete     bool                `json:"evidence_complete,omitempty"`
+	EvidenceObservedAt   time.Time           `json:"evidence_observed_at,omitempty"`
 	WorkContextTruncated bool                `json:"work_context_truncated,omitempty"`
 	WorkContextLookup    string              `json:"work_context_lookup,omitempty"`
 	RelatedSessions      []store.SessionWork `json:"related_sessions,omitempty"`
@@ -49,6 +53,19 @@ type Event struct {
 	SubjectTitle         string              `json:"subject_title,omitempty"`
 	SubjectState         string              `json:"subject_state,omitempty"`
 	ContextWarnings      []string            `json:"context_warnings,omitempty"`
+}
+
+// SubjectEvidence preserves source identity and author outside prose. Complete
+// means the text was not clipped; it does not imply a complete thread history.
+type SubjectEvidence struct {
+	ID        string `json:"id"`
+	URL       string `json:"url"`
+	Actor     string `json:"actor"`
+	Text      string `json:"text"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at"`
+	Complete  bool   `json:"complete"`
+	Current   bool   `json:"current"`
 }
 type Batch struct {
 	Events     []Event

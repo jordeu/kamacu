@@ -92,18 +92,22 @@ func (p contextFactsProvider) PRContext(_ context.Context, _ Source, _ string, _
 	yes := true
 	return PRFacts{Source: "github_api", Available: true, State: "open", HeadCommit: "new-head", Viewer: "alice", ReviewsComplete: true, ViewerEverApproved: &yes, ViewerReviews: []ViewerReview{{State: "APPROVED", CommitID: "old-head"}}}
 }
-func TestNotificationModelConsumesFactsAfterExcerptTruncation(t *testing.T) {
+func TestNotificationModelConsumesFactsAcrossEvidenceWindows(t *testing.T) {
 	s, model, _, source := fixture(t)
 	s.Providers["github"] = contextFactsProvider{&fakeProvider{}}
-	id := seed(t, s, source, event())
-	result := process(t, s, model, BatchDecision{DiscardIDs: []int64{id}})
-	if result.Status != "completed" || len(model.prompts) != 1 {
-		t.Fatalf("processing failed: %+v", result)
+	seed(t, s, source, event())
+	result := process(t, s, model, "routine")
+	if result.Status != "completed" || len(model.prompts) < 2 {
+		t.Fatalf("%+v calls=%d", result, len(model.prompts))
 	}
-	prompt := model.prompts[0]
-	for _, fact := range []string{`"pr_facts":`, `"viewer_ever_approved":true`, `"viewer":"alice"`, `"commit_id":"old-head"`, "Excerpt truncated"} {
-		if !strings.Contains(prompt, fact) {
-			t.Fatalf("missing %s after truncation", fact)
+	for _, prompt := range model.prompts {
+		for _, fact := range []string{`"pr_facts":`, `"viewer_ever_approved":true`, `"viewer":"alice"`} {
+			if !strings.Contains(prompt, fact) {
+				t.Fatalf("missing %s", fact)
+			}
+		}
+		if len(prompt) > intentPromptLimit {
+			t.Fatal("unbounded prompt")
 		}
 	}
 }
@@ -161,41 +165,17 @@ func TestNotificationProcessingBoundsManySessionsAndKeepsLookupFacts(t *testing.
 			t.Fatal(err)
 		}
 	}
-	id := seed(t, s, source, event())
-	result := process(t, s, model, BatchDecision{DiscardIDs: []int64{id}})
-	if result.Status != "completed" || len(model.prompts) != 1 {
-		t.Fatalf("work decoration prevented processing: %+v", result)
+	seed(t, s, source, event())
+	result := process(t, s, model, "routine")
+	if result.Status != "completed" {
+		t.Fatal(result)
 	}
-	prompt := model.prompts[0]
-	if strings.Contains(prompt, "TRANSCRIPT_SENTINEL") {
-		t.Fatal("full session transcripts leaked into notification prompt")
-	}
-	_, snapshot, ok := strings.Cut(prompt, "\nSNAPSHOT (data):\n")
-	if !ok {
-		t.Fatal("missing input snapshot")
-	}
-	var payload struct {
-		Subjects map[string]Event `json:"subject_context"`
-	}
-	if err := json.Unmarshal([]byte(snapshot), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if len(payload.Subjects) != 1 {
-		t.Fatal("missing subject decoration")
-	}
-	for _, e := range payload.Subjects {
-		if !e.WorkContextTruncated || e.WorkContextLookup == "" || e.PRFacts == nil || e.PRFacts.ViewerEverApproved == nil || !*e.PRFacts.ViewerEverApproved {
-			t.Fatalf("lost essential facts/lookup: %+v", e)
+	for _, prompt := range model.prompts {
+		if strings.Contains(prompt, "TRANSCRIPT_SENTINEL") || strings.Contains(prompt, `"related_sessions"`) || len(prompt) > intentPromptLimit {
+			t.Fatal("classifier received unbounded session context")
 		}
-		if len(e.RelatedWork) != 1 || e.RelatedWork[0].Link.TaskID != 1 || e.RelatedWork[0].Link.Role != "review" {
-			t.Fatal("lost task association", e.RelatedWork)
-		}
-		b, _ := json.Marshal(struct {
-			Tasks    []store.RelatedTask `json:"tasks"`
-			Sessions []store.SessionWork `json:"sessions"`
-		}{e.RelatedWork, e.RelatedSessions})
-		if len(b) > workDecorationLimit {
-			t.Fatalf("work payload too large: %d", len(b))
+		if !strings.Contains(prompt, `"viewer_ever_approved":true`) {
+			t.Fatal("lost aggregate facts")
 		}
 	}
 }

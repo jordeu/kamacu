@@ -65,19 +65,19 @@ func checkTranscriptGroup(t *testing.T, dir, kind, id string, wantCalls int) {
 func TestProcessingTranscriptsIncludeRepositoriesAndFollowups(t *testing.T) {
 	s, model, _, source := fixture(t)
 	ctx := context.Background()
-	first := seed(t, s, source, event())
+	seed(t, s, source, event())
 	other := event()
 	other.ExternalID = "other-thread"
 	other.Repository = "acme/other"
 	other.URL = "https://github.com/acme/other/pull/9"
-	second := seed(t, s, source, other)
+	seed(t, s, source, other)
 	dir := t.TempDir()
 	rec, err := diagnostics.NewRecorder(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Model = recordingModel{model, rec}
-	model.responses = []any{BatchDecision{ToolName: "list_sessions", Arguments: `{"project_id":2}`}, BatchDecision{DiscardIDs: []int64{second}}, BatchDecision{DiscardIDs: []int64{first}}}
+	respondWithIntent(model, "routine")
 	p, err := s.RequestProcessing(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestProcessingTranscriptsIncludeRepositoriesAndFollowups(t *testing.T) {
 	if err != nil || status.Processing.Status != "completed" {
 		t.Fatalf("%+v %v", status.Processing, err)
 	}
-	checkTranscriptGroup(t, dir, "batch", p.ID, 3)
+	checkTranscriptGroup(t, dir, "batch", p.ID, 2)
 }
 func TestReplyTranscriptsShareRun(t *testing.T) {
 	s, model, _, source := fixture(t)
@@ -131,7 +131,7 @@ func TestValidationOutcomesAreCaptured(t *testing.T) {
 		{name: "batch invalid arguments", content: `{"tool_name":"list_sessions","arguments":"null"}`, batch: true, wantError: true},
 		{name: "batch unknown event", content: `{"discard_ids":[999999]}`, batch: true, wantError: true},
 		{name: "batch invalid action", content: `{"actions":[{"event_ids":[1]}]}`, batch: true, wantError: true},
-		{name: "batch valid", content: `{"discard_ids":[1]}`, batch: true},
+		{name: "batch valid", content: `{"findings":[{"intent":"routine","evidence_id":"context","quote":"Review requested","policy_quote":""}]}`, batch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _, source := fixture(t)

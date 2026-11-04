@@ -19,11 +19,13 @@ const (
 	KeyDoneSessionTTL     = "done_session_ttl"
 	KeyGithubIntegration  = "github_integration"
 	KeyNotificationPrompt = "notification_system_prompt"
+	KeyNotificationPolicy = "notification_policy"
 	KeyPRReviewSeed       = "pr_review_seed"
 )
 
 // Defaults maps each setting key to its code default. Absent row = default.
 var Defaults = map[string]string{
+	KeyNotificationPolicy: `{}`,
 	KeyNotificationPrompt: `Surface actionable review requests, mentions, and new review feedback. Explain what changed and ask what the user wants to do. Prefer continuing the existing implementation session for review feedback. Ignore routine updates that require no action. Offer concise suggested replies and accept free-text instructions. Ask follow-up questions when the target or intent is unclear.`,
 	KeyWorktreeBase:       "~/.kamacu/worktrees/", // WT-01; stored raw, expanded at use
 	KeyShell:              "bash",                 // SHELL-01

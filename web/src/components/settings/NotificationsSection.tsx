@@ -3,6 +3,7 @@ import { useAddNotificationSource, useEnableNotificationSource, useNotificationS
 import type { Settings } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NotificationPreferences } from "./NotificationPreferences";
 import { SettingsField } from "./SettingsField";
 
 export function NotificationsSection({ settings }: { settings: Settings }) {
@@ -14,7 +15,7 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
   const githubEnabled = settings.github_integration?.value === "on";
   return <section className="flex flex-col gap-3" aria-labelledby="notifications-heading">
     <h2 id="notifications-heading" className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Notification sources</h2>
-    <p className="text-xs text-muted-foreground">New activity in registered repositories is checked using your GitHub CLI login. Review the raw list in Notifications and choose Process pending when ready. The global monitoring model groups related activity into Inbox actions. GitHub read state stays unchanged.</p>
+    <p className="text-xs text-muted-foreground">New activity in registered repositories is checked using your GitHub CLI login. Review the raw list in Notifications and choose Process pending when ready. Related activity is classified and grouped into Inbox actions. GitHub read state stays unchanged.</p>
     {!githubEnabled && <p className="text-xs text-muted-foreground">GitHub collection and actions are paused while GitHub integration is off.</p>}
     {sources.isLoading && <p className="text-sm">Loading sources…</p>}
     {sources.isError && <p role="alert" className="text-sm text-destructive">Could not load notification sources. <button type="button" className="underline" onClick={() => void sources.refetch()}>Retry</button></p>}
@@ -32,6 +33,7 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
       <Button type="submit" variant="outline" disabled={add.isPending || !name.trim() || !githubEnabled}>{add.isPending ? "Adding…" : "Add GitHub source"}</Button>
     </form>}
     {(add.isError || enable.isError || remove.isError) && <p role="alert" className="text-sm text-destructive">{add.error?.message || enable.error?.message || remove.error?.message}</p>}
-    {settings.notification_system_prompt && <SettingsField settingKey="notification_system_prompt" label="Notification instructions" entry={settings.notification_system_prompt} control="textarea" help="Controls which notifications appear and how replies are handled. Applies when you choose Process pending and when replying to inbox actions. Available actions remain limited to reviews, starting agents, and messaging sessions." />}
+    {settings.notification_policy && <NotificationPreferences entry={settings.notification_policy} />}
+    {settings.notification_system_prompt && <SettingsField settingKey="notification_system_prompt" label="Notification instructions" entry={settings.notification_system_prompt} control="textarea" help="Additional relevance instructions for classification and replies. Structured preferences above apply first. Work starts only after your inbox reply." />}
   </section>;
 }

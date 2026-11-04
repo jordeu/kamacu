@@ -5,6 +5,7 @@ web/dist/*
 !web/dist/index.html
 
 # Local AI-assistant / planning artifacts — kept private, never tracked
+/artifacts/notification-analysis/
 CLAUDE.md
 AGENTS.md
 .claude/

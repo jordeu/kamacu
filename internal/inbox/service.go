@@ -473,6 +473,9 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	var moved func()
 	var before func(*sql.Tx) error
 	if q.Origin == "notification" {
+		// Preserve a selected typed action. Free-text answers leave this empty;
+		// the worker must not infer a no-op from a substring of user prose.
+		reason = optionID
 		if who != nil {
 			return Result{}, ErrOwner
 		}
