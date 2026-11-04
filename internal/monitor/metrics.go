@@ -12,15 +12,24 @@ type Metrics struct {
 	profiles map[int64]ProfileMetrics
 }
 type ProfileMetrics struct {
-	Calls         uint64 `json:"calls"`
-	Failures      uint64 `json:"failures"`
-	Timeouts      uint64 `json:"timeouts"`
-	LastLatencyMS int64  `json:"last_latency_ms"`
-	InputTokens   uint64 `json:"input_tokens"`
-	OutputTokens  uint64 `json:"output_tokens"`
-	TokenReports  uint64 `json:"token_reports"`
+	CacheCreationInputTokens uint64  `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     uint64  `json:"cache_read_input_tokens"`
+	ReportedCostUSD          float64 `json:"reported_cost_usd"`
+	Calls                    uint64  `json:"calls"`
+	Failures                 uint64  `json:"failures"`
+	Timeouts                 uint64  `json:"timeouts"`
+	LastLatencyMS            int64   `json:"last_latency_ms"`
+	InputTokens              uint64  `json:"input_tokens"`
+	OutputTokens             uint64  `json:"output_tokens"`
+	TokenReports             uint64  `json:"token_reports"`
 }
 type Usage struct {
+	CacheCreationInputTokens uint64  `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     uint64  `json:"cache_read_input_tokens"`
+	ReportedCostUSD          float64 `json:"reported_cost_usd,omitempty"`
+	PromptTokensDetails      struct {
+		CachedTokens uint64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 	InputTokens      uint64 `json:"input_tokens"`
 	OutputTokens     uint64 `json:"output_tokens"`
 	PromptTokens     uint64 `json:"prompt_tokens"`
@@ -47,7 +56,12 @@ func (m *Metrics) record(id int64, elapsed time.Duration, failed, timeout bool, 
 	v.LastLatencyMS = elapsed.Milliseconds()
 	if usage != nil {
 		v.TokenReports++
-		v.InputTokens += max(usage.InputTokens, usage.PromptTokens)
+		// Anthropic's input count excludes cached tokens; OpenAI's prompt count
+		// includes them. Never add OpenAI's cached subset a second time.
+		v.InputTokens += max(usage.InputTokens+usage.CacheCreationInputTokens+usage.CacheReadInputTokens, usage.PromptTokens)
+		v.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		v.CacheReadInputTokens += max(usage.CacheReadInputTokens, usage.PromptTokensDetails.CachedTokens)
+		v.ReportedCostUSD += usage.ReportedCostUSD
 		v.OutputTokens += max(usage.OutputTokens, usage.CompletionTokens)
 	}
 	m.profiles[id] = v

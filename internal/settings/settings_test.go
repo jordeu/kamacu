@@ -25,6 +25,7 @@ func testDB(t *testing.T) *sql.DB {
 
 func TestDefaultsValues(t *testing.T) {
 	want := map[string]string{
+		settings.KeyNotificationPolicy: `{}`,
 		settings.KeyNotificationPrompt: `Surface actionable review requests, mentions, and new review feedback. Explain what changed and ask what the user wants to do. Prefer continuing the existing implementation session for review feedback. Ignore routine updates that require no action. Offer concise suggested replies and accept free-text instructions. Ask follow-up questions when the target or intent is unclear.`,
 		settings.KeyWorktreeBase:       "~/.kamacu/worktrees/",
 		settings.KeyShell:              "bash",

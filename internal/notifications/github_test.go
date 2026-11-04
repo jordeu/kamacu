@@ -85,7 +85,7 @@ func TestGitHubEnrichIncludesInlineComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 4 || !strings.Contains(paths[2], "/pulls/7/comments?") || !strings.Contains(got.Context, "reviewer") || strings.Contains(got.Context, "irrelevant") {
+	if len(paths) != 5 || !strings.Contains(paths[3], "/pulls/7/comments?") || !strings.Contains(got.Context, "reviewer") || strings.Contains(got.Context, "irrelevant") {
 		t.Fatalf("enrichment: %v %s", paths, got.Context)
 	}
 }
@@ -179,7 +179,7 @@ func TestGitHubDeletedOptionalCommentPreservesOtherEvidence(t *testing.T) {
 	if err != nil || fresh.SubjectState != "merged" || !strings.Contains(fresh.Context, "Verified current subject") || len(fresh.ContextWarnings) != 1 {
 		t.Fatalf("lost partial evidence: %+v %v", fresh, err)
 	}
-	if len(paths) != 4 {
+	if len(paths) != 5 {
 		t.Fatalf("stopped fetching other evidence after missing comment: %v", paths)
 	}
 }
@@ -251,5 +251,82 @@ func TestGitHubEnrichRefreshesSubjectTitle(t *testing.T) {
 		if got.SubjectTitle != want {
 			t.Fatalf("title = %q, want %q", got.SubjectTitle, want)
 		}
+	}
+}
+
+func TestGitHubMentionEvidenceIncludesLaterCommentPages(t *testing.T) {
+	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		switch path {
+		case "repos/acme/repo/pulls/7":
+			return response(`{"state":"open","body":"Background","html_url":"https://github.com/acme/repo/pull/7"}`, ""), nil
+		case "repos/acme/repo/issues/7/comments?per_page=100":
+			return response(`[{"body":"Routine update","html_url":"https://github.com/acme/repo/issues/7#issuecomment-1"}]`, `Link: <https://api.github.com/repos/acme/repo/issues/7/comments?per_page=100&page=2>; rel="next"`+"\r\n"), nil
+		case "repos/acme/repo/issues/7/comments?per_page=100&page=2":
+			return response(`[{"body":"@alice can you investigate?","html_url":"https://github.com/acme/repo/issues/7#issuecomment-2","user":{"login":"reviewer"},"updated_at":"2026-11-04T12:00:00Z"}]`, ""), nil
+		default:
+			return response(`[]`, ""), nil
+		}
+	}}
+	e := event()
+	e.Version = "2026-11-04T12:00:00Z"
+	e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+	fresh, err := g.Enrich(context.Background(), Source{}, e)
+	if err != nil || !fresh.EvidenceComplete {
+		t.Fatalf("%+v %v", fresh, err)
+	}
+	mention := mentionStatus([]RawNotification{{Event: e}}, fresh, "alice")
+	if mention == nil || !*mention {
+		t.Fatal("missed mention on later page")
+	}
+}
+
+func TestGitHubClippedBodiesCannotProveNoMention(t *testing.T) {
+	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		if strings.Contains(args[len(args)-1], "?") {
+			return response(`[]`, ""), nil
+		}
+		body, _ := json.Marshal(map[string]any{"body": strings.Repeat("x", 13000) + " @alice", "html_url": "https://github.com/acme/repo/pull/7"})
+		return response(string(body), ""), nil
+	}}
+	e := event()
+	e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+	fresh, err := g.Enrich(context.Background(), Source{}, e)
+	if err != nil || fresh.EvidenceComplete || mentionStatus([]RawNotification{{Event: e}}, fresh, "alice") != nil {
+		t.Fatalf("clipped evidence treated as complete: %+v %v", fresh, err)
+	}
+}
+
+func TestGitHubLatestCommentPointerDoesNotClaimHistoricalTextIsCurrent(t *testing.T) {
+	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		switch path {
+		case "repos/acme/repo/pulls/7":
+			return response(`{"body":"Background","html_url":"https://github.com/acme/repo/pull/7","created_at":"2025-01-01T00:00:00Z","updated_at":"2026-11-04T12:00:00Z"}`, ""), nil
+		case "repos/acme/repo/issues/comments/99":
+			return response(`{"body":"@alice an old question","html_url":"https://github.com/acme/repo/pull/7#issuecomment-99","updated_at":"2025-01-01T00:00:00Z"}`, ""), nil
+		default:
+			return response(`[]`, ""), nil
+		}
+	}}
+	e := event()
+	e.Version = "2026-11-04T12:00:00Z"
+	e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+	e.LatestCommentURL = "https://api.github.com/repos/acme/repo/issues/comments/99"
+	fresh, err := g.Enrich(context.Background(), Source{}, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Evidence) != 2 {
+		t.Fatal("missing enrichment evidence", fresh)
+	}
+	for _, item := range fresh.Evidence {
+		if item.Current {
+			t.Fatal("thread timestamp or pointer revived old text", item)
+		}
+	}
+	mention := mentionStatus([]RawNotification{{Event: e}}, fresh, "alice")
+	if mention == nil || *mention {
+		t.Fatal("old comment counted as a current mention")
 	}
 }

@@ -152,6 +152,13 @@ func (s *Service) executeNext(ctx context.Context) error {
 		return s.finishRun(finishCtx, id, state, result, history)
 	}
 
+	if q.Reason == "triage_noop" && q.AnswerSource == "inbox" {
+		for _, option := range q.Options {
+			if option.ID == "triage_noop" && option.Label == q.Answer {
+				return s.finishRun(ctx, id, "succeeded", "You chose to handle this activity yourself or leave it alone. No work was started.", history)
+			}
+		}
+	}
 	related, err := s.loadActionContext(ctx, q.ID)
 	if err != nil {
 		return fail(err)

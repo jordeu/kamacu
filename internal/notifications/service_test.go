@@ -24,6 +24,7 @@ type fakeProvider struct {
 	identityChecks int
 	failIdentityAt int
 	enrichCalls    int
+	contextText    string
 }
 
 func (p *fakeProvider) CheckIdentity(context.Context, Source) error {
@@ -40,6 +41,10 @@ func (p *fakeProvider) Collect(context.Context, Source, map[string]bool) (Batch,
 func (p *fakeProvider) Enrich(_ context.Context, _ Source, e Event) (Event, error) {
 	p.enrichCalls++
 	e.Context = "Review requested"
+	if p.contextText != "" {
+		e.Context = p.contextText
+	}
+	e.EvidenceComplete = true
 	e.SubjectTitle = "Change"
 	return e, p.enrichErr
 }
@@ -48,6 +53,7 @@ type fakeModel struct {
 	steps      []Step
 	responses  []any
 	prompts    []string
+	respond    func(string) (any, error)
 	onGenerate func(string)
 }
 
@@ -59,6 +65,13 @@ func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt st
 	if len(m.responses) > 0 {
 		response := m.responses[0]
 		m.responses = m.responses[1:]
+		return json.Marshal(response)
+	}
+	if m.respond != nil {
+		response, err := m.respond(prompt)
+		if err != nil {
+			return nil, err
+		}
 		return json.Marshal(response)
 	}
 	if len(m.steps) == 0 {
