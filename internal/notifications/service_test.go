@@ -69,6 +69,14 @@ func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt st
 	return json.Marshal(step)
 }
 
+func (m *fakeModel) GenerateValidatedJSON(ctx context.Context, p monitor.Profile, prompt string, schema any, validate func([]byte) error) ([]byte, error) {
+	raw, err := m.GenerateJSON(ctx, p, prompt, schema)
+	if err == nil && validate != nil {
+		err = validate(raw)
+	}
+	return raw, err
+}
+
 type fakeTools struct {
 	calls     []string
 	arguments []json.RawMessage

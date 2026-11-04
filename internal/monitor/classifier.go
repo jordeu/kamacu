@@ -435,7 +435,13 @@ func (b Backend) httpJSON(ctx context.Context, p Profile, prompt string, respons
 
 // GenerateJSON shares monitoring authentication and adapters without enabling tools
 // in the inference process. Callers validate their own response contracts.
-func (b Backend) GenerateJSON(ctx context.Context, p Profile, prompt string, schema any) (raw []byte, err error) {
+func (b Backend) GenerateJSON(ctx context.Context, p Profile, prompt string, schema any) ([]byte, error) {
+	return b.GenerateValidatedJSON(ctx, p, prompt, schema, nil)
+}
+
+// GenerateValidatedJSON records the caller's response-contract validation in
+// the same interaction and metrics as the provider call.
+func (b Backend) GenerateValidatedJSON(ctx context.Context, p Profile, prompt string, schema any, validate func([]byte) error) (raw []byte, err error) {
 	start := time.Now()
 	var wire *providerCapture
 	if b.Transcripts != nil {
@@ -453,9 +459,14 @@ func (b Backend) GenerateJSON(ctx context.Context, p Profile, prompt string, sch
 		b.Metrics.record(p.ID, time.Since(start), err != nil, errors.Is(ctx.Err(), context.DeadlineExceeded), usage)
 	}()
 	if p.Backend == "claude_cli" || p.Backend == "codex_cli" {
-		return runCLIJSON(ctx, p, prompt, schema, &usage)
+		raw, err = runCLIJSON(ctx, p, prompt, schema, &usage)
+	} else {
+		raw, err = b.httpJSON(ctx, p, prompt, schema, &usage)
 	}
-	return b.httpJSON(ctx, p, prompt, schema, &usage)
+	if err == nil && validate != nil {
+		err = validate(raw)
+	}
+	return raw, err
 }
 
 func (b Backend) recordInteraction(ctx context.Context, purpose string, p Profile, prompt string, schema any, raw []byte, usage *Usage, start time.Time, err error, wire *providerCapture) {

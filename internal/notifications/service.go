@@ -17,8 +17,9 @@ import (
 	"kamacu/internal/settings"
 )
 
+// Model validates response contracts before reporting or recording the outcome.
 type Model interface {
-	GenerateJSON(context.Context, monitor.Profile, string, any) ([]byte, error)
+	GenerateValidatedJSON(context.Context, monitor.Profile, string, any, func([]byte) error) ([]byte, error)
 }
 type Service struct {
 	DB          *sql.DB
@@ -241,16 +242,18 @@ func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
 	defer cancel()
 	start := time.Now()
 	slog.Debug("notification inference started", "profile", p.ID, "prompt_bytes", len(prompt))
-	raw, err := s.Model.GenerateJSON(callCtx, p, prompt, stepSchema)
+	var step Step
+	_, err = s.Model.GenerateValidatedJSON(callCtx, p, prompt, stepSchema, func(raw []byte) error {
+		var validationErr error
+		step, validationErr = decodeStep(raw)
+		return validationErr
+	})
 	slog.Debug("notification inference finished", "profile", p.ID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
 	if err != nil {
 		return Step{}, err
 	}
-	step, err := decodeStep(raw)
-	if err != nil {
-		slog.Debug("notification response validation failed", "profile", p.ID, "error", err)
-	}
-	return step, err
+
+	return step, nil
 }
 func (s *Service) projectContext(ctx context.Context, repo string) (string, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.name,t.id,t.title,t.status,t.source,t.pr_number FROM projects p LEFT JOIN tasks t ON t.project_id=p.id WHERE lower(p.github_repo)=lower(?) ORDER BY p.id,CASE WHEN t.status='done' THEN 1 ELSE 0 END,t.updated_at DESC LIMIT 100`, repo)

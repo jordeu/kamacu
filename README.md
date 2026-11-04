@@ -106,7 +106,8 @@ without workflow context (such as profile tests) get their own `call-<id>` folde
 `prompt.md` preserves the full prompt. `response.md` pretty-prints JSON responses
 in a Markdown code block and preserves non-JSON responses as text.
 `metadata.json` records the model/profile, interaction and group IDs, timings,
-errors, and token usage when available. `schema.json` holds the response schema;
+errors (including notification response-validation failures), and token usage
+when available. `schema.json` holds the response schema;
 `provider.json` preserves raw provider output, HTTP status, or CLI stderr.
 Interaction folders appear only once all their files are written.
 
@@ -117,6 +118,8 @@ groups to target 256 MiB total. Active notification workflows and the current
 monitoring day are protected, so usage may temporarily exceed that target.
 Copy groups elsewhere to retain them longer. Existing JSONL captures from
 older versions are left untouched and are outside this retention policy.
+Malformed or incomplete group manifests are preserved and skipped with a
+warning, allowing startup and cleanup of valid groups to continue.
 
 These files may contain private terminal, task, and notification content.
 Directories use owner-only permissions (`0700`), and files use `0600`.

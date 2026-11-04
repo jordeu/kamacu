@@ -59,3 +59,35 @@ func TestStartupDiagnosticsPersist(t *testing.T) {
 		})
 	}
 }
+
+func TestDebugStartupSkipsMalformedTranscriptManifest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	group := filepath.Join(home, ".kamacu", "llm", "notifications", "2026-11-04", "run_batch-corrupt")
+	if err := os.MkdirAll(group, 0700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(group, "group.json")
+	if err := os.WriteFile(manifest, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(home, "blocked")
+	if err := os.WriteFile(blocked, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := serveCmd{debug: true, addr: "127.0.0.1:7333", db: filepath.Join(blocked, "db"), noIntegrationSync: true}
+	if status := c.Execute(context.Background(), nil); status != subcommands.ExitFailure {
+		t.Fatalf("exit: %v", status)
+	}
+	logs, err := os.ReadFile(filepath.Join(home, ".kamacu", "kamacu.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logs), "skipping invalid LLM transcript group") || !strings.Contains(string(logs), "creating db directory") || strings.Contains(string(logs), "initializing LLM transcripts") {
+		t.Fatalf("startup blocked by manifest: %s", logs)
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil || string(data) != "{" {
+		t.Fatalf("diagnostic evidence changed: %q %v", data, err)
+	}
+}

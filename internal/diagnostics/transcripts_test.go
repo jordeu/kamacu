@@ -1,8 +1,10 @@
 package diagnostics
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -361,5 +363,69 @@ func TestRetentionRefreshesSessionIndex(t *testing.T) {
 	}
 	if strings.Contains(string(summary), oldDate) || !strings.Contains(string(summary), now.Format("2006-01-02")) {
 		t.Fatalf("stale index: %s", summary)
+	}
+}
+
+func TestMalformedManifestsDoNotBlockStartupOrRetention(t *testing.T) {
+	for _, broken := range []string{"{", `{}`, `{"purpose":"unknown","group":{"id":"bad"},"updated_at":"2026-01-01T00:00:00Z"}`} {
+		t.Run(broken, func(t *testing.T) {
+			root := t.TempDir()
+			r, err := NewRecorder(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := WithGroup(context.Background(), Group{Kind: "session", ID: "damaged", SessionID: "damaged"})
+			fields := transcriptFields()
+			fields["purpose"] = "monitoring"
+			r.Record(ctx, fields)
+			dirs := groupDirs(t, r)
+			if len(dirs) != 1 {
+				t.Fatal(dirs)
+			}
+			corrupt := filepath.Join(dirs[0], "group.json")
+			if err = os.WriteFile(corrupt, []byte(broken), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// A different, valid expired group must still be cleaned up.
+			r.Record(WithGroup(context.Background(), Group{Kind: "batch", ID: "expired"}), transcriptFields())
+			dirs = groupDirs(t, r)
+			var expired string
+			for _, dir := range dirs {
+				if strings.HasSuffix(dir, "_batch-expired") {
+					expired = dir
+				}
+			}
+			if expired == "" {
+				t.Fatal("missing expired group")
+			}
+			ageGroup(t, expired, time.Now().UTC().Add(-8*24*time.Hour))
+			var warnings bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&warnings, nil)))
+			defer slog.SetDefault(previous)
+			reopened, err := NewRecorder(root)
+			if err != nil {
+				t.Fatal("startup blocked by diagnostic file", err)
+			}
+			data, err := os.ReadFile(corrupt)
+			if err != nil || string(data) != broken {
+				t.Fatalf("corrupt evidence was modified: %q %v", data, err)
+			}
+			if _, err = os.Stat(expired); !os.IsNotExist(err) {
+				t.Fatal("valid expired group not removed", err)
+			}
+			// Session indexes also tolerate an invalid sibling day.
+			if err = writeSessionSummary(filepath.Dir(filepath.Dir(corrupt))); err != nil {
+				t.Fatal(err)
+			}
+			reopened.Record(context.Background(), transcriptFields())
+			dirs = groupDirs(t, reopened)
+			if len(dirs) != 2 {
+				t.Fatalf("fresh capture missing: %v", dirs)
+			}
+			if !strings.Contains(warnings.String(), "skipping invalid LLM transcript group") || !strings.Contains(warnings.String(), corrupt) {
+				t.Fatal(warnings.String())
+			}
+		})
 	}
 }

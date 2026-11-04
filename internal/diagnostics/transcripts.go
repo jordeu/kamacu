@@ -226,16 +226,14 @@ func writeSessionSummary(dir string) error {
 		if !day.IsDir() || strings.HasPrefix(day.Name(), ".") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, day.Name(), "group.json"))
+		manifestPath := filepath.Join(dir, day.Name(), "group.json")
+		manifest, err := readGroupManifest(manifestPath)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return err
-		}
-		var manifest groupManifest
-		if err = json.Unmarshal(data, &manifest); err != nil {
-			return err
+			slog.Warn("skipping invalid LLM transcript group", "path", manifestPath, "error", err)
+			continue
 		}
 		latest = manifest.Group
 		fmt.Fprintf(&links, "- [%s](%s/summary.md)\n", day.Name(), day.Name())
@@ -289,6 +287,23 @@ type groupManifest struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Purpose   string    `json:"purpose"`
 }
+
+// Invalid saved diagnostics are preserved for inspection and excluded from
+// retention; they must not prevent fresh captures or server startup.
+func readGroupManifest(path string) (manifest groupManifest, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return manifest, err
+	}
+	if err = json.Unmarshal(data, &manifest); err != nil {
+		return manifest, err
+	}
+	if (manifest.Purpose != "monitoring" && manifest.Purpose != "notifications") || manifest.Group.ID == "" || manifest.UpdatedAt.IsZero() {
+		return manifest, fmt.Errorf("incomplete transcript group manifest")
+	}
+	return manifest, nil
+}
+
 type storedGroup struct {
 	path     string
 	manifest groupManifest
@@ -305,16 +320,14 @@ func (r *Recorder) cleanup(now time.Time, protect string) error {
 		if !d.IsDir() {
 			return nil
 		}
-		data, e := os.ReadFile(filepath.Join(path, "group.json"))
+		manifestPath := filepath.Join(path, "group.json")
+		m, e := readGroupManifest(manifestPath)
 		if os.IsNotExist(e) {
 			return nil
 		}
 		if e != nil {
-			return e
-		}
-		var m groupManifest
-		if e = json.Unmarshal(data, &m); e != nil {
-			return e
+			slog.Warn("skipping invalid LLM transcript group", "path", manifestPath, "error", e)
+			return filepath.SkipDir
 		}
 		var size int64
 		e = filepath.WalkDir(path, func(_ string, entry fs.DirEntry, e error) error {
