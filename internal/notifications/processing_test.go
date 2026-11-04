@@ -141,9 +141,9 @@ func TestGroupedReplyAllowsEveryRelatedTargetAndPreservesProvenance(t *testing.T
 	id1 := seed(t, s, source, first)
 	second := event()
 	second.ExternalID = "other-repo"
-	second.Repository = "acme/other"
-	second.URL = "https://github.com/acme/other/pull/9"
-	second.SubjectURL = "https://api.github.com/repos/acme/other/pulls/9"
+	second.Repository = "acme/repo"
+	second.URL = "https://github.com/acme/repo/pull/9"
+	second.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/9"
 	id2 := seed(t, s, source, second)
 	p := process(t, s, model, BatchDecision{Actions: []BatchAction{actionFor(id1, id2)}})
 	if p.Status != "completed" {
@@ -819,5 +819,336 @@ func TestTriageReadLoopIsBounded(t *testing.T) {
 	raw, err := s.ListRaw(ctx, "pending", 0)
 	if err != nil || raw.PendingCount != 1 {
 		t.Fatalf("failed triage consumed notification: %+v %v", raw, err)
+	}
+}
+
+func TestProcessingScopesRepositoriesAndProjects(t *testing.T) {
+	s, model, _, source := fixture(t)
+	ctx := context.Background()
+	first := seed(t, s, source, event())
+	other := event()
+	other.ExternalID = "other-thread"
+	other.Repository = "acme/other"
+	other.URL = "https://github.com/acme/other/pull/9"
+	second := seed(t, s, source, other)
+	model.responses = []any{BatchDecision{Actions: []BatchAction{actionFor(second)}}, BatchDecision{Actions: []BatchAction{actionFor(first)}}}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || status.Processing.ActionCount != 2 || len(model.prompts) != 2 {
+		t.Fatalf("processing: %+v prompts=%d", status, len(model.prompts))
+	}
+	for i, prompt := range model.prompts {
+		if i == 0 && (strings.Contains(prompt, `"project_id":1`) || strings.Contains(prompt, `"repository":"acme/repo"`)) {
+			t.Fatal("other repository prompt leaked repo project")
+		}
+		if i == 1 && (strings.Contains(prompt, `"project_id":2`) || strings.Contains(prompt, `"repository":"acme/other"`)) {
+			t.Fatal("repo prompt leaked other project")
+		}
+	}
+}
+
+func TestProcessingSplitsOversizedGroupsAndKeepsLimit(t *testing.T) {
+	s, model, _, source := fixture(t)
+	ctx := context.Background()
+	var ids []int64
+	for i := range 4 {
+		e := event()
+		e.ExternalID = fmt.Sprintf("thread-%d", i)
+		e.URL = fmt.Sprintf("https://github.com/acme/repo/pull/%d", i+10)
+		e.Title = strings.Repeat("x", 100000)
+		ids = append(ids, seed(t, s, source, e))
+	}
+	for _, id := range ids {
+		model.responses = append(model.responses, BatchDecision{DiscardIDs: []int64{id}})
+	}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || status.PendingCount != 0 || len(model.prompts) != 4 {
+		t.Fatalf("processing: %+v prompts=%d", status, len(model.prompts))
+	}
+	for _, prompt := range model.prompts {
+		if len(prompt) > 192000 {
+			t.Fatal("sent oversized prompt")
+		}
+	}
+}
+
+type longContextProvider struct {
+	fakeProvider
+	contextText string
+}
+
+func (p *longContextProvider) Enrich(ctx context.Context, source Source, e Event) (Event, error) {
+	e, err := p.fakeProvider.Enrich(ctx, source, e)
+	e.Context = "Short summary. " + strings.Repeat("feedback ", 500) + "FULL_CONTEXT_MARKER"
+	if p.contextText != "" {
+		e.Context = p.contextText
+	}
+	return e, err
+}
+func TestProcessingStartsCompactAndCanReadFullSubjectContext(t *testing.T) {
+	s, model, tools, source := fixture(t)
+	s.Providers["github"] = &longContextProvider{}
+	ctx := context.Background()
+	id := seed(t, s, source, event())
+	model.responses = []any{BatchDecision{ToolName: "notification_subject_context", Arguments: fmt.Sprintf(`{"event_id":%d}`, id)}, BatchDecision{Actions: []BatchAction{actionFor(id)}}}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || len(model.prompts) != 2 {
+		t.Fatalf("processing: %+v", status)
+	}
+	if strings.Contains(model.prompts[0], "FULL_CONTEXT_MARKER") || !strings.Contains(model.prompts[1], "FULL_CONTEXT_MARKER") || len(tools.calls) != 0 {
+		t.Fatal("full context was not loaded on demand")
+	}
+}
+
+func TestFailedLaterRepositoryDoesNotPartiallyPublish(t *testing.T) {
+	s, model, _, source := fixture(t)
+	ctx := context.Background()
+	first := seed(t, s, source, event())
+	e := event()
+	e.ExternalID = "second-repo"
+	e.Repository = "zzz/repo"
+	seed(t, s, source, e)
+	model.responses = []any{BatchDecision{Actions: []BatchAction{actionFor(first)}}, BatchDecision{}}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	cards, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if status.Processing.Status != "failed" || status.PendingCount != 2 || len(cards.Items) != 0 {
+		t.Fatalf("partial publication: %+v cards=%d", status, len(cards.Items))
+	}
+}
+
+func TestProcessingSplitsWhenReadResultsExceedLimit(t *testing.T) {
+	s, model, tools, source := fixture(t)
+	ctx := context.Background()
+	var ids []int64
+	for i := range 2 {
+		e := event()
+		e.ExternalID = fmt.Sprintf("large-%d", i)
+		e.URL = fmt.Sprintf("https://github.com/acme/repo/pull/%d", i+10)
+		e.Title = strings.Repeat("x", 90000)
+		ids = append(ids, seed(t, s, source, e))
+	}
+	tools.result = strings.Repeat("r", ToolResultLimit)
+	model.responses = []any{
+		BatchDecision{ToolName: "list_sessions", Arguments: `{}`},
+		BatchDecision{DiscardIDs: ids[:1]}, BatchDecision{DiscardIDs: ids[1:]},
+	}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || len(model.prompts) != 3 {
+		t.Fatalf("processing: %+v prompts=%d", status, len(model.prompts))
+	}
+	for _, prompt := range model.prompts {
+		if len(prompt) > notificationPromptLimit {
+			t.Fatal("sent oversized tool transcript")
+		}
+	}
+}
+
+func TestUnsplittableNotificationRemainsPending(t *testing.T) {
+	s, model, _, source := fixture(t)
+	e := event()
+	e.Title = strings.Repeat("x", notificationPromptLimit)
+	id := seed(t, s, source, e)
+	status := process(t, s, model, BatchDecision{DiscardIDs: []int64{id}})
+	raw, _ := s.ListRaw(context.Background(), "pending", 0)
+	if status.Status != "failed" || !strings.Contains(status.Error, "one notification") || len(model.prompts) != 0 || raw.PendingCount != 1 {
+		t.Fatalf("processing: %+v", status)
+	}
+}
+
+func TestProcessingScopesExistingQuestionsToRepositoryThreads(t *testing.T) {
+	s, model, _, source := fixture(t)
+	ctx := context.Background()
+	id1 := seed(t, s, source, event())
+	q1 := publish(t, s, id1)
+	other := event()
+	other.ExternalID = "other-thread"
+	other.Repository = "acme/other"
+	id2 := seed(t, s, source, other)
+	q2 := publish(t, s, id2)
+	model.responses = []any{BatchDecision{DiscardIDs: []int64{id2}}, BatchDecision{DiscardIDs: []int64{id1}}}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || len(model.prompts) != 2 {
+		t.Fatalf("processing: %+v", status)
+	}
+	if strings.Contains(model.prompts[0], q1.ID) || !strings.Contains(model.prompts[0], q2.ID) || strings.Contains(model.prompts[1], q2.ID) || !strings.Contains(model.prompts[1], q1.ID) {
+		t.Fatal("questions leaked across groups")
+	}
+}
+
+func TestProcessingSplitKeepsInterleavedSubjectRevisionsTogether(t *testing.T) {
+	s, model, _, source := fixture(t)
+	ctx := context.Background()
+	first := event()
+	first.Title = strings.Repeat("x", 65000)
+	id1 := seed(t, s, source, first)
+	other := first
+	other.ExternalID = "other-thread"
+	other.URL = "https://github.com/acme/repo/pull/8"
+	id2 := seed(t, s, source, other)
+	newer := first
+	newer.Version = "v2"
+	id3 := seed(t, s, source, newer)
+	model.responses = []any{BatchDecision{Actions: []BatchAction{actionFor(id1, id3)}}, BatchDecision{Actions: []BatchAction{actionFor(id2)}}}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || status.Processing.ActionCount != 2 || len(model.prompts) != 2 {
+		t.Fatalf("processing: %+v prompts=%d", status, len(model.prompts))
+	}
+	for _, id := range []int64{id1, id3} {
+		if !strings.Contains(model.prompts[0], fmt.Sprintf(`"id":%d,`, id)) {
+			t.Fatalf("thread revision %d split off", id)
+		}
+	}
+	if strings.Contains(model.prompts[1], fmt.Sprintf(`"id":%d,`, id1)) || strings.Contains(model.prompts[1], fmt.Sprintf(`"id":%d,`, id3)) {
+		t.Fatal("thread included in both subgroups")
+	}
+}
+
+func TestOversizedSingleThreadDoesNotSplitIntoDuplicateActions(t *testing.T) {
+	s, model, _, source := fixture(t)
+	for i := range 2 {
+		e := event()
+		e.Version = fmt.Sprint(i)
+		e.Title = strings.Repeat("x", 100000)
+		seed(t, s, source, e)
+	}
+	ctx := context.Background()
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "failed" || !strings.Contains(status.Processing.Error, "one notification thread") || status.PendingCount != 2 || len(model.prompts) != 0 {
+		t.Fatalf("processing: %+v", status)
+	}
+}
+
+func TestSubjectContextPagesPreserveAllTextAndCursors(t *testing.T) {
+	for _, text := range []string{"", strings.Repeat("feedback ", 6000) + "IMPORTANT_LATEST_FEEDBACK", strings.Repeat("\x00\n\"\\😀é", 5000)} {
+		t.Run(fmt.Sprint(len(text)), func(t *testing.T) {
+			raw := RawNotification{ID: 1, SourceID: "source", Event: event()}
+			subject := raw.Event
+			subject.Context = text
+			subjects := map[string]Event{subjectKey(raw.SourceID, raw.Event): subject}
+			offset := 0
+			var assembled strings.Builder
+			for count := 0; ; count++ {
+				if count > 100 {
+					t.Fatal("pagination did not finish")
+				}
+				result, err := readNotificationSubjectContext(json.RawMessage(fmt.Sprintf(`{"event_id":1,"offset":%d}`, offset)), []RawNotification{raw}, subjects)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(result) > ToolResultLimit {
+					t.Fatal("serialized page exceeds result limit")
+				}
+				var page struct {
+					Context string `json:"context"`
+					Next    *int   `json:"next_offset"`
+					Offset  int    `json:"offset"`
+					Total   int    `json:"total_bytes"`
+				}
+				if err = json.Unmarshal([]byte(result), &page); err != nil {
+					t.Fatal("invalid page JSON", err)
+				}
+				if page.Offset != offset || page.Total != len(text) {
+					t.Fatalf("incorrect page metadata: %+v", page)
+				}
+				assembled.WriteString(page.Context)
+				if page.Next == nil {
+					break
+				}
+				if *page.Next <= offset || *page.Next != offset+len(page.Context) {
+					t.Fatal("cursor does not advance by page length")
+				}
+				offset = *page.Next
+			}
+			if assembled.String() != text {
+				t.Fatal("pagination lost or repeated context")
+			}
+		})
+	}
+}
+
+func TestSubjectContextRejectsInvalidPages(t *testing.T) {
+	raw := RawNotification{ID: 1, SourceID: "source", Event: event()}
+	subject := raw.Event
+	subject.Context = "😀context"
+	subjects := map[string]Event{subjectKey(raw.SourceID, raw.Event): subject}
+	for _, args := range []string{`{"event_id":2}`, `{"event_id":1,"offset":-1}`, `{"event_id":1,"offset":1}`, `{"event_id":1,"offset":100}`, `{"event_id":1,"offset":"bad"}`, `{"event_id":1,"unknown":true}`} {
+		if _, err := readNotificationSubjectContext(json.RawMessage(args), []RawNotification{raw}, subjects); err == nil {
+			t.Fatalf("accepted invalid request %s", args)
+		}
+	}
+}
+
+func TestProcessingReadsFeedbackBeyondFirstContextPage(t *testing.T) {
+	s, model, tools, source := fixture(t)
+	s.Providers["github"] = &longContextProvider{contextText: strings.Repeat("x", 20000) + "IMPORTANT_LATEST_FEEDBACK"}
+	ctx := context.Background()
+	id := seed(t, s, source, event())
+	model.responses = []any{
+		BatchDecision{ToolName: "notification_subject_context", Arguments: fmt.Sprintf(`{"event_id":%d}`, id)},
+		BatchDecision{ToolName: "notification_subject_context", Arguments: fmt.Sprintf(`{"event_id":%d,"offset":12000}`, id)},
+		BatchDecision{Actions: []BatchAction{actionFor(id)}},
+	}
+	if _, err := s.RequestProcessing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Status(ctx)
+	if status.Processing.Status != "completed" || len(model.prompts) != 3 || len(tools.calls) != 0 {
+		t.Fatalf("processing: %+v prompts=%d", status, len(model.prompts))
+	}
+	if strings.Contains(model.prompts[0], "IMPORTANT_LATEST_FEEDBACK") || strings.Contains(model.prompts[1], "IMPORTANT_LATEST_FEEDBACK") || !strings.Contains(model.prompts[2], "IMPORTANT_LATEST_FEEDBACK") {
+		t.Fatal("later feedback was not reachable through pagination")
+	}
+	if strings.Contains(model.prompts[2], "[truncated]") {
+		t.Fatal("context page was truncated after pagination")
 	}
 }
