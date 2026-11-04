@@ -19,7 +19,7 @@ func TestStartupDiagnosticsPersist(t *testing.T) {
 		{name: "invalid address", want: "refusing to start"},
 		{name: "remote warning", remote: true, want: "NO authentication"},
 		{name: "legacy invalid address", legacy: true, want: "refusing to start"},
-		{name: "migration failure", remote: true, legacy: true, both: true, want: "refusing to boot"},
+		{name: "both data directories", remote: true, legacy: true, both: true, want: "creating db directory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -28,9 +28,6 @@ func TestStartupDiagnosticsPersist(t *testing.T) {
 			if tc.legacy {
 				if err := os.Mkdir(filepath.Join(home, ".kangent"), 0700); err != nil {
 					t.Fatal(err)
-				}
-				if !tc.both {
-					logDir = filepath.Join(home, ".kangent")
 				}
 			}
 			if tc.both {
@@ -44,9 +41,6 @@ func TestStartupDiagnosticsPersist(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := serveCmd{addr: "0.0.0.0:7333", db: filepath.Join(blocked, "db"), insecureAllowRemote: tc.remote, noIntegrationSync: true}
-			if tc.both {
-				c.db = "~/.kamacu/kamacu.db"
-			}
 			if got := c.Execute(context.Background(), nil); got != subcommands.ExitFailure {
 				t.Fatalf("exit %v", got)
 			}
@@ -57,9 +51,9 @@ func TestStartupDiagnosticsPersist(t *testing.T) {
 			if !strings.Contains(string(data), tc.want) {
 				t.Fatalf("missing %q in %s", tc.want, data)
 			}
-			if tc.legacy && !tc.both {
-				if _, err := os.Stat(filepath.Join(home, ".kamacu")); !os.IsNotExist(err) {
-					t.Fatalf("legacy destination was created: %v", err)
+			if tc.legacy {
+				if _, err := os.Stat(filepath.Join(home, ".kangent", "kamacu.log")); !os.IsNotExist(err) {
+					t.Fatalf("legacy directory was modified: %v", err)
 				}
 			}
 		})
