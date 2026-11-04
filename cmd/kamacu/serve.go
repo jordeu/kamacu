@@ -26,7 +26,6 @@ import (
 	"kamacu/internal/inbox"
 	"kamacu/internal/integration"
 	kamacumcp "kamacu/internal/mcp"
-	"kamacu/internal/migrate"
 	"kamacu/internal/monitor"
 	"kamacu/internal/notifications"
 	"kamacu/internal/opencode"
@@ -100,25 +99,6 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 
-	// Part 1 of the one-time ~/.kangent -> ~/.kamacu data-directory migration
-	// (MIGRATE-01/05, D-09..D-12). Ordering is load-bearing: Prepare MUST run
-	// BEFORE os.MkdirAll/store.Open below — creating ~/.kamacu early would defeat
-	// the "destination absent" gate and make the atomic os.Rename fail (RESEARCH
-	// Pitfall 4). It gates on the default paths (a custom --db opts out), performs
-	// the preflight + atomic rename + WAL-safe DB rename + old-tmux retire, and on
-	// ANY error leaves ~/.kangent byte-for-byte untouched. A migration error or a
-	// both-dirs anomaly refuses to boot (D-11) — the data is safe.
-	decision, migCfg, err := migrate.Prepare(context.Background(), dbPath, "~/.kamacu/kamacu.db")
-	if err != nil {
-		slog.Error("migrating data directory ~/.kangent -> ~/.kamacu: refusing to boot (your data is safe — nothing moved past the failure)", "error", err)
-		return subcommands.ExitFailure
-	}
-	if decision == migrate.DoMigrate {
-		// Silent success is a single line (D-10); fresh installs and already-
-		// migrated boots stay quiet.
-		slog.Info("migrated ~/.kangent -> ~/.kamacu")
-	}
-
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		slog.Error("creating db directory", "dir", filepath.Dir(dbPath), "error", err)
 		return subcommands.ExitFailure
@@ -134,22 +114,6 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	if err := store.Migrate(db); err != nil {
 		slog.Error("running migrations", "error", err)
 		return subcommands.ExitFailure
-	}
-
-	// Part 2 of the data-directory migration (MIGRATE-02/03): rewrite the DB's
-	// managed stored paths under the old root (D-15), repair each managed repo's
-	// git worktree link files, and delete the retired kangent-* tmux rows so a
-	// reopened task respawns fresh on the -L kamacu socket. It needs the schema,
-	// so it MUST run after store.Migrate; only a DoMigrate/RollForward decision
-	// has anything to complete (SkipCustom/FreshInstall are no-ops; RefuseBoot
-	// already errored in Prepare). Every step self-gates, so a failure refuses to
-	// serve (D-04) and the next boot's RollForward path re-runs the idempotent
-	// steps — the data stays safe.
-	if decision == migrate.DoMigrate || decision == migrate.RollForward {
-		if err := migrate.Complete(context.Background(), db, migCfg); err != nil {
-			slog.Error("completing data-directory migration ~/.kangent -> ~/.kamacu: refusing to serve (your data is safe — a re-run finishes it)", "error", err)
-			return subcommands.ExitFailure
-		}
 	}
 
 	// One-shot idempotent icon backfill (D-08): migration 00009 adds icon_letters
