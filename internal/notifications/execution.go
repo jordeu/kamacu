@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"kamacu/internal/diagnostics"
 	"kamacu/internal/inbox"
 	"kamacu/internal/settings"
 )
@@ -129,6 +130,9 @@ func (s *Service) executeNext(ctx context.Context) error {
 	if n == 0 {
 		return nil
 	}
+	groupCtx, finishGroup := context.WithCancel(ctx)
+	defer finishGroup()
+	ctx = diagnostics.WithGroup(groupCtx, diagnostics.Group{Kind: "reply", ID: id})
 	_ = s.Inbox.FinishNotification(ctx, id, "running", "")
 	history := []trace{}
 	executedMutations := map[string]bool{}

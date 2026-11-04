@@ -2,14 +2,12 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 const MaxLogBytes = 10 << 20
@@ -106,35 +104,4 @@ func Configure(dir string, debug bool) (func(), error) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, w), &slog.HandlerOptions{Level: level})))
 	return func() { slog.SetDefault(previous); w.Close() }, nil
-}
-
-// Recorder is nil outside debug mode. Each JSONL record contains a complete
-// interaction, without provider credentials or HTTP authorization headers.
-type Recorder struct{ writer *RotatingWriter }
-
-func NewRecorder(dir string) (*Recorder, error) {
-	w, err := NewRotatingWriter(filepath.Join(dir, "llm", "interactions.jsonl"), MaxLogBytes, LogBackups)
-	if err != nil {
-		return nil, err
-	}
-	return &Recorder{w}, nil
-}
-func (r *Recorder) Close() error {
-	if r == nil {
-		return nil
-	}
-	return r.writer.Close()
-}
-func (r *Recorder) Record(fields map[string]any) {
-	if r == nil {
-		return
-	}
-	fields["recorded_at"] = time.Now().UTC()
-	data, err := json.Marshal(fields)
-	if err == nil {
-		_, err = r.writer.Write(append(data, '\n'))
-	}
-	if err != nil {
-		slog.Error("writing LLM transcript", "error", err)
-	}
 }

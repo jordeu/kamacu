@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"kamacu/internal/diagnostics"
 	"kamacu/internal/inbox"
 	"kamacu/internal/observation"
 	"kamacu/internal/presence"
@@ -198,6 +200,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	start := time.Now()
+	ctx = diagnostics.WithGroup(ctx, diagnostics.Group{Kind: "session", ID: sess.Info().ID, SessionID: sess.Info().ID, StartedAt: sess.Info().CreatedAt, TaskID: task.ID, TaskTitle: task.Title, ProjectID: task.ProjectID, ProjectName: task.ProjectName})
 	inferenceTask := task
 	if task.ID == 0 {
 		work, e := store.WorkForSession(ctx, s.DB, sess.Info().ID)
@@ -469,6 +472,6 @@ func (s *Service) taskContext(ctx context.Context, info session.Info) (TaskConte
 		task.Scope = "scratchpad"
 		return task, nil
 	}
-	err := s.DB.QueryRowContext(ctx, `SELECT title,description,status,source FROM tasks WHERE id=?`, info.TaskID).Scan(&task.Title, &task.Description, &task.Status, &task.Source)
+	err := s.DB.QueryRowContext(ctx, `SELECT t.title,t.description,t.status,t.source,p.id,p.name FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?`, info.TaskID).Scan(&task.Title, &task.Description, &task.Status, &task.Source, &task.ProjectID, &task.ProjectName)
 	return task, err
 }

@@ -1,12 +1,10 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -34,34 +32,6 @@ func TestRotationAndPermissions(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".3"); !os.IsNotExist(err) {
 		t.Fatalf("extra backup: %v", err)
-	}
-}
-func TestConcurrentTranscripts(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRecorder(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < 30; i++ {
-		wg.Go(func() { r.Record(map[string]any{"prompt": "hello\nworld", "response": "ok"}) })
-	}
-	wg.Wait()
-	r.Close()
-	f, err := os.Open(filepath.Join(dir, "llm", "interactions.jsonl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	dec := json.NewDecoder(f)
-	for i := 0; i < 30; i++ {
-		var v map[string]any
-		if err := dec.Decode(&v); err != nil {
-			t.Fatal(err)
-		}
-		if v["prompt"] != "hello\nworld" {
-			t.Fatal(v)
-		}
 	}
 }
 func TestLoggingLevels(t *testing.T) {

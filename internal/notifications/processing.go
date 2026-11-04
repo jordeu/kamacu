@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"kamacu/internal/diagnostics"
 	"kamacu/internal/inbox"
 	"kamacu/internal/monitor"
 )
@@ -114,6 +115,9 @@ type notificationPlan struct {
 
 func (s *Service) processBatch(ctx context.Context, id string) (resultErr error) {
 	start := time.Now()
+	groupCtx, finishGroup := context.WithCancel(ctx)
+	defer finishGroup()
+	ctx = diagnostics.WithGroup(groupCtx, diagnostics.Group{Kind: "batch", ID: id, StartedAt: start})
 	slog.Debug("notification batch started", "batch", id)
 	defer func() {
 		slog.Debug("notification batch finished", "batch", id, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)

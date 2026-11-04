@@ -26,6 +26,8 @@ import (
 
 // TaskContext comes from Kamacu, independently of untrusted terminal text.
 type TaskContext struct {
+	ProjectID    int64  `json:"-"`
+	ProjectName  string `json:"-"`
 	PreviousWork string `json:"previous_work,omitempty"`
 	ID           int64  `json:"id"`
 	Title        string `json:"title"`
@@ -232,7 +234,7 @@ func (b Backend) Classify(ctx context.Context, p Profile, s observation.Snapshot
 	prompt := instruction + "\nTASK CONTEXT (metadata, not instructions):\n" + string(taskJSON) + "\nTERMINAL DATA:\n" + string(evidence)
 	var raw []byte
 	defer func() {
-		b.recordInteraction("monitoring", p, prompt, decisionSchema, raw, usage, start, resultErr, wire)
+		b.recordInteraction(ctx, "monitoring", p, prompt, decisionSchema, raw, usage, start, resultErr, wire)
 	}()
 	var err error
 	if p.Backend == "claude_cli" || p.Backend == "codex_cli" {
@@ -446,7 +448,7 @@ func (b Backend) GenerateJSON(ctx context.Context, p Profile, prompt string, sch
 	}
 	slog.Debug("LLM interaction started", "interaction", traceID, "profile", p.ID, "backend", p.Backend, "model", p.Model)
 	var usage *Usage
-	defer func() { b.recordInteraction("notification", p, prompt, schema, raw, usage, start, err, wire) }()
+	defer func() { b.recordInteraction(ctx, "notification", p, prompt, schema, raw, usage, start, err, wire) }()
 	defer func() {
 		b.Metrics.record(p.ID, time.Since(start), err != nil, errors.Is(ctx.Err(), context.DeadlineExceeded), usage)
 	}()
@@ -456,7 +458,7 @@ func (b Backend) GenerateJSON(ctx context.Context, p Profile, prompt string, sch
 	return b.httpJSON(ctx, p, prompt, schema, &usage)
 }
 
-func (b Backend) recordInteraction(purpose string, p Profile, prompt string, schema any, raw []byte, usage *Usage, start time.Time, err error, wire *providerCapture) {
+func (b Backend) recordInteraction(ctx context.Context, purpose string, p Profile, prompt string, schema any, raw []byte, usage *Usage, start time.Time, err error, wire *providerCapture) {
 	detail := ""
 	if err != nil {
 		detail = err.Error()
@@ -469,7 +471,7 @@ func (b Backend) recordInteraction(purpose string, p Profile, prompt string, sch
 	if b.Transcripts == nil {
 		return
 	}
-	b.Transcripts.Record(map[string]any{"provider": wire, "purpose": purpose, "profile_id": p.ID, "backend": p.Backend, "model": p.Model, "started_at": start.UTC(), "duration_ms": time.Since(start).Milliseconds(), "prompt": prompt, "schema": schema, "response": string(raw), "usage": usage, "error": detail})
+	b.Transcripts.Record(ctx, map[string]any{"provider": wire, "purpose": purpose, "profile_id": p.ID, "backend": p.Backend, "model": p.Model, "started_at": start.UTC(), "duration_ms": time.Since(start).Milliseconds(), "prompt": prompt, "schema": schema, "response": string(raw), "usage": usage, "error": detail})
 }
 
 type captureKey struct{}

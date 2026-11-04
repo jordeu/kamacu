@@ -44,7 +44,7 @@ func TestHTTPTranscripts(t *testing.T) {
 			if (err != nil) != (tc.status != 200 || tc.classify) {
 				t.Fatalf("error %v", err)
 			}
-			data, e := os.ReadFile(filepath.Join(dir, "llm", "interactions.jsonl"))
+			data, e := readTranscript(dir)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -89,7 +89,7 @@ func TestCLITranscripts(t *testing.T) {
 			if err != nil || !strings.Contains(string(raw), `"ok":true`) {
 				t.Fatalf("%s %v", raw, err)
 			}
-			data, err := os.ReadFile(filepath.Join(dir, "llm", "interactions.jsonl"))
+			data, err := readTranscript(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,4 +105,40 @@ func TestCLITranscripts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Reconstruct the fields checked by adapter tests from the published folder.
+func readTranscript(root string) ([]byte, error) {
+	var dir string
+	err := filepath.WalkDir(filepath.Join(root, "llm"), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Name() == "metadata.json" {
+			dir = filepath.Dir(path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]any
+	if err = json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	data, err = os.ReadFile(filepath.Join(dir, "provider.json"))
+	if err != nil {
+		return nil, err
+	}
+	fields["provider"] = json.RawMessage(data)
+	data, err = os.ReadFile(filepath.Join(dir, "prompt.md"))
+	if err != nil {
+		return nil, err
+	}
+	fields["prompt"] = string(data)
+	return json.Marshal(fields)
 }
