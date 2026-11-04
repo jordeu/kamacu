@@ -237,6 +237,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 			inferenceTask.PreviousWork = string(raw)
 		}
 	}
+	slog.Debug("classifying terminal", "session", sess.Info().ID, "profile", p.ID, "revision", obs.Revision)
 	d, err := s.Classifier.Classify(ctx, p, obs, inferenceTask)
 	info := sess.Info()
 	s.mu.Lock()
@@ -251,10 +252,12 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	effective, e := Resolve(parent, s.DB, info.TaskID)
 	currentTask, taskErr := s.taskContext(parent, info)
 	if info.Status != session.StatusRunning || info.StopRequested || taskErr != nil || currentTask != task || e != nil || effective.Key() != p.Key() || current.Input != obs.Input || current.UnsupportedSize {
+		slog.Debug("discarding obsolete terminal classification", "session", info.ID)
 		return
 	}
 	// Provider failures must back off even when terminal output kept changing.
 	if err != nil {
+		slog.Debug("terminal classification failed; backing off", "session", info.ID, "error", err, "backoff_seconds", 20)
 		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: err.Error()})
 		_ = s.Inbox.HideObserved(parent, info.ID, true)
 		w.lastAttempt = time.Now().Add(20 * time.Second)
@@ -263,6 +266,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	// An old question can remain visible after progress. Never accept an old
 	// screen merely because its evidence excerpt is still present.
 	if current.Revision != obs.Revision {
+		slog.Debug("terminal changed during classification", "session", info.ID, "revision", obs.Revision, "current_revision", current.Revision)
 		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "ready", Detail: "Terminal changed during analysis; waiting for stable evidence"})
 		_ = s.Inbox.HideObserved(parent, info.ID, true)
 		return

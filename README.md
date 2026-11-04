@@ -69,6 +69,19 @@ make build           # Vite production build, then the Go binary → bin/kamacu
 ./bin/kamacu serve
 ```
 
+Run `kamacu serve --debug` to enable debug-level console and file logs and
+record monitoring and notification LLM interactions for troubleshooting.
+Server logs are always written to `~/.kamacu/kamacu.log`; debug mode also
+writes JSONL transcripts to `~/.kamacu/llm/interactions.jsonl`. Both rotate at
+10 MiB and retain five numbered backups (`.1` is newest). Each transcript
+includes the full prompt, response schema, provider output, parsed response,
+CLI stderr, errors, timing, model/profile, and token usage when available.
+Transcript files are created only in debug mode. These files may contain
+private terminal, task, and notification content; files have owner-only
+permissions. Provider authorization headers and configured credentials are
+not added to transcripts. Copy the files elsewhere before rotation if you
+need to retain a debugging session longer.
+
 `make build` embeds the frontend into the binary — no separate frontend server
 in production. For frontend development with hot-reload, run `make dev-backend`
 and `make dev-frontend` (Vite dev server with HMR, proxying `/api` — the JSON

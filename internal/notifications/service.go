@@ -193,6 +193,7 @@ func (s *Service) repositories(ctx context.Context) (map[string]bool, error) {
 	return out, rows.Err()
 }
 func (s *Service) ingest(ctx context.Context, source Source, batch Batch) error {
+	slog.Debug("ingesting notifications", "source", source.ID, "events", len(batch.Events))
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -238,11 +239,18 @@ func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	start := time.Now()
+	slog.Debug("notification inference started", "profile", p.ID, "prompt_bytes", len(prompt))
 	raw, err := s.Model.GenerateJSON(callCtx, p, prompt, stepSchema)
+	slog.Debug("notification inference finished", "profile", p.ID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
 	if err != nil {
 		return Step{}, err
 	}
-	return decodeStep(raw)
+	step, err := decodeStep(raw)
+	if err != nil {
+		slog.Debug("notification response validation failed", "profile", p.ID, "error", err)
+	}
+	return step, err
 }
 func (s *Service) projectContext(ctx context.Context, repo string) (string, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.name,t.id,t.title,t.status,t.source,t.pr_number FROM projects p LEFT JOIN tasks t ON t.project_id=p.id WHERE lower(p.github_repo)=lower(?) ORDER BY p.id,CASE WHEN t.status='done' THEN 1 ELSE 0 END,t.updated_at DESC LIMIT 100`, repo)

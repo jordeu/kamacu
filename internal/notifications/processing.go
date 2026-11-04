@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -111,7 +112,13 @@ type notificationPlan struct {
 	refs    []inbox.NotificationQuestionRef
 }
 
-func (s *Service) processBatch(ctx context.Context, id string) error {
+func (s *Service) processBatch(ctx context.Context, id string) (resultErr error) {
+	start := time.Now()
+	slog.Debug("notification batch started", "batch", id)
+	defer func() {
+		slog.Debug("notification batch finished", "batch", id, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)
+	}()
+
 	events, err := s.batchEvents(ctx, id)
 	if err != nil {
 		return err
@@ -167,6 +174,7 @@ func (s *Service) processBatch(ctx context.Context, id string) error {
 }
 
 func (s *Service) processGroup(ctx context.Context, id string, events []RawNotification, plan *notificationPlan) error {
+	slog.Debug("processing notification group", "batch", id, "events", len(events))
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	var err error

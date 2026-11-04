@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -146,7 +147,17 @@ func (m *Manager) SetTmuxClient(c tmux.Client) {
 // must produce the clean "couldn't start a session" path, not a confusing
 // shell error, and must never register a session. Agents additionally require
 // a non-empty Cwd.
-func (m *Manager) Spawn(opts SpawnOpts) (*Session, error) {
+func (m *Manager) Spawn(opts SpawnOpts) (result *Session, resultErr error) {
+	start := time.Now()
+	slog.Debug("session spawn started", "task", opts.TaskID, "kind", opts.Kind)
+	defer func() {
+		id := ""
+		if result != nil {
+			id = result.Info().ID
+		}
+		slog.Debug("session spawn finished", "session", id, "task", opts.TaskID, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)
+	}()
+
 	m.mu.Lock()
 	ready := m.agentReady
 	m.mu.Unlock()
@@ -553,6 +564,7 @@ func (m *Manager) listWhere(keep func(*Session) bool) []Info {
 // window — required because the DELETE /worktree handler calls this inline
 // in the request (D-32 cleanup gate).
 func (m *Manager) StopAllForTask(taskID int64) {
+	slog.Debug("stopping task sessions", "task", taskID)
 	m.mu.Lock()
 	targets := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
@@ -602,6 +614,7 @@ func (m *Manager) StopAllForScope() {
 // Remove deletes an exited session (freeing its ring). Running sessions are
 // rejected with ErrStillRunning; unknown IDs with ErrNotFound.
 func (m *Manager) Remove(id string) error {
+	slog.Debug("removing session", "session", id)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
