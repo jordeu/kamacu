@@ -16,6 +16,7 @@ export interface AgentStatusEntry {
   exitCode: number | null;
   stopRequested: boolean;
   resumable: boolean;
+  resumeFallback?: boolean;
   prNumber: number | null; // null for source='manual' (D-15)
   // "global" = the Scratchpad agent entry the server synthesizes since
   // Phase 15 (agents.go — taskId 0, "Scratchpad"/"Global" labels). The only

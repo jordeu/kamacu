@@ -25,6 +25,8 @@ func TestCodexSessionIDFromFooter(t *testing.T) {
 	}{
 		{"plain", "To continue this session, run codex resume " + id + "\r\n", id},
 		{"color and wrap", "output\r\nTo continue this session, run\r\n\x1b[32mcodex resume " + id + "\x1b[0m\r\n", id},
+		{"codex 0.166 exit", "Shutting down...\x1b[?2026l\x1b]0;\x07\x1b]7501;state=clear\x1b\\\x1b[0 q\x1b[?25hSession ID: " + id + "\r\n", id},
+		{"session id not final", "Session ID: " + id + "\nmore output", ""},
 		{"ordinary command", "codex resume " + id, ""},
 		{"not final", "To continue this session, run codex resume " + id + "\nmore output", ""},
 		{"invalid id", "To continue this session, run codex resume invalid", ""},
@@ -308,25 +310,45 @@ func TestCodexExitedTaskIsResumable(t *testing.T) {
 	}
 }
 
-// TestCodexResumeWithoutStoredIdIs409 (negative test): a Resume request on a
-// codex task with a NULL codex_session_id is an honest 409 "no session to
-// resume" — refusing to silently fork a fresh session. Mirrors the opencode
-// posture.
-func TestCodexResumeWithoutStoredIdIs409(t *testing.T) {
+// A missing ID falls back to Codex's cwd-scoped most recent session.
+func TestCodexResumeWithoutStoredIDUsesLast(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
-	srv, _, db, agentID, _ := newCodexResumeServer(t)
+	srv, _, db, agentID, argsFile := newCodexResumeServer(t)
 
 	tid, _ := codexWorktreeTask(t, srv, db, agentID, "No Id Codex")
 	// codex_session_id left NULL.
+	entry := waitAgentStatus(t, srv, tid, "exited", 5*time.Second)
+	if entry["resumable"] != true || entry["resumeFallback"] != true {
+		t.Fatalf("missing fallback status: %v", entry)
+	}
 
 	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"task_id": tid, "kind": "agent", "resume": true})
-	if status != http.StatusConflict {
-		t.Fatalf("resume NULL-codex-id task = %d, want 409; body=%v", status, body)
+	if status != http.StatusCreated {
+		t.Fatalf("resume NULL-codex-id task = %d; body=%v", status, body)
 	}
-	if body["error"] != "no session to resume" {
-		t.Errorf("error = %q, want %q", body["error"], "no session to resume")
+	args := readArgv(t, argsFile)
+	if !reflect.DeepEqual(args, []string{"--no-alt-screen", "resume", "--last"}) {
+		t.Fatalf("resume argv = %v", args)
+	}
+}
+
+func TestCodexGlobalResumeWithoutStoredIDUsesLast(t *testing.T) {
+	srv, _, db, agentID, argsFile := newCodexResumeServer(t)
+	if _, err := db.Exec("UPDATE global_task SET root_path = ?, agent_id = ? WHERE id = 1", t.TempDir(), agentID); err != nil {
+		t.Fatal(err)
+	}
+	entry := waitAgentStatus(t, srv, 0, "exited", 5*time.Second)
+	if entry["resumable"] != true || entry["resumeFallback"] != true {
+		t.Fatalf("missing global fallback status: %v", entry)
+	}
+	status, body := doJSON(t, "POST", srv.URL+"/api/sessions", map[string]any{"scope": "global", "kind": "agent", "resume": true})
+	if status != http.StatusCreated {
+		t.Fatalf("global resume = %d; body=%v", status, body)
+	}
+	if args := readArgv(t, argsFile); !reflect.DeepEqual(args, []string{"--no-alt-screen", "resume", "--last"}) {
+		t.Fatalf("resume argv = %v", args)
 	}
 }
 

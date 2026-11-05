@@ -47,7 +47,7 @@ On upgrade, new agent launches stop injecting Claude status hooks or selecting t
 
 Agent terminals are direct PTYs, not persistent tmux sessions; a server restart ends those agents. Shell tmux tabs retain their existing recovery behavior. Inbox history and episode decisions are durable, and a new agent session cannot inherit another session's pending decision.
 
-Claude retains its explicit conversation ID. OpenCode retains its existing session-list discovery. Codex's normal exit footer supplies its resume ID without hooks, and already saved IDs resume normally. A fresh Codex process killed before emitting that footer may have no saved resume ID; automatic crash recovery of that conversation is a remaining limitation. Kamacu deliberately does not guess from unrelated conversations in the same directory.
+Claude retains its explicit conversation ID. OpenCode retains its existing session-list discovery. Codex's normal exit footer supplies its resume ID without hooks, and saved IDs resume directly. If no ID was saved, Resume asks Codex for the latest interactive session in the task worktree or Scratchpad root. If several conversations share that directory, Codex may select a different one; if none exists, Codex reports that it cannot resume. The Resume option can therefore appear for a configured Codex directory even before a conversation exists.
 
 Strict screen-generation checks favor avoiding stale notifications. A continuously repainting UI or a slow/limited provider can exceed the intended 10–15 second response time. The implementation has synthetic installed-login checks and a recorded Codex renderer replay; broad live-terminal accuracy and 1/5/10-session load benchmarks remain necessary before treating that latency as a production guarantee.
 
