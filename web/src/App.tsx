@@ -3,6 +3,10 @@ import { Navigate, Route, Routes, useParams } from "react-router";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProjects, useWorkspaces } from "@/api/queries";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
+import {
+  getWorkspaceProject,
+  rememberWorkspaceProject,
+} from "@/lib/workspaceProject";
 import { Button } from "@/components/ui/button";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
 import ActivityPage from "@/pages/ActivityPage";
@@ -14,7 +18,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import TaskPage from "@/pages/TaskPage";
 import TerminalPage from "@/pages/TerminalPage";
 
-function RedirectToFirstProject() {
+function RedirectToWorkspaceProject() {
   const { data: projects, isLoading } = useProjects();
   const { data: workspaces } = useWorkspaces();
   const { activeWorkspaceId } = useActiveWorkspace();
@@ -24,15 +28,9 @@ function RedirectToFirstProject() {
   // (activeWorkspaceId is null only while useWorkspaces() is still loading).
   if (isLoading || activeWorkspaceId === null) return null;
 
-  // Only the active workspace's projects are candidates for the index redirect
-  // (D-11/D-13) — do NOT redirect to a project in another workspace.
-  const wsProjects = (projects ?? []).filter(
-    (p) => p.workspace_id === activeWorkspaceId,
-  );
-  if (wsProjects.length > 0) {
-    // First-by-name: the backend lists projects ORDER BY name COLLATE NOCASE,
-    // so [0] is the alphabetically-first project in this workspace (D-11).
-    return <Navigate to={`/projects/${wsProjects[0].id}`} replace />;
+  const project = getWorkspaceProject(activeWorkspaceId, projects ?? []);
+  if (project) {
+    return <Navigate to={`/projects/${project.id}`} replace />;
   }
 
   // Workspace-scoped empty state (D-13): never a global "No projects yet" while
@@ -89,6 +87,16 @@ function BoardWorkspaceSync({ children }: { children: ReactNode }) {
     (p) => p.id === projectId,
   )?.workspace_id;
 
+  // Track the URL project independently of workspace reconciliation. A project
+  // can move workspaces without changing the URL; record its new owner too.
+  // Do not depend on activeWorkspaceId: switching workspaces may temporarily
+  // leave the previous project's URL visible while navigation is pending.
+  useEffect(() => {
+    if (projectWorkspaceId !== undefined) {
+      rememberWorkspaceProject(projectWorkspaceId, projectId);
+    }
+  }, [projectId, projectWorkspaceId]);
+
   // The last projectId we reconciled against. Reconciliation is idempotent per
   // URL project: a workspace switch under the same URL must not be reverted.
   const lastSyncedProjectId = useRef<number | null>(null);
@@ -119,7 +127,7 @@ export default function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route index element={<RedirectToFirstProject />} />
+        <Route index element={<RedirectToWorkspaceProject />} />
         <Route
           path="/projects/:projectId"
           element={
