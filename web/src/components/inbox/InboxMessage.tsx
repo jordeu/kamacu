@@ -1,15 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowUpRight, ChevronRight } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Button } from "@/components/ui/button";
+import { InboxText, InboxTextAction } from "./InboxText";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useContinueNotification, completionActions, completionClosesSession, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, type FeedbackQuestion } from "@/api/inbox";
 
 function Context({ text }: { text: string }) {
   return <div className="prose prose-invert prose-sm max-w-none break-words prose-headings:text-sm prose-a:text-blue-400 prose-pre:overflow-x-auto">
-    <ReactMarkdown skipHtml remarkPlugins={[remarkGfm]} components={{ img: () => null }}>{text}</ReactMarkdown>
+    <InboxText text={text} paragraphs />
   </div>;
 }
 export function InboxMessage({ question: q, onResult, expanded, dialog = false, onNavigate }: { question: FeedbackQuestion; onNavigate?: () => void; expanded?: boolean; dialog?: boolean; onResult: (message: string, keepOpen?: boolean) => void }) {
@@ -46,12 +45,12 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
     <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
       <div className="min-w-0 flex-1">
         <p className="break-words text-sm text-muted-foreground">{notification ? q.source_name || "Notification" : q.task_id === 0 ? "Scratchpad" : `${q.project_name} / ${q.task_title}`}</p>
-        <h2 id={`question-${q.id}`} className="mt-2 whitespace-pre-wrap break-words text-base font-medium">{q.question}</h2>
+        <h2 id={`question-${q.id}`} className="mt-2 whitespace-pre-wrap break-words text-base font-medium"><InboxText text={q.question} /></h2>
       </div>
       {notification ? <a className="inline-flex items-center gap-1 text-sm text-blue-400" href={q.source_url} target="_blank" rel="noopener noreferrer">Open notification <ArrowUpRight className="size-4" /></a> : <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => pending && (q.origin!=="observer" || completion) ? submit("dismiss", undefined, true) : navigateToTask()} aria-label={q.task_id === 0 ? "Open Scratchpad" : `Open task: ${q.task_title}`}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"} <ArrowUpRight className="size-4" /></Button>}
     </div>
     {pending ? <div className="mt-6 space-y-6">
-      <div><h3 className="mb-2 text-sm font-medium text-muted-foreground">{notification ? "Notification summary" : "Task summary"}</h3><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{q.summary}</p></div>
+      <div><h3 className="mb-2 text-sm font-medium text-muted-foreground">{notification ? "Notification summary" : "Task summary"}</h3><div className="whitespace-pre-wrap break-words text-sm leading-relaxed"><InboxText text={q.summary} /></div></div>
       <div><h3 className="mb-2 text-sm font-medium text-muted-foreground">{completion ? "What was done" : "Decision context"}</h3><Context text={q.context} /></div>
     </div> : <>
       <p className="mt-3 text-sm text-muted-foreground">
@@ -63,7 +62,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
         {q.reason === "heartbeat_expired" && " · Agent stopped polling"}
         {q.reason === "session_stopped" && " · Agent session stopped"}
       </p>
-      {q.status === "answered" && <p className="mt-2 whitespace-pre-wrap break-words text-sm">{q.answer}</p>}
+      {q.status === "answered" && <div className="mt-2 whitespace-pre-wrap break-words text-sm"><InboxText text={q.answer} /></div>}
       {notification && q.delivery_status !== "queued" && q.delivery_status !== "running" && <Button variant="outline" size="sm" className="mt-3" disabled={continueNotification.isPending} onClick={async () => {
         try { const next = await continueNotification.mutateAsync(q.id); onNavigate?.(); navigate(`/inbox?message=${encodeURIComponent(next.id)}#message-${next.id}`); } catch { /* Inline error below. */ }
       }}>Reply again</Button>}
@@ -71,14 +70,14 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       {notification && q.execution_result && <div className="mt-4"><Context text={q.execution_result} /></div>}
       <div className="mt-6 space-y-4 border-t border-border pt-5 text-sm">
         <h3 className="font-medium text-muted-foreground">{notification ? "Notification summary and context" : "Task summary and context"}</h3>
-        <p className="whitespace-pre-wrap break-words leading-relaxed">{q.summary}</p>
+        <div className="whitespace-pre-wrap break-words leading-relaxed"><InboxText text={q.summary} /></div>
         <Context text={q.context} />
       </div>
     </>}
     {pending && <div className="mt-6 space-y-4 border-t border-border pt-5">
       <p className="text-sm font-medium">{completion ? "What next?" : "Your answer"} {choices.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <span className="ml-1 font-normal text-muted-foreground">{completion ? "Choose what happens next." : "Choose an option to send it immediately."}</span>}</p>
       {choices.length > 0 && (completion || (q.delivery_mode !== "terminal" && !q.hidden)) && <div className="flex flex-wrap gap-2" role="group" aria-label={completion ? "Completion actions" : "Choose an answer to send immediately"}>
-        {choices.map((option) => <Button key={option.id} variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
+        {choices.map((option) => <InboxTextAction text={option.label} key={option.id} className={`${buttonVariants({ variant: "outline" })} h-auto min-h-9 max-w-full whitespace-normal break-words text-left`} disabled={action.isPending} onClick={() => submit("answer", option.id)} />)}
       </div>}
       {!completion && q.delivery_mode!=="terminal" && q.delivery_mode!=="claude_question" && !q.hidden && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) submit("answer"); }}>
         <label htmlFor={`answer-${q.id}`} className="mb-2 block text-sm text-muted-foreground">Write your own answer</label>
@@ -101,8 +100,8 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       <div className="grid min-w-0 flex-1 gap-1 sm:grid-cols-[minmax(8rem,0.8fr)_minmax(0,3fr)] sm:items-center sm:gap-5">
         <span className="truncate text-xs text-muted-foreground sm:text-sm" title={notification ? q.source_name : q.task_title}>{notification ? q.source_name || "Notification" : q.task_id === 0 ? "Scratchpad" : q.task_title}</span>
         <span className="min-w-0">
-          <span className={`block truncate text-sm ${pending ? "font-semibold" : "font-medium"}`}>{q.question}</span>
-          <span className="mt-1 block truncate text-xs text-muted-foreground">{q.status === "answered" ? q.answer : q.summary}</span>
+          <span className={`block truncate text-sm ${pending ? "font-semibold" : "font-medium"}`}><InboxText text={q.question} /></span>
+          <span className="mt-1 block truncate text-xs text-muted-foreground"><InboxText text={q.status === "answered" ? q.answer : q.summary} /></span>
         </span>
       </div>
       <span className="flex shrink-0 flex-col items-end gap-1.5 text-xs text-muted-foreground">

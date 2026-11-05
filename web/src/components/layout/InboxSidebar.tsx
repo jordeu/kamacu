@@ -2,13 +2,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ArrowUpRight, CheckCheck, ChevronLeft, ChevronRight, Inbox } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { completionActions, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
 import { useInboxFavicon } from "@/lib/useInboxFavicon";
 
 import { NotificationProcessing } from "@/components/inbox/NotificationProcessing";
 import { InboxMessage } from "@/components/inbox/InboxMessage";
-import { InboxText } from "@/components/inbox/InboxText";
+import { InboxText, InboxTextAction } from "@/components/inbox/InboxText";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 function MessageDialog({ question, onOpenChange, onResult, onRestoreFocus }: { question: FeedbackQuestion; onRestoreFocus: () => void; onOpenChange: (open: boolean) => void; onResult: (message: string) => void }) {
@@ -117,14 +117,14 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
       </div>
       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${completion ? "bg-emerald-500/10 text-emerald-400" : "bg-orange-500/10 text-orange-400"}`}>{completion ? "Completed" : "Needs reply"}</span>
     </div>
-    <button type="button" aria-haspopup="dialog" onClick={(event) => onOpenMessage(event.currentTarget)} className="block w-full whitespace-pre-wrap break-words rounded-sm text-left text-sm font-semibold leading-snug hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{q.question}</button>
+    <InboxTextAction text={q.question} aria-haspopup="dialog" onClick={(event) => onOpenMessage(event.currentTarget)} className="block w-full whitespace-pre-wrap break-words rounded-sm text-left text-sm font-semibold leading-snug hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
     <MessagePreview text={q.abstract || q.summary} />
     {!completion && q.options.length > 0 && <div className="flex flex-col gap-2" role="group" aria-label="Choose an answer to send immediately">
-      {q.options.map((option) => <Button key={option.id} variant="outline" size="sm" className="h-auto min-h-9 max-w-full justify-start whitespace-normal break-words text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
+      {q.options.map((option) => <InboxTextAction text={option.label} key={option.id} className={`${buttonVariants({ variant: "outline", size: "sm" })} h-auto min-h-9 max-w-full justify-start whitespace-normal break-words text-left`} disabled={action.isPending} onClick={() => submit("answer", option.id)} />)}
     </div>}
     <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
       {notification ? <a href={q.source_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-400">Open notification <ArrowUpRight className="size-3" /></a> : <Button variant="outline" size="sm" disabled={action.isPending} title={q.origin === "observer" && !completion ? "Open its agent terminal" : "Archive this message and open its agent terminal"} onClick={() => { if(q.origin==="observer" && !completion){onOpenTask();navigate(feedbackTaskURL(q));}else void submit("dismiss", undefined, true); }}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"}<ArrowUpRight className="size-3" /></Button>}
-      {completion && completionActions(q).map(option => <Button key={option.id} variant="outline" size="sm" className="h-auto min-h-7 max-w-full whitespace-normal text-left" disabled={action.isPending} onClick={() => submit("answer", option.id)}>{option.label}</Button>)}
+      {completion && completionActions(q).map(option => <InboxTextAction text={option.label} key={option.id} className={`${buttonVariants({ variant: "outline", size: "sm" })} h-auto min-h-7 max-w-full whitespace-normal text-left`} disabled={action.isPending} onClick={() => submit("answer", option.id)} />)}
       <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>
     </div>
     {!completion && <Link to={`/inbox?message=${encodeURIComponent(q.id)}#message-${q.id}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">{q.delivery_mode === "claude_question" ? "Full context / choices" : "Full context / custom reply"}<ArrowUpRight className="size-3" /></Link>}
