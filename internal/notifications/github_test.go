@@ -14,6 +14,23 @@ import (
 func response(body, headers string) []byte {
 	return []byte("HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n" + headers + "\r\n" + body)
 }
+
+func TestReleaseEnrichmentDoesNotRequestIssueComments(t *testing.T) {
+	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		if path != "repos/acme/repo/releases/42" {
+			t.Fatalf("release used an unsupported discussion endpoint: %s", path)
+		}
+		return response(`{"html_url":"https://github.com/acme/repo/releases/tag/v1","body":"Release notes","created_at":"2026-11-04T12:00:00Z"}`, ""), nil
+	}}
+	e := event()
+	e.SubjectType = "Release"
+	e.SubjectURL = "https://api.github.com/repos/acme/repo/releases/42"
+	fresh, err := g.Enrich(context.Background(), Source{}, e)
+	if err != nil || !fresh.EvidenceComplete || len(fresh.ContextWarnings) > 0 || len(fresh.Evidence) != 1 {
+		t.Fatalf("release was marked incomplete: %+v, %v", fresh, err)
+	}
+}
 func TestGitHubPaginationScopePollingAndAccount(t *testing.T) {
 	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
 	calls := []string{}

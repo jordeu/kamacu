@@ -207,11 +207,15 @@ func TestValidationOutcomesAreCaptured(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if calls != 1 {
-				t.Fatalf("expected one interaction, got %d", calls)
+			wantCalls := 1
+			if tc.batch && tc.wantError {
+				wantCalls = 2 // The bounded correction is recorded separately.
+			}
+			if calls != wantCalls {
+				t.Fatalf("expected %d interactions, got %d", wantCalls, calls)
 			}
 			usage := metrics.Snapshot()[1]
-			if usage.Calls != 1 || (usage.Failures == 1) != tc.wantError {
+			if int(usage.Calls) != wantCalls || (usage.Failures == usage.Calls) != tc.wantError {
 				t.Fatalf("incorrect metrics: %+v", usage)
 			}
 		})

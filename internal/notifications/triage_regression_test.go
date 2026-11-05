@@ -46,6 +46,26 @@ func TestDecodeIntentRepeatedIntentsValidateEveryCitation(t *testing.T) {
 	}
 }
 
+func TestInvalidCitationIsCorrectedOnceWithoutWeakeningEvidence(t *testing.T) {
+	for _, corrected := range []bool{false, true} {
+		t.Run(fmt.Sprint(corrected), func(t *testing.T) {
+			s, model, _, _ := fixture(t)
+			e := event()
+			invalid := intentResponse{Findings: []intentFinding{{Intent: "direct_question", EvidenceID: "context", Quote: "invented question"}}}
+			second := invalid
+			if corrected {
+				second.Findings = []intentFinding{{Intent: "direct_question", EvidenceID: "context", Quote: e.Context}}
+			}
+			model.responses = []any{invalid, second, second}
+			subject := &triageSubject{fresh: e, events: []RawNotification{{Event: e}}}
+			err := s.classifySubject(context.Background(), subject, "")
+			if (err == nil) != corrected || len(model.prompts) != 2 || !strings.Contains(model.prompts[1], "CORRECTION") {
+				t.Fatalf("unexpected repair outcome: err=%v calls=%d", err, len(model.prompts))
+			}
+		})
+	}
+}
+
 func TestRepeatedIntentRetainsCurrentEvidenceAfterRecencyChecks(t *testing.T) {
 	s, model, _, _ := fixture(t)
 	e := event()
@@ -78,7 +98,7 @@ func TestMergedThreadNewFeedbackIsClassifiedBeforeReviewSuppression(t *testing.T
 	seed(t, s, source, e)
 	s.Providers["github"] = &changingFactsProvider{fakeProvider: &fakeProvider{contextText: "Please investigate this regression before responding."}, facts: PRFacts{Available: true, State: "merged"}}
 	status := process(t, s, model, "review_feedback")
-	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 1 {
+	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 2 {
 		t.Fatalf("lost new feedback: %+v calls=%d", status, len(model.prompts))
 	}
 	page, _ := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
