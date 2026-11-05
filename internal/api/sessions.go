@@ -561,13 +561,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				// custom spawn arm below keys off ocsid, which the singleton
 				// scan already filled.
 			} else if agentEngine == "codex" {
-				// Codex global resume: keys off the persisted codex_session_id
-				// alone (captured from hook payloads); the `resume <id>` subcommand
-				// append below keys off cxid.
-				if !cxid.Valid {
-					writeError(w, http.StatusConflict, "no global codex session to resume")
-					return
-				}
+				// When no ID was captured, Codex selects the latest session in cwd.
 			} else {
 				if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
 					writeError(w, http.StatusConflict, "no global claude session to resume")
@@ -584,14 +578,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// claude's --resume (MEM027); the `-s <id>` flag is appended to
 			// AgentArgs in the custom spawn arm below.
 		} else if agentEngine == "codex" {
-			// Codex task resume: keys off the persisted codex_session_id alone —
-			// codex has no kamacu-side transcript glob (its sessions live under
-			// ~/.codex). The `resume <id>` subcommand is appended to AgentArgs in
-			// the custom spawn arm below.
-			if !cxid.Valid {
-				writeError(w, http.StatusConflict, "no session to resume")
-				return
-			}
+			// The CLI can resume the most recent conversation in the worktree.
 		} else {
 			if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
 				writeError(w, http.StatusConflict, "no session to resume")
@@ -640,8 +627,12 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// renderAgentCommand("codex",...) == ["codex"] (the seed command
 			// has no placeholders). The fake-codex argv stub locks this exact
 			// fresh-vs-resume argv.
-			if agentEngine == "codex" && req.Resume && cxid.Valid {
-				opts.AgentArgs = append(opts.AgentArgs, "resume", cxid.String)
+			if agentEngine == "codex" && req.Resume {
+				id := cxid.String
+				if id == "" {
+					id = "--last"
+				}
+				opts.AgentArgs = append(opts.AgentArgs, "resume", id)
 			}
 		}
 	} else if reattach {
@@ -808,17 +799,9 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				go captureOpencodeSessionAsync(h.db, sess.Done(), taskPersistTarget(req.TaskID), opts.Cwd)
 			}
 		}
-		// Codex session-id capture (the codex counterpart of the opencode
-		// block above, with a simpler source): codex mints its own uuid and
-		// every hook payload carries it (session_id), so the hook receiver
-		// records it onto the Session (first capture wins) and THIS poller
-		// just persists sess.CodexSessionID() to the session owner's resume
-		// column — no subprocess discovery. Async + warn-only, exactly the
-		// opencode posture: a capture failure (e.g. hooks not yet trusted in
-		// the codex TUI) costs only restart-resume, never the live session.
-		// Resume reuses the stored id (no capture) — only a FRESH codex spawn
-		// captures.
-		if agentEngine == "codex" && !req.Resume {
+		// Capture the exit footer for fresh sessions and --last resumes; a
+		// resume by saved ID already has the identity it needs.
+		if agentEngine == "codex" && (!req.Resume || cxid.String == "") {
 			if req.Scope == "global" {
 				go captureCodexSessionAsync(h.db, sess.Done(), codexGlobalPersistTarget(), sess)
 			} else {
@@ -1312,14 +1295,16 @@ func codexGlobalPersistTarget() codexPersistTarget {
 	}
 }
 
-// Codex's normal exit footer also exposes the resume ID when hooks are not
-// trusted. Only accept the complete footer at the end of the exited output;
+// Codex's normal exit footer exposes the resume ID. Only accept the complete
+// footer at the end of the exited output;
 // arbitrary resume commands in conversation output are not capture signals.
 var codexFooterANSI = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
-var codexResumeFooter = regexp.MustCompile(`(?:^|[\r\n])To continue this session, run[\s]+codex resume ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\s*$`)
+var codexFooterOSC = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+var codexResumeFooter = regexp.MustCompile(`(?:To continue this session, run\s+codex resume |Session ID: )([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\s*$`)
 
 func codexSessionIDFromFooter(output []byte) string {
 	plain := codexFooterANSI.ReplaceAll(output, nil)
+	plain = codexFooterOSC.ReplaceAll(plain, nil)
 	match := codexResumeFooter.FindSubmatch(plain)
 	if len(match) == 0 {
 		return ""
@@ -1327,14 +1312,9 @@ func codexSessionIDFromFooter(output []byte) string {
 	return string(match[1])
 }
 
-// captureCodexSessionAsync polls the session's hook-recorded codex uuid until
-// it appears (the SessionStart hook fires at codex boot — but ONLY once the
-// user has trusted the kamacu hooks via /hooks, so the window must tolerate a
-// late first hook) and persists it via the parametrized target. In-memory
-// polls are free, so the poll runs until the session exits (done). The final
-// attempt also checks Codex's exit footer if no hook supplied the ID.
-// All failures are warn-only: capture is best-effort and must never affect
-// the live session.
+// captureCodexSessionAsync persists a captured ID, checking the exit footer
+// after the terminal is drained. Capture is best-effort and never blocks the
+// live session.
 func captureCodexSessionAsync(db *sql.DB, done <-chan struct{}, target codexPersistTarget, sess *session.Session) {
 	const pollInterval = 500 * time.Millisecond
 	attempt := func() bool {
@@ -1346,7 +1326,7 @@ func captureCodexSessionAsync(db *sql.DB, done <-chan struct{}, target codexPers
 			}
 		}
 		if id == "" {
-			return false // no hook yet (untrusted hooks / no turn started)
+			return false // no ID captured yet
 		}
 		if err := target.persist(db, id); err != nil {
 			slog.Warn("persisting codex session id", "owner", target.owner, "error", err)

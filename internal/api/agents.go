@@ -25,19 +25,20 @@ type agentHandlers struct {
 
 // agentStatusEntry is the exact JSON contract the 04-03 frontend consumes.
 type agentStatusEntry struct {
-	Live          bool                  `json:"live"` // process lifetime, independent of inferred activity
-	Monitor       session.MonitorStatus `json:"monitor"`
-	TaskID        int64                 `json:"taskId"`
-	ProjectID     int64                 `json:"projectId"`
-	SessionID     string                `json:"sessionId"`
-	Status        string                `json:"status"` // working | idle | waiting | exited (Info.AgentStatus)
-	ExitCode      *int                  `json:"exitCode"`
-	StopRequested bool                  `json:"stopRequested"`
-	Resumable     bool                  `json:"resumable"`   // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
-	PRNumber      *int64                `json:"prNumber"`    // null for source='manual'; the PR number for a github_pr review task (D-15)
-	Source        string                `json:"source"`      // "manual" | "github_pr"
-	TaskTitle     string                `json:"taskTitle"`   // tasks.title — the bar's row label (SBAR-10)
-	ProjectName   string                `json:"projectName"` // projects.name — the bar's row label (SBAR-10)
+	Live           bool                  `json:"live"` // process lifetime, independent of inferred activity
+	Monitor        session.MonitorStatus `json:"monitor"`
+	TaskID         int64                 `json:"taskId"`
+	ProjectID      int64                 `json:"projectId"`
+	SessionID      string                `json:"sessionId"`
+	Status         string                `json:"status"` // working | idle | waiting | exited (Info.AgentStatus)
+	ExitCode       *int                  `json:"exitCode"`
+	StopRequested  bool                  `json:"stopRequested"`
+	Resumable      bool                  `json:"resumable"`                // RCVR-01/RCVR-02: transcript exists + worktree + no running agent (D-54b)
+	ResumeFallback bool                  `json:"resumeFallback,omitempty"` // Codex will look for a session in cwd.
+	PRNumber       *int64                `json:"prNumber"`                 // null for source='manual'; the PR number for a github_pr review task (D-15)
+	Source         string                `json:"source"`                   // "manual" | "github_pr"
+	TaskTitle      string                `json:"taskTitle"`                // tasks.title — the bar's row label (SBAR-10)
+	ProjectName    string                `json:"projectName"`              // projects.name — the bar's row label (SBAR-10)
 }
 
 // status handles GET /api/agents/status — one entry per task, newest agent
@@ -139,22 +140,23 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			// transcript glob unchanged.
 			resumable := info.AgentStatus == "exited" && m.wtp.Valid &&
 				(m.engine == "opencode" && m.ocsid.Valid ||
-					m.engine == "codex" && m.cxid.Valid ||
+					m.engine == "codex" ||
 					m.engine != "opencode" && m.engine != "codex" && m.csid.Valid && transcriptExists(a.globRoot, m.csid.String))
 			entries = append(entries, agentStatusEntry{
-				TaskID:        tid,
-				ProjectID:     m.projectID,
-				SessionID:     info.ID,
-				Status:        info.AgentStatus,
-				Live:          info.Status == session.StatusRunning,
-				Monitor:       info.Monitor,
-				ExitCode:      info.ExitCode,
-				StopRequested: info.StopRequested,
-				Resumable:     resumable,
-				PRNumber:      prNumberOf(m.prNumber),
-				Source:        m.source,
-				TaskTitle:     m.title,
-				ProjectName:   m.projectName,
+				TaskID:         tid,
+				ProjectID:      m.projectID,
+				SessionID:      info.ID,
+				Status:         info.AgentStatus,
+				Live:           info.Status == session.StatusRunning,
+				Monitor:        info.Monitor,
+				ExitCode:       info.ExitCode,
+				StopRequested:  info.StopRequested,
+				Resumable:      resumable,
+				ResumeFallback: resumable && m.engine == "codex" && m.cxid.String == "",
+				PRNumber:       prNumberOf(m.prNumber),
+				Source:         m.source,
+				TaskTitle:      m.title,
+				ProjectName:    m.projectName,
 			})
 		}
 	}
@@ -188,19 +190,20 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	}
 	if hasGlobalAgent {
 		entries = append(entries, agentStatusEntry{
-			TaskID:        0,
-			ProjectID:     0,
-			SessionID:     globalAgent.ID,
-			Status:        globalAgent.AgentStatus,
-			Live:          globalAgent.Status == session.StatusRunning,
-			Monitor:       globalAgent.Monitor,
-			ExitCode:      globalAgent.ExitCode,
-			StopRequested: globalAgent.StopRequested,
-			Resumable:     globalAgent.AgentStatus == "exited" && gstate.resumable(a.globRoot),
-			PRNumber:      nil,
-			Source:        "global",
-			TaskTitle:     "Scratchpad",
-			ProjectName:   "Global",
+			TaskID:         0,
+			ProjectID:      0,
+			SessionID:      globalAgent.ID,
+			Status:         globalAgent.AgentStatus,
+			Live:           globalAgent.Status == session.StatusRunning,
+			Monitor:        globalAgent.Monitor,
+			ExitCode:       globalAgent.ExitCode,
+			StopRequested:  globalAgent.StopRequested,
+			Resumable:      globalAgent.AgentStatus == "exited" && gstate.resumable(a.globRoot),
+			ResumeFallback: globalAgent.AgentStatus == "exited" && gstate.engine == "codex" && gstate.cxid.String == "",
+			PRNumber:       nil,
+			Source:         "global",
+			TaskTitle:      "Scratchpad",
+			ProjectName:    "Global",
 		})
 	}
 
@@ -219,7 +222,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		FROM tasks
 		JOIN projects ON projects.id = tasks.project_id
 		JOIN agents ON agents.id = projects.agent_id
-		WHERE (tasks.claude_session_id IS NOT NULL OR tasks.opencode_session_id IS NOT NULL OR tasks.codex_session_id IS NOT NULL) AND tasks.worktree_path IS NOT NULL`)
+		WHERE (tasks.claude_session_id IS NOT NULL OR tasks.opencode_session_id IS NOT NULL OR tasks.codex_session_id IS NOT NULL OR agents.engine = 'codex') AND tasks.worktree_path IS NOT NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -245,7 +248,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		// non-resumable row (e.g. an exited claude task whose transcript was
 		// deleted) surfaces nothing.
 		resumable := engine == "opencode" && ocsid.Valid ||
-			engine == "codex" && cxid.Valid ||
+			engine == "codex" ||
 			engine != "opencode" && engine != "codex" && csid.Valid && transcriptExists(a.globRoot, csid.String)
 		if !resumable {
 			continue
@@ -255,17 +258,18 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		// prNumber — that is correct and desired: the PR card's dot/border
 		// survive a restart (D-15).
 		entries = append(entries, agentStatusEntry{
-			TaskID:        id,
-			ProjectID:     pid,
-			SessionID:     "",
-			Status:        "exited",
-			ExitCode:      nil,
-			StopRequested: false,
-			Resumable:     true,
-			PRNumber:      prNumberOf(prNumber),
-			Source:        source,
-			TaskTitle:     title,
-			ProjectName:   projectName,
+			TaskID:         id,
+			ProjectID:      pid,
+			SessionID:      "",
+			Status:         "exited",
+			ExitCode:       nil,
+			StopRequested:  false,
+			Resumable:      true,
+			ResumeFallback: engine == "codex" && cxid.String == "",
+			PRNumber:       prNumberOf(prNumber),
+			Source:         source,
+			TaskTitle:      title,
+			ProjectName:    projectName,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -281,17 +285,18 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	// and the honest exited state.
 	if !hasGlobalAgent && gstate.resumable(a.globRoot) {
 		entries = append(entries, agentStatusEntry{
-			TaskID:        0,
-			ProjectID:     0,
-			SessionID:     "",
-			Status:        "exited",
-			ExitCode:      nil,
-			StopRequested: false,
-			Resumable:     true,
-			PRNumber:      nil,
-			Source:        "global",
-			TaskTitle:     "Scratchpad",
-			ProjectName:   "Global",
+			TaskID:         0,
+			ProjectID:      0,
+			SessionID:      "",
+			Status:         "exited",
+			ExitCode:       nil,
+			StopRequested:  false,
+			Resumable:      true,
+			ResumeFallback: gstate.engine == "codex" && gstate.cxid.String == "",
+			PRNumber:       nil,
+			Source:         "global",
+			TaskTitle:      "Scratchpad",
+			ProjectName:    "Global",
 		})
 	}
 	writeJSON(w, http.StatusOK, entries)
@@ -341,7 +346,7 @@ func (g globalResumeState) resumable(globRoot string) bool {
 	case "opencode":
 		return g.ocsid.Valid
 	case "codex":
-		return g.cxid.Valid
+		return true
 	}
 	return g.csid.Valid && transcriptExists(globRoot, g.csid.String)
 }

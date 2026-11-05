@@ -100,11 +100,10 @@ export function AgentTab({
   // task scope finds its task's entry, the global scope the server's
   // synthesized source === "global" entry (Phase 15; taskId 0).
   const statusEntries = useAgentStatuses().data ?? [];
-  const resumable =
-    (isTask
+  const agentStatus = isTask
       ? statusEntries.find((e) => e.taskId === scope.taskId)
-      : statusEntries.find((e) => e.source === "global")
-    )?.resumable ?? false;
+      : statusEntries.find((e) => e.source === "global");
+  const resumable = agentStatus?.resumable ?? false;
   // Mutual exclusion: while either Resume or Reset is in flight both buttons
   // disable, preventing a double-spawn racing the one-per-task 409 gate.
   const busy = spawn.isPending || resume.isPending;
@@ -119,13 +118,13 @@ export function AgentTab({
     if (resumable) {
       return (
         <div className="flex flex-col items-center gap-2 py-8 text-center">
-          <h2 className="text-xl font-medium">{`Agent session ended.`}</h2>
+          <h2 className="text-xl font-medium">{agentStatus?.resumeFallback ? `Start or resume an agent` : `Agent session ended.`}</h2>
           <p className="max-w-[480px] text-sm text-muted-foreground">
-            {`A previous conversation can be picked up where it left off. Reset starts a fresh session instead.`}
+            {agentStatus?.resumeFallback ? `Resume looks for the latest Codex conversation in this directory, if one exists.` : `A previous conversation can be picked up where it left off. Reset starts a fresh session instead.`}
           </p>
           <div className="flex items-center gap-2">
             <Button variant="ghost" disabled={busy} onClick={() => spawn.mutate()}>
-              {spawn.isPending ? `Resetting…` : `Reset session`}
+              {spawn.isPending ? `Starting…` : agentStatus?.resumeFallback ? `Start agent` : `Reset session`}
             </Button>
             <Button disabled={busy} onClick={() => resume.mutate()}>
               {resume.isPending ? `Resuming…` : `Resume session`}
