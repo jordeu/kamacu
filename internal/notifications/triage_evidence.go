@@ -1,6 +1,25 @@
 package notifications
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// The current GitHub assignment is independent of notification-reason recency.
+// Only a positive assignment to the verified source account proves a request.
+func currentReviewRequestEvidence(subject *triageSubject) *SubjectEvidence {
+	f := subject.fresh.PRFacts
+	if f == nil || !f.Available || f.Stale || f.State != "open" || subject.viewer == "" || !strings.EqualFold(f.Viewer, subject.viewer) {
+		return nil
+	}
+	for _, reviewer := range f.RequestedReviewers {
+		if strings.EqualFold(reviewer, subject.viewer) {
+			return &SubjectEvidence{ID: "current-review-request", URL: subject.fresh.URL, Text: fmt.Sprintf("GitHub currently requests a review from %s on %s.", subject.viewer, subject.fresh.URL), Complete: true, Current: true}
+		}
+	}
+	return nil
+}
 
 type evidenceRecency uint8
 

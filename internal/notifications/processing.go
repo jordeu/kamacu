@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"kamacu/internal/diagnostics"
@@ -15,6 +14,7 @@ import (
 )
 
 type BatchAction struct {
+	evidence []triageEvidence
 	EventIDs []int64  `json:"event_ids"`
 	Summary  string   `json:"summary"`
 	Context  string   `json:"context"`
@@ -101,19 +101,13 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	if _, err = s.Inbox.NotificationBatchQuestions(ctx, id); err != nil {
 		return err
 	}
-	groups := map[string][]RawNotification{}
-	var repos []string
-	for _, event := range events {
-		repo := strings.ToLower(event.Event.Repository)
-		if _, ok := groups[repo]; !ok {
-			repos = append(repos, repo)
-		}
-		groups[repo] = append(groups[repo], event)
+	groups, err := s.notificationProjectGroups(ctx, events)
+	if err != nil {
+		return err
 	}
-	slices.Sort(repos)
 	var plan notificationPlan
-	for _, repo := range repos {
-		if err = s.triageGroup(ctx, id, groups[repo], &plan); err != nil {
+	for _, events := range groups {
+		if err = s.triageGroup(ctx, id, events, &plan); err != nil {
 			return err
 		}
 	}

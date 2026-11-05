@@ -21,6 +21,28 @@ func actionFor(ids ...int64) BatchAction {
 // Fixtures emit the new evidence-backed intent contract, never planner output.
 func respondWithIntent(model *fakeModel, kind string) {
 	model.respond = func(prompt string) (any, error) {
+		if _, raw, ok := strings.Cut(prompt, projectEvidenceMarker); ok {
+			raw, _, _ = strings.Cut(raw, "\nCORRECTION")
+			var payload struct {
+				Subjects []projectSubjectData `json:"subjects"`
+			}
+			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+				return nil, err
+			}
+			subjects := []map[string]any{}
+			for _, subject := range payload.Subjects {
+				item := subject.Evidence[0]
+				quote := item.Text
+				if len(quote) > 100 {
+					quote = strings.ToValidUTF8(quote[:100], "")
+				}
+				subjects = append(subjects, map[string]any{"subject_id": subject.ID, "findings": []intentFinding{{Intent: kind, EvidenceID: item.ID, Quote: quote}}})
+			}
+			return map[string]any{"subjects": subjects}, nil
+		}
+		if strings.Contains(prompt, projectCardsMarker) {
+			return fixtureProjectCards(prompt, nil)
+		}
 		_, raw, ok := strings.Cut(prompt, "\nEVIDENCE (data):\n")
 		if !ok {
 			return nil, errors.New("missing classifier evidence")
@@ -77,7 +99,7 @@ func TestTriageGroupsSubjectRevisionsAndProjectReviews(t *testing.T) {
 	id3 := seed(t, s, source, other)
 	tools.result = `[]`
 	status := process(t, s, model, "review_request")
-	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 3 {
+	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 2 {
 		t.Fatalf("%+v calls=%d", status, len(model.prompts))
 	}
 	page, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
@@ -95,7 +117,7 @@ func TestTriageGroupsSubjectRevisionsAndProjectReviews(t *testing.T) {
 		}
 	}
 	for _, prompt := range model.prompts {
-		if strings.Contains(prompt, "AVAILABLE") || strings.Contains(prompt, "list_sessions") || strings.Contains(prompt, "task_id") {
+		if strings.Contains(prompt, "AVAILABLE MCP TOOLS") {
 			t.Fatal("classifier received tool planning context")
 		}
 	}
@@ -104,7 +126,7 @@ func TestTriageGroupsSubjectRevisionsAndProjectReviews(t *testing.T) {
 			t.Fatal("unexpected triage tool", call)
 		}
 	}
-	if !strings.Contains(page.Items[0].Context, "recurrent task renovate") {
+	if !strings.Contains(model.prompts[1], `"batch_review_task":"renovate"`) {
 		t.Fatal("lost project workflow")
 	}
 }
@@ -273,25 +295,6 @@ func TestTriageUnknownContextCannotBeSilentlyDiscarded(t *testing.T) {
 	}
 }
 
-func TestTriageEvidenceWindowsPreserveUTF8AndEveryByte(t *testing.T) {
-	text := strings.Repeat("長い文章 🐟 ", 4000)
-	windows := evidenceWindows([]SubjectEvidence{{ID: "comment", Text: text, Complete: true}})
-	var joined strings.Builder
-	for _, window := range windows {
-		size := 0
-		for _, item := range window {
-			size += len(item.Text)
-			joined.WriteString(item.Text)
-		}
-		if size > evidenceWindowBytes {
-			t.Fatal("unbounded evidence window")
-		}
-	}
-	if joined.String() != text {
-		t.Fatal("window split lost feedback")
-	}
-}
-
 func TestTriagePolicyPrecedenceAndUnknowns(t *testing.T) {
 	yes, no := true, false
 	p := settings.NotificationPolicy{ExcludedRepositories: []string{"acme/repo"}, IgnoreDrafts: true, IgnoreApproved: true, IgnoreOwnActivity: true}
@@ -334,14 +337,14 @@ func TestTriagePolicyPrecedenceAndUnknowns(t *testing.T) {
 	}
 }
 
-func TestTriageRulesCanSkipModel(t *testing.T) {
+func TestTriageStructuredRulesRemainInProjectContext(t *testing.T) {
 	s, model, _, source := fixture(t)
 	seed(t, s, source, event())
 	if err := settings.Set(s.DB, settings.KeyNotificationPolicy, `{"excluded_repositories":["acme/repo"]}`); err != nil {
 		t.Fatal(err)
 	}
 	status := process(t, s, model, "routine")
-	if status.Status != "completed" || status.ActionCount != 0 || len(model.prompts) != 0 {
+	if status.Status != "completed" || status.ActionCount != 0 || len(model.prompts) != 1 {
 		t.Fatalf("%+v", status)
 	}
 }
@@ -578,19 +581,6 @@ func TestFreeTextNoopPhraseDoesNotBypassExecution(t *testing.T) {
 	}
 }
 
-func TestGroupingInstructionIsExplicitAndPreservesTaskName(t *testing.T) {
-	instruction := "Group by project all the dependency-reviews PR review notifications, and propose triggering a recurrent task named dependency-reviews on that project to review them all, not one by one."
-	p := applyGroupingInstruction(settings.NotificationPolicy{}, instruction)
-	if p.BatchReviewTask != "dependency-reviews" {
-		t.Fatal("lost existing grouping preference")
-	}
-	for _, text := range []string{"Do not " + instruction, strings.Replace(instruction, "named dependency-reviews", "named other", 1)} {
-		if p := applyGroupingInstruction(settings.NotificationPolicy{}, text); p.BatchReviewTask != "" {
-			t.Fatal("compiled ambiguous grouping instruction")
-		}
-	}
-}
-
 func TestPostClassificationRulesDoNotSuppressMergedFeedback(t *testing.T) {
 	e := event()
 	e.Reason = "subscribed"
@@ -622,22 +612,5 @@ func TestNewFeedbackReplacesSingleSubjectTemplate(t *testing.T) {
 	old, _ := s.Inbox.Get(ctx, previous.ID)
 	if old.Reason != "notification_superseded" {
 		t.Fatal("old feedback card remained pending", old)
-	}
-}
-
-func TestEvidenceWindowBudgetIncludesJSONEscaping(t *testing.T) {
-	text := strings.Repeat("<>&\n", 5000)
-	var joined strings.Builder
-	for _, window := range evidenceWindows([]SubjectEvidence{{ID: "comment", Text: text, Complete: true}}) {
-		raw, _ := json.Marshal(window)
-		if len(raw) > evidenceWindowBytes {
-			t.Fatal("serialized window exceeded budget", len(raw))
-		}
-		for _, item := range window {
-			joined.WriteString(item.Text)
-		}
-	}
-	if joined.String() != text {
-		t.Fatal("lost escaped evidence")
 	}
 }

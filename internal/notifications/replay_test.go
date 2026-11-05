@@ -178,7 +178,7 @@ func TestNotificationTraceReplay(t *testing.T) {
 		if len(prompt) > result.LargestPrompt {
 			result.LargestPrompt = len(prompt)
 		}
-		if len(prompt) > intentPromptLimit || strings.Contains(prompt, "AVAILABLE READ-ONLY MCP TOOLS") {
+		if len(prompt) > projectPromptLimit || strings.Contains(prompt, "AVAILABLE READ-ONLY MCP TOOLS") {
 			t.Fatal("replay violated classifier contract")
 		}
 	}

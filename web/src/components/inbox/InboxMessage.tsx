@@ -9,7 +9,7 @@ import { useContinueNotification, completionActions, completionClosesSession, fe
 
 function Context({ text }: { text: string }) {
   return <div className="prose prose-invert prose-sm max-w-none break-words prose-headings:text-sm prose-a:text-blue-400 prose-pre:overflow-x-auto">
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: () => null }}>{text}</ReactMarkdown>
+    <ReactMarkdown skipHtml remarkPlugins={[remarkGfm]} components={{ img: () => null }}>{text}</ReactMarkdown>
   </div>;
 }
 export function InboxMessage({ question: q, onResult, expanded, dialog = false, onNavigate }: { question: FeedbackQuestion; onNavigate?: () => void; expanded?: boolean; dialog?: boolean; onResult: (message: string, keepOpen?: boolean) => void }) {

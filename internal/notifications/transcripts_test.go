@@ -131,7 +131,7 @@ func TestValidationOutcomesAreCaptured(t *testing.T) {
 		{name: "batch invalid arguments", content: `{"tool_name":"list_sessions","arguments":"null"}`, batch: true, wantError: true},
 		{name: "batch unknown event", content: `{"discard_ids":[999999]}`, batch: true, wantError: true},
 		{name: "batch invalid action", content: `{"actions":[{"event_ids":[1]}]}`, batch: true, wantError: true},
-		{name: "batch valid", content: `{"findings":[{"intent":"routine","evidence_id":"context","quote":"Review requested","policy_quote":""}]}`, batch: true},
+		{name: "batch valid", content: `{"subjects":[{"subject_id":"subject-1","findings":[{"intent":"routine","evidence_id":"context","quote":"Review requested","policy_quote":""}]}]}`, batch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _, source := fixture(t)

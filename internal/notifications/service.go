@@ -256,7 +256,7 @@ func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
 	return step, nil
 }
 func (s *Service) projectContext(ctx context.Context, repo string) (string, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.name,t.id,t.title,t.status,t.source,t.pr_number FROM projects p LEFT JOIN tasks t ON t.project_id=p.id WHERE lower(p.github_repo)=lower(?) ORDER BY p.id,CASE WHEN t.status='done' THEN 1 ELSE 0 END,t.updated_at DESC LIMIT 100`, repo)
+	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.name,t.id,t.title,t.status,t.source,t.pr_number,t.recurrent FROM projects p LEFT JOIN tasks t ON t.project_id=p.id WHERE lower(p.github_repo)=lower(?) ORDER BY p.id,CASE WHEN t.status='done' THEN 1 ELSE 0 END,t.updated_at DESC LIMIT 100`, repo)
 	if err != nil {
 		return "", err
 	}
@@ -267,10 +267,11 @@ func (s *Service) projectContext(ctx context.Context, repo string) (string, erro
 		var name string
 		var tid, pr sql.NullInt64
 		var title, status, source sql.NullString
-		if err = rows.Scan(&pid, &name, &tid, &title, &status, &source, &pr); err != nil {
+		var recurrent sql.NullBool
+		if err = rows.Scan(&pid, &name, &tid, &title, &status, &source, &pr, &recurrent); err != nil {
 			return "", err
 		}
-		out = append(out, map[string]any{"project_id": pid, "project_name": name, "task_id": tid.Int64, "title": title.String, "status": status.String, "source": source.String, "pr_number": pr.Int64})
+		out = append(out, map[string]any{"project_id": pid, "project_name": name, "task_id": tid.Int64, "title": title.String, "status": status.String, "source": source.String, "pr_number": pr.Int64, "recurrent": recurrent.Bool})
 	}
 	raw, _ := json.Marshal(out)
 	return string(raw), rows.Err()

@@ -65,14 +65,17 @@ func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt st
 	if len(m.responses) > 0 {
 		response := m.responses[0]
 		m.responses = m.responses[1:]
-		return json.Marshal(response)
+		return marshalFixtureResponse(prompt, response)
 	}
 	if m.respond != nil {
 		response, err := m.respond(prompt)
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(response)
+		return marshalFixtureResponse(prompt, response)
+	}
+	if len(m.steps) == 0 && strings.Contains(prompt, projectCardsMarker) {
+		return fixtureProjectCardsJSON(prompt, nil)
 	}
 	if len(m.steps) == 0 {
 		return nil, errors.New("no model response")
