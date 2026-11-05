@@ -31,6 +31,8 @@ type Source struct {
 	CreatedAt       int64           `json:"created_at"`
 }
 type Event struct {
+	// MentionScanComplete excludes missing pages/resources, but not prose clipping.
+	MentionScanComplete  bool                `json:"mention_scan_complete,omitempty"`
 	SubjectUpdatedAt     string              `json:"subject_updated_at,omitempty"`
 	Evidence             []SubjectEvidence   `json:"evidence,omitempty"`
 	EvidenceComplete     bool                `json:"evidence_complete,omitempty"`
@@ -58,14 +60,17 @@ type Event struct {
 // SubjectEvidence preserves source identity and author outside prose. Complete
 // means the text was not clipped; it does not imply a complete thread history.
 type SubjectEvidence struct {
-	ID        string `json:"id"`
-	URL       string `json:"url"`
-	Actor     string `json:"actor"`
-	Text      string `json:"text"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at"`
-	Complete  bool   `json:"complete"`
-	Current   bool   `json:"current"`
+	// ViewerMention records a scan of the full API body for MentionViewer.
+	MentionViewer string `json:"mention_viewer,omitempty"`
+	ViewerMention *bool  `json:"viewer_mention,omitempty"`
+	ID            string `json:"id"`
+	URL           string `json:"url"`
+	Actor         string `json:"actor"`
+	Text          string `json:"text"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	UpdatedAt     string `json:"updated_at"`
+	Complete      bool   `json:"complete"`
+	Current       bool   `json:"current"`
 }
 type Batch struct {
 	Events     []Event

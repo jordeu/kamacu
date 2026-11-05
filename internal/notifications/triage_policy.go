@@ -43,7 +43,7 @@ func refreshIntentPolicy(subject *triageSubject, previous Event, policy settings
 	after, afterComplete := classifierEvidence(subject.events, subject.fresh)
 	beforeJSON, _ := json.Marshal(before)
 	afterJSON, _ := json.Marshal(after)
-	changed := !bytes.Equal(beforeJSON, afterJSON) || beforeComplete != afterComplete || previous.SubjectTitle != subject.fresh.SubjectTitle
+	changed := !bytes.Equal(beforeJSON, afterJSON) || beforeComplete != afterComplete || previous.SubjectTitle != subject.fresh.SubjectTitle || !equalBool(mentionStatus(subject.events, previous, subject.viewer), mentionStatus(subject.events, subject.fresh, subject.viewer))
 	if classificationFactsChanged(previous.PRFacts, subject.fresh.PRFacts) {
 		changed = true
 	}

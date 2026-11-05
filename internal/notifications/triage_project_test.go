@@ -341,3 +341,89 @@ func TestOversizedProjectCardCanBeCorrectedWithoutSplittingItsInput(t *testing.T
 		}
 	}
 }
+
+// The production snapshot for the merge-readiness question on cloudinfo's
+// merged PR had complete retrieval but uncertain comment recency. A routine
+// classification must survive that uncertainty instead of creating a card.
+func TestResolvedTerminalActivityDoesNotRequireRecencyInspection(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		facts     *PRFacts
+		retrieved bool
+		intent    string
+		current   bool
+		want      string
+	}{
+		{"merged readiness resolved", &PRFacts{Available: true, State: "merged"}, true, "routine", false, "routine"},
+		{"closed activity resolved", &PRFacts{Available: true, State: "closed"}, true, "routine", false, "routine"},
+		{"open recency unknown", &PRFacts{Available: true, State: "open"}, true, "routine", false, "needs_context"},
+		{"stale merge", &PRFacts{Available: true, Stale: true, State: "merged"}, true, "routine", false, "needs_context"},
+		{"unavailable merge", &PRFacts{State: "merged"}, true, "routine", false, "needs_context"},
+		{"missing facts", nil, true, "routine", false, "needs_context"},
+		{"incomplete retrieval", &PRFacts{Available: true, State: "merged"}, false, "routine", false, "needs_context"},
+		{"independent post-merge question", &PRFacts{Available: true, State: "merged"}, true, "direct_question", true, "direct_question"},
+		{"unresolved recency", &PRFacts{Available: true, State: "merged"}, true, "direct_question", false, "needs_context"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evidence := SubjectEvidence{ID: "comment", Text: "all set here? can it be merged?", Complete: true, Current: tc.current}
+			subject := &triageSubject{fresh: Event{PRFacts: tc.facts, Evidence: []SubjectEvidence{evidence}}}
+			data := projectSubjectData{Evidence: []SubjectEvidence{evidence}, RetrievalComplete: tc.retrieved, ContextComplete: false}
+			normalizeProjectFindings(subject, []intentFinding{{Intent: tc.intent, EvidenceID: evidence.ID, Quote: evidence.Text}}, data, settings.NotificationPolicy{})
+			if len(subject.findings) != 1 || subject.findings[0].Intent != tc.want {
+				t.Fatalf("findings = %+v, want %s", subject.findings, tc.want)
+			}
+		})
+	}
+}
+
+func TestShortenedTerminalActivityStillRequiresInspection(t *testing.T) {
+	for _, state := range []string{"merged", "closed"} {
+		t.Run(state, func(t *testing.T) {
+			comment := SubjectEvidence{ID: "comment", Text: "can it be merged?", Complete: true}
+			followup := SubjectEvidence{ID: "followup", Text: strings.Repeat("background ", projectPromptLimit/10) + "Please investigate the deployment failure.", Complete: true}
+			subject := &triageSubject{fresh: Event{PRFacts: &PRFacts{Available: true, State: state}, Evidence: []SubjectEvidence{comment, followup}}}
+			data := []projectSubjectData{{ID: "subject-1", Evidence: []SubjectEvidence{comment, followup}, RetrievalComplete: true, ContextComplete: true}}
+			_, shortened, err := projectPrompt(projectIntentPrompt, "", projectEvidenceMarker, map[string]any{}, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !shortened[0].RetrievalComplete || shortened[0].ContextComplete || shortened[0].Evidence[1].Complete {
+				t.Fatal("expected complete retrieval with a shortened follow-up excerpt")
+			}
+			// Even a citation to an intact comment cannot establish that the
+			// omitted portion of another comment has no remaining request.
+			normalizeProjectFindings(subject, []intentFinding{{Intent: "routine", EvidenceID: comment.ID, Quote: comment.Text}}, shortened[0], settings.NotificationPolicy{})
+			if len(subject.findings) != 1 || subject.findings[0].Intent != "needs_context" {
+				t.Fatalf("shortened activity was discarded: %+v", subject.findings)
+			}
+		})
+	}
+}
+
+func TestMentionScanChangeInvalidatesPolicyClassification(t *testing.T) {
+	no := false
+	e := event()
+	e.Version = "2026-11-04T12:00:00Z"
+	e.MentionScanComplete = true
+	e.EvidenceComplete = false
+	e.Evidence = []SubjectEvidence{{ID: "release", Text: "Clipped release notes", Complete: false, MentionViewer: "alice", ViewerMention: &no}}
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprintf("refreshed scan complete=%v", complete), func(t *testing.T) {
+			fresh := e
+			fresh.MentionScanComplete = complete
+			finding := intentFinding{Intent: "policy_ignore", EvidenceID: "release", Quote: "Clipped release notes"}
+			subject := &triageSubject{fresh: fresh, viewer: "alice", events: []RawNotification{{Event: e}}, findings: []intentFinding{finding}, classifiedFindings: []intentFinding{finding}}
+			refreshIntentPolicy(subject, e, settings.NotificationPolicy{})
+			if subject.classificationStale != !complete {
+				t.Fatalf("stale = %v for scan complete=%v", subject.classificationStale, complete)
+			}
+			want := "policy_ignore"
+			if !complete {
+				want = "needs_context"
+			}
+			if len(subject.findings) != 1 || subject.findings[0].Intent != want {
+				t.Fatalf("findings = %+v, want %s", subject.findings, want)
+			}
+		})
+	}
+}

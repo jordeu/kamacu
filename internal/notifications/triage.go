@@ -43,38 +43,55 @@ type triageSubject struct {
 	classificationStale bool
 }
 
-// mentionStatus is tri-state. Negative evidence requires the complete retrieved
-// discussion, never just a reason other than "mention" or a clipped excerpt.
+// Match the full username, so @alice-other does not count as @alice.
+func textMentionsViewer(text, viewer string) bool {
+	if viewer == "" {
+		return false
+	}
+	text = strings.ToLower(text)
+	needle := "@" + strings.ToLower(viewer)
+	for at := strings.Index(text, needle); at >= 0; {
+		end := at + len(needle)
+		if end == len(text) || !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789_-", rune(text[end])) {
+			return true
+		}
+		next := strings.Index(text[end:], needle)
+		if next < 0 {
+			break
+		}
+		at = end + next
+	}
+	return false
+}
+
+// mentionStatus is tri-state. Negative evidence requires complete discussion
+// retrieval, or a full-text scan performed before clipping model excerpts.
 func mentionStatus(events []RawNotification, e Event, viewer string) *bool {
 	yes, no := true, false
 	if viewer == "" {
 		return nil
 	}
 	uncertainMention := false
+	scanned := e.MentionScanComplete
 	for _, item := range e.Evidence {
 		recency := scopeEvidence(events, e, item)
 		if recency == evidenceHistorical {
 			continue
 		}
-		text := strings.ToLower(item.Text)
-		needle := "@" + strings.ToLower(viewer)
-		for at := strings.Index(text, needle); at >= 0; {
-			end := at + len(needle)
-			if end == len(text) || !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789_-", rune(text[end])) {
-				if recency == evidenceCurrent {
-					return &yes
-				}
-				uncertainMention = true
-				break
+		mentioned := textMentionsViewer(item.Text, viewer)
+		if item.ViewerMention != nil && strings.EqualFold(item.MentionViewer, viewer) {
+			mentioned = *item.ViewerMention
+		} else {
+			scanned = false
+		}
+		if mentioned {
+			if recency == evidenceCurrent {
+				return &yes
 			}
-			next := strings.Index(text[end:], needle)
-			if next < 0 {
-				break
-			}
-			at = end + next
+			uncertainMention = true
 		}
 	}
-	if !uncertainMention && e.EvidenceComplete && len(e.ContextWarnings) == 0 {
+	if !uncertainMention && (e.EvidenceComplete || scanned) && len(e.ContextWarnings) == 0 {
 		return &no
 	}
 	return nil

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"kamacu/internal/settings"
 )
 
 func response(body, headers string) []byte {
@@ -345,5 +347,69 @@ func TestGitHubLatestCommentPointerDoesNotClaimHistoricalTextIsCurrent(t *testin
 	mention := mentionStatus([]RawNotification{{Event: e}}, fresh, "alice")
 	if mention == nil || *mention {
 		t.Fatal("old comment counted as a current mention")
+	}
+}
+
+func TestLongReleaseMentionScanPrecedesClipping(t *testing.T) {
+	for _, tc := range []struct{ name, suffix, updated, want string }{
+		{"no mention", "routine changes", "2026-11-04T12:00:00Z", "repository_policy"},
+		{"mention beyond excerpt", "@ALICE please investigate", "2026-11-04T12:00:00Z", ""},
+		{"different username", "@alice-other", "2026-11-04T12:00:00Z", "repository_policy"},
+		{"uncertain mention date", "@alice please investigate", "", "needs_context:direct_mention"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+				body, _ := json.Marshal(map[string]any{"body": strings.Repeat("x", 13000) + " " + tc.suffix, "html_url": "https://github.com/acme/repo/releases/tag/v1", "created_at": tc.updated, "updated_at": tc.updated})
+				return response(string(body), ""), nil
+			}}
+			e := event()
+			e.Version = "2026-11-04T12:00:00Z"
+			e.SubjectType = "Release"
+			e.SubjectURL = "https://api.github.com/repos/acme/repo/releases/42"
+			e.LatestCommentURL = ""
+			fresh, err := g.Enrich(context.Background(), Source{Account: "alice"}, e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fresh.EvidenceComplete || !fresh.MentionScanComplete || len(fresh.Evidence[0].Text) > 12000 {
+				t.Fatal("expected clipped prose and complete mention scan")
+			}
+			policy := settings.NotificationPolicy{ExcludedRepositories: []string{e.Repository}}
+			if got := policyReason(policy, []RawNotification{{Event: e}}, fresh, "alice"); got != tc.want {
+				t.Fatalf("policy = %q, want %q", got, tc.want)
+			}
+			if mentionStatus([]RawNotification{{Event: e}}, fresh, "bob") != nil {
+				t.Fatal("scan for alice proved absence for another viewer")
+			}
+			if tc.want == "repository_policy" {
+				subject := &triageSubject{fresh: fresh, viewer: "alice", events: []RawNotification{{Event: e}}}
+				mention := mentionStatus(subject.events, fresh, "alice")
+				normalizeProjectFindings(subject, []intentFinding{{Intent: "policy_ignore"}}, projectSubjectData{DirectMention: mention, RetrievalComplete: false}, settings.NotificationPolicy{})
+				if len(subject.findings) != 1 || subject.findings[0].Intent != "policy_ignore" {
+					t.Fatal("clipped prose overrode verified repository exclusion", subject.findings)
+				}
+			}
+		})
+	}
+}
+
+func TestFullBodyMentionScanDoesNotHideMissingComments(t *testing.T) {
+	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		if strings.Contains(args[len(args)-1], "comments") {
+			return errorResponse(404), errors.New("exit status 1")
+		}
+		body, _ := json.Marshal(map[string]any{"body": strings.Repeat("x", 13000), "html_url": "https://github.com/acme/repo/issues/7"})
+		return response(string(body), ""), nil
+	}}
+	e := event()
+	e.SubjectType = "Issue"
+	e.SubjectURL = "https://api.github.com/repos/acme/repo/issues/7"
+	e.LatestCommentURL = ""
+	fresh, err := g.Enrich(context.Background(), Source{Account: "alice"}, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.MentionScanComplete || mentionStatus([]RawNotification{{Event: e}}, fresh, "alice") != nil {
+		t.Fatal("missing comments were treated as proof of no mention")
 	}
 }
