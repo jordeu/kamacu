@@ -60,6 +60,10 @@ type Event struct {
 // SubjectEvidence preserves source identity and author outside prose. Complete
 // means the text was not clipped; it does not imply a complete thread history.
 type SubjectEvidence struct {
+	// ReviewState preserves GitHub's formal review result independently of prose.
+	ReviewState string `json:"review_state,omitempty"`
+	// ReviewBodyEmpty distinguishes citable state text from a reviewer quotation.
+	ReviewBodyEmpty bool `json:"review_body_empty,omitempty"`
 	// ViewerMention records a scan of the full API body for MentionViewer.
 	MentionViewer string `json:"mention_viewer,omitempty"`
 	ViewerMention *bool  `json:"viewer_mention,omitempty"`

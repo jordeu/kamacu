@@ -328,6 +328,20 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 				if updated == "" {
 					updated, _ = v["submitted_at"].(string)
 				}
+				reviewState := ""
+				if strings.Contains(link, "#pullrequestreview-") || (event.SubjectType == "PullRequest" && strings.HasPrefix(currentPath, path+"/reviews")) {
+					state, _ := v["state"].(string)
+					switch state {
+					case "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING":
+						reviewState = state
+					}
+				}
+				// Reviews may have no body. Keep their verified result citable so
+				// classification does not require invented prose or an empty quote.
+				reviewBodyEmpty := strings.TrimSpace(body) == "" && reviewState != ""
+				if reviewBodyEmpty {
+					body = "GitHub review state: " + reviewState + "."
+				}
 				// Scan the complete API body before clipping model evidence.
 				mentioned := textMentionsViewer(body, s.Account)
 				complete := true
@@ -342,7 +356,7 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 					break
 				}
 				evidenceBytes += len(body)
-				event.Evidence = append(event.Evidence, SubjectEvidence{MentionViewer: s.Account, ViewerMention: &mentioned, ID: link, URL: link, Actor: actor, Text: body, CreatedAt: created, UpdatedAt: updated, Complete: complete})
+				event.Evidence = append(event.Evidence, SubjectEvidence{ReviewState: reviewState, ReviewBodyEmpty: reviewBodyEmpty, MentionViewer: s.Account, ViewerMention: &mentioned, ID: link, URL: link, Actor: actor, Text: body, CreatedAt: created, UpdatedAt: updated, Complete: complete})
 			}
 			clipped, _ := json.Marshal(compactGitHub(data))
 			if prose.Len()+len(clipped) < 48000 {
