@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -759,5 +760,142 @@ func TestExecutionStartsUserSelectedReviewOutsideNotification(t *testing.T) {
 				t.Fatalf("incorrect review instructions: %s", sent.Message)
 			}
 		})
+	}
+}
+
+func TestReviewRequestCorrectsNormalTaskCreationBeforeMutation(t *testing.T) {
+	for _, repeats := range []bool{false, true} {
+		t.Run(fmt.Sprint(repeats), func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			ctx := context.Background()
+			if _, err := s.DB.Exec(`UPDATE tasks SET source='github_pr',pr_number=7 WHERE id=1`); err != nil {
+				t.Fatal(err)
+			}
+			card := ask().question()
+			card.Context = withTriageEvidence([]triageEvidence{{Intent: "review_request"}}, "Review this PR")
+			q, err := s.Inbox.PublishNotification(ctx, seed(t, s, source, event()), "GitHub", event().URL, card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Create a task and review it", ""); err != nil {
+				t.Fatal(err)
+			}
+			wrong := Step{Action: "tool", ToolName: "create_task", Arguments: `{"project_id":1,"title":"Review PR"}`}
+			model.steps = []Step{wrong}
+			if repeats {
+				model.steps = append(model.steps, wrong)
+			} else {
+				model.steps = append(model.steps,
+					Step{Action: "tool", ToolName: "open_review", Arguments: `{"project_id":1,"pr_number":7}`},
+					Step{Action: "tool", ToolName: "start_task_agent", Arguments: `{"task_id":1}`},
+					Step{Action: "tool", ToolName: "send_session_message", Arguments: `{"session_id":"correct","message":"Review it"}`},
+					Step{Action: "done", Message: "Review started"})
+			}
+			if err = s.executeNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := s.Inbox.Get(ctx, q.ID)
+			if repeats {
+				if len(tools.calls) != 0 || got.DeliveryStatus != "failed" {
+					t.Fatalf("normal task creation was allowed: %+v %v", got, tools.calls)
+				}
+				return
+			}
+			if got.DeliveryStatus != "succeeded" || strings.Join(tools.calls, ",") != "open_review,start_task_agent,send_session_message" {
+				t.Fatalf("review workflow not used: %+v %v", got, tools.calls)
+			}
+			var sent struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(tools.arguments[2], &sent); err != nil {
+				t.Fatal(err)
+			}
+			if sent.Message == "Review it" || !strings.Contains(sent.Message, "Review PR #7") {
+				t.Fatalf("registered review prompt not delivered: %q", sent.Message)
+			}
+		})
+	}
+}
+
+func TestReviewRequestCannotUseImplementationTask(t *testing.T) {
+	for _, step := range []Step{
+		{Action: "tool", ToolName: "start_task_agent", Arguments: `{"task_id":1}`},
+		{Action: "tool", ToolName: "send_session_message", Arguments: `{"session_id":"correct","message":"Review this PR"}`},
+	} {
+		t.Run(step.ToolName, func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			ctx := context.Background()
+			card := ask().question()
+			card.Context = withTriageEvidence([]triageEvidence{{Intent: "review_request"}}, "Review this PR")
+			q, err := s.Inbox.PublishNotification(ctx, seed(t, s, source, event()), "GitHub", event().URL, card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Start review", ""); err != nil {
+				t.Fatal(err)
+			}
+			model.steps = []Step{step}
+			if err = s.executeNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := s.Inbox.Get(ctx, q.ID)
+			if len(tools.calls) != 0 || got.DeliveryStatus != "failed" || !strings.Contains(got.ExecutionResult, "PR review task") {
+				t.Fatalf("implementation agent started for review: %+v %v", got, tools.calls)
+			}
+
+		})
+	}
+}
+
+func TestReviewFollowupRetainsRoutingClassification(t *testing.T) {
+	s, model, tools, source := fixture(t)
+	ctx := context.Background()
+	card := ask().question()
+	records := []triageEvidence{{Intent: "review_request", Scope: "pr", Quote: "request"}}
+	card.Context = withTriageEvidence(records, "Review this PR")
+	q, err := s.Inbox.PublishNotification(ctx, seed(t, s, source, event()), "GitHub", event().URL, card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Review it", ""); err != nil {
+		t.Fatal(err)
+	}
+	model.steps = []Step{ask()}
+	if err = s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("pending cards = %d", len(page.Items))
+	}
+	followup := page.Items[0]
+	got, _, present := readTriageEvidence(followup.Context)
+	if !present || len(got) != 1 || got[0] != records[0] {
+		t.Fatalf("lost routing provenance: %+v", got)
+	}
+	if _, err = s.Inbox.Answer(ctx, nil, followup.ID, followup.Revision, "Yes, start it", ""); err != nil {
+		t.Fatal(err)
+	}
+	wrong := Step{Action: "tool", ToolName: "create_task", Arguments: `{"project_id":1,"title":"Review PR"}`}
+	model.steps = []Step{wrong, wrong}
+	if err = s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	outcome, _ := s.Inbox.Get(ctx, followup.ID)
+	if len(tools.calls) != 0 || outcome.DeliveryStatus != "failed" {
+		t.Fatalf("follow-up bypassed review routing: %+v %v", outcome, tools.calls)
+	}
+}
+
+func TestReviewTaskValidationAllowsRecurringWorkflows(t *testing.T) {
+	s, _, _, _ := fixture(t)
+	if _, err := s.DB.Exec(`UPDATE tasks SET recurrent=1 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.validateReviewTask(context.Background(), 1); err != nil {
+		t.Fatal(err)
 	}
 }
