@@ -10,6 +10,87 @@ import (
 	"kamacu/internal/settings"
 )
 
+func TestDecodeIntentRepeatedIntentsValidateEveryCitation(t *testing.T) {
+	const custom = "Ignore this repository unless directly mentioned."
+	evidence := []SubjectEvidence{
+		{ID: "comment", Text: "Please review again."},
+		{ID: "notification", Text: "review_requested"},
+	}
+	findings := []intentFinding{
+		{Intent: "policy_ignore", EvidenceID: "comment", Quote: "Please review again.", PolicyQuote: custom},
+		{Intent: "policy_ignore", EvidenceID: "notification", Quote: "review_requested", PolicyQuote: custom},
+	}
+	t.Run("valid repeated intent", func(t *testing.T) {
+		raw, _ := json.Marshal(intentResponse{Findings: findings})
+		got, err := decodeIntent(raw, evidence, custom)
+		if err != nil || len(got) != 2 {
+			t.Fatalf("valid repeated intent rejected: %v, %v", got, err)
+		}
+	})
+	for _, field := range []string{"quote", "evidence", "policy"} {
+		t.Run("invalid repeated "+field, func(t *testing.T) {
+			invalid := append([]intentFinding(nil), findings...)
+			switch field {
+			case "quote":
+				invalid[1].Quote = "invented text"
+			case "evidence":
+				invalid[1].EvidenceID = "unknown"
+			case "policy":
+				invalid[1].PolicyQuote = "invented policy"
+			}
+			raw, _ := json.Marshal(intentResponse{Findings: invalid})
+			if _, err := decodeIntent(raw, evidence, custom); err == nil {
+				t.Fatal("invalid repeated citation accepted")
+			}
+		})
+	}
+}
+
+func TestInvalidCitationIsCorrectedOnceWithoutWeakeningEvidence(t *testing.T) {
+	for _, corrected := range []bool{false, true} {
+		t.Run(fmt.Sprint(corrected), func(t *testing.T) {
+			s, model, _, _ := fixture(t)
+			e := event()
+			invalid := intentResponse{Findings: []intentFinding{{Intent: "direct_question", EvidenceID: "context", Quote: "invented question"}}}
+			second := invalid
+			if corrected {
+				second.Findings = []intentFinding{{Intent: "direct_question", EvidenceID: "context", Quote: e.Context}}
+			}
+			model.responses = []any{invalid, second, second}
+			subject := &triageSubject{fresh: e, events: []RawNotification{{Event: e}}}
+			err := s.classifySubject(context.Background(), subject, "")
+			if (err == nil) != corrected || len(model.prompts) != 2 || !strings.Contains(model.prompts[1], "CORRECTION") {
+				t.Fatalf("unexpected repair outcome: err=%v calls=%d", err, len(model.prompts))
+			}
+		})
+	}
+}
+
+func TestRepeatedIntentRetainsCurrentEvidenceAfterRecencyChecks(t *testing.T) {
+	s, model, _, _ := fixture(t)
+	e := event()
+	e.Version = "2026-11-04T12:00:00Z"
+	e.EvidenceComplete = true
+	e.Evidence = []SubjectEvidence{
+		{ID: "old", Text: "Old question?", Complete: true},
+		{ID: "new", Text: "Current question?", Complete: true, Current: true, UpdatedAt: e.Version},
+	}
+	model.responses = []any{intentResponse{Findings: []intentFinding{
+		{Intent: "direct_question", EvidenceID: "old", Quote: "Old question?"},
+		{Intent: "direct_question", EvidenceID: "new", Quote: "Current question?"},
+	}}}
+	subject := &triageSubject{fresh: e, events: []RawNotification{{Event: e}}, viewer: "alice"}
+	if err := s.classifySubject(context.Background(), subject, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range subject.findings {
+		if finding.Intent == "direct_question" && finding.EvidenceID == "new" {
+			return
+		}
+	}
+	t.Fatalf("lost current question: %+v", subject.findings)
+}
+
 func TestMergedThreadNewFeedbackIsClassifiedBeforeReviewSuppression(t *testing.T) {
 	s, model, _, source := fixture(t)
 	e := event()
@@ -17,7 +98,7 @@ func TestMergedThreadNewFeedbackIsClassifiedBeforeReviewSuppression(t *testing.T
 	seed(t, s, source, e)
 	s.Providers["github"] = &changingFactsProvider{fakeProvider: &fakeProvider{contextText: "Please investigate this regression before responding."}, facts: PRFacts{Available: true, State: "merged"}}
 	status := process(t, s, model, "review_feedback")
-	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 1 {
+	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 2 {
 		t.Fatalf("lost new feedback: %+v calls=%d", status, len(model.prompts))
 	}
 	page, _ := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)

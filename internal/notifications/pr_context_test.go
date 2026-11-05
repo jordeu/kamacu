@@ -171,7 +171,7 @@ func TestNotificationProcessingBoundsManySessionsAndKeepsLookupFacts(t *testing.
 		t.Fatal(result)
 	}
 	for _, prompt := range model.prompts {
-		if strings.Contains(prompt, "TRANSCRIPT_SENTINEL") || strings.Contains(prompt, `"related_sessions"`) || len(prompt) > intentPromptLimit {
+		if strings.Contains(prompt, "TRANSCRIPT_SENTINEL") || len(prompt) > intentPromptLimit || (!strings.HasPrefix(prompt, cardDraftPrompt) && strings.Contains(prompt, `"related_sessions"`)) {
 			t.Fatal("classifier received unbounded session context")
 		}
 		if !strings.Contains(prompt, `"viewer_ever_approved":true`) {

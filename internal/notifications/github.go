@@ -254,7 +254,9 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 		}
 	}
 	issuePath := strings.Replace(path, "/pulls/", "/issues/", 1)
-	paths = append(paths, issuePath+"/comments?per_page=100")
+	if event.SubjectType == "PullRequest" || event.SubjectType == "Issue" {
+		paths = append(paths, issuePath+"/comments?per_page=100")
+	}
 	if event.SubjectType == "PullRequest" {
 		paths = append(paths, path+"/comments?per_page=100", path+"/reviews?per_page=100")
 	}

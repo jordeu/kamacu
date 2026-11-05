@@ -77,7 +77,7 @@ func TestTriageGroupsSubjectRevisionsAndProjectReviews(t *testing.T) {
 	id3 := seed(t, s, source, other)
 	tools.result = `[]`
 	status := process(t, s, model, "review_request")
-	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 2 {
+	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 3 {
 		t.Fatalf("%+v calls=%d", status, len(model.prompts))
 	}
 	page, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
@@ -109,17 +109,17 @@ func TestTriageGroupsSubjectRevisionsAndProjectReviews(t *testing.T) {
 	}
 }
 
-func TestTriageMultipleIntentsRemainSeparate(t *testing.T) {
+func TestTriageMultipleIntentsShareOneSubjectCard(t *testing.T) {
 	s, model, _, source := fixture(t)
 	seed(t, s, source, event())
 	model.responses = []any{intentResponse{Findings: []intentFinding{{Intent: "review_feedback", EvidenceID: "context", Quote: "Review requested"}, {Intent: "direct_question", EvidenceID: "context", Quote: "Review requested"}}}}
 	status := process(t, s, model, "")
-	if status.Status != "completed" || status.ActionCount != 2 {
+	if status.Status != "completed" || status.ActionCount != 1 {
 		t.Fatalf("%+v", status)
 	}
 	page, _ := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
-	if page.Items[0].ID == page.Items[1].ID {
-		t.Fatal("actions coalesced")
+	if len(page.Items) != 1 || !strings.Contains(page.Items[0].Context, "<!-- kamacu-triage:review_feedback -->") || !strings.Contains(page.Items[0].Context, "<!-- kamacu-triage:direct_question -->") {
+		t.Fatal("card lost one of the subject intents")
 	}
 }
 
@@ -268,7 +268,7 @@ func TestTriageUnknownContextCannotBeSilentlyDiscarded(t *testing.T) {
 		t.Fatal(status)
 	}
 	page, _ := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
-	if !strings.Contains(page.Items[0].Context, "incomplete or ambiguous") {
+	if !strings.Contains(page.Items[0].Context, "Current subject context is unavailable") {
 		t.Fatal("missing uncertainty")
 	}
 }
