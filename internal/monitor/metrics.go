@@ -15,6 +15,8 @@ type ProfileMetrics struct {
 	CacheCreationInputTokens uint64  `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     uint64  `json:"cache_read_input_tokens"`
 	ReportedCostUSD          float64 `json:"reported_cost_usd"`
+	Canceled                 uint64  `json:"canceled"`
+	MissingTokenReports      uint64  `json:"missing_token_reports"`
 	Calls                    uint64  `json:"calls"`
 	Failures                 uint64  `json:"failures"`
 	Timeouts                 uint64  `json:"timeouts"`
@@ -36,7 +38,7 @@ type Usage struct {
 	CompletionTokens uint64 `json:"completion_tokens"`
 }
 
-func (m *Metrics) record(id int64, elapsed time.Duration, failed, timeout bool, usage *Usage) {
+func (m *Metrics) record(id int64, elapsed time.Duration, failed, timeout bool, usage *Usage, canceled bool) {
 	if m == nil {
 		return
 	}
@@ -47,6 +49,9 @@ func (m *Metrics) record(id int64, elapsed time.Duration, failed, timeout bool, 
 	}
 	v := m.profiles[id]
 	v.Calls++
+	if canceled {
+		v.Canceled++
+	}
 	if failed {
 		v.Failures++
 	}
@@ -54,6 +59,9 @@ func (m *Metrics) record(id int64, elapsed time.Duration, failed, timeout bool, 
 		v.Timeouts++
 	}
 	v.LastLatencyMS = elapsed.Milliseconds()
+	if usage == nil {
+		v.MissingTokenReports++
+	}
 	if usage != nil {
 		v.TokenReports++
 		// Anthropic's input count excludes cached tokens; OpenAI's prompt count

@@ -178,6 +178,9 @@ func (s *Service) tick(ctx context.Context) {
 		}
 		due := !w.busy && stale && obs.Screen != "" && time.Since(w.lastAttempt) > 5*time.Second && (time.Since(w.lastChange) > 2*time.Second || time.Since(w.lastAttempt) > 10*time.Second)
 		if due {
+			if cosmeticCandidate(w, obs, p.Key(), task) {
+				slog.Debug("terminal cosmetic skip candidate", "session", info.ID, "revision", obs.Revision, "shadow", true)
+			}
 			select {
 			case s.workers <- struct{}{}:
 				w.busy = true
@@ -204,8 +207,16 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	inferenceTask := task
 	if task.ID == 0 {
 		work, e := store.WorkForSession(ctx, s.DB, sess.Info().ID)
-		if e == nil {
-			raw, _ := json.Marshal(work)
+		if e == nil && work != nil {
+			// Continuation needs the latest work state, not another copy of
+			// terminal evidence and uncertainty from every saved observation.
+			type priorWork struct {
+				Summary    string
+				State      string
+				Stale      bool
+				ObservedAt time.Time
+			}
+			raw, _ := json.Marshal(priorWork{work.Summary, work.State, work.Stale, work.ObservedAt})
 			inferenceTask.PreviousWork = string(raw)
 		}
 	}
