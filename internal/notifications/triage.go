@@ -615,11 +615,11 @@ func triageOptions(kind string) []string {
 	case "review_request":
 		return []string{"Review these PRs, checking existing work before starting another session", "I'll handle these reviews myself"}
 	case "review_feedback":
-		return []string{"Find the existing implementation session and explain the feedback", "Summarize the feedback first"}
+		return []string{"Resume the responsible implementation task agent to check new comments and commits; create a task if none exists"}
 	case "direct_question":
-		return []string{"Open a task to investigate before answering", "Help me draft a response"}
+		return []string{"Ask the responsible task agent to investigate and answer; create a task if none exists"}
 	default:
-		return []string{"Inspect the linked activity and explain what needs attention", "Leave this activity alone"}
+		return []string{"Ask the responsible task agent to inspect this activity; create a task if none exists", "Leave this activity alone"}
 	}
 }
 
