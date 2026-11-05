@@ -23,3 +23,32 @@ it("hides internal notification comments while preserving visible Markdown and H
   expect(html).toContain("<strong>context</strong>");
   expect(html).toContain("&lt;div&gt;example&lt;/div&gt;");
 });
+
+it("renders new-tab links throughout pending and answered message dialogs", () => {
+  const question: FeedbackQuestion = {
+    id: "links", task_id: 1, project_id: 1, task_title: "Task", project_name: "Project", session_id: "",
+    abstract: "", question: "Review https://github.com/acme/title/pull/1",
+    summary: "See https://github.com/acme/summary/issues/2",
+    context: "[Context](https://github.com/acme/context/pull/3)",
+    options: [{ id: "yes", label: "Approve https://github.com/acme/option/pull/4" }],
+    status: "pending", reason: "", answer: "https://github.com/acme/answer/issues/5", answer_source: "", revision: 1,
+    created_at: 1, updated_at: 1, acknowledged_at: null,
+  };
+  function render(status: FeedbackQuestion["status"]) {
+    return renderToStaticMarkup(<QueryClientProvider client={new QueryClient()}><MemoryRouter>
+      <InboxMessage question={{ ...question, status }} dialog onResult={() => {}} />
+    </MemoryRouter></QueryClientProvider>);
+  }
+  const pending = render("pending");
+  for (const label of ["title#1", "summary#2", "context#3", "option#4"]) {
+    expect(pending).toContain(`>${label}</a>`);
+  }
+  for (const anchor of pending.matchAll(/<a\b[^>]*>/g)) {
+    expect(anchor[0]).toContain('target="_blank"');
+    expect(anchor[0]).toContain('rel="noopener noreferrer"');
+  }
+  for (const button of pending.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)) {
+    expect(button[0]).not.toContain("<a ");
+  }
+  expect(render("answered")).toContain('>answer#5</a>');
+});
