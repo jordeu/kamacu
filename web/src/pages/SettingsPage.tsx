@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,8 +56,8 @@ const PR_REVIEW_SEED_HELP = `Prefilled (not sent) into the agent when you Start 
  * /api/settings/github_integration). The cache is replaced on success
  * (useSaveSetting), flipping `enabled`; on failure the cache is untouched so
  * `checked` falls back to the last saved value (never sticks mid-flip) and the
- * canonical error renders under the row. This section ALWAYS renders — it is
- * the control that hides everything else, so it cannot hide itself.
+ * canonical error renders under the row. This section stays available in the
+ * GitHub tab even when integration is off, so users can enable it again.
  *
  * The toggle is gh-aware: it reads useGithubStatus() (GET /api/github/status).
  * When gh is unavailable on the host, the EFFECTIVE checked state is forced off
@@ -125,8 +127,26 @@ function GithubSection({
   );
 }
 
+const SETTINGS_GROUPS = [
+  { id: "workspace", label: "Workspace", description: "Choose where tasks run and how shells and branches are created." },
+  { id: "agents", label: "Agents", description: "Manage your coding agents and the scratchpad they use." },
+  { id: "monitoring", label: "Monitoring", description: "Configure AI profiles and workspace monitoring." },
+  { id: "github", label: "GitHub", description: "Manage GitHub integration, review prompts, and notification sources." },
+  { id: "cleanup", label: "Cleanup", description: "Control idle sessions and clean up task worktrees." },
+] as const;
+
 export default function SettingsPage() {
   const { data: settings, isLoading, isError, refetch } = useSettings();
+  const [params, setParams] = useSearchParams();
+  const activeGroup = SETTINGS_GROUPS.find(group => group.id === params.get("section"))?.id ?? "workspace";
+
+  function selectGroup(value: string) {
+    setParams(previous => {
+      const next = new URLSearchParams(previous);
+      next.set("section", value);
+      return next;
+    });
+  }
 
   if (isError) {
     // Mirrors the board load-failure pattern.
@@ -142,11 +162,11 @@ export default function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto p-4">
-      <div className="max-w-[640px]">
+      <div className="mx-auto w-full max-w-[640px]">
         <h1 className="text-base font-medium">{`Settings`}</h1>
         {/* SET-03 stated once for the whole page, never per field. */}
         <p className="mt-1 text-xs text-muted-foreground">
-          {`Monitoring changes apply immediately. Other settings apply to the next session or worktree.`}
+          {`Inline fields save when you leave them; switches and menus save immediately. Use the save controls in dialogs. Monitoring changes apply immediately; session and worktree defaults apply to new sessions and worktrees.`}
         </p>
         {isLoading || !settings ? (
           <div className="mt-6 flex flex-col gap-6">
@@ -158,72 +178,89 @@ export default function SettingsPage() {
             ))}
           </div>
         ) : (
-          <div className="mt-6 flex flex-col gap-6">
-            <MonitoringSection />
- <NotificationsSection settings={settings} />
- <AgentsSection />
-            {/* GCONF-05: the Scratchpad summary card + Change-root dialog —
-                directly after AgentsSection (both govern where agents run). */}
-            <ScratchpadSection />
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Worktrees`}</h2>
-              <SettingsField
-                settingKey="worktree_base"
-                label={`Worktree base directory`}
-                entry={settings.worktree_base}
-                mono
-                help={WORKTREE_HELP}
+          <Tabs value={activeGroup} onValueChange={selectGroup} activationMode="manual" className="mt-6 gap-6">
+            <TabsList aria-label="Settings categories" className="sticky top-0 z-10 h-auto! w-full flex-wrap justify-start gap-1 border bg-background shadow-sm">
+              {SETTINGS_GROUPS.map(group => (
+                <TabsTrigger key={group.id} value={group.id} className="min-h-9 px-3">
+                  {group.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {/* Keep panels mounted so drafts and save feedback survive tab changes. */}
+            <TabsContent value="workspace" forceMount hidden={activeGroup !== "workspace"} className="space-y-6">
+              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "workspace")?.description}</p>
+              <section className="flex flex-col gap-3">
+                <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Worktrees`}</h2>
+                <SettingsField
+                  settingKey="worktree_base"
+                  label={`Worktree base directory`}
+                  entry={settings.worktree_base}
+                  mono
+                  help={WORKTREE_HELP}
+                />
+              </section>
+              <section className="flex flex-col gap-3">
+                <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Bash tabs`}</h2>
+                {/* Dropdown options come from entry.options in the API payload —
+                    never a frontend constant (the SHELL-02 seam). */}
+                <SettingsField
+                  settingKey="shell"
+                  label={`Shell`}
+                  entry={settings.shell}
+                  control="select"
+                  help={SHELL_HELP}
+                />
+              </section>
+              <section className="flex flex-col gap-3">
+                <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Branches`}</h2>
+                <SettingsField
+                  settingKey="branch_template"
+                  label={`Branch name template`}
+                  entry={settings.branch_template}
+                  mono
+                  help={withMono(BRANCH_HELP, [
+                    `{slug}`,
+                    `{id}`,
+                    `{title}`,
+                    `task/fix-login-42`,
+                  ])}
+                />
+              </section>
+            </TabsContent>
+            <TabsContent value="agents" forceMount hidden={activeGroup !== "agents"} className="space-y-6">
+              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "agents")?.description}</p>
+              <AgentsSection />
+              <ScratchpadSection />
+            </TabsContent>
+            <TabsContent value="monitoring" forceMount hidden={activeGroup !== "monitoring"} className="space-y-6">
+              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "monitoring")?.description}</p>
+              <MonitoringSection />
+            </TabsContent>
+            <TabsContent value="github" forceMount hidden={activeGroup !== "github"} className="space-y-6">
+              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "github")?.description}</p>
+              <GithubSection
+                enabled={settings.github_integration?.value === "on"}
+                settings={settings}
               />
-            </section>
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Bash tabs`}</h2>
-              {/* Dropdown options come from entry.options in the API payload —
-                  never a frontend constant (the SHELL-02 seam). */}
-              <SettingsField
-                settingKey="shell"
-                label={`Shell`}
-                entry={settings.shell}
-                control="select"
-                help={SHELL_HELP}
-              />
-            </section>
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Branches`}</h2>
-              <SettingsField
-                settingKey="branch_template"
-                label={`Branch name template`}
-                entry={settings.branch_template}
-                mono
-                help={withMono(BRANCH_HELP, [
-                  `{slug}`,
-                  `{id}`,
-                  `{title}`,
-                  `task/fix-login-42`,
-                ])}
-              />
-            </section>
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Cleanup`}</h2>
-              {/* REAP-01/D-91: read-at-use TTL; "never"/empty/0 disable reaping
-                  (the disable copy here mirrors ParseDoneSessionTTL semantics). */}
-              <SettingsField
-                settingKey="done_session_ttl"
-                label={`Done session TTL`}
-                entry={settings.done_session_ttl}
-                mono
-                help={DONE_TTL_HELP}
-              />
-            </section>
-            {/* Always last; ON by default (absent KV row reads as "on"). The
-                control that hides every other GitHub surface app-wide. */}
-            <GithubSection
-              enabled={settings.github_integration?.value === "on"}
-              settings={settings}
-            />
-            {/* WTREE-01..04: the worktree cleanup panel — one more section in
-                the same 640px column, never a full-width breakout. */}
-            <WorktreeCleanupSection />
-          </div>
+              <NotificationsSection settings={settings} />
+            </TabsContent>
+            <TabsContent value="cleanup" forceMount hidden={activeGroup !== "cleanup"} className="space-y-6">
+              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "cleanup")?.description}</p>
+              <section className="flex flex-col gap-3">
+                <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Cleanup`}</h2>
+                {/* REAP-01/D-91: read-at-use TTL; "never"/empty/0 disable reaping
+                    (the disable copy here mirrors ParseDoneSessionTTL semantics). */}
+                <SettingsField
+                  settingKey="done_session_ttl"
+                  label={`Done session TTL`}
+                  entry={settings.done_session_ttl}
+                  mono
+                  help={DONE_TTL_HELP}
+                />
+              </section>
+              <WorktreeCleanupSection />
+            </TabsContent>
+          </Tabs>
         )}
       </div>
     </div>
