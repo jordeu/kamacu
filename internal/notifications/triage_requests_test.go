@@ -80,3 +80,51 @@ func TestReplyDoesNotPublishInventedToolAccessFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestImplementationAgentRequiresFollowupDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		session string
+		ask     bool
+		want    string
+	}{
+		{name: "done without instructions", want: "uncertain"},
+		{name: "ask without instructions", ask: true, want: "uncertain"},
+		{name: "instructions to another task", session: "other", want: "uncertain"},
+		{name: "instructions delivered", session: "correct", want: "succeeded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			ctx := context.Background()
+			q := publish(t, s, seed(t, s, source, event()))
+			if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Resume the implementation agent to check new comments and commits", ""); err != nil {
+				t.Fatal(err)
+			}
+			model.steps = []Step{{Action: "tool", ToolName: "start_task_agent", Arguments: `{"task_id":1,"resume":true}`}}
+			if tc.session != "" {
+				model.steps = append(model.steps, Step{Action: "tool", ToolName: "send_session_message", Arguments: fmt.Sprintf(`{"session_id":%q,"message":"Check new comments and commits on https://github.com/acme/repo/pull/7 and handle the feedback"}`, tc.session)})
+			}
+			last := Step{Action: "done", Message: "Follow-up handed to the task agent."}
+			if tc.ask {
+				last = ask()
+			}
+			model.steps = append(model.steps, last)
+			if err := s.executeNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.Inbox.Get(ctx, q.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.DeliveryStatus != tc.want {
+				t.Fatalf("got %s, want %s: %s", got.DeliveryStatus, tc.want, got.ExecutionResult)
+			}
+			if tc.want == "uncertain" && !strings.Contains(got.ExecutionResult, "follow-up instructions were not sent") {
+				t.Fatalf("missing handoff failure: %s", got.ExecutionResult)
+			}
+			if tc.session == "correct" && (len(tools.calls) != 2 || tools.calls[1] != "send_session_message") {
+				t.Fatalf("missing delivery: %v", tools.calls)
+			}
+		})
+	}
+}

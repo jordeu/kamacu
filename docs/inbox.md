@@ -146,3 +146,14 @@ can produce a follow-up question directly. Failed or interrupted actions are nev
 automatically repeated; an uncertain result asks you to check the target task or
 session before requesting another attempt. Execution history is stored locally.
 Settings show collection health, queued notifications, and processing errors.
+
+Notification action cards route follow-up work to task agents. New PR comments,
+feedback, questions, and commits should offer to resume the responsible
+implementation task and ask its agent to inspect the latest comments and commits.
+A clear match in the project task list can identify the owner even without an
+explicit PR link; a separate review task does not take precedence over it. If no
+owner exists, offer to create a task and start its agent. The inbox delegates the
+work rather than asking the user to resolve technical feedback or compose a PR
+reply there. After the user accepts, execution checks existing sessions, starts
+or resumes the agent as needed, and sends the follow-up instructions with the
+full PR URL. Ambiguous ownership requires choosing a task.
