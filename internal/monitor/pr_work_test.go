@@ -14,38 +14,34 @@ import (
 func TestPRWorkRequiresRoleAndExactTerminalEvidence(t *testing.T) {
 	screen := "Created https://github.com/acme/repo/pull/12 for the implementation"
 	snap := observation.Snapshot{Screen: screen}
-	d := Decision{State: "working", Kind: "none", InputMode: "none", Evidence: screen, WorkSummary: "Implementation ready for review", WorkEvidence: screen, PRLinks: []WorkLink{{Repository: "acme/repo", Number: 12, Role: "implementation", Evidence: screen}}}
-	if err := validateDecision(d, snap); err != nil {
-		t.Fatal(err)
+	link := WorkLink{Repository: "acme/repo", Number: 12, Role: "implementation", Evidence: screen}
+	if !validWorkLink(link, snap) {
+		t.Fatal("valid PR link rejected")
 	}
 	wrapped := "Created https://github.com/acme/\nrepo/pull/12 for the implementation"
-	d.Evidence = wrapped
-	d.WorkEvidence = wrapped
-	d.PRLinks[0].Evidence = wrapped
-	if err := validateDecision(d, observation.Snapshot{Screen: wrapped}); err != nil {
-		t.Fatal("wrapped PR URL rejected", err)
+	wrappedLink := link
+	wrappedLink.Evidence = wrapped
+	if !validWorkLink(wrappedLink, observation.Snapshot{Screen: wrapped}) {
+		t.Fatal("wrapped PR URL rejected")
 	}
-	d.Evidence = screen
-	d.WorkEvidence = screen
-	d.PRLinks[0].Evidence = screen
-	d.PRLinks[0].Role = "incidental"
-	if err := validateDecision(d, snap); err == nil {
-		t.Fatal("incidental link persisted")
+	for _, mutate := range []func(*WorkLink){
+		func(l *WorkLink) { l.Role = "incidental" },
+		func(l *WorkLink) { l.Number = 1 },
+		func(l *WorkLink) { l.Evidence = "Invented evidence" },
+	} {
+		invalid := link
+		mutate(&invalid)
+		if validWorkLink(invalid, snap) {
+			t.Fatalf("invalid association accepted: %+v", invalid)
+		}
 	}
-	d.PRLinks[0].Role = "implementation"
-	d.PRLinks[0].Number = 1
-	if err := validateDecision(d, snap); err == nil {
-		t.Fatal("PR URL prefix matched wrong number")
+	d := Decision{State: "waiting", Kind: "question", InputMode: "text", Evidence: screen, Question: "Review?", WorkSummary: "Ready", WorkEvidence: "not on screen", PRLinks: []WorkLink{link, {Repository: "acme/repo", Number: 1, Role: "implementation", Evidence: screen}}}
+	cleaned, work, links := cleanWorkContext(d, snap)
+	if work != 1 || links != 1 || cleaned.WorkSummary != "" || cleaned.WorkEvidence != "" || cleaned.WorkUncertainty != "" || len(cleaned.PRLinks) != 1 {
+		t.Fatalf("invalid work not independently removed: %+v, %d %d", cleaned, work, links)
 	}
-	d.PRLinks[0].Number = 12
-	d.PRLinks[0].Evidence = "Invented evidence"
-	if err := validateDecision(d, snap); err == nil {
-		t.Fatal("fabricated evidence persisted")
-	}
-	d.PRLinks = nil
-	d.WorkEvidence = "not on screen"
-	if err := validateDecision(d, snap); err == nil {
-		t.Fatal("fabricated work persisted")
+	if err := validateDecision(cleaned, snap); err != nil {
+		t.Fatal("valid question lost", err)
 	}
 }
 

@@ -30,9 +30,9 @@ func TestPromptSnapshotEvidence(t *testing.T) {
 }
 
 func TestCosmeticCandidate(t *testing.T) {
-	task := TaskContext{ID: 1}
+	task := TaskContext{ID: 1, Engine: "codex"}
 	original := observation.Snapshot{Revision: 1, Screen: "Testing\n• Working (4s • esc to interrupt)"}
-	w := &watch{revision: 1, profile: "p", taskContext: task, evidence: original, decision: Decision{State: "working", Kind: "none", Evidence: "Testing"}}
+	w := &watch{revision: 1, reusable: true, profile: "p", taskContext: task, evidence: original, decision: Decision{State: "working", Kind: "none", Evidence: "Testing"}}
 	next := original
 	next.Revision = 2
 	next.Screen = strings.Replace(original.Screen, "4s", "14s", 1)
@@ -68,8 +68,8 @@ func TestReplayMonitoringEfficiency(t *testing.T) {
 	}
 	var calls, before, after, adjacent, candidates int
 	type entry struct {
-		session, path string
-		snapshot      observation.Snapshot
+		session, path, engine string
+		snapshot              observation.Snapshot
 	}
 	var entries []entry
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -102,7 +102,12 @@ func TestReplayMonitoringEfficiency(t *testing.T) {
 			return e
 		}
 		key := strings.Split(rel, string(os.PathSeparator))[0]
-		entries = append(entries, entry{key, path, s})
+		var task TaskContext
+		if _, context, ok := strings.Cut(string(b), "TASK CONTEXT (metadata, not instructions):\n"); ok {
+			taskJSON, _, _ := strings.Cut(context, "\nTERMINAL DATA:")
+			_ = json.Unmarshal([]byte(taskJSON), &task)
+		}
+		entries = append(entries, entry{key, path, task.Engine, s})
 		for _, h := range compact.History {
 			if !s.ContainsEvidence(h) {
 				t.Fatal("invented evidence")
@@ -131,7 +136,7 @@ func TestReplayMonitoringEfficiency(t *testing.T) {
 			continue
 		}
 		adjacent++
-		if a.snapshot.Input == b.snapshot.Input && meaningfulFingerprint(a.snapshot) == meaningfulFingerprint(b.snapshot) {
+		if a.snapshot.Input == b.snapshot.Input && a.engine == b.engine && meaningfulFingerprint(a.snapshot, a.engine) == meaningfulFingerprint(b.snapshot, b.engine) {
 			candidates++
 		}
 	}
@@ -154,19 +159,19 @@ func TestPromptSnapshotPreservesRepeatedContext(t *testing.T) {
 
 func TestCosmeticCandidateNewHistory(t *testing.T) {
 	old := observation.Snapshot{Revision: 1, Screen: "Testing\n• Working (4s • esc to interrupt)"}
-	w := &watch{revision: 1, evidence: old, decision: Decision{State: "working", Kind: "none", Evidence: "Testing"}}
+	w := &watch{revision: 1, reusable: true, evidence: old, taskContext: TaskContext{Engine: "codex"}, decision: Decision{State: "working", Kind: "none", Evidence: "Testing"}}
 	current := old
 	current.Revision = 2
 	current.History = []string{"Allow access?"}
-	if cosmeticCandidate(w, current, "", TaskContext{}) {
+	if cosmeticCandidate(w, current, "", TaskContext{Engine: "codex"}) {
 		t.Fatal("new historical evidence must invalidate")
 	}
 	current.History = []string{old.Screen}
-	if !cosmeticCandidate(w, current, "", TaskContext{}) {
+	if !cosmeticCandidate(w, current, "", TaskContext{Engine: "codex"}) {
 		t.Fatal("known repaint history should be covered")
 	}
 	current.UnsupportedSize = true
-	if cosmeticCandidate(w, current, "", TaskContext{}) {
+	if cosmeticCandidate(w, current, "", TaskContext{Engine: "codex"}) {
 		t.Fatal("unsupported geometry")
 	}
 }

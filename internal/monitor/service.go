@@ -28,6 +28,7 @@ type Service struct {
 	Inbox      *inbox.Service
 	Presence   *presence.Tracker
 	Classifier Classifier
+	Metrics    *Metrics
 	jobs       sync.WaitGroup
 	mu         sync.Mutex
 	states     map[string]*watch
@@ -39,8 +40,21 @@ type watch struct {
 	revision, input      uint64
 	profile              string
 	lastAttempt          time.Time
+	retryAfter           time.Time
+	reusable             bool
 	lastChange           time.Time
 	observedRevision     uint64
+	observedContent      string
+	observedSignals      attentionEvidence
+	observedInput        uint64
+	observedProfile      string
+	observedTask         TaskContext
+	observationStarted   time.Time
+	generating           bool
+	urgent               bool
+	deferred             bool
+	inflightSignals      attentionEvidence
+	inflightGenerating   bool
 	busy                 bool
 	cancel               context.CancelFunc
 	inflightInput        uint64
@@ -54,7 +68,14 @@ type watch struct {
 }
 
 func New(db *sql.DB, m *session.Manager, i *inbox.Service, p *presence.Tracker, c Classifier) *Service {
-	return &Service{DB: db, Sessions: m, Inbox: i, Presence: p, Classifier: c, states: map[string]*watch{}, workers: make(chan struct{}, 4)}
+	s := &Service{DB: db, Sessions: m, Inbox: i, Presence: p, Classifier: c, states: map[string]*watch{}, workers: make(chan struct{}, 4)}
+	switch b := c.(type) {
+	case Backend:
+		s.Metrics = b.Metrics
+	case *Backend:
+		s.Metrics = b.Metrics
+	}
+	return s
 }
 func (s *Service) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
@@ -159,7 +180,9 @@ func (s *Service) tick(ctx context.Context) {
 				w.active = active
 			}
 		}
-		if w.busy && w.cancel != nil && (w.inflightInput != obs.Input || w.inflightProfile != p.Key() || w.inflightTask != task) {
+		now := time.Now()
+		observeScheduling(w, obs, p.Key(), task, now)
+		if w.busy && w.cancel != nil && (w.inflightInput != obs.Input || w.inflightProfile != p.Key() || w.inflightTask != task || newAttention(w.inflightSignals, w.observedSignals) || (w.inflightGenerating && !w.generating)) {
 			w.cancel()
 		}
 		viewed := s.Presence.ViewingSession(info.ID)
@@ -172,19 +195,32 @@ func (s *Service) tick(ctx context.Context) {
 		if !stale && w.active && w.decision.Kind != "none" && w.decision.State != "unknown" && !viewed && !w.seen {
 			s.publish(ctx, info, w)
 		}
-		if obs.Revision != w.observedRevision {
-			w.lastChange = time.Now()
-			w.observedRevision = obs.Revision
+		if !w.busy && !w.urgent && !now.Before(w.retryAfter) && now.Sub(w.lastAttempt) < generationFallback && cosmeticCandidate(w, obs, p.Key(), task) {
+			w.decision, _ = rebaseRoutineDecision(w.decision, w.evidence, obs, task.Engine)
+			w.revision = obs.Revision
+			stale = false
+			s.Metrics.monitorEvent(p.ID, "cosmetic_reuse", 1)
+			slog.Debug("terminal routine decision reused after cosmetic repaint", "session", info.ID, "revision", obs.Revision)
 		}
-		due := !w.busy && stale && obs.Screen != "" && time.Since(w.lastAttempt) > 5*time.Second && (time.Since(w.lastChange) > 2*time.Second || time.Since(w.lastAttempt) > 10*time.Second)
-		if due {
-			if cosmeticCandidate(w, obs, p.Key(), task) {
-				slog.Debug("terminal cosmetic skip candidate", "session", info.ID, "revision", obs.Revision, "shadow", true)
+		reason := inferenceSchedule(w, stale, obs, now)
+		if reason == "generation" {
+			if !w.deferred {
+				s.Metrics.monitorEvent(p.ID, "generation_deferred", 1)
+				slog.Debug("terminal inference deferred during generation", "session", info.ID, "fallback_seconds", generationFallback.Seconds())
 			}
+			w.deferred = true
+		} else if reason != "" {
 			select {
 			case s.workers <- struct{}{}:
 				w.busy = true
-				w.lastAttempt = time.Now()
+				w.reusable = false
+				w.urgent, w.deferred = false, false
+				w.lastAttempt = now
+				w.inflightSignals, w.inflightGenerating = w.observedSignals, w.generating
+				if reason == "fallback" {
+					s.Metrics.monitorEvent(p.ID, "fallback", 1)
+				}
+				slog.Debug("terminal inference scheduled", "session", info.ID, "reason", reason, "revision", obs.Revision)
 				jobCtx, cancel := context.WithCancel(ctx)
 				w.cancel = cancel
 				w.inflightInput = obs.Input
@@ -265,7 +301,8 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	current := sess.Observation()
 	effective, e := Resolve(parent, s.DB, info.TaskID)
 	currentTask, taskErr := s.taskContext(parent, info)
-	if info.Status != session.StatusRunning || info.StopRequested || taskErr != nil || currentTask != task || e != nil || effective.Key() != p.Key() || current.Input != obs.Input || current.UnsupportedSize {
+	if parent.Err() != nil || info.Status != session.StatusRunning || info.StopRequested || taskErr != nil || currentTask != task || e != nil || effective.Key() != p.Key() || current.Input != obs.Input || current.UnsupportedSize {
+		s.Metrics.monitorEvent(p.ID, "obsolete", 1)
 		slog.Debug("discarding obsolete terminal classification", "session", info.ID)
 		return
 	}
@@ -274,21 +311,40 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 		slog.Debug("terminal classification failed; backing off", "session", info.ID, "error", err, "backoff_seconds", 20)
 		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: err.Error()})
 		_ = s.Inbox.HideObserved(parent, info.ID, true)
-		w.lastAttempt = time.Now().Add(20 * time.Second)
+		w.retryAfter = time.Now().Add(20 * time.Second)
 		return
 	}
 	// An old question can remain visible after progress. Never accept an old
 	// screen merely because its evidence excerpt is still present.
 	if current.Revision != obs.Revision {
-		slog.Debug("terminal changed during classification", "session", info.ID, "revision", obs.Revision, "current_revision", current.Revision)
-		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "ready", Detail: "Terminal changed during analysis; waiting for stable evidence"})
-		_ = s.Inbox.HideObserved(parent, info.ID, true)
+		var reusable bool
+		d, reusable = rebaseRoutineDecision(d, obs, current, task.Engine)
+		if !reusable {
+			// A dialog can repaint while its first classification is running.
+			// Recheck valid, still-visible attention immediately rather than
+			// falling back to the generation delay of the previous decision.
+			if d.Kind != "none" && validateDecision(d, obs) == nil && strings.Contains(current.Screen, d.Evidence) {
+				w.urgent = true
+			}
+			s.Metrics.monitorEvent(p.ID, "stale", 1)
+			slog.Debug("terminal changed during classification", "session", info.ID, "revision", obs.Revision, "current_revision", current.Revision)
+			sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "ready", Detail: "Terminal changed during analysis; waiting for stable evidence"})
+			_ = s.Inbox.HideObserved(parent, info.ID, true)
+			return
+		}
+		slog.Debug("terminal routine result survived cosmetic repaint", "session", info.ID, "revision", obs.Revision, "current_revision", current.Revision)
+	}
+	if err = validateDecision(d, current); err != nil {
+		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: err.Error()})
+		w.retryAfter = time.Now().Add(20 * time.Second)
 		return
 	}
-	if err = validateDecision(d, obs); err != nil {
-		sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: err.Error()})
-		w.lastAttempt = time.Now().Add(20 * time.Second)
-		return
+	var droppedWork, droppedLinks int
+	d, droppedWork, droppedLinks = cleanWorkContext(d, obs)
+	if droppedWork > 0 || droppedLinks > 0 {
+		s.Metrics.monitorEvent(p.ID, "dropped_work", uint64(droppedWork))
+		s.Metrics.monitorEvent(p.ID, "dropped_link", uint64(droppedLinks))
+		slog.Debug("discarded invalid optional terminal work context", "session", info.ID, "work_updates", droppedWork, "pr_links", droppedLinks)
 	}
 	var taskID *int64
 	if info.TaskID > 0 {
@@ -332,7 +388,11 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 		observedAt = obs.InputAt
 	}
 	sess.SetMonitorStatus(session.MonitorStatus{State: d.State, Health: "ready", ObservedAt: observedAt})
-	slog.Debug("terminal classified", "session", info.ID, "state", d.State, "latency_ms", time.Since(start).Milliseconds())
+	recordAccepted := func() {
+		slog.Debug("terminal classified", "session", info.ID, "state", d.State, "latency_ms", time.Since(start).Milliseconds(), "evidence_age_ms", max(int64(0), time.Since(obs.EvidenceAt(d.Evidence)).Milliseconds()))
+		s.Metrics.monitorEvent(p.ID, "accepted", 1)
+	}
+
 	if d.Kind == "none" || d.State == "unknown" {
 		if d.State == "working" || d.State == "idle" {
 			if err := s.Inbox.SupersedeObserved(parent, info.ID); err != nil {
@@ -343,8 +403,11 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 			w.fingerprint = ""
 			if err := s.persist(parent, info.ID, w); err != nil {
 				s.persistenceFailure(parent, sess, w)
+				return
 			}
+			w.reusable = true
 		}
+		recordAccepted()
 		return
 	}
 	// Rewording a question or switching between a question and a native menu
@@ -374,6 +437,7 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 		s.persistenceFailure(parent, sess, w)
 		return
 	}
+	recordAccepted()
 	if !s.Presence.ViewingSession(info.ID) && !w.seen {
 		s.publish(parent, info, w)
 	}
@@ -472,6 +536,7 @@ func (s *Service) visibility(ctx context.Context, id string, hide bool) error {
 }
 func (s *Service) persistenceFailure(ctx context.Context, sess *session.Session, w *watch) {
 	w.revision = 0
+	w.reusable = false
 	w.decision = Decision{State: "unknown", Kind: "none", InputMode: "none"}
 	_ = s.Inbox.HideObserved(ctx, sess.Info().ID, true)
 	sess.SetMonitorStatus(session.MonitorStatus{State: "unknown", Health: "unavailable", Detail: "Could not save monitoring state"})

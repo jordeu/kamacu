@@ -363,3 +363,16 @@ func TestInstalledLoginAuthoredMessages(t *testing.T) {
 		})
 	}
 }
+
+func TestBackendOptionalWorkDoesNotRejectAttention(t *testing.T) {
+	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", InputMode: "text", WorkSummary: "Unsupported", WorkEvidence: "invented", PRLinks: []WorkLink{{Repository: "acme/repo", Number: 1, Role: "implementation", Evidence: "invented"}}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := json.Marshal(d)
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(raw)}}}})
+	}))
+	defer srv.Close()
+	got, err := (Backend{}).Classify(context.Background(), Profile{Backend: "openai_compatible", Endpoint: srv.URL, Model: "fixture"}, observation.Snapshot{Screen: "Continue?"})
+	if err != nil || got.Kind != "question" {
+		t.Fatal("optional metadata rejected attention", got, err)
+	}
+}
