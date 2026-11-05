@@ -12,6 +12,14 @@ type Metrics struct {
 	profiles map[int64]ProfileMetrics
 }
 type ProfileMetrics struct {
+	GenerationDeferrals      uint64  `json:"generation_deferrals"`
+	CosmeticReuses           uint64  `json:"cosmetic_reuses"`
+	FallbackCalls            uint64  `json:"fallback_calls"`
+	AcceptedDecisions        uint64  `json:"accepted_decisions"`
+	StaleResults             uint64  `json:"stale_results"`
+	ObsoleteResults          uint64  `json:"obsolete_results"`
+	DroppedWorkUpdates       uint64  `json:"dropped_work_updates"`
+	DroppedPRLinks           uint64  `json:"dropped_pr_links"`
 	CacheCreationInputTokens uint64  `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     uint64  `json:"cache_read_input_tokens"`
 	ReportedCostUSD          float64 `json:"reported_cost_usd"`
@@ -25,6 +33,39 @@ type ProfileMetrics struct {
 	OutputTokens             uint64  `json:"output_tokens"`
 	TokenReports             uint64  `json:"token_reports"`
 }
+
+// Deferrals count transitions into waiting for generation, not scheduler ticks.
+func (m *Metrics) monitorEvent(id int64, event string, count uint64) {
+	if m == nil || count == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.profiles == nil {
+		m.profiles = map[int64]ProfileMetrics{}
+	}
+	v := m.profiles[id]
+	switch event {
+	case "generation_deferred":
+		v.GenerationDeferrals += count
+	case "cosmetic_reuse":
+		v.CosmeticReuses += count
+	case "fallback":
+		v.FallbackCalls += count
+	case "accepted":
+		v.AcceptedDecisions += count
+	case "stale":
+		v.StaleResults += count
+	case "obsolete":
+		v.ObsoleteResults += count
+	case "dropped_work":
+		v.DroppedWorkUpdates += count
+	case "dropped_link":
+		v.DroppedPRLinks += count
+	}
+	m.profiles[id] = v
+}
+
 type Usage struct {
 	CacheCreationInputTokens uint64  `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     uint64  `json:"cache_read_input_tokens"`

@@ -227,7 +227,7 @@ func TestProviderFailureBacksOffDespiteNewOutput(t *testing.T) {
 		t.Fatal("failure lost after repaint", sess.Info())
 	}
 	svc.mu.Lock()
-	retry := svc.states[sess.Info().ID].lastAttempt
+	retry := svc.states[sess.Info().ID].retryAfter
 	svc.mu.Unlock()
 	if !retry.After(time.Now()) {
 		t.Fatal("provider failure did not back off")
