@@ -413,3 +413,66 @@ func TestFullBodyMentionScanDoesNotHideMissingComments(t *testing.T) {
 		t.Fatal("missing comments were treated as proof of no mention")
 	}
 }
+
+func TestGitHubReviewStateSurvivesEnrichmentAndProjectPrompt(t *testing.T) {
+	for _, state := range []string{"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"} {
+		for _, body := range []string{"Thanks, everything is addressed. LGTM. Merge the dependency before releasing.", ""} {
+			t.Run(state+"/"+body, func(t *testing.T) {
+				s, _, _, source := fixture(t)
+				g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
+					path := args[len(args)-1]
+					if strings.HasSuffix(path, "/reviews?per_page=100") {
+						reviews, _ := json.Marshal([]map[string]any{{"html_url": "https://github.com/acme/repo/pull/7#pullrequestreview-99", "state": state, "body": body, "submitted_at": "2026-11-04T12:00:00Z", "user": map[string]string{"login": "reviewer"}}})
+						return response(string(reviews), ""), nil
+					}
+					if strings.HasSuffix(path, "/pulls/7") {
+						return response(`{"html_url":"https://github.com/acme/repo/pull/7","state":"open","body":"Implementation","created_at":"2026-11-01T12:00:00Z"}`, ""), nil
+					}
+					return response(`[]`, ""), nil
+				}}
+				e := event()
+				e.Version = "2026-11-04T12:00:00Z"
+				e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
+				fresh, err := g.Enrich(context.Background(), source, e)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(fresh.Evidence) != 2 || fresh.Evidence[0].ReviewState != "" {
+					t.Fatal("PR state confused with review state", fresh.Evidence)
+				}
+				review := fresh.Evidence[1]
+				if review.ReviewState != state || review.Actor != "reviewer" || review.UpdatedAt != e.Version || review.Text == "" {
+					t.Fatalf("lost review facts: %+v", review)
+				}
+				if review.ReviewBodyEmpty != (body == "") {
+					t.Fatal("lost distinction between reviewer text and synthetic state citation")
+				}
+				if body != "" && review.Text != body {
+					t.Fatal("review body changed")
+				}
+				subject := &triageSubject{fresh: fresh, events: []RawNotification{{ID: 1, SourceID: source.ID, Event: e}}}
+				input, data, err := s.projectInput(context.Background(), []*triageSubject{subject}, settings.NotificationPolicy{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, marker := range []string{projectEvidenceMarker, projectCardsMarker} {
+					prompt, _, err := projectPrompt("test", "", marker, input, data)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if body == "" && !strings.Contains(prompt, `"review_body_empty":true`) {
+						t.Fatal("model could mistake generated state text for reviewer prose")
+					}
+					if !strings.Contains(prompt, `"review_state":"`+state+`"`) {
+						t.Fatal("review state lost before model call")
+					}
+				}
+				// Even an empty-body review now has a source-backed citation.
+				raw, _ := json.Marshal(intentResponse{Findings: []intentFinding{{Intent: "review_feedback", EvidenceID: review.ID, Quote: review.Text}}})
+				if _, err := decodeIntent(raw, fresh.Evidence, ""); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
