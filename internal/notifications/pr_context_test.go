@@ -92,7 +92,7 @@ func (p contextFactsProvider) PRContext(_ context.Context, _ Source, _ string, _
 	yes := true
 	return PRFacts{Source: "github_api", Available: true, State: "open", HeadCommit: "new-head", Viewer: "alice", ReviewsComplete: true, ViewerEverApproved: &yes, ViewerReviews: []ViewerReview{{State: "APPROVED", CommitID: "old-head"}}}
 }
-func TestNotificationModelConsumesFactsAcrossEvidenceWindows(t *testing.T) {
+func TestNotificationModelConsumesFactsInProjectContext(t *testing.T) {
 	s, model, _, source := fixture(t)
 	s.Providers["github"] = contextFactsProvider{&fakeProvider{}}
 	seed(t, s, source, event())
@@ -106,7 +106,7 @@ func TestNotificationModelConsumesFactsAcrossEvidenceWindows(t *testing.T) {
 				t.Fatalf("missing %s", fact)
 			}
 		}
-		if len(prompt) > intentPromptLimit {
+		if len(prompt) > projectPromptLimit {
 			t.Fatal("unbounded prompt")
 		}
 	}
@@ -171,7 +171,7 @@ func TestNotificationProcessingBoundsManySessionsAndKeepsLookupFacts(t *testing.
 		t.Fatal(result)
 	}
 	for _, prompt := range model.prompts {
-		if strings.Contains(prompt, "TRANSCRIPT_SENTINEL") || len(prompt) > intentPromptLimit || (!strings.HasPrefix(prompt, cardDraftPrompt) && strings.Contains(prompt, `"related_sessions"`)) {
+		if strings.Contains(prompt, "TRANSCRIPT_SENTINEL") || len(prompt) > projectPromptLimit {
 			t.Fatal("classifier received unbounded session context")
 		}
 		if !strings.Contains(prompt, `"viewer_ever_approved":true`) {

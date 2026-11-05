@@ -79,18 +79,18 @@ func TestTriageDraftIncludesDiscussionAndPreservesScope(t *testing.T) {
 	}
 }
 
-func TestDraftFailureOffersTargetedInvestigation(t *testing.T) {
+func TestDraftFailurePreservesScopeWithoutPublishingFallback(t *testing.T) {
 	s, model, _, _ := fixture(t)
 	e := event()
 	e.Title = "Retry capacity fallback"
 	subject := &triageSubject{fresh: e, events: []RawNotification{{ID: 7, Event: e}}}
 	decision := BatchDecision{Actions: []BatchAction{{EventIDs: []int64{7}, Question: triageQuestions["needs_context"], Context: e.URL}}}
 	model.respond = func(string) (any, error) { return nil, errors.New("model unavailable") }
-	if err := s.draftTriageCards(context.Background(), &decision, []*triageSubject{subject}, ""); err != nil {
-		t.Fatal(err)
+	if err := s.draftTriageCards(context.Background(), &decision, []*triageSubject{subject}, ""); err == nil {
+		t.Fatal("failed drafting was accepted")
 	}
-	if !strings.Contains(decision.Actions[0].Options[0], e.Title) || !strings.Contains(decision.Actions[0].Options[0], "recommended next step") {
-		t.Fatal("fallback repeated the generic inspection question")
+	if len(decision.Actions) != 1 || decision.Actions[0].EventIDs[0] != 7 {
+		t.Fatal("failed drafting changed scope")
 	}
 	if raw, _ := json.Marshal(decision); !strings.Contains(string(raw), e.URL) {
 		t.Fatal("fallback lost source URL")
@@ -103,7 +103,7 @@ func TestPersonalizedCardsDeduplicateAndDismissWithoutExecution(t *testing.T) {
 	respondWithIntent(model, "direct_question")
 	classify := model.respond
 	model.respond = func(prompt string) (any, error) {
-		if !strings.HasPrefix(prompt, cardDraftPrompt) {
+		if !strings.HasPrefix(prompt, projectDraftPrompt) {
 			return classify(prompt)
 		}
 		return triageDraft{Summary: "Decide how to investigate capacity retries", Context: "The reviewer asks about capacity retry behavior.", Question: "Should I investigate capacity retries before drafting a response?", Options: []string{"Investigate capacity retries in a task", "Draft a response about capacity retries"}}, nil

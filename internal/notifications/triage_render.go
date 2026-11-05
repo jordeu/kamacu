@@ -40,6 +40,12 @@ func fitTriageContext(action *BatchAction, allowed map[int64]RawNotification) er
 	if budget < len(omitted) {
 		return errors.New("notification subject links exceed the card size limit")
 	}
+	if _, _, present := readTriageEvidence(action.Context); present {
+		end := strings.Index(action.Context, " -->")
+		if end < 0 || end+len(" -->") > budget-len(omitted) {
+			return errors.New("notification evidence metadata exceeds the card size limit")
+		}
+	}
 	if len(action.Context) > budget {
 		action.Context = strings.ToValidUTF8(action.Context[:budget-len(omitted)], "") + omitted
 	}

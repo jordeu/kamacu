@@ -44,7 +44,7 @@ func refreshIntentPolicy(subject *triageSubject, previous Event, policy settings
 	beforeJSON, _ := json.Marshal(before)
 	afterJSON, _ := json.Marshal(after)
 	changed := !bytes.Equal(beforeJSON, afterJSON) || beforeComplete != afterComplete || previous.SubjectTitle != subject.fresh.SubjectTitle
-	if previous.PRFacts != nil && subject.fresh.PRFacts != nil && previous.PRFacts.HeadCommit != subject.fresh.PRFacts.HeadCommit {
+	if classificationFactsChanged(previous.PRFacts, subject.fresh.PRFacts) {
 		changed = true
 	}
 	subject.classificationStale = subject.classificationStale || changed || len(subject.classifiedFindings) == 0
@@ -56,4 +56,19 @@ func refreshIntentPolicy(subject *triageSubject, previous Event, policy settings
 	// a previously filtered copy. This also handles reopening a merged PR.
 	subject.findings = append([]intentFinding(nil), subject.classifiedFindings...)
 	applyIntentPolicy(subject, policy)
+}
+
+func classificationFactsChanged(before, after *PRFacts) bool {
+	if before == nil || after == nil {
+		return before != after
+	}
+	fields := func(f *PRFacts) map[string]any {
+		values := compactTriageFacts(f).(map[string]any)
+		delete(values, "observed_at")
+		values["head_commit"], values["updated_at"] = f.HeadCommit, f.UpdatedAt
+		return values
+	}
+	a, _ := json.Marshal(fields(before))
+	b, _ := json.Marshal(fields(after))
+	return !bytes.Equal(a, b)
 }

@@ -145,13 +145,15 @@ func TestCurrentIssueBodyRemainsInClassifierInput(t *testing.T) {
 				t.Fatal("new issue body omitted")
 			}
 			var payload struct {
-				Complete bool `json:"context_complete"`
+				Subjects []struct {
+					Complete bool `json:"context_complete"`
+				} `json:"subjects"`
 			}
-			raw := strings.Split(model.prompts[0], "\nEVIDENCE (data):\n")[1]
+			raw := strings.Split(model.prompts[0], projectEvidenceMarker)[1]
 			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload.Complete != knownCreation {
+			if payload.Subjects[0].Complete != knownCreation {
 				t.Fatal("uncertain body activity was declared complete")
 			}
 			want := "needs_context"
@@ -207,7 +209,7 @@ func TestClippedUnknownIssueBodyCannotBeDiscardedAsRoutine(t *testing.T) {
 	}
 }
 
-func TestGroupedReviewCardsFitWithAllLinksAndRevisions(t *testing.T) {
+func TestSubjectCandidatesFitWithAllLinksAndRevisions(t *testing.T) {
 	for _, count := range []int{12, 160} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			s, _, tools, _ := fixture(t)
@@ -232,19 +234,16 @@ func TestGroupedReviewCardsFitWithAllLinksAndRevisions(t *testing.T) {
 			if err != nil {
 				t.Fatal("valid review group failed validation", err)
 			}
-			if count == 12 && len(actions) != 1 {
+			if len(actions) != count {
 				t.Fatal("ordinary group was split", len(actions))
 			}
-			if count == 160 && len(actions) < 2 {
+			if count == 160 && len(actions) != count {
 				t.Fatal("oversized link group was not split")
 			}
 			covered := map[int64]bool{}
 			for _, action := range actions {
 				if len(action.Request.Context) > inboxCardContextLimit {
 					t.Fatal("oversized inbox context")
-				}
-				if !strings.Contains(action.Request.Context, "Additional detail omitted") {
-					t.Fatal("missing excerpt truncation disclosure")
 				}
 				for _, id := range action.EventIDs {
 					if covered[id] {
@@ -285,7 +284,9 @@ func TestBodyPointerDoesNotMakeAnOldBodyMentionCurrent(t *testing.T) {
 	}
 }
 
-func TestRefreshRestoresAnUnfilteredReviewWhenPRReopens(t *testing.T) {
+func TestRefreshReclassifiesReviewWhenPRReopens(t *testing.T) {
+	s, model, _, _ := fixture(t)
+	respondWithIntent(model, "review_request")
 	previous := event()
 	previous.Context = "Please review"
 	previous.EvidenceComplete = true
@@ -297,6 +298,12 @@ func TestRefreshRestoresAnUnfilteredReviewWhenPRReopens(t *testing.T) {
 	}
 	subject.fresh.PRFacts = &PRFacts{Available: true, State: "open"}
 	refreshIntentPolicy(subject, previous, settings.NotificationPolicy{})
+	if !subject.classificationStale {
+		t.Fatal("reopening did not invalidate the old classification")
+	}
+	if err := s.classifyProject(context.Background(), []*triageSubject{subject}, settings.NotificationPolicy{}, ""); err != nil {
+		t.Fatal(err)
+	}
 	if subject.reason != "" || len(subject.findings) != 1 || subject.findings[0].Intent != "review_request" {
 		t.Fatal("lost review when facts changed", subject)
 	}
