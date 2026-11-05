@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronsUpDown, Plus, Settings } from "lucide-react";
 import { useProjects, useWorkspaces } from "@/api/queries";
+import { getWorkspaceProject } from "@/lib/workspaceProject";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 import {
   DropdownMenu,
@@ -19,8 +20,8 @@ import { ManageWorkspacesDialog } from "@/components/sidebar/ManageWorkspacesDia
  * the active workspace's name + a chevron; the dropdown lists every workspace
  * (active marked with a ✓ via DropdownMenuCheckboxItem), then a New-workspace and
  * a Manage-workspaces entry. Picking a workspace sets it active and navigates to
- * that workspace's first project (or "/" when the workspace is empty, letting the
- * index route render the workspace-scoped empty state — plan 05).
+ * that workspace's last active project, falling back to its first project.
+ * Empty workspaces navigate to "/" for the workspace-scoped empty state.
  *
  * The whole switcher is hidden in the collapsed icon rail via
  * `group-data-[collapsible=icon]:hidden` (the same brand-lockup idiom as
@@ -45,10 +46,8 @@ export function WorkspaceSwitcher() {
 
   function handlePick(id: number) {
     setActiveWorkspaceId(id);
-    // The projects list is already name-sorted by the backend, so [0] is the
-    // first project by name (D-11). Empty workspace → index route empty state.
-    const first = (projects ?? []).filter((p) => p.workspace_id === id)[0];
-    navigate(first ? `/projects/${first.id}` : "/");
+    const project = getWorkspaceProject(id, projects ?? []);
+    navigate(project ? `/projects/${project.id}` : "/");
   }
 
   return (
