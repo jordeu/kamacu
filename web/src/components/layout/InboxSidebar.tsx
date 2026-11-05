@@ -8,6 +8,7 @@ import { useInboxFavicon } from "@/lib/useInboxFavicon";
 
 import { NotificationProcessing } from "@/components/inbox/NotificationProcessing";
 import { InboxMessage } from "@/components/inbox/InboxMessage";
+import { InboxText } from "@/components/inbox/InboxText";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 function MessageDialog({ question, onOpenChange, onResult, onRestoreFocus }: { question: FeedbackQuestion; onRestoreFocus: () => void; onOpenChange: (open: boolean) => void; onResult: (message: string) => void }) {
@@ -70,7 +71,7 @@ export function InboxSidebar() {
 
 function MessagePreview({ text }: { text: string }) {
   const id = useId();
-  const preview = useRef<HTMLParagraphElement>(null);
+  const preview = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [clipped, setClipped] = useState(false);
 
@@ -85,7 +86,7 @@ function MessagePreview({ text }: { text: string }) {
   }, [text, expanded]);
 
   return <div className="space-y-1">
-    <p ref={preview} id={id} className={`${expanded ? "" : "line-clamp-3"} whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground`}>{text}</p>
+    <div ref={preview} id={id} className={`${expanded ? "" : "line-clamp-3"} whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground`}><InboxText text={text} /></div>
     {(clipped || expanded) && <button type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded(!expanded)} className="rounded-sm text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{expanded ? "Show less" : "Show more"}</button>}
   </div>;
 }
