@@ -49,6 +49,7 @@ func (s *Service) enrichSubject(ctx context.Context, source Source, event Event)
 	event.PRFacts = nil
 	event.Evidence = nil
 	event.EvidenceComplete = false
+	event.MentionScanComplete = false
 	event.EvidenceObservedAt = time.Time{}
 	event.RelatedWork = nil
 	event.RelatedSessions = nil

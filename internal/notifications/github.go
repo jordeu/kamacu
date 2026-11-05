@@ -234,6 +234,7 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 	event.ContextWarnings = nil
 	event.Evidence = nil
 	event.EvidenceComplete = true
+	event.MentionScanComplete = true
 	event.EvidenceObservedAt = time.Now()
 	if g.Now != nil {
 		event.EvidenceObservedAt = g.Now()
@@ -268,6 +269,7 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 		for page := 0; next != ""; page++ {
 			if page >= 10 || evidenceBytes >= 96000 {
 				event.EvidenceComplete = false
+				event.MentionScanComplete = false
 				event.ContextWarnings = append(event.ContextWarnings, "Thread evidence exceeded its bounded retrieval budget; absence of a mention is unknown.")
 				break
 			}
@@ -278,6 +280,7 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 					return event, e
 				}
 				event.EvidenceComplete = false
+				event.MentionScanComplete = false
 				event.ContextWarnings = append(event.ContextWarnings, fmt.Sprintf("Could not load %s: %s. Missing context is not evidence that the notification is resolved.", currentPath, e))
 				if currentPath == path {
 					return event, nil
@@ -325,6 +328,8 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 				if updated == "" {
 					updated, _ = v["submitted_at"].(string)
 				}
+				// Scan the complete API body before clipping model evidence.
+				mentioned := textMentionsViewer(body, s.Account)
 				complete := true
 				if len(body) > 12000 {
 					body = strings.ToValidUTF8(body[:12000], "")
@@ -333,10 +338,11 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 				}
 				if evidenceBytes+len(body) > 96000 {
 					event.EvidenceComplete = false
+					event.MentionScanComplete = false
 					break
 				}
 				evidenceBytes += len(body)
-				event.Evidence = append(event.Evidence, SubjectEvidence{ID: link, URL: link, Actor: actor, Text: body, CreatedAt: created, UpdatedAt: updated, Complete: complete})
+				event.Evidence = append(event.Evidence, SubjectEvidence{MentionViewer: s.Account, ViewerMention: &mentioned, ID: link, URL: link, Actor: actor, Text: body, CreatedAt: created, UpdatedAt: updated, Complete: complete})
 			}
 			clipped, _ := json.Marshal(compactGitHub(data))
 			if prose.Len()+len(clipped) < 48000 {
