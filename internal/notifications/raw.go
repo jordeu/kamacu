@@ -15,14 +15,16 @@ var ErrNoPending = errors.New("no pending notifications to process")
 var ErrProcessing = errors.New("notifications are being processed; try again when processing finishes")
 
 type RawNotification struct {
-	Processing bool   `json:"processing,omitempty"`
-	ID         int64  `json:"id"`
-	SourceID   string `json:"source_id"`
-	SourceName string `json:"source_name"`
-	Status     string `json:"status"`
-	Revision   int64  `json:"revision"`
-	CreatedAt  int64  `json:"created_at"`
-	Event      Event  `json:"event"`
+	Processing bool               `json:"processing,omitempty"`
+	ID         int64              `json:"id"`
+	SourceID   string             `json:"source_id"`
+	SourceName string             `json:"source_name"`
+	Status     string             `json:"status"`
+	Revision   int64              `json:"revision"`
+	CreatedAt  int64              `json:"created_at"`
+	Held       bool               `json:"held"`
+	Decisions  []ActivityDecision `json:"decisions,omitempty"`
+	Event      Event              `json:"event"`
 }
 type RawPage struct {
 	Items        []RawNotification `json:"items"`
@@ -40,6 +42,7 @@ type Processing struct {
 }
 type Status struct {
 	PendingCount int         `json:"pending_count"`
+	HeldCount    int         `json:"held_count"`
 	Processing   *Processing `json:"processing"`
 }
 
@@ -51,7 +54,10 @@ func scanProcessing(row interface{ Scan(...any) error }) (p Processing, err erro
 }
 func (s *Service) Status(ctx context.Context) (Status, error) {
 	var status Status
-	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending'`).Scan(&status.PendingCount); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending' AND held=0`).Scan(&status.PendingCount); err != nil {
+		return status, err
+	}
+	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending' AND held=1`).Scan(&status.HeldCount); err != nil {
 		return status, err
 	}
 	p, err := scanProcessing(s.DB.QueryRowContext(ctx, `SELECT `+processingColumns+` FROM notification_batches ORDER BY created_at DESC,rowid DESC LIMIT 1`))
@@ -66,10 +72,10 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 }
 func (s *Service) ListRaw(ctx context.Context, status string, offset int) (RawPage, error) {
 	page := RawPage{Items: []RawNotification{}}
-	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending'`).Scan(&page.PendingCount); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending' AND held=0`).Scan(&page.PendingCount); err != nil {
 		return page, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.source_id,s.name,e.raw_status,e.raw_revision,e.created_at,e.payload,EXISTS(SELECT 1 FROM notification_batch_events m JOIN notification_batches b ON b.id=m.batch_id WHERE m.event_id=e.id AND b.status IN ('queued','running')) FROM notification_events e JOIN notification_sources s ON s.id=e.source_id WHERE e.raw_status=? ORDER BY e.id DESC LIMIT 51 OFFSET ?`, status, offset)
+	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.source_id,s.name,e.raw_status,e.raw_revision,e.created_at,e.payload,e.held,EXISTS(SELECT 1 FROM notification_batch_events m JOIN notification_batches b ON b.id=m.batch_id WHERE m.event_id=e.id AND b.status IN ('queued','running')) FROM notification_events e JOIN notification_sources s ON s.id=e.source_id WHERE e.raw_status=? AND e.held=? ORDER BY e.id DESC LIMIT 51 OFFSET ?`, map[bool]string{true: "pending", false: status}[status == "held"], status == "held", offset)
 	if err != nil {
 		return page, err
 	}
@@ -77,7 +83,7 @@ func (s *Service) ListRaw(ctx context.Context, status string, offset int) (RawPa
 	for rows.Next() {
 		var n RawNotification
 		var payload string
-		if err = rows.Scan(&n.ID, &n.SourceID, &n.SourceName, &n.Status, &n.Revision, &n.CreatedAt, &payload, &n.Processing); err != nil {
+		if err = rows.Scan(&n.ID, &n.SourceID, &n.SourceName, &n.Status, &n.Revision, &n.CreatedAt, &payload, &n.Held, &n.Processing); err != nil {
 			return page, err
 		}
 		if err = json.Unmarshal([]byte(payload), &n.Event); err != nil {
@@ -89,7 +95,18 @@ func (s *Service) ListRaw(ctx context.Context, status string, offset int) (RawPa
 		page.Items = page.Items[:50]
 		page.HasMore = true
 	}
-	return page, rows.Err()
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	rows.Close()
+	for i := range page.Items {
+		decisions, err := s.EventDecisions(ctx, page.Items[i].ID)
+		if err != nil {
+			return page, err
+		}
+		page.Items[i].Decisions = decisions
+	}
+	return page, nil
 }
 func (s *Service) SetRawStatus(ctx context.Context, id int64, status string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -104,7 +121,7 @@ func (s *Service) SetRawStatus(ctx context.Context, id int64, status string) err
 	if active > 0 {
 		return ErrProcessing
 	}
-	r, err := tx.ExecContext(ctx, `UPDATE notification_events SET raw_status=?,raw_revision=raw_revision+1 WHERE id=? AND raw_status!=?`, status, id, status)
+	r, err := tx.ExecContext(ctx, `UPDATE notification_events SET raw_status=?,raw_revision=raw_revision+1,held=0 WHERE id=? AND (raw_status!=? OR held=1)`, status, id, status)
 	if err != nil {
 		return err
 	}
@@ -136,8 +153,15 @@ func (s *Service) RequestProcessing(ctx context.Context) (Processing, error) {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Processing{}, err
 	}
+	var rulesID sql.NullString
+	if err = tx.QueryRowContext(ctx, `SELECT active_set_id FROM notification_rule_state WHERE id=1`).Scan(&rulesID); err != nil {
+		return Processing{}, err
+	}
+	if !rulesID.Valid {
+		return Processing{}, ErrNoActiveRules
+	}
 	var count int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending'`).Scan(&count); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending' AND held=0`).Scan(&count); err != nil {
 		return Processing{}, err
 	}
 	if count == 0 {
@@ -145,10 +169,10 @@ func (s *Service) RequestProcessing(ctx context.Context) (Processing, error) {
 	}
 	now := time.Now().UnixMilli()
 	p := Processing{ID: uuid.NewString(), Status: "queued", CreatedAt: now, UpdatedAt: now, NotificationCount: count}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO notification_batches(id,status,created_at,updated_at) VALUES(?,'queued',?,?)`, p.ID, now, now); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO notification_batches(id,status,created_at,updated_at,rule_set_id) VALUES(?,'queued',?,?,?)`, p.ID, now, now, rulesID.String); err != nil {
 		return p, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO notification_batch_events SELECT ?,id,raw_revision FROM notification_events WHERE raw_status='pending'`, p.ID); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO notification_batch_events SELECT ?,id,raw_revision FROM notification_events WHERE raw_status='pending' AND held=0`, p.ID); err != nil {
 		return p, err
 	}
 	if err = inbox.CaptureNotificationBatchQuestions(ctx, tx, p.ID); err != nil {
@@ -156,4 +180,42 @@ func (s *Service) RequestProcessing(ctx context.Context) (Processing, error) {
 	}
 
 	return p, tx.Commit()
+}
+
+func (s *Service) RetryHeld(ctx context.Context) (int64, error) {
+	r, err := s.DB.ExecContext(ctx, `UPDATE notification_events SET held=0,raw_revision=raw_revision+1 WHERE raw_status='pending' AND held=1 AND NOT EXISTS(SELECT 1 FROM notification_batch_events e JOIN notification_batches b ON b.id=e.batch_id WHERE e.event_id=notification_events.id AND b.status IN ('queued','running'))`)
+	if err != nil {
+		return 0, err
+	}
+	return r.RowsAffected()
+}
+
+func (s *Service) EventDecisions(ctx context.Context, id int64) ([]ActivityDecision, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT activity_id,event_ids,outcome,evaluations,facts,semantic,b.rule_set_id,r.revision FROM notification_rule_decisions d JOIN notification_batches b ON b.id=d.batch_id JOIN notification_rule_sets r ON r.id=b.rule_set_id WHERE EXISTS(SELECT 1 FROM json_each(d.event_ids) WHERE value=?) ORDER BY d.rowid DESC LIMIT 30`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ActivityDecision{}
+	for rows.Next() {
+		var d ActivityDecision
+		var ids, evals, facts, semantic string
+		if err = rows.Scan(&d.ID, &ids, &d.Outcome, &evals, &facts, &semantic, &d.RuleSetID, &d.RuleSetRevision); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(ids), &d.EventIDs); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(evals), &d.Evaluations); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(facts), &d.Facts); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(semantic), &d.Semantic); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }

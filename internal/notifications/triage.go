@@ -13,14 +13,15 @@ import (
 	"time"
 
 	"kamacu/internal/inbox"
-	"kamacu/internal/settings"
 )
 
 type intentFinding struct {
+	WorkKind    string `json:"work_kind,omitempty"`
+	Audience    string `json:"audience,omitempty"`
+	Uncertainty string `json:"uncertainty,omitempty"`
 	Intent      string `json:"intent"`
 	EvidenceID  string `json:"evidence_id"`
 	Quote       string `json:"quote"`
-	PolicyQuote string `json:"policy_quote"`
 }
 type intentResponse struct {
 	Findings []intentFinding `json:"findings"`
@@ -29,11 +30,15 @@ type intentResponse struct {
 var intentSchema = map[string]any{
 	"type": "object", "additionalProperties": false, "required": []string{"findings"},
 	"properties": map[string]any{"findings": map[string]any{"type": "array", "minItems": 1, "maxItems": 6, "items": map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"intent", "evidence_id", "quote", "policy_quote"},
-		"properties": map[string]any{"intent": map[string]any{"type": "string", "enum": []string{"review_request", "review_feedback", "direct_question", "routine", "policy_ignore", "needs_context"}}, "evidence_id": map[string]string{"type": "string"}, "quote": map[string]string{"type": "string"}, "policy_quote": map[string]string{"type": "string"}},
+		"type": "object", "additionalProperties": false, "required": []string{"intent", "evidence_id", "quote", "work_kind", "audience", "uncertainty"},
+		"properties": map[string]any{"work_kind": map[string]any{"type": "string", "enum": []string{"review", "implementation", "investigation"}}, "audience": map[string]any{"type": "string", "enum": []string{"individual", "team", "unspecified"}}, "uncertainty": map[string]string{"type": "string"}, "intent": map[string]any{"type": "string", "enum": []string{"review_request", "review_feedback", "direct_question", "routine", "needs_context"}}, "evidence_id": map[string]string{"type": "string"}, "quote": map[string]string{"type": "string"}},
 	}}}}
 
 type triageSubject struct {
+	projectID           int64
+	decisions           []ActivityDecision
+	matched             map[string][]RuleClause
+	plans               map[string]ActionPlan
 	viewer              string
 	events              []RawNotification
 	fresh               Event
@@ -97,39 +102,6 @@ func mentionStatus(events []RawNotification, e Event, viewer string) *bool {
 	return nil
 }
 
-// policyReason never suppresses direct mentions. Own activity requires an exact
-// current-comment timestamp match; the PR author alone says nothing about actor.
-func policyReason(p settings.NotificationPolicy, events []RawNotification, e Event, viewer string) string {
-	mention := mentionStatus(events, e, viewer)
-	if mention != nil && *mention {
-		return ""
-	}
-	excluded := false
-	for _, repo := range p.ExcludedRepositories {
-		excluded = excluded || strings.EqualFold(repo, e.Repository)
-	}
-	if excluded {
-		if mention == nil {
-			return "needs_context:direct_mention"
-		}
-		return "repository_policy"
-	}
-	if p.IgnoreOwnActivity && mention != nil && !*mention && viewer != "" {
-		own := len(events) > 0
-		for _, raw := range events {
-			found := false
-			for _, item := range e.Evidence {
-				found = found || (item.Current && item.Complete && item.UpdatedAt == raw.Event.Version && strings.EqualFold(item.Actor, viewer))
-			}
-			own = own && found
-		}
-		if own {
-			return "own_activity"
-		}
-	}
-	return ""
-}
-
 func decodeIntent(raw []byte, evidence []SubjectEvidence, custom string) ([]intentFinding, error) {
 	var response intentResponse
 	d := json.NewDecoder(bytes.NewReader(raw))
@@ -145,54 +117,27 @@ func decodeIntent(raw []byte, evidence []SubjectEvidence, custom string) ([]inte
 		byID[item.ID] = item.Text
 	}
 	for _, f := range response.Findings {
+		if f.WorkKind != "" && !slices.Contains([]string{"review", "implementation", "investigation"}, f.WorkKind) {
+			return nil, errors.New("invalid work kind")
+		}
+		if f.Audience != "" && !slices.Contains([]string{"individual", "team", "unspecified"}, f.Audience) {
+			return nil, errors.New("invalid audience")
+		}
+		if len(f.Uncertainty) > 1000 {
+			return nil, errors.New("uncertainty exceeds limit")
+		}
 		switch f.Intent {
-		case "review_request", "review_feedback", "direct_question", "routine", "policy_ignore", "needs_context":
+		case "review_request", "review_feedback", "direct_question", "routine", "needs_context":
 		default:
 			return nil, errors.New("unknown notification intent")
 		}
 		if strings.TrimSpace(f.Quote) == "" || len(f.Quote) > 2000 || !strings.Contains(byID[f.EvidenceID], f.Quote) {
 			return nil, errors.New("notification intent requires source-backed evidence")
 		}
-		if f.Intent == "policy_ignore" {
-			if strings.TrimSpace(f.PolicyQuote) == "" || !strings.Contains(custom, f.PolicyQuote) {
-				return nil, errors.New("policy ignore requires an exact user preference")
-			}
-		} else if f.PolicyQuote != "" {
-			return nil, errors.New("unexpected policy evidence")
-		}
 	}
 	// Keep repeated intents until project classification applies recency and
 	// policy checks to each citation, then deduplicates the resulting intents.
 	return response.Findings, nil
-}
-
-// GitHub can report a dependency review as "subscribed". Apply review-specific
-// rules again after intent classification without suppressing other findings on
-// the same subject (for example feedback after a merge).
-func applyIntentPolicy(subject *triageSubject, policy settings.NotificationPolicy) {
-	mention := mentionStatus(subject.events, subject.fresh, subject.viewer)
-	if mention != nil && *mention {
-		return
-	}
-	reason := reviewPolicyReason(policy, subject.fresh, mention)
-	if reason == "" {
-		return
-	}
-	filtered := []intentFinding{}
-	for _, finding := range subject.findings {
-		if finding.Intent != "review_request" {
-			filtered = append(filtered, finding)
-			continue
-		}
-		if strings.HasPrefix(reason, "needs_context:") {
-			finding.Intent = "needs_context"
-			filtered = append(filtered, finding)
-		}
-	}
-	if len(filtered) == 0 {
-		subject.reason = reason
-	}
-	subject.findings = filtered
 }
 
 func compactTriageFacts(f *PRFacts) any {
@@ -203,20 +148,17 @@ func compactTriageFacts(f *PRFacts) any {
 }
 
 func (s *Service) triageGroup(ctx context.Context, batchID string, events []RawNotification, plan *notificationPlan) error {
+	rules, err := s.batchRuleSet(ctx, batchID)
+	if err != nil {
+		return err
+	}
+	return s.prepareRuleGroup(ctx, events, rules, plan)
+}
+func (s *Service) prepareRuleGroup(ctx context.Context, events []RawNotification, policy RuleSet, plan *notificationPlan) error {
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	rawPolicy, err := settings.Get(s.DB, settings.KeyNotificationPolicy)
-	if err != nil {
-		return err
-	}
-	policy, err := settings.ParseNotificationPolicy(rawPolicy)
-	if err != nil {
-		return err
-	}
-	custom, err := s.notificationPrompt()
-	if err != nil {
-		return err
-	}
+	var err error
+	custom := ""
 	sources := map[string]Source{}
 	subjects := []*triageSubject{}
 	indexes := map[string]int{}
@@ -252,12 +194,13 @@ func (s *Service) triageGroup(ctx context.Context, batchID string, events []RawN
 			subject := subjects[i]
 			source := sources[subject.events[0].SourceID]
 			subject.viewer = source.Account
+			_ = s.DB.QueryRowContext(ctx, `SELECT id FROM projects WHERE lower(github_repo)=lower(?)`, subject.fresh.Repository).Scan(&subject.projectID)
 			fresh, err := s.enrichSubject(ctx, source, subject.fresh)
 			if err != nil {
 				return err
 			}
 			subject.fresh = fresh
-			subject.reason = policyReason(policy, subject.events, subject.fresh, source.Account)
+			subject.reason = preflightRules(policy, subject)
 			return nil
 		})
 	}); err != nil {
@@ -275,29 +218,12 @@ type preparedTriageGroup struct {
 	subjects []*triageSubject
 	sources  map[string]Source
 	events   []RawNotification
-	policy   settings.NotificationPolicy
+	policy   RuleSet
 	custom   string
 }
 
-func (s *Service) checkTriagePreferences(group preparedTriageGroup) error {
-	raw, err := settings.Get(s.DB, settings.KeyNotificationPolicy)
-	if err != nil {
-		return err
-	}
-	policy, err := settings.ParseNotificationPolicy(raw)
-	if err != nil {
-		return err
-	}
-	custom, err := s.notificationPrompt()
-	if err != nil {
-		return err
-	}
-	before, _ := json.Marshal(group.policy)
-	after, _ := json.Marshal(policy)
-	if string(before) != string(after) || custom != group.custom {
-		return errors.New("notification preferences changed during processing; process pending again")
-	}
-	return nil
+func (s *Service) checkTriagePreferences(ctx context.Context, group preparedTriageGroup) error {
+	return s.checkRuleSet(ctx, group.policy)
 }
 
 func (s *Service) finalizeTriage(ctx context.Context, id string, plan *notificationPlan) error {
@@ -306,7 +232,7 @@ func (s *Service) finalizeTriage(ctx context.Context, id string, plan *notificat
 	for _, group := range plan.groups {
 		subjects, sources, events, policy := group.subjects, group.sources, group.events, group.policy
 		// A settings change invalidates the whole prepared plan, just like an inbox edit.
-		if err := s.checkTriagePreferences(group); err != nil {
+		if err := s.checkTriagePreferences(ctx, group); err != nil {
 			return err
 		}
 		var err error
@@ -322,11 +248,17 @@ func (s *Service) finalizeTriage(ctx context.Context, id string, plan *notificat
 
 		if slices.ContainsFunc(subjects, func(subject *triageSubject) bool { return subject.classificationStale }) {
 			for _, subject := range subjects {
-				subject.reason = policyReason(policy, subject.events, subject.fresh, subject.viewer)
+				subject.reason = preflightRules(policy, subject)
 			}
 			if err = notificationStage(ctx, "reclassification", func() error { return s.classifyProject(ctx, subjects, policy, group.custom) }); err != nil {
 				return err
 			}
+		}
+		if err = s.evaluateActivities(ctx, subjects, policy); err != nil {
+			return err
+		}
+		if err = s.prepareActivityPlans(ctx, subjects, policy); err != nil {
+			return err
 		}
 		questions, err := s.groupQuestions(ctx, id, events)
 		if err != nil {
@@ -383,7 +315,7 @@ func (s *Service) finalizeTriage(ctx context.Context, id string, plan *notificat
 	// Model calls may take time. Also validate preferences after the last model
 	// response, before publishing any prepared group's cards.
 	for _, group := range plan.groups {
-		if err := s.checkTriagePreferences(group); err != nil {
+		if err := s.checkTriagePreferences(ctx, group); err != nil {
 			return err
 		}
 	}
@@ -399,9 +331,21 @@ var triageQuestions = map[string]string{
 	"needs_context":   "Would you like to inspect this activity before deciding?",
 }
 
-func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, questions []inbox.Question, policy settings.NotificationPolicy) (BatchDecision, error) {
+func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, questions []inbox.Question, policy RuleSet) (BatchDecision, error) {
 	decision := BatchDecision{}
 	scopes := map[string]map[string]bool{}
+	questionPlans := map[string]ActionPlan{}
+	for i := range questions {
+		var raw string
+		if err := s.DB.QueryRowContext(ctx, `SELECT plan FROM notification_card_plans WHERE question_id=?`, questions[i].ID).Scan(&raw); err != nil {
+			return decision, err
+		}
+		var plan ActionPlan
+		if err := json.Unmarshal([]byte(raw), &plan); err != nil {
+			return decision, err
+		}
+		questionPlans[questions[i].ID] = plan
+	}
 	for _, q := range questions {
 		related, err := s.Inbox.RelatedNotificationIDs(ctx, q.ID)
 		if err != nil {
@@ -424,14 +368,15 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 	// Only retire our review template when every linked subject is conclusively
 	// obsolete in this snapshot. A merged PR may still have an unrelated question.
 	for _, q := range questions {
-		if !isTriageQuestion(q, "review_request") {
+		reviewPlan := questionPlans[q.ID].WorkKind == "review"
+		if !reviewPlan && (!planHasIntent(questionPlans[q.ID], "review_request") || slices.ContainsFunc(questionPlans[q.ID].Evidence, func(e triageEvidence) bool { return e.Intent != "review_request" })) {
 			continue
 		}
 		obsolete := len(scopes[q.ID]) > 0
 		for url := range scopes[q.ID] {
 			found := false
 			for _, subject := range subjects {
-				if subjectScope(subject) == url && (subject.reason == "obsolete_review_request" || subject.reason == "draft_review_request" || subject.reason == "already_approved") {
+				if subjectScope(subject) == url && (reviewRequestStatusReason(subject.fresh) != "" || subject.reason == "obsolete_review_request" || subject.reason == "draft_review_request" || subject.reason == "already_approved") {
 					found = true
 				}
 			}
@@ -444,7 +389,7 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 	// A resolved classification replaces an earlier inspection card. Keep grouped
 	// questions if any linked subject is missing or still uncertain.
 	for _, q := range questions {
-		if !isTriageQuestion(q, "needs_context") {
+		if !planHasIntent(questionPlans[q.ID], "needs_context") {
 			continue
 		}
 		resolved := len(scopes[q.ID]) > 0
@@ -477,7 +422,7 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 		actionable := []intentFinding{}
 		if subject.reason == "" || strings.HasPrefix(subject.reason, "needs_context:") {
 			for _, f := range subject.findings {
-				if f.Intent != "routine" && f.Intent != "policy_ignore" {
+				if f.Intent != "routine" {
 					actionable = append(actionable, f)
 				}
 			}
@@ -496,17 +441,14 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 			// might represent a different action on the same PR and remain untouched.
 			duplicate := false
 			for _, q := range questions {
-				if !isTriageQuestion(q, f.Intent) {
+				if !planHasIntent(questionPlans[q.ID], f.Intent) {
 					continue
 				}
 				urls := scopes[q.ID]
 				if !urls[subjectScope(subject)] {
 					continue
 				}
-				match, scoped := hasFindingEvidence(q.Context, subject, f)
-				if !scoped && len(urls) == 1 {
-					match = f.Quote == "" || strings.Contains(q.Context, f.Quote)
-				}
+				match := slices.Contains(questionPlans[q.ID].Evidence, findingEvidence(subject, f))
 				if match {
 					duplicate = true
 					continue
@@ -521,7 +463,19 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 				continue
 			}
 
-			key := subject.fresh.URL
+			plan, err := s.activityActionPlan(ctx, subject, f, policy)
+			if err != nil {
+				return decision, err
+			}
+			key := subject.fresh.URL + ":" + plan.Workflow
+			for _, clause := range subject.matched[activityID(subject, f)] {
+				if clause.Effect == "group_project" {
+					key = fmt.Sprintf("project:%d:%s:%d", subject.projectID, plan.Workflow, plan.TaskID)
+				}
+			}
+			if plan.Workflow == "clarify" {
+				key += ":" + evidenceFingerprint(mustJSON(plan.Bindings))
+			}
 			action := grouped[key]
 			if action != nil {
 				candidate := append(append([]int64(nil), action.EventIDs...), ids...)
@@ -530,7 +484,7 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 				}
 			}
 			if action == nil {
-				action = &BatchAction{Summary: triageTitle(f.Intent) + ": " + subject.fresh.Title, Question: triageQuestions[f.Intent], Options: triageOptions(f.Intent)}
+				action = &BatchAction{Plan: plan, Summary: triageTitle(f.Intent) + ": " + subject.fresh.Title, Question: triageQuestions[f.Intent], Options: triageOptions(f.Intent)}
 				grouped[key] = action
 				order = append(order, action)
 			}
@@ -539,7 +493,25 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 					action.EventIDs = append(action.EventIDs, id)
 				}
 			}
+			for _, binding := range plan.Bindings {
+				if !slices.ContainsFunc(action.Plan.Bindings, func(b inbox.TaskLink) bool { return b.TaskID == binding.TaskID }) {
+					action.Plan.Bindings = append(action.Plan.Bindings, binding)
+				}
+			}
+			for _, target := range plan.Targets {
+				if !slices.Contains(action.Plan.Targets, target) {
+					action.Plan.Targets = append(action.Plan.Targets, target)
+				}
+			}
+			for _, instruction := range plan.Presentation {
+				if !slices.Contains(action.Plan.Presentation, instruction) {
+					action.Plan.Presentation = append(action.Plan.Presentation, instruction)
+				}
+			}
 			action.evidence = append(action.evidence, findingEvidence(subject, f))
+			if !slices.Contains(action.Plan.Activities, activityID(subject, f)) {
+				action.Plan.Activities = append(action.Plan.Activities, activityID(subject, f))
+			}
 			title := subject.fresh.SubjectTitle
 			if title == "" {
 				title = subject.fresh.Title
@@ -547,7 +519,7 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 			if len(title) > 600 {
 				title = strings.ToValidUTF8(title[:600], "") + "…"
 			}
-			action.Context += fmt.Sprintf("\n\n<!-- kamacu-triage:%s -->\n**%s**\n%s", f.Intent, title, subject.fresh.URL)
+			action.Context += fmt.Sprintf("\n\n**%s**\n%s", title, subject.fresh.URL)
 			if f.Quote != "" {
 				action.Context += "\n\nSource excerpt:\n> " + strings.ReplaceAll(f.Quote, "\n", "\n> ")
 			}
@@ -573,7 +545,7 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 	}
 	covered := map[int64]bool{}
 	for _, a := range order {
-		a.Context = withTriageEvidence(a.evidence, a.Context)
+		a.Plan.Evidence = a.evidence
 		if err := fitTriageContext(a, allowed); err != nil {
 			return decision, err
 		}
@@ -645,7 +617,8 @@ func (s *Service) reviewCoverage(ctx context.Context, subject *triageSubject) (s
 	return "No live project sessions were returned by the current lookup. Recheck before starting a review.", nil
 }
 
-func (s *Service) revalidateNotificationSubject(ctx context.Context, subject *triageSubject, sources map[string]Source, policy settings.NotificationPolicy) error {
+func (s *Service) revalidateNotificationSubject(ctx context.Context, subject *triageSubject, sources map[string]Source, policy RuleSet) error {
+	ctx = freshGitHubReadCache(ctx)
 	var err error
 	source := sources[subject.events[0].SourceID]
 	if reader, ok := s.Providers[source.Provider].(interface {
@@ -661,7 +634,7 @@ func (s *Service) revalidateNotificationSubject(ctx context.Context, subject *tr
 			if err != nil {
 				return err
 			}
-			refreshIntentPolicy(subject, previous, policy)
+			refreshIntentRules(subject, previous, policy)
 		}
 	}
 	if reader, ok := s.Providers[source.Provider].(interface {
@@ -680,8 +653,8 @@ func (s *Service) revalidateNotificationSubject(ctx context.Context, subject *tr
 			if err != nil {
 				return err
 			}
-			refreshIntentPolicy(subject, previous, policy)
+			refreshIntentRules(subject, previous, policy)
 		}
 	}
-	return nil
+	return s.refreshRoutingContext(ctx, &subject.fresh)
 }

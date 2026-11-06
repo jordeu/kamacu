@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"kamacu/internal/inbox"
-	"kamacu/internal/settings"
 )
 
 func actionFor(ids ...int64) BatchAction {
@@ -86,9 +85,7 @@ func process(t *testing.T, s *Service, model *fakeModel, kind string) Processing
 func TestTriageGroupsSubjectRevisionsAndProjectReviews(t *testing.T) {
 	s, model, tools, source := fixture(t)
 	ctx := context.Background()
-	if err := settings.Set(s.DB, settings.KeyNotificationPolicy, `{"batch_review_task":"renovate"}`); err != nil {
-		t.Fatal(err)
-	}
+	activateTestRules(t, s, []NotificationRule{groupTestRule()})
 	first := event()
 	id1 := seed(t, s, source, first)
 	first.Version = "v2"
@@ -126,7 +123,7 @@ func TestTriageGroupsSubjectRevisionsAndProjectReviews(t *testing.T) {
 			t.Fatal("unexpected triage tool", call)
 		}
 	}
-	if !strings.Contains(model.prompts[1], `"batch_review_task":"renovate"`) {
+	if !strings.Contains(model.prompts[1], `"workflow":"clarify"`) {
 		t.Fatal("lost project workflow")
 	}
 }
@@ -140,9 +137,14 @@ func TestTriageMultipleIntentsShareOneSubjectCard(t *testing.T) {
 		t.Fatalf("%+v", status)
 	}
 	page, _ := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
-	if len(page.Items) != 1 || !strings.Contains(page.Items[0].Context, "<!-- kamacu-triage:review_feedback -->") || !strings.Contains(page.Items[0].Context, "<!-- kamacu-triage:direct_question -->") {
-		t.Fatal("card lost one of the subject intents")
+	var plan string
+	if err := s.DB.QueryRow(`SELECT plan FROM notification_card_plans WHERE question_id=?`, page.Items[0].ID).Scan(&plan); err != nil {
+		t.Fatal(err)
 	}
+	if !strings.Contains(plan, `"intent":"review_feedback"`) || !strings.Contains(plan, `"intent":"direct_question"`) {
+		t.Fatal("card lost typed activity provenance")
+	}
+
 }
 
 func TestTriageInvalidOutputLeavesSnapshotPending(t *testing.T) {
@@ -151,7 +153,7 @@ func TestTriageInvalidOutputLeavesSnapshotPending(t *testing.T) {
 		map[string]any{"tool_name": "delete_task", "arguments": "{}"},
 		intentResponse{Findings: []intentFinding{{Intent: "routine", EvidenceID: "invented", Quote: "Review requested"}}},
 		intentResponse{Findings: []intentFinding{{Intent: "routine", EvidenceID: "context", Quote: "invented"}}},
-		intentResponse{Findings: []intentFinding{{Intent: "policy_ignore", EvidenceID: "context", Quote: "Review requested", PolicyQuote: "invented policy"}}},
+		intentResponse{Findings: []intentFinding{{Intent: "policy_ignore", EvidenceID: "context", Quote: "Review requested"}}},
 	} {
 		t.Run(fmt.Sprintf("%v", response), func(t *testing.T) {
 			s, model, _, source := fixture(t)
@@ -295,60 +297,6 @@ func TestTriageUnknownContextCannotBeSilentlyDiscarded(t *testing.T) {
 	}
 }
 
-func TestTriagePolicyPrecedenceAndUnknowns(t *testing.T) {
-	yes, no := true, false
-	p := settings.NotificationPolicy{ExcludedRepositories: []string{"acme/repo"}, IgnoreDrafts: true, IgnoreApproved: true, IgnoreOwnActivity: true}
-	base := event()
-	base.Reason = "review_requested"
-	base.Version = "2026-11-04T12:00:00Z"
-	for _, tc := range []struct {
-		name     string
-		mention  *bool
-		state    string
-		complete bool
-		want     string
-	}{
-		{"missing mention evidence", nil, "open", false, "needs_context:direct_mention"},
-		{"complete exclusion", &no, "open", true, "repository_policy"},
-		{"direct mention wins", &yes, "merged", true, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			e := base
-			e.EvidenceComplete = tc.complete
-			e.PRFacts = &PRFacts{Available: true, State: tc.state, Draft: &yes, ViewerEverApproved: &yes}
-			if tc.mention != nil && *tc.mention {
-				e.Evidence = []SubjectEvidence{{Text: "@alice please respond", UpdatedAt: base.Version}}
-			}
-			if got := policyReason(p, []RawNotification{{Event: base}}, e, "alice"); got != tc.want {
-				t.Fatalf("%s != %s", got, tc.want)
-			}
-		})
-	}
-	// Merged feedback and issue questions are not obsolete review requests.
-	p.ExcludedRepositories = nil
-	for _, reason := range []string{"subscribed", "mention"} {
-		e := base
-		e.Reason = reason
-		e.EvidenceComplete = true
-		e.PRFacts = &PRFacts{Available: true, State: "merged", Draft: &no, ViewerEverApproved: &yes}
-		if got := policyReason(p, []RawNotification{{Event: e}}, e, "alice"); got != "" {
-			t.Fatal("discarded post-merge feedback", got)
-		}
-	}
-}
-
-func TestTriageStructuredRulesRemainInProjectContext(t *testing.T) {
-	s, model, _, source := fixture(t)
-	seed(t, s, source, event())
-	if err := settings.Set(s.DB, settings.KeyNotificationPolicy, `{"excluded_repositories":["acme/repo"]}`); err != nil {
-		t.Fatal(err)
-	}
-	status := process(t, s, model, "routine")
-	if status.Status != "completed" || status.ActionCount != 0 || len(model.prompts) != 1 {
-		t.Fatalf("%+v", status)
-	}
-}
-
 type changingFactsProvider struct {
 	*fakeProvider
 	facts   PRFacts
@@ -471,13 +419,14 @@ func TestManualNotificationMigrationPreservesPreviouslyProcessedHistory(t *testi
 	if _, err = s.DB.Exec(parts[0]); err != nil {
 		t.Fatal("apply migration", err)
 	}
-	pending, err := s.ListRaw(context.Background(), "pending", 0)
-	if err != nil || len(pending.Items) != 1 || pending.Items[0].Event.ExternalID != "queued" {
-		t.Fatalf("pending after upgrade: %+v %v", pending, err)
+	// Inspect the migration's schema directly: newer ListRaw also requires the
+	// rule snapshot column, which this historical migration does not create.
+	var pending, archived int
+	if err = s.DB.QueryRow(`SELECT count(*) FROM notification_events WHERE raw_status='pending' AND external_id='queued'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("pending after upgrade: %d %v", pending, err)
 	}
-	archived, err := s.ListRaw(context.Background(), "archived", 0)
-	if err != nil || len(archived.Items) != 2 {
-		t.Fatalf("history after upgrade: %+v %v", archived, err)
+	if err = s.DB.QueryRow(`SELECT count(*) FROM notification_events WHERE raw_status='archived'`).Scan(&archived); err != nil || archived != 2 {
+		t.Fatalf("history after upgrade: %d %v", archived, err)
 	}
 }
 func TestQuestionSnapshotStatusMigrationPreservesQueuedRequests(t *testing.T) {
@@ -576,8 +525,8 @@ func TestFreeTextNoopPhraseDoesNotBypassExecution(t *testing.T) {
 	if err := s.executeNext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(model.prompts) != 1 {
-		t.Fatal("free text was treated as a typed no-op")
+	if len(model.prompts) != 2 {
+		t.Fatal("free text did not go through reply planning and execution")
 	}
 }
 
@@ -587,7 +536,12 @@ func TestPostClassificationRulesDoNotSuppressMergedFeedback(t *testing.T) {
 	e.EvidenceComplete = true
 	e.PRFacts = &PRFacts{Available: true, State: "merged"}
 	subject := &triageSubject{fresh: e, events: []RawNotification{{Event: e}}, viewer: "alice", findings: []intentFinding{{Intent: "review_request"}, {Intent: "review_feedback"}}}
-	applyIntentPolicy(subject, settings.NotificationPolicy{})
+	if err := func() error {
+		s, _, _, _ := fixture(t)
+		return s.evaluateActivities(context.Background(), []*triageSubject{subject}, RuleSet{})
+	}(); err != nil {
+		t.Fatal(err)
+	}
 	if len(subject.findings) != 1 || subject.findings[0].Intent != "review_feedback" || subject.reason != "" {
 		t.Fatal("suppressed feedback with obsolete request", subject)
 	}

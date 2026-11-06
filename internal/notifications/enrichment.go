@@ -15,6 +15,7 @@ import (
 // while authentication, identity, rate-limit and transport failures still abort.
 // GitHub can retain verified subject state when only an optional comment is gone.
 func (s *Service) enrichSubject(ctx context.Context, source Source, event Event) (Event, error) {
+	ctx = withGitHubReadCache(ctx)
 	provider, ok := s.Providers[source.Provider]
 	if !ok {
 		return event, errors.New("notification provider is unavailable")
@@ -31,22 +32,19 @@ func (s *Service) enrichSubject(ctx context.Context, source Source, event Event)
 					facts := reader.PRContext(callCtx, source, repo, n)
 					fresh.PRFacts = &facts
 				}
-				fresh.RelatedWork, e = store.RelatedPRWork(ctx, s.DB, repo, n)
-				if e == nil {
-					fresh.RelatedSessions, e = store.RelatedPRSessions(ctx, s.DB, repo, n)
-				}
-				if e != nil {
-					return fresh, e
-				}
 			}
 		}
-		compactWorkDecoration(&fresh, workDecorationLimit)
+		if err := s.refreshRoutingContext(ctx, &fresh); err != nil {
+			return fresh, err
+		}
 		return fresh, nil
 	}
 	if !errors.Is(err, ErrContextUnavailable) {
 		return fresh, err
 	}
 	event.PRFacts = nil
+	event.SessionRouting = nil
+	event.ReviewSessionRouting = nil
 	event.Evidence = nil
 	event.EvidenceComplete = false
 	event.MentionScanComplete = false

@@ -23,12 +23,14 @@ type Model interface {
 	GenerateValidatedJSON(context.Context, monitor.Profile, string, any, func([]byte) error) ([]byte, error)
 }
 type Service struct {
-	DB          *sql.DB
-	Inbox       *inbox.Service
-	Model       Model
-	Tools       Tools
-	SessionTask func(string) (int64, bool)
-	Providers   map[string]Provider
+	DB             *sql.DB
+	Inbox          *inbox.Service
+	Model          Model
+	Tools          Tools
+	SessionTask    func(string) (int64, bool)
+	TaskHasSession func(int64) bool
+	TaskSession    func(int64) string
+	Providers      map[string]Provider
 	// workMu serializes ticks; source CRUD has its own short lock.
 	workMu   sync.Mutex
 	sourceMu sync.Mutex
@@ -38,7 +40,7 @@ func New(db *sql.DB, box *inbox.Service, model Model, tools Tools) *Service {
 	return &Service{DB: db, Inbox: box, Model: model, Tools: tools, Providers: map[string]Provider{"github": GitHub{}}}
 }
 
-const sourceColumns = `id,provider,name,config,enabled,account,checkpoint,next_poll,last_success,last_error,created_at,(SELECT count(*) FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending'),COALESCE((SELECT last_error FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.last_error!='' ORDER BY e.id DESC LIMIT 1),'')`
+const sourceColumns = `id,provider,name,config,enabled,account,checkpoint,next_poll,last_success,last_error,created_at,(SELECT count(*) FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.held=0),COALESCE((SELECT last_error FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.last_error!='' ORDER BY e.id DESC LIMIT 1),'')`
 
 func scanSource(row interface{ Scan(...any) error }) (s Source, err error) {
 	var config string
@@ -110,6 +112,10 @@ func (s *Service) EnableSource(ctx context.Context, id string, enabled bool) err
 
 // Recover never repeats an execution whose last tool call may have taken effect.
 func (s *Service) Recover(ctx context.Context) error {
+	if _, err := s.DB.ExecContext(ctx, `UPDATE notification_rule_previews SET status='failed',error='Preview was interrupted; request another preview.' WHERE status='running'`); err != nil {
+		return err
+	}
+
 	if _, err := s.DB.ExecContext(ctx, `UPDATE notification_batches SET status='failed',error='Processing was interrupted. Notifications remain pending; start processing again.',updated_at=? WHERE status='running'`, time.Now().UnixMilli()); err != nil {
 		return err
 	}
@@ -137,6 +143,12 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) Tick(ctx context.Context) error {
 	s.workMu.Lock()
 	defer s.workMu.Unlock()
+	if err := s.processRulePreview(ctx); err != nil {
+		return err
+	}
+	if err := s.compileNextRuleSet(ctx); err != nil {
+		return err
+	}
 	// Reply execution has priority over collection; terminal monitoring has its
 	// own workers and is never blocked by this service's locks or inference.
 	if err := s.executeNext(ctx); err != nil {
@@ -225,9 +237,7 @@ func (s *Service) ingest(ctx context.Context, source Source, batch Batch) error 
 	}
 	return tx.Commit()
 }
-func (s *Service) notificationPrompt() (string, error) {
-	return settings.Get(s.DB, settings.KeyNotificationPrompt)
-}
+
 func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
 	if len(prompt) > 192000 {
 		return Step{}, errors.New("notification context exceeds inference limit; narrow the request")

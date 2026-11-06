@@ -31,6 +31,8 @@ type Source struct {
 	CreatedAt       int64           `json:"created_at"`
 }
 type Event struct {
+	ReviewSessionRouting *RuleFact `json:"review_session_routing,omitempty"`
+	SessionRouting       *RuleFact `json:"session_routing,omitempty"`
 	// MentionScanComplete excludes missing pages/resources, but not prose clipping.
 	MentionScanComplete  bool                `json:"mention_scan_complete,omitempty"`
 	SubjectUpdatedAt     string              `json:"subject_updated_at,omitempty"`

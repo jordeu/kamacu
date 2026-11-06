@@ -143,6 +143,12 @@ type concurrentNotificationModel struct {
 }
 
 func (m *concurrentNotificationModel) GenerateValidatedJSON(ctx context.Context, _ monitor.Profile, prompt string, _ any, validate func([]byte) error) ([]byte, error) {
+	if raw, ok, err := fixtureOwnershipResponse(prompt); ok {
+		if err == nil {
+			err = validate(raw)
+		}
+		return raw, err
+	}
 	if strings.Contains(prompt, projectEvidenceMarker) {
 		if m.entered != nil {
 			select {
@@ -429,6 +435,12 @@ type sourcePauseNotificationModel struct {
 }
 
 func (m *sourcePauseNotificationModel) GenerateValidatedJSON(ctx context.Context, _ monitor.Profile, prompt string, _ any, validate func([]byte) error) ([]byte, error) {
+	if raw, ok, err := fixtureOwnershipResponse(prompt); ok {
+		if err == nil {
+			err = validate(raw)
+		}
+		return raw, err
+	}
 	if strings.Contains(prompt, projectEvidenceMarker) {
 		raw, err := marshalFixtureResponse(prompt, intentResponse{Findings: []intentFinding{{Intent: "direct_question", EvidenceID: "context", Quote: "Review requested"}}})
 		if err == nil {

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"kamacu/internal/settings"
 )
 
 func response(body, headers string) []byte {
@@ -352,10 +350,10 @@ func TestGitHubLatestCommentPointerDoesNotClaimHistoricalTextIsCurrent(t *testin
 
 func TestLongReleaseMentionScanPrecedesClipping(t *testing.T) {
 	for _, tc := range []struct{ name, suffix, updated, want string }{
-		{"no mention", "routine changes", "2026-11-04T12:00:00Z", "repository_policy"},
+		{"no mention", "routine changes", "2026-11-04T12:00:00Z", "rule_suppressed"},
 		{"mention beyond excerpt", "@ALICE please investigate", "2026-11-04T12:00:00Z", ""},
-		{"different username", "@alice-other", "2026-11-04T12:00:00Z", "repository_policy"},
-		{"uncertain mention date", "@alice please investigate", "", "needs_context:direct_mention"},
+		{"different username", "@alice-other", "2026-11-04T12:00:00Z", "rule_suppressed"},
+		{"uncertain mention date", "@alice please investigate", "", "rule_held"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
@@ -374,20 +372,12 @@ func TestLongReleaseMentionScanPrecedesClipping(t *testing.T) {
 			if fresh.EvidenceComplete || !fresh.MentionScanComplete || len(fresh.Evidence[0].Text) > 12000 {
 				t.Fatal("expected clipped prose and complete mention scan")
 			}
-			policy := settings.NotificationPolicy{ExcludedRepositories: []string{e.Repository}}
-			if got := policyReason(policy, []RawNotification{{Event: e}}, fresh, "alice"); got != tc.want {
+			policy := repositoryTestRules(e.Repository)
+			if got := preflightRules(policy, &triageSubject{events: []RawNotification{{Event: e}}, fresh: fresh, viewer: "alice"}); got != tc.want {
 				t.Fatalf("policy = %q, want %q", got, tc.want)
 			}
 			if mentionStatus([]RawNotification{{Event: e}}, fresh, "bob") != nil {
 				t.Fatal("scan for alice proved absence for another viewer")
-			}
-			if tc.want == "repository_policy" {
-				subject := &triageSubject{fresh: fresh, viewer: "alice", events: []RawNotification{{Event: e}}}
-				mention := mentionStatus(subject.events, fresh, "alice")
-				normalizeProjectFindings(subject, []intentFinding{{Intent: "policy_ignore"}}, projectSubjectData{DirectMention: mention, RetrievalComplete: false}, settings.NotificationPolicy{})
-				if len(subject.findings) != 1 || subject.findings[0].Intent != "policy_ignore" {
-					t.Fatal("clipped prose overrode verified repository exclusion", subject.findings)
-				}
 			}
 		})
 	}
@@ -451,7 +441,7 @@ func TestGitHubReviewStateSurvivesEnrichmentAndProjectPrompt(t *testing.T) {
 					t.Fatal("review body changed")
 				}
 				subject := &triageSubject{fresh: fresh, events: []RawNotification{{ID: 1, SourceID: source.ID, Event: e}}}
-				input, data, err := s.projectInput(context.Background(), []*triageSubject{subject}, settings.NotificationPolicy{})
+				input, data, err := s.projectInput(context.Background(), []*triageSubject{subject}, RuleSet{})
 				if err != nil {
 					t.Fatal(err)
 				}

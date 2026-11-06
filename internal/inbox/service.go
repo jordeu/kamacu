@@ -43,39 +43,49 @@ type Option struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
+type TaskLink struct {
+	TaskID    int64  `json:"task_id"`
+	ProjectID int64  `json:"project_id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	Role      string `json:"role"`
+	Source    string `json:"source"`
+	Evidence  string `json:"evidence"`
+}
 type Question struct {
-	NotificationID       int64    `json:"notification_id,omitempty"`
-	SourceName           string   `json:"source_name,omitempty"`
-	SourceURL            string   `json:"source_url,omitempty"`
-	ExecutionResult      string   `json:"execution_result,omitempty"`
-	CompletionTaskStatus string   `json:"completion_task_status,omitempty"`
-	Origin               string   `json:"origin"`
-	Hidden               bool     `json:"hidden"`
-	DeliveryMode         string   `json:"delivery_mode"`
-	DeliveryStatus       string   `json:"delivery_status"`
-	EvidenceRevision     uint64   `json:"evidence_revision"`
-	InputGeneration      uint64   `json:"input_generation"`
-	Kind                 string   `json:"kind"`
-	ID                   string   `json:"id"`
-	TaskID               int64    `json:"task_id"`
-	ProjectID            int64    `json:"project_id"`
-	TaskTitle            string   `json:"task_title"`
-	ProjectName          string   `json:"project_name"`
-	SessionID            string   `json:"session_id"`
-	Abstract             string   `json:"abstract"`
-	Summary              string   `json:"summary"`
-	Context              string   `json:"context"`
-	Question             string   `json:"question"`
-	Options              []Option `json:"options"`
-	Status               string   `json:"status"`
-	Reason               string   `json:"reason"`
-	Answer               string   `json:"answer"`
-	AnswerSource         string   `json:"answer_source"`
-	Revision             int64    `json:"revision"`
-	CreatedAt            int64    `json:"created_at"`
-	UpdatedAt            int64    `json:"updated_at"`
-	HeartbeatAt          int64    `json:"heartbeat_at"`
-	AcknowledgedAt       *int64   `json:"acknowledged_at"`
+	LinkedTasks          []TaskLink `json:"linked_tasks,omitempty"`
+	NotificationID       int64      `json:"notification_id,omitempty"`
+	SourceName           string     `json:"source_name,omitempty"`
+	SourceURL            string     `json:"source_url,omitempty"`
+	ExecutionResult      string     `json:"execution_result,omitempty"`
+	CompletionTaskStatus string     `json:"completion_task_status,omitempty"`
+	Origin               string     `json:"origin"`
+	Hidden               bool       `json:"hidden"`
+	DeliveryMode         string     `json:"delivery_mode"`
+	DeliveryStatus       string     `json:"delivery_status"`
+	EvidenceRevision     uint64     `json:"evidence_revision"`
+	InputGeneration      uint64     `json:"input_generation"`
+	Kind                 string     `json:"kind"`
+	ID                   string     `json:"id"`
+	TaskID               int64      `json:"task_id"`
+	ProjectID            int64      `json:"project_id"`
+	TaskTitle            string     `json:"task_title"`
+	ProjectName          string     `json:"project_name"`
+	SessionID            string     `json:"session_id"`
+	Abstract             string     `json:"abstract"`
+	Summary              string     `json:"summary"`
+	Context              string     `json:"context"`
+	Question             string     `json:"question"`
+	Options              []Option   `json:"options"`
+	Status               string     `json:"status"`
+	Reason               string     `json:"reason"`
+	Answer               string     `json:"answer"`
+	AnswerSource         string     `json:"answer_source"`
+	Revision             int64      `json:"revision"`
+	CreatedAt            int64      `json:"created_at"`
+	UpdatedAt            int64      `json:"updated_at"`
+	HeartbeatAt          int64      `json:"heartbeat_at"`
+	AcknowledgedAt       *int64     `json:"acknowledged_at"`
 }
 type Create struct {
 	completionTaskStatus              string
@@ -143,16 +153,19 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status,COALESCE(q.notification_id,0),q.source_name,q.source_url,q.execution_result FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status,COALESCE(q.notification_id,0),q.source_name,q.source_url,q.execution_result,COALESCE((SELECT json_group_array(json_object('task_id',lt.id,'project_id',lt.project_id,'title',lt.title,'status',lt.status,'role',link.role,'source',link.source,'evidence',link.evidence)) FROM notification_task_links link JOIN tasks lt ON lt.id=link.task_id WHERE link.question_id=q.id),'[]') FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
-	var opts string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus, &q.NotificationID, &q.SourceName, &q.SourceURL, &q.ExecutionResult)
+	var opts, links string
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus, &q.NotificationID, &q.SourceName, &q.SourceURL, &q.ExecutionResult, &links)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
 	if err != nil {
+		return q, err
+	}
+	if err = json.Unmarshal([]byte(links), &q.LinkedTasks); err != nil {
 		return q, err
 	}
 	err = json.Unmarshal([]byte(opts), &q.Options)

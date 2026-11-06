@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"kamacu/internal/monitor"
-	"kamacu/internal/settings"
 )
 
 type simulationInference struct {
@@ -39,10 +38,10 @@ func TestNotificationBatchSimulation(t *testing.T) {
 		t.Skip("set KAMACU_BATCH_SIMULATION_INPUT, OUTPUT and MODEL for isolated batch simulation")
 	}
 	var snapshot struct {
-		BatchID     string                      `json:"batch_id"`
-		Preferences string                      `json:"preferences"`
-		Policy      settings.NotificationPolicy `json:"policy"`
-		Limitations []string                    `json:"limitations"`
+		BatchID     string   `json:"batch_id"`
+		Preferences string   `json:"preferences"`
+		Policy      RuleSet  `json:"policy"`
+		Limitations []string `json:"limitations"`
 		Subjects    []struct {
 			Viewer string            `json:"viewer"`
 			Events []RawNotification `json:"events"`
@@ -72,7 +71,7 @@ func TestNotificationBatchSimulation(t *testing.T) {
 		subject := &triageSubject{viewer: item.Viewer, events: item.Events, fresh: item.Fresh}
 		notifications += len(item.Events)
 		t.Logf("classifying %s (%d notifications)", item.Fresh.URL, len(item.Events))
-		subject.reason = policyReason(policy, subject.events, subject.fresh, subject.viewer)
+		subject.reason = preflightRules(policy, subject)
 		subjects = append(subjects, subject)
 	}
 	allEvents := []RawNotification{}
@@ -227,14 +226,14 @@ func TestNotificationCardTraceReplay(t *testing.T) {
 	}
 	e.Repository = strings.Join(parts[3:5], "/")
 	subject := &triageSubject{fresh: e, viewer: e.PRFacts.Viewer, events: []RawNotification{{ID: 1, Event: e}}}
-	if err := s.classifyProject(context.Background(), []*triageSubject{subject}, settings.NotificationPolicy{}, preferences); err != nil {
+	if err := s.classifyProject(context.Background(), []*triageSubject{subject}, RuleSet{}, preferences); err != nil {
 		t.Fatal(err)
 	}
-	decision, err := s.renderTriage(context.Background(), []*triageSubject{subject}, nil, settings.NotificationPolicy{})
+	decision, err := s.renderTriage(context.Background(), []*triageSubject{subject}, nil, RuleSet{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.draftProjectCards(context.Background(), &decision, []*triageSubject{subject}, settings.NotificationPolicy{}, preferences); err != nil {
+	if err := s.draftProjectCards(context.Background(), &decision, []*triageSubject{subject}, RuleSet{}, preferences); err != nil {
 		t.Fatal(err)
 	}
 	result, _ := json.MarshalIndent(map[string]any{"findings": subject.findings, "decision": decision}, "", "  ")

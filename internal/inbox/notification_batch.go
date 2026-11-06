@@ -11,20 +11,31 @@ import (
 )
 
 type NotificationBatchAction struct {
+	Links      []TaskLink
 	EventIDs   []int64
 	SourceName string
 	SourceURL  string
 	Request    Create
+	Plan       string
 }
 type NotificationQuestionRef struct {
 	ID       string `json:"id"`
 	Revision int64  `json:"revision"`
 }
 
+type NotificationDecision struct {
+	Semantic    string
+	ActivityID  string
+	EventIDs    string
+	Outcome     string
+	Evaluations string
+	Facts       string
+}
+
 // ApplyNotificationBatch publishes one independent card per action, records its
 // full provenance, supersedes only unchanged questions, and archives the exact
 // raw snapshot in the same transaction as marking the run complete.
-func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, actions []NotificationBatchAction, supersede []NotificationQuestionRef) error {
+func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, actions []NotificationBatchAction, supersede []NotificationQuestionRef, decisions ...NotificationDecision) error {
 	for i := range actions {
 		actions[i].Request.Key = fmt.Sprintf("batch:%s:%d", batchID, i)
 		if err := validate(actions[i].Request); err != nil {
@@ -58,6 +69,18 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 	if err = checkNotificationBatchQuestions(ctx, tx, batchID); err != nil {
 		return err
 	}
+	var captured, active sql.NullString
+	if err = tx.QueryRowContext(ctx, `SELECT rule_set_id,(SELECT active_set_id FROM notification_rule_state WHERE id=1) FROM notification_batches WHERE id=?`, batchID).Scan(&captured, &active); err != nil {
+		return err
+	}
+	if !captured.Valid || !active.Valid || captured.String != active.String {
+		return ErrConflict
+	}
+	for _, d := range decisions {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO notification_rule_decisions(batch_id,activity_id,event_ids,outcome,evaluations,facts,semantic) VALUES(?,?,?,?,?,?,?)`, batchID, d.ActivityID, d.EventIDs, d.Outcome, d.Evaluations, d.Facts, d.Semantic); err != nil {
+			return err
+		}
+	}
 	now := s.now().UnixMilli()
 	for _, ref := range supersede {
 		var revision int64
@@ -78,9 +101,13 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET raw_status='archived',raw_revision=raw_revision+1,state='ignored',last_error='' WHERE id IN (SELECT event_id FROM notification_batch_events WHERE batch_id=?)`, batchID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET held=EXISTS(SELECT 1 FROM notification_rule_decisions d,json_each(d.event_ids) j WHERE d.batch_id=? AND d.outcome='held' AND j.value=notification_events.id),raw_revision=raw_revision+1,last_error='' WHERE id IN (SELECT event_id FROM notification_batch_events WHERE batch_id=?)`, batchID, batchID); err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET raw_status=CASE WHEN held=1 THEN 'pending' ELSE 'archived' END,state=CASE WHEN held=1 THEN 'queued' ELSE 'ignored' END WHERE id IN (SELECT event_id FROM notification_batch_events WHERE batch_id=?)`, batchID); err != nil {
+		return err
+	}
+
 	for _, a := range actions {
 		if len(a.EventIDs) == 0 {
 			return ErrInvalid
@@ -93,6 +120,17 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 		opts, _ := json.Marshal(c.Options)
 		if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?)`, id, "notification:"+id, c.Key, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, a.EventIDs[0], a.SourceName, a.SourceURL, id); err != nil {
 			return err
+		}
+		if a.Plan == "" {
+			return ErrInvalid
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO notification_card_plans(question_id,rule_set_id,plan) VALUES(?,?,?)`, id, captured.String, a.Plan); err != nil {
+			return err
+		}
+		for _, link := range a.Links {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO notification_task_links(question_id,task_id,role,source,evidence) VALUES(?,?,?,?,?) ON CONFLICT(question_id,task_id) DO NOTHING`, id, link.TaskID, link.Role, link.Source, link.Evidence); err != nil {
+				return err
+			}
 		}
 		for _, eventID := range a.EventIDs {
 			var member int
@@ -180,6 +218,14 @@ func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, 
 	opts, _ := json.Marshal(c.Options)
 	before := func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO notification_question_events(question_id,event_id) SELECT ?,event_id FROM notification_question_events WHERE question_id=?`, id, previous.ID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO notification_card_plans(question_id,rule_set_id,plan) SELECT ?,rule_set_id,COALESCE(NULLIF((SELECT plan FROM notification_runs WHERE id=p.question_id),'{}'),p.plan) FROM notification_card_plans p WHERE question_id=?`, id, previous.ID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO notification_task_links(question_id,task_id,role,source,evidence) SELECT ?,task_id,role,source,evidence FROM notification_task_links WHERE question_id=?`, id, previous.ID)
 		return err
 	}
 	// Provenance references the newly inserted question, so copy it after insert.

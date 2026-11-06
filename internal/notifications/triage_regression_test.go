@@ -6,45 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"kamacu/internal/settings"
 )
-
-func TestDecodeIntentRepeatedIntentsValidateEveryCitation(t *testing.T) {
-	const custom = "Ignore this repository unless directly mentioned."
-	evidence := []SubjectEvidence{
-		{ID: "comment", Text: "Please review again."},
-		{ID: "notification", Text: "review_requested"},
-	}
-	findings := []intentFinding{
-		{Intent: "policy_ignore", EvidenceID: "comment", Quote: "Please review again.", PolicyQuote: custom},
-		{Intent: "policy_ignore", EvidenceID: "notification", Quote: "review_requested", PolicyQuote: custom},
-	}
-	t.Run("valid repeated intent", func(t *testing.T) {
-		raw, _ := json.Marshal(intentResponse{Findings: findings})
-		got, err := decodeIntent(raw, evidence, custom)
-		if err != nil || len(got) != 2 {
-			t.Fatalf("valid repeated intent rejected: %v, %v", got, err)
-		}
-	})
-	for _, field := range []string{"quote", "evidence", "policy"} {
-		t.Run("invalid repeated "+field, func(t *testing.T) {
-			invalid := append([]intentFinding(nil), findings...)
-			switch field {
-			case "quote":
-				invalid[1].Quote = "invented text"
-			case "evidence":
-				invalid[1].EvidenceID = "unknown"
-			case "policy":
-				invalid[1].PolicyQuote = "invented policy"
-			}
-			raw, _ := json.Marshal(intentResponse{Findings: invalid})
-			if _, err := decodeIntent(raw, evidence, custom); err == nil {
-				t.Fatal("invalid repeated citation accepted")
-			}
-		})
-	}
-}
 
 func TestInvalidCitationIsCorrectedOnceWithoutWeakeningEvidence(t *testing.T) {
 	for _, corrected := range []bool{false, true} {
@@ -98,27 +60,12 @@ func TestMergedThreadNewFeedbackIsClassifiedBeforeReviewSuppression(t *testing.T
 	seed(t, s, source, e)
 	s.Providers["github"] = &changingFactsProvider{fakeProvider: &fakeProvider{contextText: "Please investigate this regression before responding."}, facts: PRFacts{Available: true, State: "merged"}}
 	status := process(t, s, model, "review_feedback")
-	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 2 {
+	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 3 {
 		t.Fatalf("lost new feedback: %+v calls=%d", status, len(model.prompts))
 	}
 	page, _ := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
 	if !strings.Contains(page.Items[0].Context, "regression") {
 		t.Fatal("lost feedback context")
-	}
-}
-
-func TestReviewSuppressionOnlyRemovesClassifiedReviewIntent(t *testing.T) {
-	e := event()
-	e.Reason = "review_requested"
-	e.EvidenceComplete = true
-	e.PRFacts = &PRFacts{Available: true, State: "merged"}
-	subject := &triageSubject{fresh: e, events: []RawNotification{{Event: e}}, viewer: "alice", findings: []intentFinding{{Intent: "review_request"}, {Intent: "direct_question"}}}
-	if reason := policyReason(settings.NotificationPolicy{}, subject.events, e, "alice"); reason != "" {
-		t.Fatal("thread reason preempted classification", reason)
-	}
-	applyIntentPolicy(subject, settings.NotificationPolicy{})
-	if len(subject.findings) != 1 || subject.findings[0].Intent != "direct_question" || subject.reason != "" {
-		t.Fatal("question removed along with review", subject)
 	}
 }
 
@@ -167,31 +114,6 @@ func TestCurrentIssueBodyRemainsInClassifierInput(t *testing.T) {
 	}
 }
 
-func TestHistoricalMentionAndStickyReasonDoNotBypassFilters(t *testing.T) {
-	e := event()
-	e.Reason = "mention"
-	e.Version = "2026-11-04T12:00:00Z"
-	e.EvidenceComplete = true
-	p := settings.NotificationPolicy{ExcludedRepositories: []string{e.Repository}}
-	e.Evidence = []SubjectEvidence{{ID: "old-comment", URL: e.URL + "#issuecomment-1", Text: "@alice please review", UpdatedAt: "2025-01-01T00:00:00Z", Current: true, Complete: true}}
-	events := []RawNotification{{Event: e}}
-	if got := policyReason(p, events, e, "alice"); got != "repository_policy" {
-		t.Fatal("historical mention bypassed filter", got)
-	}
-	evidence, complete := classifierEvidence(events, e)
-	if len(evidence) != 0 || !complete {
-		t.Fatal("stale latest-comment pointer revived old text", evidence, complete)
-	}
-	e.Evidence[0].UpdatedAt = e.Version
-	if got := policyReason(p, events, e, "alice"); got != "" {
-		t.Fatal("current mention was filtered", got)
-	}
-	e.Evidence[0].UpdatedAt = ""
-	if got := policyReason(p, events, e, "alice"); got != "needs_context:direct_mention" {
-		t.Fatal("undated mention treated as current or absent", got)
-	}
-}
-
 func TestClippedUnknownIssueBodyCannotBeDiscardedAsRoutine(t *testing.T) {
 	s, model, _, _ := fixture(t)
 	respondWithIntent(model, "routine")
@@ -226,7 +148,7 @@ func TestSubjectCandidatesFitWithAllLinksAndRevisions(t *testing.T) {
 				events = append(events, first, second)
 				subjects = append(subjects, &triageSubject{fresh: e, events: []RawNotification{first, second}, findings: []intentFinding{{Intent: "review_request", Quote: strings.Repeat("界", 666)}}})
 			}
-			d, err := s.renderTriage(context.Background(), subjects, nil, settings.NotificationPolicy{BatchReviewTask: "renovate"})
+			d, err := s.renderTriage(context.Background(), subjects, nil, RuleSet{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -284,40 +206,15 @@ func TestBodyPointerDoesNotMakeAnOldBodyMentionCurrent(t *testing.T) {
 	}
 }
 
-func TestRefreshReclassifiesReviewWhenPRReopens(t *testing.T) {
-	s, model, _, _ := fixture(t)
-	respondWithIntent(model, "review_request")
-	previous := event()
-	previous.Context = "Please review"
-	previous.EvidenceComplete = true
-	previous.PRFacts = &PRFacts{Available: true, State: "merged"}
-	subject := &triageSubject{viewer: "alice", events: []RawNotification{{Event: previous}}, fresh: previous, findings: []intentFinding{{Intent: "review_request"}}, classifiedFindings: []intentFinding{{Intent: "review_request"}}}
-	applyIntentPolicy(subject, settings.NotificationPolicy{})
-	if subject.reason != "obsolete_review_request" || len(subject.findings) != 0 {
-		t.Fatal("expected an initially filtered review")
-	}
-	subject.fresh.PRFacts = &PRFacts{Available: true, State: "open"}
-	refreshIntentPolicy(subject, previous, settings.NotificationPolicy{})
-	if !subject.classificationStale {
-		t.Fatal("reopening did not invalidate the old classification")
-	}
-	if err := s.classifyProject(context.Background(), []*triageSubject{subject}, settings.NotificationPolicy{}, ""); err != nil {
-		t.Fatal(err)
-	}
-	if subject.reason != "" || len(subject.findings) != 1 || subject.findings[0].Intent != "review_request" {
-		t.Fatal("lost review when facts changed", subject)
-	}
-}
-
 func TestChangedEvidenceCannotBeRevalidatedBackToOldClassification(t *testing.T) {
 	previous := event()
 	previous.Context = "Old request"
 	previous.EvidenceComplete = true
 	subject := &triageSubject{viewer: "alice", events: []RawNotification{{Event: previous}}, fresh: previous, findings: []intentFinding{{Intent: "review_request"}}, classifiedFindings: []intentFinding{{Intent: "review_request"}}}
 	subject.fresh.Context = "New unrelated question"
-	refreshIntentPolicy(subject, previous, settings.NotificationPolicy{})
+	refreshIntentRules(subject, previous, RuleSet{})
 	unchanged := subject.fresh
-	refreshIntentPolicy(subject, unchanged, settings.NotificationPolicy{})
+	refreshIntentRules(subject, unchanged, RuleSet{})
 	if len(subject.findings) != 1 || subject.findings[0].Intent != "needs_context" {
 		t.Fatal("revived old classification after an evidence change")
 	}

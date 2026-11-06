@@ -66,6 +66,20 @@ func (e *GitHubHTTPError) Unwrap() error {
 }
 
 func (g GitHub) api(ctx context.Context, host, path string) (data []byte, headers http.Header, err error) {
+	if err = ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	cache, _ := ctx.Value(githubReadCacheKey{}).(*githubReadCache)
+	key := host + "/" + strings.TrimPrefix(path, "/")
+	cacheable := strings.HasPrefix(strings.TrimPrefix(path, "/"), "repos/")
+	if cache != nil && cacheable {
+		cache.Lock()
+		v, ok := cache.reads[key]
+		cache.Unlock()
+		if ok {
+			return bytes.Clone(v.data), v.headers.Clone(), nil
+		}
+	}
 	err = notificationStage(ctx, "github_request", func() error {
 		if run, ok := ctx.Value(notificationRunKey{}).(*notificationRun); ok {
 			release, err := acquireNotificationSlot(ctx, run.github)
@@ -78,6 +92,14 @@ func (g GitHub) api(ctx context.Context, host, path string) (data []byte, header
 		data, headers, requestErr = g.apiRequest(ctx, host, path)
 		return requestErr
 	})
+	if err == nil && cache != nil && cacheable {
+		cache.Lock()
+		if _, exists := cache.reads[key]; !exists && cache.bytes+len(data) <= 8<<20 && len(cache.reads) < 64 {
+			cache.reads[key] = githubReadResult{data: bytes.Clone(data), headers: headers.Clone()}
+			cache.bytes += len(data)
+		}
+		cache.Unlock()
+	}
 	return data, headers, err
 }
 

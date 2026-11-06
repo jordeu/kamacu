@@ -3,8 +3,8 @@ import { useAddNotificationSource, useEnableNotificationSource, useNotificationS
 import type { Settings } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { NotificationPreferences } from "./NotificationPreferences";
-import { SettingsField } from "./SettingsField";
+import { NotificationRules } from "./NotificationRules";
+
 
 export function NotificationsSection({ settings }: { settings: Settings }) {
   const sources = useNotificationSources();
@@ -33,7 +33,6 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
       <Button type="submit" variant="outline" disabled={add.isPending || !name.trim() || !githubEnabled}>{add.isPending ? "Adding…" : "Add GitHub source"}</Button>
     </form>}
     {(add.isError || enable.isError || remove.isError) && <p role="alert" className="text-sm text-destructive">{add.error?.message || enable.error?.message || remove.error?.message}</p>}
-    {settings.notification_policy && <NotificationPreferences entry={settings.notification_policy} />}
-    {settings.notification_system_prompt && <SettingsField settingKey="notification_system_prompt" label="Notification instructions" entry={settings.notification_system_prompt} control="textarea" help="Additional relevance instructions for classification and replies. Structured preferences above apply first. Work starts only after your inbox reply." />}
+    <NotificationRules />
   </section>;
 }

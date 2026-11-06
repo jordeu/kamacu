@@ -6,8 +6,6 @@ import (
 	"errors"
 	"io"
 	"strings"
-
-	"kamacu/internal/inbox"
 )
 
 type triageDraft struct {
@@ -44,16 +42,4 @@ func decodeTriageDraft(raw []byte) (triageDraft, error) {
 		seen[option] = true
 	}
 	return draft, nil
-}
-
-func isTriageQuestion(q inbox.Question, intent string) bool {
-	if records, _, present := readTriageEvidence(q.Context); present {
-		for _, record := range records {
-			if record.Intent == intent {
-				return true
-			}
-		}
-		return false
-	}
-	return q.Question == triageQuestions[intent] || strings.Contains(q.Context, "<!-- kamacu-triage:"+intent+" -->")
 }

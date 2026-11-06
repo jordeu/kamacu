@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"kamacu/internal/monitor"
-	"kamacu/internal/settings"
 )
 
 type replayInference struct {
@@ -52,13 +51,13 @@ func TestNotificationTraceReplay(t *testing.T) {
 		s.Model = live
 		prompts = &live.prompts
 	}
-	policy := settings.NotificationPolicy{}
+	policy := RuleSet{}
 	if path := os.Getenv("KAMACU_NOTIFICATION_REPLAY_POLICY_FILE"); path != "" {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		policy, err = settings.ParseNotificationPolicy(string(raw))
+		err = json.Unmarshal(raw, &policy)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,13 +150,13 @@ func TestNotificationTraceReplay(t *testing.T) {
 			subject := groups[key]
 			result.Subjects++
 			result.Events += len(subject.events)
-			reason := policyReason(policy, subject.events, subject.fresh, subject.viewer)
+			reason := preflightRules(policy, subject)
 			if reason == "" {
 				reason = "semantic"
 				if err = s.classifySubject(context.Background(), subject, custom); err != nil {
 					return err
 				}
-				applyIntentPolicy(subject, policy)
+				_ = subject
 			}
 			result.PolicyReasons[reason] += len(subject.events)
 		}

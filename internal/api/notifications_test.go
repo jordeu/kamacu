@@ -145,6 +145,16 @@ func TestRawNotificationRoutesAndManualProcessingRequest(t *testing.T) {
 	if w = call("PATCH", path, `{"status":"processed"}`); w.Code != 400 {
 		t.Fatal("accepted third raw state")
 	}
+	draft, err := service.SaveRuleDraft(context.Background(), 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE notification_rule_sets SET status='ready' WHERE id=?`, draft.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ActivateRules(context.Background(), draft.ID); err != nil {
+		t.Fatal(err)
+	}
 	w = call("POST", "/api/notifications/process", "")
 	if w.Code != 202 {
 		t.Fatal(w.Body.String())
