@@ -82,6 +82,8 @@ type Batch struct {
 	Checkpoint string
 	PollAfter  time.Duration
 }
+
+// Provider read operations can run concurrently for independent subjects.
 type Provider interface {
 	Validate(json.RawMessage) error
 	CheckIdentity(context.Context, Source) error

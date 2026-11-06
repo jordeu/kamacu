@@ -85,9 +85,10 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	groupCtx, finishGroup := context.WithCancel(ctx)
 	defer finishGroup()
 	ctx = diagnostics.WithGroup(groupCtx, diagnostics.Group{Kind: "batch", ID: id, StartedAt: start})
+	ctx = withNotificationRun(ctx, id)
 	slog.Debug("notification batch started", "batch", id)
 	defer func() {
-		slog.Debug("notification batch finished", "batch", id, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)
+		slog.Info("notification batch finished", "batch", id, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)
 	}()
 
 	events, err := s.batchEvents(ctx, id)
@@ -105,13 +106,57 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	if err != nil {
 		return err
 	}
+	plans := make([]notificationPlan, len(groups))
+	if err = parallelNotifications(ctx, len(groups), notificationProjectConcurrency, func(ctx context.Context, i int) error {
+		ctx = context.WithValue(ctx, notificationProjectKey{}, groups[i][0].Event.Repository)
+		return notificationStage(ctx, "project_prepare", func() error { return s.triageGroup(ctx, id, groups[i], &plans[i]) })
+	}); err != nil {
+		return err
+	}
+	// Preserve the previous shared finalization deadline across all project
+	// workers, rather than granting each queued wave another five minutes.
+	finalizeCtx, cancelFinalize := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancelFinalize()
+	if err = parallelNotifications(finalizeCtx, len(groups), notificationProjectConcurrency, func(ctx context.Context, i int) error {
+		ctx = context.WithValue(ctx, notificationProjectKey{}, groups[i][0].Event.Repository)
+		return notificationStage(ctx, "project_finalize", func() error { return s.finalizeTriage(ctx, id, &plans[i]) })
+	}); err != nil {
+		return err
+	}
 	var plan notificationPlan
-	for _, events := range groups {
-		if err = s.triageGroup(ctx, id, events, &plan); err != nil {
-			return err
+	// Merge in input project order, regardless of worker completion order.
+	for _, prepared := range plans {
+		plan.actions = append(plan.actions, prepared.actions...)
+		plan.refs = append(plan.refs, prepared.refs...)
+		for _, group := range prepared.groups {
+			if err = s.checkTriagePreferences(group); err != nil {
+				return err
+			}
 		}
 	}
-	if err = s.finalizeTriage(ctx, id, &plan); err != nil {
+	// A project may finish while other workers are still drafting. Check every
+	// contributing source again at the shared publication barrier, not just
+	// when its own project worker completes.
+	if err = notificationStage(ctx, "source_validation", func() error {
+		seenSources := map[string]bool{}
+		for _, prepared := range plans {
+			for _, group := range prepared.groups {
+				for _, source := range group.sources {
+					if seenSources[source.ID] {
+						continue
+					}
+					seenSources[source.ID] = true
+					if err := s.sourceEnabled(ctx, source.ID); err != nil {
+						return err
+					}
+					if err := s.checkIdentity(ctx, source); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	// Publish once to preserve snapshot validation and avoid partial publication.
@@ -123,7 +168,7 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 			seen[ref.ID] = true
 		}
 	}
-	return s.Inbox.ApplyNotificationBatch(ctx, id, plan.actions, refs)
+	return notificationStage(ctx, "publication", func() error { return s.Inbox.ApplyNotificationBatch(ctx, id, plan.actions, refs) })
 }
 
 func validateBatch(d BatchDecision, events []RawNotification, questions []inbox.Question) ([]inbox.NotificationBatchAction, []inbox.NotificationQuestionRef, error) {

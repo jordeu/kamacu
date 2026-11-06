@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 )
 
 type fakeProvider struct {
+	mu             sync.Mutex
 	batch          Batch
 	err            error
 	enrichErr      error
@@ -29,6 +31,8 @@ type fakeProvider struct {
 }
 
 func (p *fakeProvider) CheckIdentity(context.Context, Source) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.identityChecks++
 	if p.failIdentityAt == 0 || p.identityChecks >= p.failIdentityAt {
 		return p.identityErr
@@ -40,6 +44,8 @@ func (p *fakeProvider) Collect(context.Context, Source, map[string]bool) (Batch,
 	return p.batch, p.err
 }
 func (p *fakeProvider) Enrich(_ context.Context, _ Source, e Event) (Event, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.enrichCalls++
 	e.Context = "Review requested"
 	if p.contextText != "" {
@@ -51,6 +57,7 @@ func (p *fakeProvider) Enrich(_ context.Context, _ Source, e Event) (Event, erro
 }
 
 type fakeModel struct {
+	mu         sync.Mutex
 	steps      []Step
 	responses  []any
 	prompts    []string
@@ -59,6 +66,8 @@ type fakeModel struct {
 }
 
 func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt string, _ any) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.prompts = append(m.prompts, prompt)
 	if m.onGenerate != nil {
 		m.onGenerate(prompt)
@@ -95,6 +104,7 @@ func (m *fakeModel) GenerateValidatedJSON(ctx context.Context, p monitor.Profile
 }
 
 type fakeTools struct {
+	mu        sync.Mutex
 	calls     []string
 	arguments []json.RawMessage
 	err       error
@@ -106,6 +116,8 @@ func (f *fakeTools) List(context.Context) ([]Tool, error) {
 	return []Tool{{Name: "send_session_message"}, {Name: "start_task_agent"}, {Name: "open_review"}, {Name: "create_task"}, {Name: "delete_task"}, {Name: "move_task"}, {Name: "list_tasks"}, {Name: "list_sessions"}, {Name: "get_session"}, {Name: "get_session_output"}}, nil
 }
 func (f *fakeTools) Call(_ context.Context, name string, args json.RawMessage) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, name)
 	f.arguments = append(f.arguments, append(json.RawMessage(nil), args...))
 	if result, ok := f.results[name]; ok {

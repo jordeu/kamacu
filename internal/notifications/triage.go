@@ -247,16 +247,23 @@ func (s *Service) triageGroup(ctx context.Context, batchID string, events []RawN
 			subjects[index].fresh = raw.Event
 		}
 	}
-	for _, subject := range subjects {
-		source := sources[subject.events[0].SourceID]
-		subject.viewer = source.Account
-		subject.fresh, err = s.enrichSubject(runCtx, source, subject.fresh)
-		if err != nil {
-			return err
-		}
-		subject.reason = policyReason(policy, subject.events, subject.fresh, source.Account)
+	if err = notificationStage(runCtx, "retrieval", func() error {
+		return parallelNotificationSubjects(runCtx, len(subjects), func(ctx context.Context, i int) error {
+			subject := subjects[i]
+			source := sources[subject.events[0].SourceID]
+			subject.viewer = source.Account
+			fresh, err := s.enrichSubject(ctx, source, subject.fresh)
+			if err != nil {
+				return err
+			}
+			subject.fresh = fresh
+			subject.reason = policyReason(policy, subject.events, subject.fresh, source.Account)
+			return nil
+		})
+	}); err != nil {
+		return err
 	}
-	if err = s.classifyProject(runCtx, subjects, policy, custom); err != nil {
+	if err = notificationStage(runCtx, "classification", func() error { return s.classifyProject(runCtx, subjects, policy, custom) }); err != nil {
 		return err
 	}
 
@@ -305,49 +312,19 @@ func (s *Service) finalizeTriage(ctx context.Context, id string, plan *notificat
 		var err error
 		// Re-fetch every GitHub fact that may affect a decision immediately before
 		// planning publication. External state is not covered by inbox revision locks.
-		for _, subject := range subjects {
-			source := sources[subject.events[0].SourceID]
-			if reader, ok := s.Providers[source.Provider].(interface {
-				SubjectVersion(context.Context, Source, Event) (string, error)
-			}); ok && subject.fresh.SubjectUpdatedAt != "" {
-				version, e := reader.SubjectVersion(ctx, source, subject.fresh)
-				if e != nil && !errors.Is(e, ErrContextUnavailable) {
-					return e
-				}
-				if e != nil || version != subject.fresh.SubjectUpdatedAt {
-					previous := subject.fresh
-					subject.fresh, err = s.enrichSubject(ctx, source, subject.fresh)
-					if err != nil {
-						return err
-					}
-					refreshIntentPolicy(subject, previous, policy)
-				}
-			}
-			if reader, ok := s.Providers[source.Provider].(interface {
-				PRContext(context.Context, Source, string, int64) PRFacts
-			}); ok && subject.fresh.PRFacts != nil {
-				old := subject.fresh.PRFacts
-				fresh := reader.PRContext(ctx, source, old.Repository, old.Number)
-				before, _ := json.Marshal(compactTriageFacts(old))
-				after, _ := json.Marshal(compactTriageFacts(&fresh))
-				// Observation time is expected to change. Compare only decision fields.
-				if old.Available != fresh.Available || old.Stale != fresh.Stale || old.State != fresh.State || !equalBool(old.Draft, fresh.Draft) || !equalBool(old.ViewerEverApproved, fresh.ViewerEverApproved) || old.ReviewsComplete != fresh.ReviewsComplete || old.HeadCommit != fresh.HeadCommit || old.UpdatedAt != fresh.UpdatedAt || old.Viewer != fresh.Viewer || !slices.Equal(old.RequestedReviewers, fresh.RequestedReviewers) {
-					slog.Info("notification facts changed before publication", "url", subject.fresh.URL, "before", string(before), "after", string(after))
-					// Re-fetch prose too: an update can introduce a new direct mention.
-					previous := subject.fresh
-					subject.fresh, err = s.enrichSubject(ctx, source, subject.fresh)
-					if err != nil {
-						return err
-					}
-					refreshIntentPolicy(subject, previous, policy)
-				}
-			}
+		if err = notificationStage(ctx, "revalidation", func() error {
+			return parallelNotificationSubjects(ctx, len(subjects), func(ctx context.Context, i int) error {
+				return s.revalidateNotificationSubject(ctx, subjects[i], sources, policy)
+			})
+		}); err != nil {
+			return err
 		}
+
 		if slices.ContainsFunc(subjects, func(subject *triageSubject) bool { return subject.classificationStale }) {
 			for _, subject := range subjects {
 				subject.reason = policyReason(policy, subject.events, subject.fresh, subject.viewer)
 			}
-			if err = s.classifyProject(ctx, subjects, policy, group.custom); err != nil {
+			if err = notificationStage(ctx, "reclassification", func() error { return s.classifyProject(ctx, subjects, policy, group.custom) }); err != nil {
 				return err
 			}
 		}
@@ -359,7 +336,7 @@ func (s *Service) finalizeTriage(ctx context.Context, id string, plan *notificat
 		if err != nil {
 			return err
 		}
-		if err = s.draftProjectCards(ctx, &decision, subjects, policy, group.custom); err != nil {
+		if err = notificationStage(ctx, "drafting", func() error { return s.draftProjectCards(ctx, &decision, subjects, policy, group.custom) }); err != nil {
 			return err
 		}
 		allowed := map[int64]RawNotification{}
@@ -666,4 +643,45 @@ func (s *Service) reviewCoverage(ctx context.Context, subject *triageSubject) (s
 		return "This project has live sessions, but their coverage of this PR is unconfirmed. Check existing work before starting another review.", nil
 	}
 	return "No live project sessions were returned by the current lookup. Recheck before starting a review.", nil
+}
+
+func (s *Service) revalidateNotificationSubject(ctx context.Context, subject *triageSubject, sources map[string]Source, policy settings.NotificationPolicy) error {
+	var err error
+	source := sources[subject.events[0].SourceID]
+	if reader, ok := s.Providers[source.Provider].(interface {
+		SubjectVersion(context.Context, Source, Event) (string, error)
+	}); ok && subject.fresh.SubjectUpdatedAt != "" {
+		version, e := reader.SubjectVersion(ctx, source, subject.fresh)
+		if e != nil && !errors.Is(e, ErrContextUnavailable) {
+			return e
+		}
+		if e != nil || version != subject.fresh.SubjectUpdatedAt {
+			previous := subject.fresh
+			subject.fresh, err = s.enrichSubject(ctx, source, subject.fresh)
+			if err != nil {
+				return err
+			}
+			refreshIntentPolicy(subject, previous, policy)
+		}
+	}
+	if reader, ok := s.Providers[source.Provider].(interface {
+		PRContext(context.Context, Source, string, int64) PRFacts
+	}); ok && subject.fresh.PRFacts != nil {
+		old := subject.fresh.PRFacts
+		fresh := reader.PRContext(ctx, source, old.Repository, old.Number)
+		before, _ := json.Marshal(compactTriageFacts(old))
+		after, _ := json.Marshal(compactTriageFacts(&fresh))
+		// Observation time is expected to change. Compare only decision fields.
+		if old.Available != fresh.Available || old.Stale != fresh.Stale || old.State != fresh.State || !equalBool(old.Draft, fresh.Draft) || !equalBool(old.ViewerEverApproved, fresh.ViewerEverApproved) || old.ReviewsComplete != fresh.ReviewsComplete || old.HeadCommit != fresh.HeadCommit || old.UpdatedAt != fresh.UpdatedAt || old.Viewer != fresh.Viewer || !slices.Equal(old.RequestedReviewers, fresh.RequestedReviewers) {
+			slog.Info("notification facts changed before publication", "url", subject.fresh.URL, "before", string(before), "after", string(after))
+			// Re-fetch prose too: an update can introduce a new direct mention.
+			previous := subject.fresh
+			subject.fresh, err = s.enrichSubject(ctx, source, subject.fresh)
+			if err != nil {
+				return err
+			}
+			refreshIntentPolicy(subject, previous, policy)
+		}
+	}
+	return nil
 }
