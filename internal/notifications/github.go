@@ -65,7 +65,23 @@ func (e *GitHubHTTPError) Unwrap() error {
 	return nil
 }
 
-func (g GitHub) api(ctx context.Context, host, path string) ([]byte, http.Header, error) {
+func (g GitHub) api(ctx context.Context, host, path string) (data []byte, headers http.Header, err error) {
+	err = notificationStage(ctx, "github_request", func() error {
+		if run, ok := ctx.Value(notificationRunKey{}).(*notificationRun); ok {
+			release, err := acquireNotificationSlot(ctx, run.github)
+			if err != nil {
+				return err
+			}
+			defer release()
+		}
+		var requestErr error
+		data, headers, requestErr = g.apiRequest(ctx, host, path)
+		return requestErr
+	})
+	return data, headers, err
+}
+
+func (g GitHub) apiRequest(ctx context.Context, host, path string) ([]byte, http.Header, error) {
 	args := []string{"api", "--hostname", host, "--method", "GET", "--include", "-H", "Accept: application/vnd.github+json", path}
 	var raw []byte
 	var err error

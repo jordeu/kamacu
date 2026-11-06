@@ -18,6 +18,7 @@ import (
 )
 
 // Model validates response contracts before reporting or recording the outcome.
+// Implementations must support concurrent calls from independent projects.
 type Model interface {
 	GenerateValidatedJSON(context.Context, monitor.Profile, string, any, func([]byte) error) ([]byte, error)
 }

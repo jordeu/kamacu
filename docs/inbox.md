@@ -109,6 +109,21 @@ new follow-ups, edits, answers, or dismissals invalidate a stale plan and leave
 its raw notifications pending for another explicit run. Exact duplicate actions
 are deduplicated without merging different actions for the same notification.
 
+Independent projects are processed by up to three workers. Each project's
+notifications stay together for classification and card grouping. Subject retrieval
+and publication-time revalidation run concurrently, with batch-wide limits of four
+subject jobs and four GitHub requests. Pagination for each resource remains ordered.
+An error cancels outstanding work; all workers finish before the run returns.
+Results are merged in stable project order and published in one transaction.
+
+The server log records `notification stage finished` entries with `stage`,
+`duration_ms`, `batch`, and (for project work) `repository`. Stages include
+`project_prepare`, `retrieval`, `classification`, `project_finalize`, `revalidation`,
+`reclassification` when needed, `drafting`, `github_request`, `source_validation`,
+and `publication`.
+Durations are wall time including queueing; overlapping stages must not be summed
+as elapsed batch time. `notification batch finished` records total duration and errors.
+
 On success, every raw notification in the snapshot moves to Archived, including
 notifications represented by inbox actions. Inbox tracks the resulting decisions
 independently. Publishing the actions, superseding old questions, archiving raw
