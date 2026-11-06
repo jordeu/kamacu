@@ -88,7 +88,7 @@ func TestProjectPlanningRejectsUnknownOrMissingCardMembership(t *testing.T) {
 				return map[string]any{"cards": []any{map[string]any{"card_ids": ids, "summary": "Invalid grouping", "context": "A proposed card.", "question": "Proceed?", "options": []string{"Proceed"}}}}, nil
 			}
 			status := process(t, s, model, "")
-			if status.Status != "failed" || len(model.prompts) != 3 {
+			if status.Status != "failed" || len(model.prompts) != 4 {
 				t.Fatalf("invalid project membership published: %+v calls=%d", status, len(model.prompts))
 			}
 			pending, err := s.ListRaw(context.Background(), "pending", 0)

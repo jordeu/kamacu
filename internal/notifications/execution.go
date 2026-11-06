@@ -23,7 +23,7 @@ Execution workflows:
 - route_review: open/reuse each planned PR review workspace with open_review, check sessions, start_task_agent if needed, then send_session_message. Never create a normal task for a review. The application delivers the registered PR review prompt to a newly notification-started review agent; do not invent initial review instructions. An existing review agent may receive the user's follow-up after its initial prompt was delivered.
 - route_implementation: reuse the planned implementation task. Check sessions first; reuse live sessions or start_task_agent with resume:true for a stored conversation. Deliver the relevant notification and user request through send_session_message and verify delivery.
 - route_recurring: run the planned existing recurring task. Do not change its standing instructions or replace it with a new task. Check/reuse sessions, start if needed, and deliver the requested run.
-- route_investigation: create a task in the planned project, start its agent, and deliver the investigation request. Do not stop after provisioning the task.
+- route_investigation: If task_id is already set, reuse that task and its session; never create a second task. Otherwise, create a task in the planned project, start its agent, and deliver the investigation request. Do not stop after provisioning the task.
 - clarify: use read tools and ask the necessary question. Do not mutate state while ownership or targets remain unresolved.
 All investigation, code changes and posting of review replies belongs with the task agent. Starting an agent alone does not deliver its instructions. Do not claim a handoff succeeded before send_session_message succeeds. Do not send instructions to a busy session unless the user's reply authorizes that handoff. Posting to GitHub requires explicit user intent; proposing or starting a review does not authorize posting. Any failed or uncertain tool call terminates the run; never automatically repeat a mutation. Agent-scoped legacy feedback tools are unavailable to this worker; use ask and done.`
 
@@ -237,7 +237,11 @@ func (s *Service) executeNext(ctx context.Context) error {
 	if err != nil {
 		return fail(err)
 	}
+	s.setPlanSession(&actionPlan)
 	if _, err = s.DB.ExecContext(ctx, `UPDATE notification_runs SET plan=? WHERE id=?`, mustJSON(actionPlan), q.ID); err != nil {
+		return fail(err)
+	}
+	if err = s.Inbox.LinkNotificationTasks(ctx, q.ID, actionPlan.Bindings); err != nil {
 		return fail(err)
 	}
 	prompt += "\nEXECUTION PLAN (validated user reply):\n" + mustJSON(actionPlan)
@@ -449,6 +453,16 @@ func (s *Service) executeNext(ctx context.Context) error {
 					return fail(errors.New("provisioned task ID is unavailable; inspect the workspace before retrying"))
 				}
 				actionPlan.TaskID = taskID
+				role := "investigation"
+				if step.ToolName == "open_review" {
+					role = "review"
+				}
+				if err = s.addPlanBinding(runCtx, &actionPlan, taskID, role, "execution", "Task provisioned by the approved notification action"); err != nil {
+					return fail(err)
+				}
+				if _, err = s.DB.ExecContext(runCtx, `INSERT INTO notification_task_links(question_id,task_id,role,source,evidence) VALUES(?,?,?,?,?) ON CONFLICT(question_id,task_id) DO NOTHING`, q.ID, taskID, role, "execution", "Task provisioned by the approved notification action"); err != nil {
+					return fail(err)
+				}
 				if _, err = s.DB.ExecContext(runCtx, `UPDATE notification_runs SET plan=? WHERE id=?`, mustJSON(actionPlan), q.ID); err != nil {
 					return fail(err)
 				}

@@ -29,6 +29,7 @@ type Service struct {
 	Tools          Tools
 	SessionTask    func(string) (int64, bool)
 	TaskHasSession func(int64) bool
+	TaskSession    func(int64) string
 	Providers      map[string]Provider
 	// workMu serializes ticks; source CRUD has its own short lock.
 	workMu   sync.Mutex

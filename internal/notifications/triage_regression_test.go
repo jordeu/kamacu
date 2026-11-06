@@ -60,7 +60,7 @@ func TestMergedThreadNewFeedbackIsClassifiedBeforeReviewSuppression(t *testing.T
 	seed(t, s, source, e)
 	s.Providers["github"] = &changingFactsProvider{fakeProvider: &fakeProvider{contextText: "Please investigate this regression before responding."}, facts: PRFacts{Available: true, State: "merged"}}
 	status := process(t, s, model, "review_feedback")
-	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 2 {
+	if status.Status != "completed" || status.ActionCount != 1 || len(model.prompts) != 3 {
 		t.Fatalf("lost new feedback: %+v calls=%d", status, len(model.prompts))
 	}
 	page, _ := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)

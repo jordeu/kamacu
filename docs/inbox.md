@@ -189,6 +189,38 @@ can route to an implementation owner, an explicitly named recurring task, or a n
 investigation task. Ambiguous targets require clarification. Cards offer one planned
 action and dismissal. No task mutation occurs before an inbox reply.
 
+Notification work kind (review, implementation, investigation) is separate from
+personal/team audience and evidence uncertainty. A team review opportunity can
+therefore propose an optional review workspace without claiming a personal request.
+Uncertain recency does not turn a review into a generic investigation.
+
+Ownership is resolved before card grouping. Verified task/PR associations and
+session/PR associations identify existing owners; review workspaces are matched by
+project and PR. When no owner is linked, a bounded task-catalog lookup includes
+completed tasks and may select a cited title/description match. Ambiguous matches,
+or a negative match against an incomplete catalog, require clarification. Verified PR owners may belong to another project; weak title matching remains
+restricted to the notification's project. Rejected task associations are excluded
+from matching and rechecked before execution. A new explicit target chosen in a
+user reply can override the saved action without changing the PR's ownership record.
+An explicit review rule can select a review workspace while retaining the source
+implementation owner's navigation link. Linked
+owners survive generic new-session rules: an exited agent means resume/start an
+agent on the same task, not create another task. Explicit recurring-task rules
+remain supported. Live sessions are rechecked before execution.
+
+Inbox cards persist one or more **Linked tasks** independently of their proposed
+actions and terminal ownership. **Open task** navigates without answering, dismissing,
+or executing the notification. Grouped cards retain all contributing task links;
+archived cards and follow-ups retain them too. Newly provisioned tasks are linked
+immediately, even if a later execution step fails. Action-button labels come from
+the validated workflow rather than the prose-writing model.
+
+On upgrade, existing task associations are backfilled for navigation. Pending
+notification cards are retired and their inputs requeued for explicit processing
+with the new ownership-preserving plans. Queued replies from the old plans are
+failed before execution; interrupted running actions retain normal uncertain-result
+recovery. History and its task links remain available.
+
 Clicking the proposed action executes its saved plan. A free-text reply is separately
 interpreted and validated; changing the workflow or target requires explicit user
 instructions. Execution restricts mutations to the plan's workflow, projects, tasks,

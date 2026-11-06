@@ -238,7 +238,7 @@ func validateBatch(d BatchDecision, events []RawNotification, questions []inbox.
 			return nil, nil, errors.New("notification context including subject links exceeds limits")
 		}
 		primary := allowed[a.EventIDs[0]]
-		actions = append(actions, inbox.NotificationBatchAction{EventIDs: a.EventIDs, Request: c, Plan: mustJSON(a.Plan), SourceName: primary.SourceName, SourceURL: primary.Event.URL})
+		actions = append(actions, inbox.NotificationBatchAction{Links: a.Plan.Bindings, EventIDs: a.EventIDs, Request: c, Plan: mustJSON(a.Plan), SourceName: primary.SourceName, SourceURL: primary.Event.URL})
 	}
 	if len(covered) != len(allowed) {
 		return nil, nil, errors.New("batch did not account for every pending notification")

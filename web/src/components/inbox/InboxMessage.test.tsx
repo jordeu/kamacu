@@ -52,3 +52,16 @@ it("renders new-tab links throughout pending and answered message dialogs", () =
   }
   expect(render("answered")).toContain('>answer#5</a>');
 });
+
+it("keeps task navigation independent of notification actions in pending and archived cards", () => {
+ const q: FeedbackQuestion={id:"bound",task_id:0,project_id:0,task_title:"",project_name:"",session_id:"",abstract:"",summary:"New review feedback",context:"Source",question:"Investigate?",options:[{id:"investigate",label:"Create another task"}],status:"pending",reason:"",answer:"",answer_source:"",revision:1,created_at:1,updated_at:1,acknowledged_at:null,origin:"notification",source_url:"https://github.com/acme/repo/pull/7",linked_tasks:[{task_id:1117,project_id:2,title:"Existing implementation",status:"in_review",role:"implementation",source:"pr_link",evidence:"PR link"},{task_id:1222,project_id:2,title:"Existing review",status:"done",role:"review",source:"pr_link",evidence:"PR link"}]};
+ for(const status of ["pending","answered","unanswered"] as const) {
+  const html=renderToStaticMarkup(<QueryClientProvider client={new QueryClient()}><MemoryRouter><InboxMessage question={{...q,status,reason:status === "unanswered" ? "notification_task_routing_changed" : ""}} dialog onResult={()=>{}} /></MemoryRouter></QueryClientProvider>);
+  expect(html).toContain('aria-label="Linked tasks"');
+  expect(html).toContain('href="/projects/2/tasks/1117"');
+  expect(html).toContain('href="/projects/2/tasks/1222"');
+  expect(html).toContain("Open task 1117");
+  expect(html).toContain("Open notification");
+  if(status==="unanswered") expect(html).toContain("Requeued for task matching");
+ }
+});

@@ -467,6 +467,7 @@ func TestDevelopmentRuleImportIsDraftOnly(t *testing.T) {
 }
 func TestImplementationOwnerIsSelectedBeforeGrouping(t *testing.T) {
 	s, model, _, source := fixture(t)
+	model.ownerRespond = true
 	ctx := context.Background()
 	s.DB.Exec(`UPDATE tasks SET title='Fix CRIU ghost-file fallback' WHERE id=1`)
 	rule := NotificationRule{ID: "OWNER", Text: "Resume the implementation owner for feedback", Enabled: true, Clauses: []RuleClause{{Category: "action", Effect: "route_implementation", OnUnknown: "hold", When: RuleExpression{Op: "eq", Fact: "activity.kind", Value: "review_feedback"}}}}
@@ -476,13 +477,15 @@ func TestImplementationOwnerIsSelectedBeforeGrouping(t *testing.T) {
 	base := model.respond
 	model.respond = func(prompt string) (any, error) {
 		if _, raw, ok := strings.Cut(prompt, "ACTIVITIES:\n"); ok {
-			var input []struct {
-				ID string `json:"activity_id"`
+			var input struct {
+				Activities []struct {
+					ID string `json:"activity_id"`
+				} `json:"activities"`
 			}
 			if err := json.Unmarshal([]byte(raw), &input); err != nil {
 				return nil, err
 			}
-			return map[string]string{"compiled_json": mustJSON(map[string]any{"choices": []any{map[string]any{"activity_id": input[0].ID, "task_id": 1, "resolution": "owner", "title_quote": "CRIU ghost-file fallback", "reason": "The task implements this fix."}}})}, nil
+			return map[string]string{"compiled_json": mustJSON(map[string]any{"choices": []any{map[string]any{"activity_id": input.Activities[0].ID, "task_id": 1, "resolution": "owner", "title_quote": "CRIU ghost-file fallback", "reason": "The task implements this fix."}}})}, nil
 		}
 		return base(prompt)
 	}
@@ -645,11 +648,11 @@ func TestActionOverridesClearOwnerAndSupportExplicitRecurringReviews(t *testing.
 	s, _, _, _ := fixture(t)
 	ctx := context.Background()
 	for _, tc := range []struct{ intent, effect, workflow string }{
-		{"review_feedback", "route_investigation", "route_investigation"},
+		{"review_feedback", "route_investigation", "route_implementation"},
 		{"review_request", "route_recurring", "route_recurring"},
 	} {
 		t.Run(tc.effect, func(t *testing.T) {
-			var taskID int64
+			taskID := int64(1)
 			taskName := ""
 			if tc.effect == "route_recurring" {
 				taskID = 1

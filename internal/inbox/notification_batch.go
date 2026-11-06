@@ -11,6 +11,7 @@ import (
 )
 
 type NotificationBatchAction struct {
+	Links      []TaskLink
 	EventIDs   []int64
 	SourceName string
 	SourceURL  string
@@ -126,6 +127,11 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 		if _, err = tx.ExecContext(ctx, `INSERT INTO notification_card_plans(question_id,rule_set_id,plan) VALUES(?,?,?)`, id, captured.String, a.Plan); err != nil {
 			return err
 		}
+		for _, link := range a.Links {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO notification_task_links(question_id,task_id,role,source,evidence) VALUES(?,?,?,?,?) ON CONFLICT(question_id,task_id) DO NOTHING`, id, link.TaskID, link.Role, link.Source, link.Evidence); err != nil {
+				return err
+			}
+		}
 		for _, eventID := range a.EventIDs {
 			var member int
 			if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM notification_batch_events WHERE batch_id=? AND event_id=?`, batchID, eventID).Scan(&member); err != nil {
@@ -216,6 +222,10 @@ func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, 
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO notification_card_plans(question_id,rule_set_id,plan) SELECT ?,rule_set_id,COALESCE(NULLIF((SELECT plan FROM notification_runs WHERE id=p.question_id),'{}'),p.plan) FROM notification_card_plans p WHERE question_id=?`, id, previous.ID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO notification_task_links(question_id,task_id,role,source,evidence) SELECT ?,task_id,role,source,evidence FROM notification_task_links WHERE question_id=?`, id, previous.ID)
 		return err
 	}
 	// Provenance references the newly inserted question, so copy it after insert.

@@ -16,9 +16,12 @@ import (
 )
 
 type intentFinding struct {
-	Intent     string `json:"intent"`
-	EvidenceID string `json:"evidence_id"`
-	Quote      string `json:"quote"`
+	WorkKind    string `json:"work_kind,omitempty"`
+	Audience    string `json:"audience,omitempty"`
+	Uncertainty string `json:"uncertainty,omitempty"`
+	Intent      string `json:"intent"`
+	EvidenceID  string `json:"evidence_id"`
+	Quote       string `json:"quote"`
 }
 type intentResponse struct {
 	Findings []intentFinding `json:"findings"`
@@ -27,8 +30,8 @@ type intentResponse struct {
 var intentSchema = map[string]any{
 	"type": "object", "additionalProperties": false, "required": []string{"findings"},
 	"properties": map[string]any{"findings": map[string]any{"type": "array", "minItems": 1, "maxItems": 6, "items": map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"intent", "evidence_id", "quote"},
-		"properties": map[string]any{"intent": map[string]any{"type": "string", "enum": []string{"review_request", "review_feedback", "direct_question", "routine", "needs_context"}}, "evidence_id": map[string]string{"type": "string"}, "quote": map[string]string{"type": "string"}},
+		"type": "object", "additionalProperties": false, "required": []string{"intent", "evidence_id", "quote", "work_kind", "audience", "uncertainty"},
+		"properties": map[string]any{"work_kind": map[string]any{"type": "string", "enum": []string{"review", "implementation", "investigation"}}, "audience": map[string]any{"type": "string", "enum": []string{"individual", "team", "unspecified"}}, "uncertainty": map[string]string{"type": "string"}, "intent": map[string]any{"type": "string", "enum": []string{"review_request", "review_feedback", "direct_question", "routine", "needs_context"}}, "evidence_id": map[string]string{"type": "string"}, "quote": map[string]string{"type": "string"}},
 	}}}}
 
 type triageSubject struct {
@@ -114,6 +117,15 @@ func decodeIntent(raw []byte, evidence []SubjectEvidence, custom string) ([]inte
 		byID[item.ID] = item.Text
 	}
 	for _, f := range response.Findings {
+		if f.WorkKind != "" && !slices.Contains([]string{"review", "implementation", "investigation"}, f.WorkKind) {
+			return nil, errors.New("invalid work kind")
+		}
+		if f.Audience != "" && !slices.Contains([]string{"individual", "team", "unspecified"}, f.Audience) {
+			return nil, errors.New("invalid audience")
+		}
+		if len(f.Uncertainty) > 1000 {
+			return nil, errors.New("uncertainty exceeds limit")
+		}
 		switch f.Intent {
 		case "review_request", "review_feedback", "direct_question", "routine", "needs_context":
 		default:
@@ -356,7 +368,8 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 	// Only retire our review template when every linked subject is conclusively
 	// obsolete in this snapshot. A merged PR may still have an unrelated question.
 	for _, q := range questions {
-		if !planHasIntent(questionPlans[q.ID], "review_request") || slices.ContainsFunc(questionPlans[q.ID].Evidence, func(e triageEvidence) bool { return e.Intent != "review_request" }) {
+		reviewPlan := questionPlans[q.ID].WorkKind == "review"
+		if !reviewPlan && (!planHasIntent(questionPlans[q.ID], "review_request") || slices.ContainsFunc(questionPlans[q.ID].Evidence, func(e triageEvidence) bool { return e.Intent != "review_request" })) {
 			continue
 		}
 		obsolete := len(scopes[q.ID]) > 0
@@ -460,6 +473,9 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 					key = fmt.Sprintf("project:%d:%s:%d", subject.projectID, plan.Workflow, plan.TaskID)
 				}
 			}
+			if plan.Workflow == "clarify" {
+				key += ":" + evidenceFingerprint(mustJSON(plan.Bindings))
+			}
 			action := grouped[key]
 			if action != nil {
 				candidate := append(append([]int64(nil), action.EventIDs...), ids...)
@@ -475,6 +491,11 @@ func (s *Service) renderTriage(ctx context.Context, subjects []*triageSubject, q
 			for _, id := range ids {
 				if !slices.Contains(action.EventIDs, id) {
 					action.EventIDs = append(action.EventIDs, id)
+				}
+			}
+			for _, binding := range plan.Bindings {
+				if !slices.ContainsFunc(action.Plan.Bindings, func(b inbox.TaskLink) bool { return b.TaskID == binding.TaskID }) {
+					action.Plan.Bindings = append(action.Plan.Bindings, binding)
 				}
 			}
 			for _, target := range plan.Targets {

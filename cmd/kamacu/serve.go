@@ -333,6 +333,14 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	}
 	defer notificationMCP.Close()
 	notificationService := notifications.New(db, inboxService, classifier, notificationMCP)
+	notificationService.TaskSession = func(taskID int64) string {
+		for _, info := range mgr.ListByTask(taskID) {
+			if info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested {
+				return info.ID
+			}
+		}
+		return ""
+	}
 	notificationService.TaskHasSession = func(taskID int64) bool {
 		for _, info := range mgr.ListByTask(taskID) {
 			if info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested {

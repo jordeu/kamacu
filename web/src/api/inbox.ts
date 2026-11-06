@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
 
+export interface NotificationTaskLink { task_id: number; project_id: number; title: string; status: string; role: string; source: string; evidence: string }
 export interface FeedbackQuestion {
+ linked_tasks?: NotificationTaskLink[];
  notification_id?: number;
  source_name?: string;
  source_url?: string;

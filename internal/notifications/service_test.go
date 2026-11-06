@@ -57,6 +57,7 @@ func (p *fakeProvider) Enrich(_ context.Context, _ Source, e Event) (Event, erro
 }
 
 type fakeModel struct {
+	ownerRespond bool
 	planResponse any
 	mu           sync.Mutex
 	steps        []Step
@@ -70,6 +71,12 @@ func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt st
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prompts = append(m.prompts, prompt)
+	if !m.ownerRespond {
+		if raw, ok, err := fixtureOwnershipResponse(prompt); ok {
+			return raw, err
+		}
+	}
+
 	if _, input, ok := strings.Cut(prompt, "PLAN INPUT:\n"); ok {
 		if m.planResponse != nil {
 			return json.Marshal(m.planResponse)

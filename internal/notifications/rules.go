@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"kamacu/internal/inbox"
 )
 
 const ruleCompilerVersion = "1"
@@ -91,6 +92,10 @@ type ReviewTarget struct {
 	PRNumber  int64 `json:"pr_number"`
 }
 type ActionPlan struct {
+	Bindings      []inbox.TaskLink `json:"bindings"`
+	WorkKind      string           `json:"work_kind,omitempty"`
+	SessionMode   string           `json:"session_mode,omitempty"`
+	SessionID     string           `json:"session_id,omitempty"`
 	OwnerEvidence string           `json:"owner_evidence,omitempty"`
 	Targets       []ReviewTarget   `json:"targets"`
 	Presentation  []string         `json:"presentation"`
@@ -106,7 +111,7 @@ type ActionPlan struct {
 }
 
 var ruleFacts = map[string]string{
-	"workflow.needs_session": "bool", "repository": "string", "project_id": "number", "actor": "string", "subject.type": "string", "subject.url": "string", "subject.title": "string", "activity.kind": "string", "activity.own": "bool", "pr.state": "string", "pr.draft": "bool", "pr.author": "string", "review.state": "string", "viewer.mentioned": "bool", "viewer.review_requested": "bool", "viewer.approved": "bool",
+	"activity.work_kind": "string", "activity.audience": "string", "activity.uncertain": "bool", "workflow.needs_session": "bool", "repository": "string", "project_id": "number", "actor": "string", "subject.type": "string", "subject.url": "string", "subject.title": "string", "activity.kind": "string", "activity.own": "bool", "pr.state": "string", "pr.draft": "bool", "pr.author": "string", "review.state": "string", "viewer.mentioned": "bool", "viewer.review_requested": "bool", "viewer.approved": "bool",
 }
 
 func strictRuleJSON(raw []byte, target any) error {
@@ -500,7 +505,7 @@ func evalExpression(e RuleExpression, facts map[string]RuleFact, semantic map[st
 	}
 }
 func expressionActivity(e RuleExpression) bool {
-	if e.Op == "semantic" || slices.Contains([]string{"actor", "activity.kind", "activity.own", "review.state"}, e.Fact) {
+	if e.Op == "semantic" || slices.Contains([]string{"actor", "activity.kind", "activity.work_kind", "activity.audience", "activity.uncertain", "activity.own", "review.state"}, e.Fact) {
 		return true
 	}
 	for _, a := range e.Args {
@@ -522,7 +527,7 @@ func subjectRuleFacts(subject *triageSubject, finding *intentFinding) map[string
 	}
 	known("repository", strings.ToLower(e.Repository))
 	facts["workflow.needs_session"] = sessionRoutingFact(e)
-	if finding != nil && finding.Intent == "review_request" {
+	if finding != nil && isReviewWork(*finding) {
 		if e.ReviewSessionRouting != nil {
 			facts["workflow.needs_session"] = *e.ReviewSessionRouting
 		} else {
@@ -559,6 +564,13 @@ func subjectRuleFacts(subject *triageSubject, finding *intentFinding) map[string
 	}
 	if finding != nil {
 		known("activity.kind", finding.Intent)
+		if finding.WorkKind != "" {
+			known("activity.work_kind", finding.WorkKind)
+		}
+		if finding.Audience != "" {
+			known("activity.audience", finding.Audience)
+		}
+		known("activity.uncertain", finding.Uncertainty != "" || finding.Intent == "needs_context")
 		for _, item := range e.Evidence {
 			if item.ID == finding.EvidenceID {
 				if item.Actor != "" {

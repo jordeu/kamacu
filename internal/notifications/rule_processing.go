@@ -196,7 +196,7 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 			if f.Intent == "routine" {
 				outcome = "suppressed"
 			}
-			if f.Intent == "review_request" && reviewRequestStatusReason(subject.fresh) != "" {
+			if isReviewWork(f) && reviewRequestStatusReason(subject.fresh) != "" {
 				outcome = "suppressed"
 			}
 			if outcome == "admitted" && ctx.Value(rulePreviewKey{}) != true {
@@ -223,22 +223,35 @@ func (s *Service) activityActionPlan(ctx context.Context, subject *triageSubject
 	if plan, ok := subject.plans[activityID(subject, f)]; ok {
 		return plan, nil
 	}
-	plan := ActionPlan{RuleSetID: set.ID, Activities: []string{activityID(subject, f)}, ProjectID: subject.projectID, Workflow: "route_investigation", RuleIDs: []string{}}
+	plan := ActionPlan{RuleSetID: set.ID, Activities: []string{activityID(subject, f)}, ProjectID: subject.projectID, Workflow: "route_investigation", WorkKind: f.WorkKind, RuleIDs: []string{}}
 	if subject.fresh.SubjectType == "PullRequest" {
 		_, plan.PRNumber, _ = store.PRIdentity(subject.fresh.URL, 0)
 	}
 	if plan.PRNumber > 0 {
 		plan.Targets = []ReviewTarget{{plan.ProjectID, plan.PRNumber}}
 	}
-	if f.Intent == "review_request" {
+	ownerIDs := []int64{}
+	if isReviewWork(f) {
+		plan.WorkKind = "review"
 		plan.Workflow = "route_review"
+		var err error
+		ownerIDs, err = s.reviewTaskIDs(ctx, plan.ProjectID, plan.PRNumber)
+		if err != nil {
+			return plan, err
+		}
+		if len(ownerIDs) == 1 {
+			plan.TaskID = ownerIDs[0]
+		} else if len(ownerIDs) > 1 {
+			plan.Workflow = "clarify"
+		}
 	} else {
 		owners := []int64{}
-		for _, work := range subject.fresh.RelatedWork {
-			if work.Link.Role == "implementation" && !slices.Contains(owners, work.Link.TaskID) {
-				owners = append(owners, work.Link.TaskID)
-			}
+		var err error
+		owners, err = s.implementationOwners(ctx, subject, plan.PRNumber)
+		if err != nil {
+			return plan, err
 		}
+		ownerIDs = append(ownerIDs, owners...)
 		if len(owners) == 1 {
 			plan.Workflow = "route_implementation"
 			plan.TaskID = owners[0]
@@ -258,6 +271,42 @@ func (s *Service) activityActionPlan(ctx context.Context, subject *triageSubject
 			winner = &copy
 		}
 	}
+	ownerTask := plan.TaskID
+	ownerWorkflow := plan.Workflow
+	if isReviewWork(f) {
+		// The source PR's implementation owner is navigable independently of
+		// the review workspace selected to handle this notification.
+		sourceOwners, err := s.implementationOwners(ctx, subject, plan.PRNumber)
+		if err != nil {
+			return plan, err
+		}
+		for _, taskID := range sourceOwners {
+			if err := s.addSourceBinding(ctx, &plan, taskID, "implementation", "pr_link", "Implementation owner of the source PR"); err != nil {
+				return plan, err
+			}
+		}
+	}
+	for _, taskID := range ownerIDs {
+		source, evidence := "pr_link", "Verified project/PR task relationship"
+		for _, work := range subject.fresh.RelatedWork {
+			if work.Link.TaskID == taskID && work.Link.Role == map[bool]string{true: "review", false: "implementation"}[isReviewWork(f)] {
+				if work.Link.Source != "" {
+					source = work.Link.Source
+				}
+				if work.Link.Evidence != "" {
+					evidence = work.Link.Evidence
+				}
+			}
+		}
+		if err := s.addSourceBinding(ctx, &plan, taskID, map[bool]string{true: "review", false: "implementation"}[isReviewWork(f)], source, evidence); err != nil {
+			return plan, err
+		}
+	}
+	if len(ownerIDs) > 1 {
+		plan.OwnerEvidence = "Multiple verified task owners; select a task before starting work"
+	} else if len(ownerIDs) == 1 {
+		plan.OwnerEvidence = "Verified project/PR task relationship"
+	}
 	if winner != nil {
 		plan.Workflow = winner.Effect
 		// Only implementation routing can reuse a previously resolved owner.
@@ -267,10 +316,41 @@ func (s *Service) activityActionPlan(ctx context.Context, subject *triageSubject
 		plan.TaskName = winner.Argument
 		plan.RuleIDs = append(plan.RuleIDs, winner.ID)
 	}
-	if f.Intent == "review_request" && plan.Workflow != "route_recurring" {
-		plan.Workflow = "route_review"
-		plan.TaskID = 0
+	if isReviewWork(f) && plan.Workflow != "route_recurring" {
+		plan.Workflow = ownerWorkflow
+		plan.TaskID = ownerTask
 		plan.TaskName = ""
+	}
+	// A generic new-session/new-task instruction must not discard a known owner.
+	if !isReviewWork(f) && ownerTask > 0 && (plan.Workflow == "route_investigation" || plan.Workflow == "route_implementation") {
+		plan.TaskID = ownerTask
+		plan.Workflow = "route_implementation"
+	}
+	if ownerWorkflow == "clarify" && (plan.Workflow == "route_investigation" || plan.Workflow == "route_implementation") {
+		plan.Workflow = "clarify"
+		plan.TaskID = 0
+	}
+	if !isReviewWork(f) && plan.Workflow == "route_review" {
+		ids, err := s.reviewTaskIDs(ctx, plan.ProjectID, plan.PRNumber)
+		if err != nil {
+			return plan, err
+		}
+		for _, id := range ids {
+			if err = s.addPlanBinding(ctx, &plan, id, "review", "rule", "Explicit review action on this PR"); err != nil {
+				return plan, err
+			}
+		}
+		if len(ids) == 1 {
+			plan.TaskID = ids[0]
+		} else if len(ids) > 1 {
+			plan.Workflow = "clarify"
+			plan.TaskID = 0
+		}
+	}
+	if plan.Workflow == "route_implementation" && plan.TaskID > 0 {
+		if err := s.DB.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id=?`, plan.TaskID).Scan(&plan.ProjectID); err != nil {
+			return plan, err
+		}
 	}
 	if plan.Workflow == "route_implementation" && plan.TaskID == 0 {
 		plan.Workflow = "clarify"
@@ -287,6 +367,16 @@ func (s *Service) activityActionPlan(ctx context.Context, subject *triageSubject
 			plan.Workflow = "clarify"
 		}
 	}
+	if plan.Workflow == "route_recurring" && plan.TaskID > 0 {
+		if err := s.addPlanBinding(ctx, &plan, plan.TaskID, "recurring", "rule", "Explicit recurring workflow"); err != nil {
+			return plan, err
+		}
+	}
+	if plan.Workflow == "route_review" && (plan.PRNumber == 0 || subject.fresh.SubjectType != "PullRequest") {
+		plan.Workflow = "clarify"
+		plan.TaskID = 0
+	}
+	s.setPlanSession(&plan)
 	if plan.ProjectID == 0 {
 		plan.Workflow = "clarify"
 	}

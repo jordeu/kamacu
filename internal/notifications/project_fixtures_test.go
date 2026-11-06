@@ -81,3 +81,24 @@ func fixtureProjectCards(prompt string, draft *triageDraft) (any, error) {
 	}
 	return map[string]any{"cards": cards}, nil
 }
+
+func fixtureOwnershipResponse(prompt string) ([]byte, bool, error) {
+	_, input, ok := strings.Cut(prompt, "ACTIVITIES:\n")
+	if !ok {
+		return nil, false, nil
+	}
+	var envelope struct {
+		Activities []struct {
+			ID string `json:"activity_id"`
+		} `json:"activities"`
+	}
+	if err := json.Unmarshal([]byte(input), &envelope); err != nil {
+		return nil, true, err
+	}
+	choices := []map[string]any{}
+	for _, r := range envelope.Activities {
+		choices = append(choices, map[string]any{"activity_id": r.ID, "task_id": 0, "resolution": "none", "title_quote": "", "reason": "No matching implementation owner in this fixture."})
+	}
+	raw, err := json.Marshal(map[string]string{"compiled_json": mustJSON(map[string]any{"choices": choices})})
+	return raw, true, err
+}

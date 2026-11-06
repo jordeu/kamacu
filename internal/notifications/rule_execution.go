@@ -16,6 +16,9 @@ func (s *Service) validatePlannedTool(ctx context.Context, plan ActionPlan, name
 	if !mutation(name) {
 		return nil
 	}
+	if err := s.validateOwnerAssociation(ctx, plan); err != nil {
+		return err
+	}
 	if plan.Workflow == "clarify" {
 		return errors.New("resolve the missing task or project before starting work")
 	}
@@ -30,7 +33,7 @@ func (s *Service) validatePlannedTool(ctx context.Context, plan ActionPlan, name
 	}
 	switch name {
 	case "create_task":
-		if plan.Workflow != "route_investigation" || a.ProjectID != plan.ProjectID {
+		if plan.Workflow != "route_investigation" || a.ProjectID != plan.ProjectID || plan.TaskID > 0 {
 			return errors.New("task creation does not match the approved action plan")
 		}
 	case "open_review":
@@ -116,6 +119,7 @@ func (s *Service) replyActionPlan(ctx context.Context, original ActionPlan, ques
 		plan.Evidence = original.Evidence
 		plan.RuleIDs = original.RuleIDs
 		plan.Presentation = original.Presentation
+		plan.Bindings = original.Bindings
 		changed := plan.Workflow != original.Workflow || plan.ProjectID != original.ProjectID || plan.TaskID != original.TaskID || plan.PRNumber != original.PRNumber || mustJSON(plan.Targets) != mustJSON(original.Targets)
 		if changed && (!response.Changed || strings.TrimSpace(response.Quote) == "" || !strings.Contains(question.Answer, response.Quote)) {
 			return errors.New("changed workflow or target requires explicit source-backed user intent")
@@ -157,6 +161,23 @@ func (s *Service) replyActionPlan(ctx context.Context, original ActionPlan, ques
 				return errors.New("invalid selected task")
 			}
 		}
+		if plan.TaskID > 0 {
+			role := "implementation"
+			if plan.Workflow == "route_recurring" {
+				role = "recurring"
+			}
+			if plan.Workflow == "route_review" {
+				role = "review"
+			}
+			bindingSource := "confirmed_plan"
+			if changed {
+				bindingSource = "user_reply"
+			}
+			if err := s.addPlanBinding(ctx, &plan, plan.TaskID, role, bindingSource, question.Answer); err != nil {
+				return err
+			}
+		}
+		s.setPlanSession(&plan)
 		return nil
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
