@@ -23,12 +23,13 @@ type Model interface {
 	GenerateValidatedJSON(context.Context, monitor.Profile, string, any, func([]byte) error) ([]byte, error)
 }
 type Service struct {
-	DB          *sql.DB
-	Inbox       *inbox.Service
-	Model       Model
-	Tools       Tools
-	SessionTask func(string) (int64, bool)
-	Providers   map[string]Provider
+	DB             *sql.DB
+	Inbox          *inbox.Service
+	Model          Model
+	Tools          Tools
+	SessionTask    func(string) (int64, bool)
+	TaskHasSession func(int64) bool
+	Providers      map[string]Provider
 	// workMu serializes ticks; source CRUD has its own short lock.
 	workMu   sync.Mutex
 	sourceMu sync.Mutex

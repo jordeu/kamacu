@@ -125,7 +125,22 @@ by a fallback rule. Interpretation failures leave inputs pending for retry.
 Suppression wins over action
 selection. Conflicting action or grouping choices hold the activity for inspection.
 Grouping runs after filtering and action planning, so different owners or workflows
-are not combined. The writer describes the resulting plan and cannot override it.
+are not combined. The writer describes the resulting plan and cannot override it. Its input contains
+only admitted citations, their source identity, PR authorship, latest loaded review-state
+metadata for cited reviewers, and resolved action plans; project
+task catalogs, full discussions, and excluded activities are omitted. Writer inputs
+are limited to 32 KB, splitting large inputs between existing cards while preserving
+each card's grouping. `notification writer input` logs report prompt bytes, card count,
+and subject count for each batch/project.
+
+Session routing checks the linked review or implementation owner against the live
+process manager and refreshes local routing context before publication, even when
+GitHub has not changed. Without a live lookup, bounded history can prove a current
+session exists but cannot prove its absence. Unknown or stale lifecycle evidence
+remains unknown; it is not guessed by a model. The previously compiled new-session condition also uses this factual path,
+so it does not require recompilation. GitHub reads are reused only within one subject
+retrieval phase. Revalidation starts with a fresh cache and identity checks are never
+cached.
 Merged or closed PRs do not produce obsolete review requests.
 
 **Test on recent notifications** runs the selected compiled revision without

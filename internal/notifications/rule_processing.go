@@ -61,7 +61,7 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 			texts := map[string]bool{}
 			var collect func(RuleExpression)
 			collect = func(e RuleExpression) {
-				if e.Op == "semantic" {
+				if e.Op == "semantic" && e.Text != sessionRoutingCondition {
 					texts[e.Text] = true
 				}
 				for _, a := range e.Args {

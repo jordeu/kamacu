@@ -106,7 +106,7 @@ type ActionPlan struct {
 }
 
 var ruleFacts = map[string]string{
-	"repository": "string", "project_id": "number", "actor": "string", "subject.type": "string", "subject.url": "string", "subject.title": "string", "activity.kind": "string", "activity.own": "bool", "pr.state": "string", "pr.draft": "bool", "pr.author": "string", "review.state": "string", "viewer.mentioned": "bool", "viewer.review_requested": "bool", "viewer.approved": "bool",
+	"workflow.needs_session": "bool", "repository": "string", "project_id": "number", "actor": "string", "subject.type": "string", "subject.url": "string", "subject.title": "string", "activity.kind": "string", "activity.own": "bool", "pr.state": "string", "pr.draft": "bool", "pr.author": "string", "review.state": "string", "viewer.mentioned": "bool", "viewer.review_requested": "bool", "viewer.approved": "bool",
 }
 
 func strictRuleJSON(raw []byte, target any) error {
@@ -438,6 +438,9 @@ func evalExpression(e RuleExpression, facts map[string]RuleFact, semantic map[st
 	case "always":
 		return "true"
 	case "semantic":
+		if e.Text == sessionRoutingCondition {
+			return evalExpression(RuleExpression{Op: "eq", Fact: "workflow.needs_session", Value: true}, facts, nil)
+		}
 		if v, ok := semantic[e.Text]; ok {
 			return v
 		}
@@ -518,6 +521,14 @@ func subjectRuleFacts(subject *triageSubject, finding *intentFinding) map[string
 		facts[key] = RuleFact{Known: true, Value: v, Evidence: ids, ObservedAt: observed}
 	}
 	known("repository", strings.ToLower(e.Repository))
+	facts["workflow.needs_session"] = sessionRoutingFact(e)
+	if finding != nil && finding.Intent == "review_request" {
+		if e.ReviewSessionRouting != nil {
+			facts["workflow.needs_session"] = *e.ReviewSessionRouting
+		} else {
+			facts["workflow.needs_session"] = (&Service{}).routingForRole(e, "review")
+		}
+	}
 	if subject.projectID > 0 {
 		known("project_id", float64(subject.projectID))
 	}

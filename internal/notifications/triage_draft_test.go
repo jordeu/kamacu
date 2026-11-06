@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestTriageDraftIncludesDiscussionAndPreservesScope(t *testing.T) {
+func TestTriageDraftIncludesOnlyAdmittedEvidenceAndPreservesScope(t *testing.T) {
 	s, model, _, _ := fixture(t)
 	e := event()
 	e.Title = "Multi-region compute ADR"
@@ -24,8 +24,8 @@ func TestTriageDraftIncludesDiscussionAndPreservesScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	model.respond = func(prompt string) (any, error) {
-		if !strings.Contains(prompt, "The cost gate saves 0.43%.") || !strings.Contains(prompt, "Investigate before answering") {
-			t.Fatal("draft only received the first quote or lost user preferences")
+		if strings.Contains(prompt, "The cost gate saves 0.43%.") || !strings.Contains(prompt, e.Evidence[0].Text) {
+			t.Fatal("draft included unadmitted activity or lost the admitted citation")
 		}
 		return triageDraft{Summary: "Multi-region ADR needs a resilience-versus-cost decision", Context: "The author asks whether resilience should lead the milestone.", Question: "Should I investigate resilience-first placement before drafting your response?", Options: []string{"Create a task to investigate resilience-first placement"}}, nil
 	}

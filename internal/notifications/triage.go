@@ -597,6 +597,7 @@ func (s *Service) reviewCoverage(ctx context.Context, subject *triageSubject) (s
 }
 
 func (s *Service) revalidateNotificationSubject(ctx context.Context, subject *triageSubject, sources map[string]Source, policy RuleSet) error {
+	ctx = freshGitHubReadCache(ctx)
 	var err error
 	source := sources[subject.events[0].SourceID]
 	if reader, ok := s.Providers[source.Provider].(interface {
@@ -634,5 +635,5 @@ func (s *Service) revalidateNotificationSubject(ctx context.Context, subject *tr
 			refreshIntentRules(subject, previous, policy)
 		}
 	}
-	return nil
+	return s.refreshRoutingContext(ctx, &subject.fresh)
 }
