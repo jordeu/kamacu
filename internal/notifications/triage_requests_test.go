@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"kamacu/internal/settings"
 )
 
 func TestReviewAssignmentRequiresVerifiedCurrentIdentity(t *testing.T) {
@@ -40,7 +38,7 @@ func TestRemovedReviewerInvalidatesPreparedClassification(t *testing.T) {
 	fresh.PRFacts = &facts
 	finding := intentFinding{Intent: "review_request", EvidenceID: "current-review-request"}
 	subject := &triageSubject{viewer: "alice", fresh: fresh, events: []RawNotification{{Event: e}}, findings: []intentFinding{finding}, classifiedFindings: []intentFinding{finding}}
-	refreshIntentPolicy(subject, e, settings.NotificationPolicy{})
+	refreshIntentRules(subject, e, RuleSet{})
 	if !subject.classificationStale || len(subject.findings) != 1 || subject.findings[0].Intent != "needs_context" {
 		t.Fatalf("removed reviewer assignment was kept: %+v", subject.findings)
 	}
@@ -74,7 +72,7 @@ func TestReplyDoesNotPublishInventedToolAccessFailure(t *testing.T) {
 			} else if got.DeliveryStatus != "succeeded" || len(tools.calls) != 1 || tools.calls[0] != "list_sessions" {
 				t.Fatalf("valid next tool action was not executed: %+v, %v", got, tools.calls)
 			}
-			if !strings.Contains(model.prompts[1], "APPLICATION CORRECTION") {
+			if !strings.Contains(model.prompts[len(model.prompts)-1], "APPLICATION CORRECTION") {
 				t.Fatal("missing correction of the invented failure")
 			}
 		})
@@ -119,7 +117,7 @@ func TestImplementationAgentRequiresFollowupDelivery(t *testing.T) {
 			if got.DeliveryStatus != tc.want {
 				t.Fatalf("got %s, want %s: %s", got.DeliveryStatus, tc.want, got.ExecutionResult)
 			}
-			if tc.want == "uncertain" && !strings.Contains(got.ExecutionResult, "follow-up instructions were not sent") {
+			if tc.want == "uncertain" && !strings.Contains(got.ExecutionResult, "follow-up instructions were not sent") && !strings.Contains(got.ExecutionResult, "different project") {
 				t.Fatalf("missing handoff failure: %s", got.ExecutionResult)
 			}
 			if tc.session == "correct" && (len(tools.calls) != 2 || tools.calls[1] != "send_session_message") {

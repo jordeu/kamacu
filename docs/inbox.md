@@ -85,90 +85,92 @@ Disconnection preserves inbox history. Pausing retains the checkpoint and catche
 up on activity after resuming. Turning off GitHub integration pauses collection
 and notification actions too.
 
-Collected notifications first appear in the **Notifications** view, with separate
-**Pending** and **Archived** lists. Browsing this view and manually archiving or
-restoring items never invokes the model. Collection does not automatically enrich,
-classify, group, or discard new notifications. Older revisions remain available
-for comparison with newer activity.
+Collected notifications appear in **Notifications**, with **Pending**, **Held**, and
+**Archived** lists. Collection and manual archiving do not invoke a model.
+**Process pending** captures a durable snapshot of pending inputs and the active
+rule-set revision. New arrivals wait for the next run. Repeated clicks join the
+active run. Processing requires an active rule set.
 
-The Inbox sidebar shows a separate pending-notification counter, a link to the raw
-list, and **Process pending**, available in both expanded and collapsed layouts.
-The same processing control is available in Notifications. Clicking it captures
-all currently pending notifications in one durable snapshot. Repeated clicks join
-the active run; notifications collected afterward wait for the next run.
+### Notification rules
 
-Processing uses the global monitoring model and global **Notification instructions**;
-workspace model overrides do not apply. The model reads the whole snapshot with
-current subject state, bounded comment/review excerpts, matching projects/tasks,
-and related pending inbox questions. It groups related activity into one question
-per concrete action, can propose several distinct actions from one thread, and
-discards obsolete activity such as a review request for a merged PR. Existing
-pending questions can be preserved or explicitly superseded. The full related
-pending-question set is checked before inference and again during publication;
-new follow-ups, edits, answers, or dismissals invalidate a stale plan and leave
-its raw notifications pending for another explicit run. Exact duplicate actions
-are deduplicated without merging different actions for the same notification.
+Under notification settings, write one instruction per rule. Each rule has a stable
+ID and revision. Saving creates a draft; **Compile rules** queues a model job that
+converts changed instructions into validated conditions and effects. Unchanged
+compiled instructions can be reused. The compiler identifies filtering, grouping,
+action, and presentation clauses. Unsupported or ambiguous instructions produce
+diagnostics; they cannot be activated. Review the compiled interpretation, including
+its missing-evidence behavior and priority, then explicitly activate the revision.
+The global monitoring model handles compilation and notification processing.
 
-Independent projects are processed by up to three workers. Each project's
-notifications stay together for classification and card grouping. Subject retrieval
-and publication-time revalidation run concurrently, with batch-wide limits of four
-subject jobs and four GitHub requests. Pagination for each resource remains ordered.
-An error cancels outstanding work; all workers finish before the run returns.
-Results are merged in stable project order and published in one transaction.
+Filtering conditions on repository and verified subject facts run before activity
+classification. Conditions evaluate to true, false, or unknown. Unknown evidence
+holds affected activity outside the inbox by default; continuing requires an explicit
+rule instruction. A direct-mention exception belongs to its own rule and cannot
+bypass unrelated exclusions. A team review request does not prove an individual
+assignment. Only verified individual assignment or a current directly addressed
+request can produce a personal review request.
 
-The server log records `notification stage finished` entries with `stage`,
-`duration_ms`, `batch`, and (for project work) `repository`. Stages include
-`project_prepare`, `retrieval`, `classification`, `project_finalize`, `revalidation`,
-`reclassification` when needed, `drafting`, `github_request`, `source_validation`,
-and `publication`.
-Durations are wall time including queueing; overlapping stages must not be summed
-as elapsed batch time. `notification batch finished` records total duration and errors.
+The model classifies independent activities using cited source evidence. Factual
+conditions run in code; semantic conditions use a bounded model check that must
+cover every condition and cite supplied evidence. Suppression wins over action
+selection. Conflicting action or grouping choices hold the activity for inspection.
+Grouping runs after filtering and action planning, so different owners or workflows
+are not combined. The writer describes the resulting plan and cannot override it.
+Merged or closed PRs do not produce obsolete review requests.
 
-On success, every raw notification in the snapshot moves to Archived, including
-notifications represented by inbox actions. Inbox tracks the resulting decisions
-independently. Publishing the actions, superseding old questions, archiving raw
-items, and completing the run commit together. Failed or interrupted processing
-leaves all snapshot notifications pending; retry requires another explicit click.
-Missing subjects or deleted comments are supplied as unavailable-context warnings,
-not as evidence that work is resolved. Missing optional comments preserve any
-verified subject state and other excerpts. Resulting action cards disclose missing
-context, while authentication, identity, rate-limit and transport failures still
-stop the run without consuming notifications.
+**Test on recent notifications** runs the selected compiled revision without
+publishing inbox cards or archiving inputs. It shows decisions and proposed cards,
+including activities previously delivered to the inbox. Normal processing instead
+deduplicates previously delivered activity. Preview and compilation jobs expose
+queued/running/completed or failed states and diagnostics.
 
-An oversized snapshot fails visibly instead of silently processing only part of
-the pending list. Notifications in an active snapshot cannot be manually archived
-or restored until the run finishes.
+Each processed activity records its rule-set revision, clause results, facts,
+missing evidence, and source-backed semantic judgments. Expand a notification's
+decisions to inspect why it was admitted, suppressed, held, or deduplicated.
+Held activities remain available in **Held** and can be explicitly retried after
+fixing missing context. Other independent activities from the same input may still
+produce inbox cards without being repeated on retry. Activating new rules releases
+held inputs for reevaluation, retires stale pending cards, and requeues their inputs.
+Publication and execution reject plans captured under a different active revision.
 
-Notification questions belong to their source rather than an agent session and
-survive server restarts. Replies are saved and queued atomically. A bounded
-execution loop exposes the full registered Kamacu MCP tool catalog after a user
-reply, including creating tasks, moving tasks, deleting resources, and posting
-reviews when requested. The reply determines the target project, task, or session;
-targets may be outside the notification repositories. Grouped actions and their
-follow-up questions retain every contributing notification. Source content is
-treated as untrusted data; the user's reply supplies action authorization.
-During triage, the model can use read-only MCP tools to inspect active sessions
-and recent terminal output before proposing actions, avoiding duplicate review
-requests when a review is already underway. Mutations require an inbox reply.
-Agent-scoped legacy feedback tools keep their API identity requirements; this worker has no agent
-identity and uses notification follow-up questions and outcomes instead.
+This replaces the former prompt and structured notification preferences. On upgrade,
+existing development preferences are imported into an inactive draft for review,
+compilation, and activation. There is no runtime fallback. Pending cards and queued
+replies from the former path are invalidated and their inputs are requeued; tasks
+and inbox history are retained.
 
-Execution results appear with the saved answer in **Archived**. **Reply again**
-opens another question without replacing earlier answers. Reply processing keeps
-the displayed summary, context, choices, earlier replies, and tool results so that
-references to previous sessions or decisions remain available. Ambiguous instructions
-can produce a follow-up question directly. Failed or interrupted actions are never
-automatically repeated; an uncertain result asks you to check the target task or
-session before requesting another attempt. Execution history is stored locally.
-Settings show collection health, queued notifications, and processing errors.
+### Processing and execution
 
-Notification action cards route follow-up work to task agents. New PR comments,
-feedback, questions, and commits should offer to resume the responsible
-implementation task and ask its agent to inspect the latest comments and commits.
-A clear match in the project task list can identify the owner even without an
-explicit PR link; a separate review task does not take precedence over it. If no
-owner exists, offer to create a task and start its agent. The inbox delegates the
-work rather than asking the user to resolve technical feedback or compose a PR
-reply there. After the user accepts, execution checks existing sessions, starts
-or resumes the agent as needed, and sends the follow-up instructions with the
-full PR URL. Ambiguous ownership requires choosing a task.
+Independent projects use up to three workers. Retrieval and revalidation share
+limits of four subject jobs and four GitHub requests. Results publish atomically
+in stable project order, together with decisions, card plans, and raw-item status.
+A failed or interrupted run leaves its inputs available for an explicit retry.
+Missing comments preserve other verified facts and become unknown evidence where
+necessary. Authentication, account, rate-limit, and transport failures stop the run.
+Oversized snapshots fail visibly rather than silently truncating pending inputs.
+Inputs in an active snapshot cannot be manually archived or restored.
+
+Server logs record `notification stage finished` with stage, duration, batch, and
+repository where applicable. Stages include retrieval, classification, semantic
+rules, action planning, drafting, revalidation, and publication. Compilation has its
+own stage. Overlapping durations must not be summed as total batch time;
+`notification batch finished` records total duration and errors.
+
+Each card stores a typed action plan separately from its displayed text. Review
+requests open PR-review workspaces rather than ordinary Todo tasks. Other activities
+can route to an implementation owner, an explicitly named recurring task, or a new
+investigation task. Ambiguous targets require clarification. Cards offer one planned
+action and dismissal. No task mutation occurs before an inbox reply.
+
+Clicking the proposed action executes its saved plan. A free-text reply is separately
+interpreted and validated; changing the workflow or target requires explicit user
+instructions. Execution restricts mutations to the plan's workflow, projects, tasks,
+and PRs, and checks the active rules again before each mutation. Creating a task or
+review workspace alone cannot count as completing an action that requires starting
+its agent. Follow-ups preserve the latest validated execution plan and source evidence.
+Clarification answers are replanned even when selected using a button.
+
+Notification questions survive restarts. Replies are saved and queued atomically;
+results appear with the answer in **Archived**. **Reply again** preserves previous
+answers and execution history. Failed or interrupted actions are never automatically
+repeated; uncertain delivery requires checking the target before another attempt.

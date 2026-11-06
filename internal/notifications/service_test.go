@@ -57,18 +57,32 @@ func (p *fakeProvider) Enrich(_ context.Context, _ Source, e Event) (Event, erro
 }
 
 type fakeModel struct {
-	mu         sync.Mutex
-	steps      []Step
-	responses  []any
-	prompts    []string
-	respond    func(string) (any, error)
-	onGenerate func(string)
+	planResponse any
+	mu           sync.Mutex
+	steps        []Step
+	responses    []any
+	prompts      []string
+	respond      func(string) (any, error)
+	onGenerate   func(string)
 }
 
 func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt string, _ any) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prompts = append(m.prompts, prompt)
+	if _, input, ok := strings.Cut(prompt, "PLAN INPUT:\n"); ok {
+		if m.planResponse != nil {
+			return json.Marshal(m.planResponse)
+		}
+		var data struct {
+			Plan ActionPlan `json:"plan"`
+		}
+		if err := json.Unmarshal([]byte(input), &data); err != nil {
+			return nil, err
+		}
+		return json.Marshal(map[string]any{"plan_json": mustJSON(data.Plan), "explicit_change": false, "user_quote": "", "request_kind": map[string]string{"route_review": "review", "route_implementation": "followup", "route_recurring": "recurring", "route_investigation": "investigation", "clarify": "clarify"}[data.Plan.Workflow]})
+	}
+
 	if m.onGenerate != nil {
 		m.onGenerate(prompt)
 	}
@@ -143,7 +157,7 @@ func fixture(t *testing.T) (*Service, *fakeModel, *fakeTools, Source) {
 	box := inbox.New(db, func(string) inbox.Session { return inbox.Session{} })
 	t.Cleanup(box.Close)
 	model := &fakeModel{}
-	tools := &fakeTools{result: `{"bytes_written":20}`}
+	tools := &fakeTools{result: `{"bytes_written":20}`, results: map[string]string{"open_review": `{"task":{"id":1},"pr":{"number":7}}`, "create_task": `{"id":3}`}}
 	s := New(db, box, model, tools)
 	s.SessionTask = func(id string) (int64, bool) {
 		if id == "correct" {
@@ -159,6 +173,7 @@ func fixture(t *testing.T) (*Service, *fakeModel, *fakeTools, Source) {
 		t.Fatal(err)
 	}
 	s.Providers["github"] = &fakeProvider{}
+	activateTestRules(t, s, nil)
 	return s, model, tools, source
 }
 func event() Event {
@@ -184,6 +199,8 @@ func publish(t *testing.T, s *Service, id int64) inbox.Question {
 	if err != nil {
 		t.Fatal(err)
 	}
+	attachTestPlan(t, s, q.ID)
+	attachTestPlan(t, s, q.ID)
 	return q
 }
 
@@ -191,9 +208,7 @@ func TestExecutionUsesMCPAndRecordsOutcome(t *testing.T) {
 	s, model, tools, source := fixture(t)
 	ctx := context.Background()
 	q := publish(t, s, seed(t, s, source, event()))
-	if err := settings.Set(s.DB, settings.KeyNotificationPrompt, "Prefer the existing implementation session."); err != nil {
-		t.Fatal(err)
-	}
+
 	if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Check and fix", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +220,7 @@ func TestExecutionUsesMCPAndRecordsOutcome(t *testing.T) {
 	if got.DeliveryStatus != "succeeded" || !strings.Contains(got.ExecutionResult, "Instructions sent") {
 		t.Fatalf("outcome: %+v", got)
 	}
-	if len(tools.calls) != 1 || !strings.Contains(model.prompts[0], "Prefer the existing implementation session.") {
+	if len(tools.calls) != 1 || !strings.Contains(model.prompts[0], "route_implementation") {
 		t.Fatal("missing tool call or custom prompt")
 	}
 	var sent struct {
@@ -375,6 +390,9 @@ func TestExecutionRevalidatesAccountBeforeEnrichmentAndEveryMutation(t *testing.
 		t.Run(string(rune('0'+failAt)), func(t *testing.T) {
 			s, model, tools, source := fixture(t)
 			ctx := context.Background()
+			if _, err := s.DB.Exec(`UPDATE tasks SET source='github_pr',pr_number=7 WHERE id=1`); err != nil {
+				t.Fatal(err)
+			}
 			q := publish(t, s, seed(t, s, source, event()))
 			mismatch := errors.New("active gh account changed")
 			provider := &fakeProvider{identityErr: mismatch, failIdentityAt: failAt}
@@ -429,6 +447,7 @@ func TestReplyPromptRetainsDisplayedContextAndPriorToolResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	attachTestPlan(t, s, q.ID)
 	if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Prepare it", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -440,10 +459,11 @@ func TestReplyPromptRetainsDisplayedContextAndPriorToolResults(t *testing.T) {
 	followup.Summary = "Choose the prepared session"
 	followup.Context = "The first session is new-session-XYZ; the second is previous-session-ABC."
 	followup.Options = []string{"Use the first session", "Use the second session"}
-	next, err := s.Inbox.PublishNotification(ctx, id, "GitHub", event().URL, followup.question())
+	next, err := s.Inbox.PublishNotificationFollowup(ctx, q.ID, followup.question())
 	if err != nil {
 		t.Fatal(err)
 	}
+	attachTestPlan(t, s, next.ID)
 	if _, err = s.Inbox.Answer(ctx, nil, next.ID, next.Revision, "Use the first session", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +662,7 @@ func TestUncertainReviewPromptCannotBeBypassed(t *testing.T) {
 	}
 }
 
-func TestExecutionFullCatalogAfterReply(t *testing.T) {
+func TestExecutionRejectsMutationsOutsidePlan(t *testing.T) {
 	for _, tc := range []struct{ name, args string }{
 		{"create_task", `{"project_id":2,"title":"Fix feedback"}`},
 		{"delete_task", `{"task_id":2}`},
@@ -667,7 +687,7 @@ func TestExecutionFullCatalogAfterReply(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ := s.Inbox.Get(ctx, q.ID)
-			if got.DeliveryStatus != "succeeded" || len(tools.calls) != 1 || tools.calls[0] != tc.name {
+			if got.DeliveryStatus != "failed" || len(tools.calls) != 0 {
 				t.Fatalf("execution: %+v calls=%v", got, tools.calls)
 			}
 		})
@@ -683,6 +703,16 @@ func TestExecutionRejectsUnknownToolAndRepeatedTaskCreation(t *testing.T) {
 			if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Create a task", ""); err != nil {
 				t.Fatal(err)
 			}
+			var plan ActionPlan
+			var raw string
+			if err := s.DB.QueryRow(`SELECT plan FROM notification_card_plans WHERE question_id=?`, q.ID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			json.Unmarshal([]byte(raw), &plan)
+			plan.Workflow = "route_investigation"
+			plan.ProjectID = 2
+			plan.TaskID = 0
+			s.DB.Exec(`UPDATE notification_card_plans SET plan=? WHERE question_id=?`, mustJSON(plan), q.ID)
 			step := Step{Action: "tool", ToolName: name, Arguments: `{"project_id":2,"title":"Fix feedback"}`}
 			model.steps = []Step{step, step}
 			if err := s.executeNext(ctx); err != nil {
@@ -738,6 +768,16 @@ func TestExecutionStartsUserSelectedReviewOutsideNotification(t *testing.T) {
 				t.Fatal(err)
 			}
 			q := publish(t, s, seed(t, s, source, event()))
+			var raw string
+			var plan ActionPlan
+			s.DB.QueryRow(`SELECT plan FROM notification_card_plans WHERE question_id=?`, q.ID).Scan(&raw)
+			json.Unmarshal([]byte(raw), &plan)
+			plan.Workflow = "route_review"
+			plan.ProjectID = 2
+			plan.TaskID = 2
+			plan.PRNumber = 9
+			plan.Targets = []ReviewTarget{{2, 9}}
+			s.DB.Exec(`UPDATE notification_card_plans SET plan=? WHERE question_id=?`, mustJSON(plan), q.ID)
 			if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Start reviewing https://github.com/acme/other/pull/9", ""); err != nil {
 				t.Fatal(err)
 			}
@@ -784,11 +824,12 @@ func TestReviewRequestCorrectsNormalTaskCreationBeforeMutation(t *testing.T) {
 				t.Fatal(err)
 			}
 			card := ask().question()
-			card.Context = withTriageEvidence([]triageEvidence{{Intent: "review_request"}}, "Review this PR")
+			card.Context = "Review this PR"
 			q, err := s.Inbox.PublishNotification(ctx, seed(t, s, source, event()), "GitHub", event().URL, card)
 			if err != nil {
 				t.Fatal(err)
 			}
+			attachTestPlan(t, s, q.ID)
 			if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Create a task and review it", ""); err != nil {
 				t.Fatal(err)
 			}
@@ -838,11 +879,12 @@ func TestReviewRequestCannotUseImplementationTask(t *testing.T) {
 			s, model, tools, source := fixture(t)
 			ctx := context.Background()
 			card := ask().question()
-			card.Context = withTriageEvidence([]triageEvidence{{Intent: "review_request"}}, "Review this PR")
+			card.Context = "Review this PR"
 			q, err := s.Inbox.PublishNotification(ctx, seed(t, s, source, event()), "GitHub", event().URL, card)
 			if err != nil {
 				t.Fatal(err)
 			}
+			attachTestPlan(t, s, q.ID)
 			if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Start review", ""); err != nil {
 				t.Fatal(err)
 			}
@@ -856,49 +898,6 @@ func TestReviewRequestCannotUseImplementationTask(t *testing.T) {
 			}
 
 		})
-	}
-}
-
-func TestReviewFollowupRetainsRoutingClassification(t *testing.T) {
-	s, model, tools, source := fixture(t)
-	ctx := context.Background()
-	card := ask().question()
-	records := []triageEvidence{{Intent: "review_request", Scope: "pr", Quote: "request"}}
-	card.Context = withTriageEvidence(records, "Review this PR")
-	q, err := s.Inbox.PublishNotification(ctx, seed(t, s, source, event()), "GitHub", event().URL, card)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Review it", ""); err != nil {
-		t.Fatal(err)
-	}
-	model.steps = []Step{ask()}
-	if err = s.executeNext(ctx); err != nil {
-		t.Fatal(err)
-	}
-	page, err := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Items) != 1 {
-		t.Fatalf("pending cards = %d", len(page.Items))
-	}
-	followup := page.Items[0]
-	got, _, present := readTriageEvidence(followup.Context)
-	if !present || len(got) != 1 || got[0] != records[0] {
-		t.Fatalf("lost routing provenance: %+v", got)
-	}
-	if _, err = s.Inbox.Answer(ctx, nil, followup.ID, followup.Revision, "Yes, start it", ""); err != nil {
-		t.Fatal(err)
-	}
-	wrong := Step{Action: "tool", ToolName: "create_task", Arguments: `{"project_id":1,"title":"Review PR"}`}
-	model.steps = []Step{wrong, wrong}
-	if err = s.executeNext(ctx); err != nil {
-		t.Fatal(err)
-	}
-	outcome, _ := s.Inbox.Get(ctx, followup.ID)
-	if len(tools.calls) != 0 || outcome.DeliveryStatus != "failed" {
-		t.Fatalf("follow-up bypassed review routing: %+v %v", outcome, tools.calls)
 	}
 }
 

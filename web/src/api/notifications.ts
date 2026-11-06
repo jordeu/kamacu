@@ -30,6 +30,8 @@ export function useRemoveNotificationSource() {
 }
 
 export interface RawNotification {
+ held: boolean;
+ decisions?: import("./notificationRules").RuleDecision[];
  processing?: boolean;
  id: number;
  source_id: string;
@@ -48,9 +50,9 @@ export interface NotificationProcessing {
  action_count: number;
  notification_count: number;
 }
-export interface NotificationStatus { pending_count: number; processing: NotificationProcessing | null }
+export interface NotificationStatus { pending_count: number; held_count: number; processing: NotificationProcessing | null }
 export interface RawNotificationPage { items: RawNotification[]; pending_count: number; has_more: boolean }
-export function useRawNotifications(status: "pending" | "archived", offset = 0) {
+export function useRawNotifications(status: "pending" | "archived" | "held", offset = 0) {
  return useQuery({ queryKey: ["raw-notifications", status, offset], queryFn: () => get<RawNotificationPage>(`/api/notifications?status=${status}&offset=${offset}`), refetchInterval: 3000 });
 }
 export function useNotificationStatus() {

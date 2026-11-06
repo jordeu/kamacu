@@ -11,14 +11,15 @@ import (
 )
 
 func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
+	notificationRuleRoutes(mux, service)
 
 	mux.HandleFunc("GET /api/notifications", func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
 		if status == "" {
 			status = "pending"
 		}
-		if status != "pending" && status != "archived" {
-			writeError(w, 400, "status must be pending or archived")
+		if status != "pending" && status != "archived" && status != "held" {
+			writeError(w, 400, "status must be pending, held or archived")
 			return
 		}
 		offset := 0
@@ -47,7 +48,7 @@ func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
 	})
 	mux.HandleFunc("POST /api/notifications/process", func(w http.ResponseWriter, r *http.Request) {
 		process, err := service.RequestProcessing(r.Context())
-		if errors.Is(err, notifications.ErrNoPending) {
+		if errors.Is(err, notifications.ErrNoPending) || errors.Is(err, notifications.ErrNoActiveRules) {
 			writeError(w, 409, err.Error())
 			return
 		}
@@ -70,7 +71,7 @@ func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
 			return
 		}
 		if body.Status != "pending" && body.Status != "archived" {
-			writeError(w, 400, "status must be pending or archived")
+			writeError(w, 400, "status must be pending, held or archived")
 			return
 		}
 		err = service.SetRawStatus(r.Context(), id, body.Status)

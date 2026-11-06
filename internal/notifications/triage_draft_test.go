@@ -6,41 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"kamacu/internal/inbox"
-	"kamacu/internal/settings"
 )
-
-func TestPolicyIgnoreDoesNotBecomeInspectionBecauseBodyRecencyIsUnknown(t *testing.T) {
-	for _, incomplete := range []bool{false, true} {
-		t.Run(map[bool]string{false: "retrieved", true: "missing evidence"}[incomplete], func(t *testing.T) {
-			s, model, _, _ := fixture(t)
-			e := event()
-			e.Version = "2026-11-04T12:00:00Z"
-			e.EvidenceComplete = !incomplete
-			e.Evidence = []SubjectEvidence{{ID: e.URL, URL: e.URL, Text: "A change to the service", UpdatedAt: e.Version, Complete: true}}
-			const preference = "Ignore acme/repo unless directly mentioned."
-			model.responses = []any{intentResponse{Findings: []intentFinding{
-				{Intent: "policy_ignore", EvidenceID: e.URL, Quote: "A change", PolicyQuote: preference},
-				{Intent: "routine", EvidenceID: e.URL, Quote: "service"},
-			}}}
-			subject := &triageSubject{fresh: e, events: []RawNotification{{ID: 1, Event: e}}, viewer: "alice"}
-			if err := s.classifySubject(context.Background(), subject, preference); err != nil {
-				t.Fatal(err)
-			}
-			decision, err := s.renderTriage(context.Background(), []*triageSubject{subject}, nil, settings.NotificationPolicy{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if incomplete && len(decision.Actions) != 1 || !incomplete && len(decision.Actions) != 0 {
-				t.Fatalf("unexpected policy outcome: %+v, %+v", subject.findings, decision)
-			}
-			if !strings.Contains(model.prompts[0], `"viewer":"alice"`) || !strings.Contains(model.prompts[0], `"retrieval_complete":`) {
-				t.Fatal("classifier did not receive recipient and retrieval facts")
-			}
-		})
-	}
-}
 
 func TestTriageDraftIncludesDiscussionAndPreservesScope(t *testing.T) {
 	s, model, _, _ := fixture(t)
@@ -53,7 +19,7 @@ func TestTriageDraftIncludesDiscussionAndPreservesScope(t *testing.T) {
 		{ID: "decision", Text: "Should resilience come before cost? The cost gate saves 0.43%.", UpdatedAt: e.Version, Complete: true},
 	}
 	subject := &triageSubject{fresh: e, viewer: "alice", events: []RawNotification{{ID: 7, Event: e}}, findings: []intentFinding{{Intent: "needs_context", EvidenceID: "reply", Quote: e.Evidence[0].Text}}}
-	decision, err := s.renderTriage(context.Background(), []*triageSubject{subject}, nil, settings.NotificationPolicy{})
+	decision, err := s.renderTriage(context.Background(), []*triageSubject{subject}, nil, RuleSet{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,16 +27,16 @@ func TestTriageDraftIncludesDiscussionAndPreservesScope(t *testing.T) {
 		if !strings.Contains(prompt, "The cost gate saves 0.43%.") || !strings.Contains(prompt, "Investigate before answering") {
 			t.Fatal("draft only received the first quote or lost user preferences")
 		}
-		return triageDraft{Summary: "Multi-region ADR needs a resilience-versus-cost decision", Context: "The author asks whether resilience should lead the milestone.", Question: "Should I investigate resilience-first placement before drafting your response?", Options: []string{"Create a task to investigate resilience-first placement", "Draft a response about the milestone tradeoffs"}}, nil
+		return triageDraft{Summary: "Multi-region ADR needs a resilience-versus-cost decision", Context: "The author asks whether resilience should lead the milestone.", Question: "Should I investigate resilience-first placement before drafting your response?", Options: []string{"Create a task to investigate resilience-first placement"}}, nil
 	}
 	if err := s.draftTriageCards(context.Background(), &decision, []*triageSubject{subject}, "Investigate before answering"); err != nil {
 		t.Fatal(err)
 	}
 	a := decision.Actions[0]
-	if len(a.EventIDs) != 1 || a.EventIDs[0] != 7 || len(a.Options) != 3 || a.Options[2] != "Leave this activity alone" || !strings.Contains(a.Question, "resilience-first") || !strings.Contains(a.Context, e.URL) || !strings.Contains(a.Context, e.Evidence[0].Text) {
+	if len(a.EventIDs) != 1 || a.EventIDs[0] != 7 || len(a.Options) != 2 || a.Options[1] != "Leave this activity alone" || !strings.Contains(a.Question, "resilience-first") || !strings.Contains(a.Context, e.URL) || !strings.Contains(a.Context, e.Evidence[0].Text) {
 		t.Fatalf("lost scope, sources or specific options: %+v", a)
 	}
-	if !isTriageQuestion(inbox.Question{Question: a.Question, Context: a.Context}, "needs_context") {
+	if len(a.Plan.Evidence) == 0 || a.Plan.Evidence[0].Intent != "needs_context" {
 		t.Fatal("personalized question lost template identity")
 	}
 	// The same source evidence must still deduplicate after personalizing prose.
@@ -106,7 +72,7 @@ func TestPersonalizedCardsDeduplicateAndDismissWithoutExecution(t *testing.T) {
 		if !strings.HasPrefix(prompt, projectDraftPrompt) {
 			return classify(prompt)
 		}
-		return triageDraft{Summary: "Decide how to investigate capacity retries", Context: "The reviewer asks about capacity retry behavior.", Question: "Should I investigate capacity retries before drafting a response?", Options: []string{"Investigate capacity retries in a task", "Draft a response about capacity retries"}}, nil
+		return triageDraft{Summary: "Decide how to investigate capacity retries", Context: "The reviewer asks about capacity retry behavior.", Question: "Should I investigate capacity retries before drafting a response?", Options: []string{"Investigate capacity retries in a task"}}, nil
 	}
 	seed(t, s, source, event())
 	if status := process(t, s, model, "direct_question"); status.Status != "completed" || status.ActionCount != 1 {

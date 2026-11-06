@@ -34,9 +34,6 @@ var tokenRe = regexp.MustCompile(`\{[^}]*\}`)
 // verbatim on failure — the frontend mirrors these strings exactly.
 func Validate(key, value string) error {
 	switch key {
-	case KeyNotificationPolicy:
-		_, err := ParseNotificationPolicy(value)
-		return err
 	case KeyBranchTemplate:
 		return validateBranchTemplate(value)
 	case KeyWorktreeBase:
@@ -63,11 +60,6 @@ func Validate(key, value string) error {
 			return nil
 		}
 		return errors.New("Choose on or off.")
-	case KeyNotificationPrompt:
-		if len(value) > 16000 {
-			return errors.New("Prompt is too long (maximum 16000 bytes).")
-		}
-		return nil
 	case KeyPRReviewSeed:
 		// Free-text seed prompt (12-07). Accept any value; cap length so a
 		// pathological paste can't bloat the KV row. <n>/<title> placeholders

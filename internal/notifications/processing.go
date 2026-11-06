@@ -14,6 +14,7 @@ import (
 )
 
 type BatchAction struct {
+	Plan     ActionPlan `json:"plan"`
 	evidence []triageEvidence
 	EventIDs []int64  `json:"event_ids"`
 	Summary  string   `json:"summary"`
@@ -75,9 +76,10 @@ func (s *Service) batchEvents(ctx context.Context, id string) ([]RawNotification
 }
 
 type notificationPlan struct {
-	actions []inbox.NotificationBatchAction
-	refs    []inbox.NotificationQuestionRef
-	groups  []preparedTriageGroup
+	actions   []inbox.NotificationBatchAction
+	refs      []inbox.NotificationQuestionRef
+	groups    []preparedTriageGroup
+	decisions []ActivityDecision
 }
 
 func (s *Service) processBatch(ctx context.Context, id string) (resultErr error) {
@@ -129,7 +131,12 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 		plan.actions = append(plan.actions, prepared.actions...)
 		plan.refs = append(plan.refs, prepared.refs...)
 		for _, group := range prepared.groups {
-			if err = s.checkTriagePreferences(group); err != nil {
+			for _, subject := range group.subjects {
+				plan.decisions = append(plan.decisions, subject.decisions...)
+			}
+		}
+		for _, group := range prepared.groups {
+			if err = s.checkTriagePreferences(ctx, group); err != nil {
 				return err
 			}
 		}
@@ -168,7 +175,13 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 			seen[ref.ID] = true
 		}
 	}
-	return notificationStage(ctx, "publication", func() error { return s.Inbox.ApplyNotificationBatch(ctx, id, plan.actions, refs) })
+	return notificationStage(ctx, "publication", func() error {
+		decisions := []inbox.NotificationDecision{}
+		for _, d := range plan.decisions {
+			decisions = append(decisions, inbox.NotificationDecision{Semantic: mustJSON(d.Semantic), ActivityID: d.ID, EventIDs: mustJSON(d.EventIDs), Outcome: d.Outcome, Evaluations: mustJSON(d.Evaluations), Facts: mustJSON(d.Facts)})
+		}
+		return s.Inbox.ApplyNotificationBatch(ctx, id, plan.actions, refs, decisions...)
+	})
 }
 
 func validateBatch(d BatchDecision, events []RawNotification, questions []inbox.Question) ([]inbox.NotificationBatchAction, []inbox.NotificationQuestionRef, error) {
@@ -225,7 +238,7 @@ func validateBatch(d BatchDecision, events []RawNotification, questions []inbox.
 			return nil, nil, errors.New("notification context including subject links exceeds limits")
 		}
 		primary := allowed[a.EventIDs[0]]
-		actions = append(actions, inbox.NotificationBatchAction{EventIDs: a.EventIDs, Request: c, SourceName: primary.SourceName, SourceURL: primary.Event.URL})
+		actions = append(actions, inbox.NotificationBatchAction{EventIDs: a.EventIDs, Request: c, Plan: mustJSON(a.Plan), SourceName: primary.SourceName, SourceURL: primary.Event.URL})
 	}
 	if len(covered) != len(allowed) {
 		return nil, nil, errors.New("batch did not account for every pending notification")

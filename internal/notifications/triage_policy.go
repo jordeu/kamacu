@@ -3,59 +3,30 @@ package notifications
 import (
 	"bytes"
 	"encoding/json"
-	"strings"
-
-	"kamacu/internal/settings"
 )
 
-// This function is called only for an already classified review_request.
-// A thread's review_requested reason cannot establish the latest activity's
-// intent: comments and feedback on the same thread may remain actionable.
-func reviewPolicyReason(policy settings.NotificationPolicy, subject Event, mention *bool) string {
-	if mention != nil && *mention {
-		return ""
+func reviewRequestStatusReason(subject Event) string {
+	if facts := subject.PRFacts; facts != nil && facts.Available && !facts.Stale && (facts.State == "merged" || facts.State == "closed") {
+		return "obsolete_review_request"
 	}
-	facts := subject.PRFacts
-	if facts == nil || !facts.Available || facts.Stale {
-		return ""
-	}
-	reason := ""
-	switch {
-	case facts.State == "merged" || facts.State == "closed":
-		reason = "obsolete_review_request"
-	case policy.IgnoreDrafts && facts.Draft != nil && *facts.Draft:
-		reason = "draft_review_request"
-	case policy.IgnoreApproved && facts.ViewerEverApproved != nil && *facts.ViewerEverApproved:
-		reason = "already_approved"
-	}
-	if reason != "" && mention == nil {
-		return "needs_context:direct_mention"
-	}
-	return reason
+	return ""
 }
-
-func refreshIntentPolicy(subject *triageSubject, previous Event, policy settings.NotificationPolicy) {
-	subject.reason = policyReason(policy, subject.events, subject.fresh, subject.viewer)
-	if subject.reason != "" && !strings.HasPrefix(subject.reason, "needs_context:") {
-		return
-	}
+func refreshIntentRules(subject *triageSubject, previous Event, rules RuleSet) {
+	subject.reason = preflightRules(rules, subject)
 	before, beforeComplete := classifierEvidence(subject.events, previous)
 	after, afterComplete := classifierEvidence(subject.events, subject.fresh)
-	beforeJSON, _ := json.Marshal(before)
-	afterJSON, _ := json.Marshal(after)
-	changed := !bytes.Equal(beforeJSON, afterJSON) || beforeComplete != afterComplete || previous.SubjectTitle != subject.fresh.SubjectTitle || !equalBool(mentionStatus(subject.events, previous, subject.viewer), mentionStatus(subject.events, subject.fresh, subject.viewer))
-	if classificationFactsChanged(previous.PRFacts, subject.fresh.PRFacts) {
-		changed = true
+	a, _ := json.Marshal(before)
+	b, _ := json.Marshal(after)
+	subject.classificationStale = subject.classificationStale || !bytes.Equal(a, b) || beforeComplete != afterComplete || previous.SubjectTitle != subject.fresh.SubjectTitle || !equalBool(mentionStatus(subject.events, previous, subject.viewer), mentionStatus(subject.events, subject.fresh, subject.viewer)) || classificationFactsChanged(previous.PRFacts, subject.fresh.PRFacts) || len(subject.classifiedFindings) == 0
+	if subject.reason != "" {
+		subject.findings = nil
+		return
 	}
-	subject.classificationStale = subject.classificationStale || changed || len(subject.classifiedFindings) == 0
-	if subject.classificationStale || strings.HasPrefix(subject.reason, "needs_context:") {
+	if subject.classificationStale {
 		subject.findings = []intentFinding{{Intent: "needs_context"}}
 		return
 	}
-	// Reapply changed status/approval facts to the original classification, not to
-	// a previously filtered copy. This also handles reopening a merged PR.
 	subject.findings = append([]intentFinding(nil), subject.classifiedFindings...)
-	applyIntentPolicy(subject, policy)
 }
 
 func classificationFactsChanged(before, after *PRFacts) bool {
