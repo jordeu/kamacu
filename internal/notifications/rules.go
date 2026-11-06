@@ -28,6 +28,9 @@ type RuleSet struct {
 	Diagnostics []string           `json:"diagnostics"`
 }
 type NotificationRule struct {
+	Mode            string       `json:"mode,omitempty"`
+	Diagnostic      string       `json:"diagnostic,omitempty"`
+	Alternatives    []string     `json:"alternatives,omitempty"`
 	ID              string       `json:"id"`
 	Revision        int64        `json:"revision"`
 	Text            string       `json:"text"`
@@ -200,8 +203,25 @@ func validateRuleSet(set RuleSet, compiled bool) error {
 		if r.Revision < 1 || r.ID == "" || ids[r.ID] || len(r.Text) > 8000 || strings.TrimSpace(r.Text) == "" {
 			return errors.New("rules require unique IDs and bounded nonempty text")
 		}
+		if len(r.Diagnostic) > 8000 || len(r.Alternatives) > 3 {
+			return errors.New("rule explanation exceeds limits")
+		}
+		for _, a := range r.Alternatives {
+			if strings.TrimSpace(a) == "" || len(a) > 8000 {
+				return errors.New("invalid alternative rule")
+			}
+		}
 		ids[r.ID] = true
+		if r.Mode != "" && r.Mode != "compiled" && r.Mode != "llm" {
+			return errors.New("unsupported rule execution mode")
+		}
 		if !compiled || !r.Enabled {
+			continue
+		}
+		if r.Mode == "llm" {
+			if len(r.Clauses) != 0 {
+				return errors.New("LLM rules must not contain stale compiled clauses")
+			}
 			continue
 		}
 		if r.CompilerVersion != ruleCompilerVersion || len(r.Clauses) == 0 || len(r.Clauses) > 20 {
@@ -327,10 +347,23 @@ func (s *Service) SaveRuleDraft(ctx context.Context, base int64, rules []Notific
 				break
 			}
 		}
+		requestedMode := r.Mode
+		r.Diagnostic = ""
+		r.Alternatives = nil
+		r.Mode = ""
 		r.Revision = old.Revision + 1
 		r.Clauses = nil
 		r.CompilerVersion = ""
-		if old.Text == r.Text && old.CompilerVersion == ruleCompilerVersion {
+		if requestedMode == "llm" {
+			r.Mode = "llm"
+			if old.Mode == "llm" && old.Text == r.Text {
+				if old.Enabled == r.Enabled {
+					r.Revision = old.Revision
+				}
+				r.Diagnostic = old.Diagnostic
+				r.Alternatives = old.Alternatives
+			}
+		} else if old.Text == r.Text && old.Mode != "llm" && old.CompilerVersion == ruleCompilerVersion {
 			r.Clauses = old.Clauses
 			r.CompilerVersion = old.CompilerVersion
 			if r.Enabled == old.Enabled {

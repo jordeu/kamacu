@@ -641,20 +641,29 @@ func TestIndependentActivitiesWithSameIntentKeepSeparateRuleDecisions(t *testing
 	}
 }
 
-func TestActionOverridesCannotReuseUnrelatedOwnerOrBypassReview(t *testing.T) {
+func TestActionOverridesClearOwnerAndSupportExplicitRecurringReviews(t *testing.T) {
 	s, _, _, _ := fixture(t)
 	ctx := context.Background()
 	for _, tc := range []struct{ intent, effect, workflow string }{
 		{"review_feedback", "route_investigation", "route_investigation"},
-		{"review_request", "route_recurring", "route_review"},
+		{"review_request", "route_recurring", "route_recurring"},
 	} {
 		t.Run(tc.effect, func(t *testing.T) {
+			var taskID int64
+			taskName := ""
+			if tc.effect == "route_recurring" {
+				taskID = 1
+				taskName = "Daily"
+				if _, err := s.DB.Exec(`UPDATE tasks SET recurrent=1,title='Daily' WHERE id=1`); err != nil {
+					t.Fatal(err)
+				}
+			}
 			f := intentFinding{Intent: tc.intent, EvidenceID: "comment", Quote: "Please check"}
 			subject := &triageSubject{projectID: 1, fresh: event()}
 			subject.fresh.RelatedWork = []store.RelatedTask{{Link: store.PRLink{TaskID: 1, Role: "implementation"}}}
 			subject.matched = map[string][]RuleClause{activityID(subject, f): {{ID: "R.1", Category: "action", Effect: tc.effect, Argument: map[bool]string{true: "Daily"}[tc.effect == "route_recurring"]}}}
 			plan, err := s.activityActionPlan(ctx, subject, f, RuleSet{})
-			if err != nil || plan.Workflow != tc.workflow || plan.TaskID != 0 || plan.TaskName != "" {
+			if err != nil || plan.Workflow != tc.workflow || plan.TaskID != taskID || plan.TaskName != taskName {
 				t.Fatal(plan, err)
 			}
 		})

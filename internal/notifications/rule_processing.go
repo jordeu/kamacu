@@ -161,6 +161,13 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 			}
 		}
 	}
+	effective, fallbackJudgments, err := s.evaluateLLMRuleFallbacks(ctx, subjects, set, semantics)
+	if err != nil {
+		return err
+	}
+	for id, audit := range fallbackJudgments {
+		judgments[id] = append(judgments[id], audit...)
+	}
 	for _, subject := range subjects {
 		subject.decisions = nil
 		subject.matched = map[string][]RuleClause{}
@@ -181,7 +188,11 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 			if subject.projectID > 0 {
 				facts["project_id"] = RuleFact{Known: true, Value: float64(subject.projectID)}
 			}
-			outcome, evals, matched := evaluateRuleSet(set, facts, semantics[id], false)
+			activityRules := set
+			if v, ok := effective[id]; ok {
+				activityRules = v
+			}
+			outcome, evals, matched := evaluateRuleSet(activityRules, facts, semantics[id], false)
 			if f.Intent == "routine" {
 				outcome = "suppressed"
 			}
@@ -256,7 +267,7 @@ func (s *Service) activityActionPlan(ctx context.Context, subject *triageSubject
 		plan.TaskName = winner.Argument
 		plan.RuleIDs = append(plan.RuleIDs, winner.ID)
 	}
-	if f.Intent == "review_request" {
+	if f.Intent == "review_request" && plan.Workflow != "route_recurring" {
 		plan.Workflow = "route_review"
 		plan.TaskID = 0
 		plan.TaskName = ""

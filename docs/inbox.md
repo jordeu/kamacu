@@ -94,11 +94,16 @@ active run. Processing requires an active rule set.
 ### Notification rules
 
 Under notification settings, write one instruction per rule. Each rule has a stable
-ID and revision. Saving creates a draft; **Compile rules** queues a model job that
+ID and revision. Saving creates a draft; **Prepare rules** queues a model job that
 converts changed instructions into validated conditions and effects. Unchanged
 compiled instructions can be reused. The compiler identifies filtering, grouping,
-action, and presentation clauses. Unsupported or ambiguous instructions produce
-diagnostics; they cannot be activated. Review the compiled interpretation, including
+action, and presentation clauses. Each rule shows **Compiled**, **LLM evaluated · not
+compiled**, or **Not compiled · awaiting preparation**. When compilation cannot
+represent a rule faithfully, that rule falls back to LLM evaluation; its explanation
+and suggested alternative rules appear beside its text. The suggestions are never
+applied automatically. Other rules can still compile. You can also explicitly choose
+**Use LLM evaluation**, or choose automatic compilation again to retry a rewrite.
+Review each rule's mode and compiled interpretation, including
 its missing-evidence behavior and priority, then explicitly activate the revision.
 The global monitoring model handles compilation and notification processing.
 
@@ -112,7 +117,12 @@ request can produce a personal review request.
 
 The model classifies independent activities using cited source evidence. Factual
 conditions run in code; semantic conditions use a bounded model check that must
-cover every condition and cite supplied evidence. Suppression wins over action
+cover every condition and cite supplied evidence. LLM-evaluated rules are interpreted
+from their full text for each activity, including filtering, grouping, routing and
+presentation. Every rule must receive a result with source-backed effects; ambiguous
+meaning or missing evidence holds the activity. Compiled exclusions cannot be bypassed
+by a fallback rule. Interpretation failures leave inputs pending for retry.
+Suppression wins over action
 selection. Conflicting action or grouping choices hold the activity for inspection.
 Grouping runs after filtering and action planning, so different owners or workflows
 are not combined. The writer describes the resulting plan and cannot override it.
@@ -157,7 +167,9 @@ own stage. Overlapping durations must not be summed as total batch time;
 `notification batch finished` records total duration and errors.
 
 Each card stores a typed action plan separately from its displayed text. Review
-requests open PR-review workspaces rather than ordinary Todo tasks. Other activities
+requests default to PR-review workspaces rather than ordinary Todo tasks. An explicit
+rule can instead select an existing named recurring task for grouped reviews.
+Other activities
 can route to an implementation owner, an explicitly named recurring task, or a new
 investigation task. Ambiguous targets require clarification. Cards offer one planned
 action and dismissal. No task mutation occurs before an inbox reply.
