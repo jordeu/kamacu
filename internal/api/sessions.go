@@ -757,7 +757,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// Starting or resuming a board task begins work. The conditional UPDATE
 	// preserves concurrent manual moves and leaves PR/global sessions alone.
 	if kind == session.KindAgent && req.TaskID != 0 {
-		if _, err := h.db.Exec(`UPDATE tasks SET status = 'in_progress',
+		if _, err := h.db.Exec(`UPDATE tasks SET status = 'in_progress', snoozed_until = NULL, snoozed_from = NULL,
 			position = (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks AS target
 				WHERE target.project_id = tasks.project_id AND target.status = 'in_progress' AND target.source = 'manual'),
 			in_progress_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),

@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useAgentStatuses } from "@/api/agents";
 import type { AgentStatusEntry } from "@/api/agents";
 import { StatusDot } from "@/components/StatusDot";
+import { SnoozeTask } from "@/components/task/SnoozeTask";
 import type { Task } from "@/api/types";
 
 /** Shared inner layout for CardShell, TaskCard, and TaskCardOverlay.
@@ -87,7 +88,11 @@ export function TaskCard({ task }: { task: Task }) {
         isDragging && "opacity-40",
       )}
     >
-      <CardRow task={task} entry={entry} />
+      <div className="flex items-start gap-1">
+        <div className="min-w-0 flex-1"><CardRow task={task} entry={entry} /></div>
+        {!task.snoozed_until && <SnoozeTask task={task} compact />}
+      </div>
+      {task.snoozed_until && <SnoozeTask task={task} compact />}
     </div>
   );
 }

@@ -29,3 +29,16 @@ describe("TODO recurrence sections", () => {
     expect(moved.recurrent).toBe(true);
   });
 });
+
+
+describe("TODO snoozed section", () => {
+  it("groups snoozed recurrent tasks only in Snoozed and sorts by deadline", () => {
+    const snoozed = { ...task(3, false), snoozed_until: "2026-11-09T09:00:00Z" };
+    const recurrentSnoozed = { ...task(4, true), snoozed_until: "2026-11-08T09:00:00Z" };
+    expect(orderColumnTasks("todo", [snoozed, task(2, true), recurrentSnoozed, task(1, false)]).map((t) => t.id)).toEqual([1, 2, 4, 3]);
+    expect(sameTaskSection("todo", snoozed, recurrentSnoozed)).toBe(true);
+    expect(sameTaskSection("todo", snoozed, task(1, false))).toBe(false);
+    expect(sameTaskSection("todo", recurrentSnoozed, task(2, true))).toBe(false);
+    expect(sameTaskSection("in_review", snoozed, task(1, false))).toBe(true);
+  });
+});

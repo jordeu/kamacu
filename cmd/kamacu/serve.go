@@ -453,6 +453,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// No graceful shutdown exists — process death stops it — so context.Background()
 	// is the correct process-lifetime scope. *session.Manager satisfies the
 	// reaper's SessionStopper; *github.Service satisfies its PRStateGetter via PRState.
+	go api.RunTaskSnoozer(ctx, db)
 	go reaper.NewWithPR(db, mgr, wtSvc, tmuxClient, ghSvc).Run(context.Background())
 	slog.Info("session reaper started (Done-TTL + PR reconcile)")
 

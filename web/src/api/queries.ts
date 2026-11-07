@@ -35,6 +35,7 @@ export function useAgents() {
 export function useTasks(projectId: number) {
   return useQuery({
     queryKey: ["tasks", projectId],
+    refetchInterval: 5000,
     queryFn: () => get<Task[]>(`/api/projects/${projectId}/tasks`),
     enabled: !isNaN(projectId),
   });
@@ -43,6 +44,7 @@ export function useTasks(projectId: number) {
 export function useTask(taskId: number) {
   return useQuery({
     queryKey: ["task", taskId],
+    refetchInterval: 5000,
     queryFn: () => get<Task>(`/api/tasks/${taskId}`),
     enabled: !isNaN(taskId),
   });

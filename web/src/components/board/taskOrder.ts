@@ -1,12 +1,21 @@
 import type { Status, Task } from "@/api/types";
 
-/** Keep TODO's sections contiguous without changing order within either one. */
-export function orderColumnTasks(status: Status, tasks: Task[]): Task[] {
-  if (status !== "todo") return tasks;
-  return [...tasks.filter((t) => !t.recurrent), ...tasks.filter((t) => t.recurrent)];
+export function taskSection(task: Task): "ordinary" | "recurrent" | "snoozed" {
+  return task.snoozed_until ? "snoozed" : task.recurrent ? "recurrent" : "ordinary";
 }
 
-/** A drop on the other TODO section never changes a task's recurrence. */
+/** Keep TODO sections contiguous; snoozed tasks wake soonest first. */
+export function orderColumnTasks(status: Status, tasks: Task[]): Task[] {
+  if (status !== "todo") return tasks;
+  return [
+    ...tasks.filter((task) => taskSection(task) === "ordinary"),
+    ...tasks.filter((task) => taskSection(task) === "recurrent"),
+    ...tasks.filter((task) => taskSection(task) === "snoozed")
+      .sort((a, b) => Date.parse(a.snoozed_until!) - Date.parse(b.snoozed_until!) || a.id - b.id),
+  ];
+}
+
+/** Dragging within TODO does not change recurrence or snooze state. */
 export function sameTaskSection(status: Status, a: Task, b: Task): boolean {
-  return status !== "todo" || a.recurrent === b.recurrent;
+  return status !== "todo" || taskSection(a) === taskSection(b);
 }

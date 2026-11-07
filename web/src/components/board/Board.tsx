@@ -152,7 +152,13 @@ export function Board({ tasks, projectId }: BoardProps) {
           insertAt = overIndex;
         }
       }
-      toTasks.splice(insertAt, 0, { ...moved, status: to });
+      toTasks.splice(insertAt, 0, {
+        ...moved,
+        status: to,
+        // A preview outside TODO cancels snooze only if the drop is committed.
+        snoozed_until: to === "todo" ? activeTask?.snoozed_until : null,
+        snoozed_from: to === "todo" ? activeTask?.snoozed_from : null,
+      });
 
       return { ...prev, [from]: fromTasks, [to]: orderColumnTasks(to, toTasks) };
     });
@@ -238,6 +244,10 @@ export function Board({ tasks, projectId }: BoardProps) {
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={() => {
+        setActiveTask(null);
+        setOrigin(null);
+      }}
     >
       {moveTask.isError && (
         <p role="alert" className="px-6 pb-2 text-sm text-destructive">

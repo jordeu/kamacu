@@ -1,3 +1,4 @@
+import { SnoozeTask } from "@/components/task/SnoozeTask";
 import { useDismissTaskCompletions } from "@/api/inbox";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -641,6 +642,7 @@ export default function TaskPage() {
           )}
 
           {isClaudeAgent ? <QuotaIndicator /> : null}
+          <SnoozeTask key={task.id} task={task} />
 
           {/* ⋯ menu OMITTED for a PR review (D-10): no Delete-task, no
               Clean-up-worktree yet (Phase 13 re-adds cleanup). ↗ open-on-GitHub
