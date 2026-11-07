@@ -31,11 +31,15 @@ func (s *Service) evaluateLLMRuleFallbacks(ctx context.Context, subjects []*tria
 		for _, f := range subject.findings {
 			id := activityID(subject, f)
 			facts := subjectRuleFacts(subject, &f)
-			outcome, _, _ := evaluateRuleSet(set, facts, semantics[id], false)
+			if err := s.addNoveltyFact(ctx, id, facts); err != nil {
+				return nil, nil, err
+			}
+			activityRules := effectiveSubjectRules(set, subject, id)
+			outcome, _, _ := evaluateRuleSet(activityRules, facts, semantics[id], false)
 			if outcome == "suppressed" || f.Intent == "routine" || (f.Intent == "review_request" && reviewRequestStatusReason(subject.fresh) != "") {
 				continue
 			}
-			for _, r := range set.Rules {
+			for _, r := range activityRules.Rules {
 				if r.Enabled && r.Mode == "llm" {
 					evidence, _ := classifierEvidence(subject.events, subject.fresh)
 					checks = append(checks, check{ID: id + ":" + r.ID, Rule: r, Activity: f, Facts: facts, Evidence: evidence})

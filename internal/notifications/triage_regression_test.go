@@ -103,7 +103,7 @@ func TestCurrentIssueBodyRemainsInClassifierInput(t *testing.T) {
 			if payload.Subjects[0].Complete != knownCreation {
 				t.Fatal("uncertain body activity was declared complete")
 			}
-			want := "needs_context"
+			want := "direct_question"
 			if knownCreation {
 				want = "direct_question"
 			}
@@ -114,7 +114,7 @@ func TestCurrentIssueBodyRemainsInClassifierInput(t *testing.T) {
 	}
 }
 
-func TestClippedUnknownIssueBodyCannotBeDiscardedAsRoutine(t *testing.T) {
+func TestRecencyUncertaintyDoesNotReviveRoutineIssueBody(t *testing.T) {
 	s, model, _, _ := fixture(t)
 	respondWithIntent(model, "routine")
 	e := event()
@@ -126,7 +126,7 @@ func TestClippedUnknownIssueBodyCannotBeDiscardedAsRoutine(t *testing.T) {
 	if err := s.classifySubject(context.Background(), subject, ""); err != nil {
 		t.Fatal(err)
 	}
-	if len(subject.findings) != 1 || subject.findings[0].Intent != "needs_context" {
+	if len(subject.findings) != 1 || subject.findings[0].Intent != "routine" {
 		t.Fatal("uncertain body activity was silently discarded")
 	}
 }

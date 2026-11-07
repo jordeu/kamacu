@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -149,5 +150,52 @@ func TestTaskStatusCheckConstraint(t *testing.T) {
 	)
 	if err == nil {
 		t.Error("insert with status 'bogus' succeeded, want CHECK constraint failure")
+	}
+}
+
+func TestOpenUsesExactFilenameWithURIReservedCharacters(t *testing.T) {
+	directory := t.TempDir()
+	for _, name := range []string{"shared#first.db", "shared#second.db", "question?mode=ro.db", "literal%23hash.db"} {
+		path := filepath.Join(directory, name)
+		db, err := Open(path)
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		if _, err = db.Exec(`CREATE TABLE marker(value TEXT)`); err != nil {
+			db.Close()
+			t.Fatal("database filenames were conflated", name, err)
+		}
+		if _, err = db.Exec(`INSERT INTO marker VALUES(?)`, name); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+		if err = db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = os.Stat(path); err != nil {
+			t.Fatal("SQLite did not create the requested file", name, err)
+		}
+		db, err = Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value string
+		err = db.QueryRow(`SELECT value FROM marker`).Scan(&value)
+		db.Close()
+		if err != nil || value != name {
+			t.Fatal("data did not survive at the exact path", name, value, err)
+		}
+	}
+}
+func TestOpenSupportsRelativeFilenameWithReservedCharacters(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	db, err := Open("relative#test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = os.Stat(filepath.Join(directory, "relative#test.db")); err != nil {
+		t.Fatal("relative filename was not preserved", err)
 	}
 }

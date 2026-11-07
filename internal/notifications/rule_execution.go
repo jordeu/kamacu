@@ -114,6 +114,10 @@ func (s *Service) replyActionPlan(ctx context.Context, original ActionPlan, ques
 		if err := strictRuleJSON([]byte(response.JSON), &plan); err != nil {
 			return err
 		}
+		// Typed clarification controls belong to application-generated cards.
+		// A model-planned conversation cannot manufacture grants or merge keys.
+		plan.ClarificationKey = ""
+		plan.Uncertain = nil
 		plan.RuleSetID = original.RuleSetID
 		plan.Activities = original.Activities
 		plan.Evidence = original.Evidence

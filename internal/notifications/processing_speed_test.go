@@ -69,7 +69,7 @@ func TestSessionRoutingConditionUsesFactsWithoutModel(t *testing.T) {
 			if len(model.prompts) != 0 {
 				t.Fatal("session availability used a model")
 			}
-			if tc.want == "unknown" && subject.decisions[0].Outcome != "held" {
+			if tc.want == "unknown" && subject.decisions[0].Outcome != "clarification" {
 				t.Fatal(subject.decisions)
 			}
 		})

@@ -90,6 +90,19 @@ func (g GitHub) api(ctx context.Context, host, path string) (data []byte, header
 		}
 		var requestErr error
 		data, headers, requestErr = g.apiRequest(ctx, host, path)
+		var httpErr *GitHubHTTPError
+		if errors.As(requestErr, &httpErr) && (httpErr.StatusCode == 500 || httpErr.StatusCode == 502 || httpErr.StatusCode == 503 || httpErr.StatusCode == 504) {
+			// Exactly one bounded retry for an idempotent read. Authentication and
+			// rate limits require intervention; retrying them would add more load.
+			timer := time.NewTimer(150 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+			}
+			data, headers, requestErr = g.apiRequest(ctx, host, path)
+		}
 		return requestErr
 	})
 	if err == nil && cache != nil && cacheable {
@@ -360,6 +373,11 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 				actor := ""
 				if u, ok := v["user"].(map[string]any); ok {
 					actor, _ = u["login"].(string)
+				}
+				if actor == "" {
+					if u, ok := v["author"].(map[string]any); ok {
+						actor, _ = u["login"].(string)
+					}
 				}
 				updated, _ := v["updated_at"].(string)
 				created, _ := v["created_at"].(string)

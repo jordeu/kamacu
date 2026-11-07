@@ -229,13 +229,13 @@ func TestResolvedTerminalActivityDoesNotRequireRecencyInspection(t *testing.T) {
 	}{
 		{"merged readiness resolved", &PRFacts{Available: true, State: "merged"}, true, "routine", false, "routine"},
 		{"closed activity resolved", &PRFacts{Available: true, State: "closed"}, true, "routine", false, "routine"},
-		{"open recency unknown", &PRFacts{Available: true, State: "open"}, true, "routine", false, "needs_context"},
-		{"stale merge", &PRFacts{Available: true, Stale: true, State: "merged"}, true, "routine", false, "needs_context"},
-		{"unavailable merge", &PRFacts{State: "merged"}, true, "routine", false, "needs_context"},
-		{"missing facts", nil, true, "routine", false, "needs_context"},
+		{"open recency unknown", &PRFacts{Available: true, State: "open"}, true, "routine", false, "routine"},
+		{"stale merge", &PRFacts{Available: true, Stale: true, State: "merged"}, true, "routine", false, "routine"},
+		{"unavailable merge", &PRFacts{State: "merged"}, true, "routine", false, "routine"},
+		{"missing facts", nil, true, "routine", false, "routine"},
 		{"incomplete retrieval", &PRFacts{Available: true, State: "merged"}, false, "routine", false, "needs_context"},
 		{"independent post-merge question", &PRFacts{Available: true, State: "merged"}, true, "direct_question", true, "direct_question"},
-		{"unresolved recency", &PRFacts{Available: true, State: "merged"}, true, "direct_question", false, "needs_context"},
+		{"unresolved recency", &PRFacts{Available: true, State: "merged"}, true, "direct_question", false, "direct_question"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			evidence := SubjectEvidence{ID: "comment", Text: "all set here? can it be merged?", Complete: true, Current: tc.current}

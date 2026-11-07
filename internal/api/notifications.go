@@ -18,8 +18,8 @@ func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
 		if status == "" {
 			status = "pending"
 		}
-		if status != "pending" && status != "archived" && status != "held" {
-			writeError(w, 400, "status must be pending, held or archived")
+		if status != "pending" && status != "archived" {
+			writeError(w, 400, "status must be pending or archived")
 			return
 		}
 		offset := 0
@@ -71,7 +71,7 @@ func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
 			return
 		}
 		if body.Status != "pending" && body.Status != "archived" {
-			writeError(w, 400, "status must be pending, held or archived")
+			writeError(w, 400, "status must be pending or archived")
 			return
 		}
 		err = service.SetRawStatus(r.Context(), id, body.Status)

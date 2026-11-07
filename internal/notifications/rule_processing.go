@@ -15,7 +15,7 @@ import (
 )
 
 func preflightRules(set RuleSet, subject *triageSubject) string {
-	outcome, _, _ := evaluateRuleSet(set, subjectRuleFacts(subject, nil), nil, true)
+	outcome, _, _ := evaluateRuleSet(effectiveSubjectRules(set, subject, subjectFilterID(subject)), subjectRuleFacts(subject, nil), nil, true)
 	if outcome == "admitted" {
 		return ""
 	}
@@ -28,7 +28,7 @@ func activityID(subject *triageSubject, finding intentFinding) string {
 	}
 	for _, e := range subject.fresh.Evidence {
 		if e.ID == finding.EvidenceID {
-			revision = e.UpdatedAt + ":" + e.ReviewState
+			revision = e.UpdatedAt + ":" + e.ReviewState + ":" + evidenceFingerprint(e.Text)
 		}
 	}
 	return evidenceFingerprint(subjectScope(subject) + "\x00" + finding.EvidenceID + "\x00" + finding.Intent + "\x00" + revision)
@@ -54,21 +54,28 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 		for _, f := range subject.findings {
 			id := activityID(subject, f)
 			facts := subjectRuleFacts(subject, &f)
+			if err := s.addNoveltyFact(ctx, id, facts); err != nil {
+				return err
+			}
 			if subject.projectID > 0 {
 				facts["project_id"] = RuleFact{Known: true, Value: float64(subject.projectID)}
+			}
+			outcome, _, _ := evaluateRuleSet(effectiveSubjectRules(set, subject, id), facts, nil, false)
+			if f.Intent == "routine" || outcome == "suppressed" {
+				continue
 			}
 			semantics[id] = map[string]string{}
 			texts := map[string]bool{}
 			var collect func(RuleExpression)
 			collect = func(e RuleExpression) {
-				if e.Op == "semantic" && e.Text != sessionRoutingCondition {
+				if e.Op == "semantic" && e.Text != sessionRoutingCondition && !isNoveltyCondition(e.Text) {
 					texts[e.Text] = true
 				}
 				for _, a := range e.Args {
 					collect(a)
 				}
 			}
-			for _, r := range set.Rules {
+			for _, r := range effectiveSubjectRules(set, subject, id).Rules {
 				if !r.Enabled {
 					continue
 				}
@@ -177,14 +184,26 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 		}
 		if subject.reason != "" {
 			facts := subjectRuleFacts(subject, nil)
-			outcome, evals, _ := evaluateRuleSet(set, facts, nil, true)
-			subject.decisions = append(subject.decisions, ActivityDecision{ID: evidenceFingerprint(subjectScope(subject) + ":subject-filter"), EventIDs: ids, Outcome: outcome, Evaluations: evals, Facts: facts, RuleSetID: set.ID, RuleSetRevision: set.Revision})
+			outcome, evals, _ := evaluateRuleSet(effectiveSubjectRules(set, subject, subjectFilterID(subject)), facts, nil, true)
+			if outcome == "clarification" && ctx.Value(rulePreviewKey{}) != true {
+				var count int
+				if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_card_plans p JOIN inbox_questions q ON q.id=p.question_id,json_each(p.plan,'$.activities') a WHERE a.value=? AND q.status IN ('pending','answered','dismissed') AND q.reason!='rule_continue_once'`, subjectFilterID(subject)).Scan(&count); err != nil {
+					return err
+				}
+				if count > 0 {
+					outcome = "duplicate"
+				}
+			}
+			subject.decisions = append(subject.decisions, ActivityDecision{ID: subjectFilterID(subject), EventIDs: ids, Outcome: outcome, Evaluations: evals, Snapshot: decisionSnapshot(subject), Facts: facts, RuleSetID: set.ID, RuleSetRevision: set.Revision})
 			continue
 		}
 		kept := []intentFinding{}
 		for _, f := range subject.findings {
 			id := activityID(subject, f)
 			facts := subjectRuleFacts(subject, &f)
+			if err := s.addNoveltyFact(ctx, id, facts); err != nil {
+				return err
+			}
 			if subject.projectID > 0 {
 				facts["project_id"] = RuleFact{Known: true, Value: float64(subject.projectID)}
 			}
@@ -192,6 +211,7 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 			if v, ok := effective[id]; ok {
 				activityRules = v
 			}
+			activityRules = effectiveSubjectRules(activityRules, subject, id)
 			outcome, evals, matched := evaluateRuleSet(activityRules, facts, semantics[id], false)
 			if f.Intent == "routine" {
 				outcome = "suppressed"
@@ -199,16 +219,16 @@ func (s *Service) evaluateActivities(ctx context.Context, subjects []*triageSubj
 			if isReviewWork(f) && reviewRequestStatusReason(subject.fresh) != "" {
 				outcome = "suppressed"
 			}
-			if outcome == "admitted" && ctx.Value(rulePreviewKey{}) != true {
+			if (outcome == "admitted" || outcome == "clarification") && ctx.Value(rulePreviewKey{}) != true {
 				var seen int
-				if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_rule_decisions d WHERE activity_id=? AND outcome='admitted' AND EXISTS(SELECT 1 FROM notification_card_plans p JOIN inbox_questions q ON q.id=p.question_id,json_each(p.plan,'$.activities') a WHERE a.value=d.activity_id AND q.status IN ('pending','answered'))`, id).Scan(&seen); err != nil {
+				if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_rule_decisions d WHERE activity_id=? AND outcome IN ('admitted','clarification') AND EXISTS(SELECT 1 FROM notification_card_plans p JOIN inbox_questions q ON q.id=p.question_id,json_each(p.plan,'$.activities') a WHERE a.value=d.activity_id AND q.status IN ('pending','answered','dismissed') AND q.reason!='rule_continue_once')`, id).Scan(&seen); err != nil {
 					return err
 				}
 				if seen > 0 {
 					outcome = "duplicate"
 				}
 			}
-			subject.decisions = append(subject.decisions, ActivityDecision{Semantic: judgments[id], ID: id, EventIDs: ids, Outcome: outcome, Evaluations: evals, Facts: facts, RuleSetID: set.ID, RuleSetRevision: set.Revision})
+			subject.decisions = append(subject.decisions, ActivityDecision{Semantic: judgments[id], ID: id, EventIDs: ids, Outcome: outcome, Evaluations: evals, Snapshot: decisionSnapshot(subject), Facts: facts, RuleSetID: set.ID, RuleSetRevision: set.Revision})
 			subject.matched[id] = matched
 			if outcome == "admitted" {
 				kept = append(kept, f)

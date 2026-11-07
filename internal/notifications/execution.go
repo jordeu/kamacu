@@ -190,6 +190,16 @@ func (s *Service) executeNext(ctx context.Context) error {
 			}
 		}
 	}
+	if q.Reason == "rule_continue_once" && q.AnswerSource == "inbox" {
+		for _, option := range q.Options {
+			if option.ID == q.Reason && option.Label == q.Answer {
+				if err := s.continueRuleClarification(ctx, q); err != nil {
+					return fail(err)
+				}
+				return s.finishRun(ctx, id, "succeeded", "Updates moved to Pending. Process pending notifications to evaluate them once without the uncertain rules. Other rules still apply. No work was started.", history)
+			}
+		}
+	}
 	related, err := s.loadActionContext(ctx, q.ID)
 	if err != nil {
 		return fail(err)

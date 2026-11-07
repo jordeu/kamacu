@@ -40,7 +40,7 @@ func New(db *sql.DB, box *inbox.Service, model Model, tools Tools) *Service {
 	return &Service{DB: db, Inbox: box, Model: model, Tools: tools, Providers: map[string]Provider{"github": GitHub{}}}
 }
 
-const sourceColumns = `id,provider,name,config,enabled,account,checkpoint,next_poll,last_success,last_error,created_at,(SELECT count(*) FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.held=0),COALESCE((SELECT last_error FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.last_error!='' ORDER BY e.id DESC LIMIT 1),'')`
+const sourceColumns = `id,provider,name,config,enabled,account,checkpoint,next_poll,last_success,last_error,created_at,(SELECT count(*) FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending'),COALESCE((SELECT last_error FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.last_error!='' ORDER BY e.id DESC LIMIT 1),'')`
 
 func scanSource(row interface{ Scan(...any) error }) (s Source, err error) {
 	var config string
