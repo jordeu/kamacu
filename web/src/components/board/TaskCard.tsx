@@ -88,10 +88,7 @@ export function TaskCard({ task }: { task: Task }) {
         isDragging && "opacity-40",
       )}
     >
-      <div className="flex items-start gap-1">
-        <div className="min-w-0 flex-1"><CardRow task={task} entry={entry} /></div>
-        {!task.snoozed_until && <SnoozeTask task={task} compact />}
-      </div>
+      <CardRow task={task} entry={entry} />
       {task.snoozed_until && <SnoozeTask task={task} compact />}
     </div>
   );
