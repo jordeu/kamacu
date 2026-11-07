@@ -14,6 +14,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Tooltip,
@@ -25,9 +26,11 @@ import { KamacuMark } from "@/components/brand/KamacuMark";
 import { AddProjectDialog } from "@/components/sidebar/AddProjectDialog";
 import { ProjectMenu } from "@/components/sidebar/ProjectMenu";
 import { WorkspaceSwitcher } from "@/components/sidebar/WorkspaceSwitcher";
+import { NotificationProcessing } from "@/components/inbox/NotificationProcessing";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 
 export function ProjectSidebar() {
+  const { setOpenMobile } = useSidebar();
   const { data: projects } = useProjects();
   const { data: agentStatuses } = useAgentStatuses();
   const { activeWorkspaceId } = useActiveWorkspace();
@@ -157,6 +160,9 @@ export function ProjectSidebar() {
             );
           })}
         </SidebarMenu>
+        <div className="mt-auto md:hidden">
+          <NotificationProcessing onNavigate={() => setOpenMobile(false)} />
+        </div>
       </SidebarContent>
 
       {/* Phase 11 D-02 wrinkle (Pitfall 1): the footer used to carry

@@ -132,3 +132,20 @@
     @apply font-sans;
     }
 }
+
+/* Keep phone controls comfortable without changing the compact desktop UI. */
+@media (max-width: 767px) {
+  [data-slot="sidebar-menu-button"],
+  [data-slot="select-trigger"] {
+    min-height: 2.75rem;
+  }
+
+  /* 16px prevents iOS from zooming the viewport when a field receives focus. */
+  input, textarea, select {
+    font-size: 1rem;
+  }
+
+  [data-slot="dialog-title"] {
+    padding-right: 2.5rem;
+  }
+}

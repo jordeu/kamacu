@@ -3,7 +3,8 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCorners,
   pointerWithin,
   useSensor,
@@ -73,7 +74,9 @@ export function Board({ tasks, projectId }: BoardProps) {
   const sensors = useSensors(
     // CRITICAL: 5px activation distance lets plain clicks navigate to the task
     // route while press-and-move starts a drag (Pitfall 4).
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    // A swipe scrolls; hold a card briefly to start a touch drag.
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
@@ -254,7 +257,7 @@ export function Board({ tasks, projectId }: BoardProps) {
           Could not move task. {moveTask.error.message}
         </p>
       )}
-      <div className="flex h-full min-h-0 flex-1 gap-4 overflow-x-auto px-6 pb-6">
+      <div className="flex h-full min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto overscroll-x-contain px-3 pb-3 [scroll-padding-inline:0.75rem] md:snap-none md:gap-4 md:px-6 md:pb-6">
         {STATUSES.map((status) => (
           <Column key={status} status={status} tasks={columns[status]} />
         ))}

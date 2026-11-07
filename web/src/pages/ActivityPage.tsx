@@ -51,7 +51,7 @@ export default function ActivityPage() {
           </div>
         ) : (
           <div className="mt-6 flex flex-col gap-6">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <ScopeSelector scope={scope} onScopeChange={setScope} />
               <WindowToggle window={window} onWindowChange={setWindow} />
             </div>

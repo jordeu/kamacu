@@ -113,7 +113,7 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
   // --- Expanded column (GHCOL-01) — echoes Column.tsx exactly, minus the
   // droppable ring (this is NOT a droppable). ---
   return (
-    <div className="flex min-h-0 min-w-[260px] flex-1 flex-col">
+    <div className="flex min-h-0 w-[calc(100vw-3rem)] min-w-0 shrink-0 snap-start md:w-auto md:min-w-[260px] md:flex-1 flex-col">
       <div className="flex items-baseline gap-2 px-3 pb-2">
         <Button
           variant="ghost"

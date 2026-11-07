@@ -26,7 +26,7 @@ export function Column({ status, tasks, topSlot }: ColumnProps) {
   const snoozed = status === "todo" ? tasks.filter((t) => t.snoozed_until) : [];
 
   return (
-    <div className="flex min-h-0 min-w-[260px] flex-1 flex-col">
+    <div className="flex min-h-0 w-[calc(100vw-3rem)] min-w-0 shrink-0 snap-start md:w-auto md:min-w-[260px] md:flex-1 flex-col">
       <div className="flex items-baseline gap-2 px-3 pb-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {STATUS_LABELS[status]}

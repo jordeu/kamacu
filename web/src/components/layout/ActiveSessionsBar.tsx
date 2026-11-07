@@ -143,7 +143,7 @@ export function ActiveSessionsBar() {
       {/* Expanded panel — rendered ABOVE the collapsed bar so it floats UP over
           content (overlay; never reflows the xterm terminals, D-03). */}
       {!collapsed && (
-        <div className="max-h-80 overflow-y-auto border-t border-border bg-[#101013] p-3 transition-[max-height,opacity] duration-150 ease-out motion-reduce:transition-none">
+        <div className="max-h-[50dvh] overflow-y-auto overscroll-contain md:max-h-80 border-t border-border bg-[#101013] p-3 transition-[max-height,opacity] duration-150 ease-out motion-reduce:transition-none">
           {total === 0 ? (
             <div className="flex flex-col gap-1 py-6 text-center">
               <div className="text-sm text-muted-foreground">
@@ -183,7 +183,7 @@ export function ActiveSessionsBar() {
         aria-expanded={!collapsed}
         aria-label={barAriaLabel}
         onClick={toggle}
-        className="flex h-9 cursor-pointer items-center gap-2 border-t border-border bg-[#101013] px-3"
+        className="flex h-[calc(2.75rem+env(safe-area-inset-bottom))] pb-[env(safe-area-inset-bottom)] md:h-9 md:pb-0 cursor-pointer items-center gap-2 border-t border-border bg-[#101013] px-3"
       >
         {/* Globe — ALWAYS visible, ahead of every counter (D-12 flip): opens
             /global. stopPropagation keeps the click from toggling the bar
@@ -327,7 +327,7 @@ function SessionRow({
         title={tooltip}
         className={cn("size-2 rounded-full shrink-0", dotClassName)}
       />
-      <span className="shrink-0 text-muted-foreground">
+      <span className="max-w-[30%] shrink-0 truncate text-muted-foreground">
         {entry.projectName}
       </span>
       <span className="text-muted-foreground">·</span>

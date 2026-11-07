@@ -99,14 +99,14 @@ export function TaskTabs({
     <Tabs
       value={value}
       onValueChange={onValueChange}
-      className="min-h-0 flex-1 gap-6"
+      className="min-h-0 min-w-0 flex-1 gap-3 md:gap-6"
     >
       {/* Visible strip even with a single tab — the seam must be visible.
           Never wraps: scrolls horizontally when bash tabs exceed the width. */}
       <TabsList
         ref={stripRef}
         variant="line"
-        className="w-full shrink-0 justify-start overflow-x-auto border-b border-border"
+        className="min-h-14 md:min-h-0 w-full shrink-0 justify-start overflow-x-auto border-b border-border"
       >
         {tabs.map((tab) =>
           tab.disabled ? (
@@ -120,7 +120,7 @@ export function TaskTabs({
                     value={tab.id}
                     aria-label={tab.label}
                     disabled
-                    className="flex-none px-2 data-active:after:bg-blue-500"
+                    className="min-h-11 flex-none px-3 md:min-h-0 md:px-2 data-active:after:bg-blue-500"
                   >
                     <span className="flex items-center gap-1">
                       {tab.leading}
@@ -138,7 +138,7 @@ export function TaskTabs({
               key={tab.id}
               value={tab.id}
               aria-label={tab.label}
-              className="flex-none px-2 data-active:after:bg-blue-500"
+              className="min-h-11 flex-none px-3 md:min-h-0 md:px-2 data-active:after:bg-blue-500"
             >
               {/* dot + 4px gap + label (UI-SPEC) — trigger height unchanged */}
               <span className="flex items-center gap-1">
@@ -201,7 +201,7 @@ export function TaskTabs({
                     role="button"
                     tabIndex={0}
                     aria-label={tab.closeLabel ?? `Stop ${tab.label} and close tab`}
-                    className="ml-1 rounded-sm p-0.5 text-zinc-400 outline-none hover:bg-[#27272a] hover:text-zinc-50 focus-visible:ring-2 focus-visible:ring-blue-500"
+                    className="ml-1 inline-flex size-11 shrink-0 items-center justify-center rounded-sm p-0.5 md:size-auto text-zinc-400 outline-none hover:bg-[#27272a] hover:text-zinc-50 focus-visible:ring-2 focus-visible:ring-blue-500"
                     onClick={(e) => {
                       e.stopPropagation();
                       tab.onClose?.();
