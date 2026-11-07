@@ -116,7 +116,7 @@ func CleanupWorktreeGated(
 	// Gate 2 (D-33 dirty): never silently destroy uncommitted work. A missing
 	// dir counts clean (Remove self-heals; never block cleanup on it).
 	dirty := 0
-	if _, statErr := os.Stat(path); statErr == nil {
+	if _, statErr := os.Stat(path); statErr == nil && !force {
 		dirty, err = wt.DirtyCount(ctx, path)
 		if err != nil {
 			return false, "", err

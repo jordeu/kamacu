@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { ApiError } from "@/api/client";
 import { useDeleteProject, useMoveProject } from "@/api/mutations";
 import { useWorkspaces } from "@/api/queries";
@@ -40,6 +42,12 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [forceDelete, setForceDelete] = useState(false);
+  const [confirmationName, setConfirmationName] = useState("");
+  const confirmationInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (deleteOpen && forceDelete) confirmationInput.current?.focus();
+  }, [deleteOpen, forceDelete]);
   const deleteProject = useDeleteProject();
   const moveProject = useMoveProject();
   const { data: workspaces } = useWorkspaces();
@@ -49,9 +57,10 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
   const { projectId } = useParams();
 
   async function handleDelete() {
+    if (deleteProject.isPending || (forceDelete && confirmationName !== project.name)) return;
     const isCurrent = projectId === String(project.id);
     try {
-      await deleteProject.mutateAsync(project.id);
+      await deleteProject.mutateAsync({ id: project.id, force: forceDelete });
     } catch {
       // Keep the confirmation open so the mutation error is visible.
       return;
@@ -129,6 +138,8 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
             variant="destructive"
             onSelect={() => {
               deleteProject.reset();
+              setForceDelete(false);
+              setConfirmationName("");
               setDeleteOpen(true);
             }}
           >
@@ -152,36 +163,66 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
       <AlertDialog open={deleteOpen} onOpenChange={(open) => {
         if (!deleteProject.isPending) setDeleteOpen(open);
       }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-h-[85vh] overflow-y-auto">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogTitle>{forceDelete ? "Force delete project?" : "Delete project?"}</AlertDialogTitle>
             <AlertDialogDescription>
-              {project.managed
-                ? `"${project.name}" and all its tasks, managed checkout, and task worktrees will be removed. Uncommitted changes, unpushed commits, stashes, or running sessions can block deletion.`
+              {forceDelete
+                ? `Force deleting "${project.name}" permanently removes all its tasks, managed checkout, and task worktrees. Local changes, untracked files, local commits, and stashes will be discarded. Running task agents and terminal sessions will be stopped. Git worktree locks will be overridden. The remote repository on GitHub is untouched. This cannot be undone.`
+                : project.managed
+                ? `"${project.name}" and all its tasks, managed checkout, and task worktrees will be removed. Kamacu will check for local work and running sessions before deleting. If deletion is blocked, the affected directories and recovery steps will appear below.`
                 : `"${project.name}" and all its tasks will be removed from Kamacu. The repository on disk is untouched.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {forceDelete && (
+            <div className="space-y-2">
+              <label htmlFor={`confirm-delete-${project.id}`} className="text-sm font-medium">
+                Type {project.name} to confirm permanent deletion
+              </label>
+              <Input
+                id={`confirm-delete-${project.id}`}
+                ref={confirmationInput}
+                value={confirmationName}
+                onChange={(event) => setConfirmationName(event.target.value)}
+                disabled={deleteProject.isPending}
+                autoComplete="off"
+              />
+            </div>
+          )}
           {deleteProject.error && (
             <div role="alert" className="text-sm text-destructive">
               <p>{deleteProject.error.message || "Could not delete the project. Please try again."}</p>
               {deleteProject.error instanceof ApiError && deleteProject.error.reasons?.length ? (
-                <ul className="mt-2 list-disc pl-4">
+                <ul className="mt-3 space-y-4">
                   {deleteProject.error.reasons.map((reason, index) => (
                     <li key={index}>
-                      {reason.target}: {({ uncommitted: "uncommitted changes", unpushed: "unpushed commits or unavailable default branch", stash: "stashed changes", sessions: "running sessions" } as Record<string, string>)[reason.kind] ?? reason.kind}
+                      <p className="font-medium">
+                        {reason.target}: {reason.message ?? ({ uncommitted: "uncommitted changes", unpushed: "commits outside the default branch or unavailable default branch", stash: "stashed changes", sessions: "running sessions" } as Record<string, string>)[reason.kind] ?? reason.kind}
+                      </p>
+                      {reason.path && <code className="mt-1 block break-all text-xs text-foreground">{reason.path}</code>}
+                      {reason.resolution && <p className="mt-1 text-muted-foreground">{reason.resolution}</p>}
                     </li>
                   ))}
                 </ul>
               ) : null}
             </div>
           )}
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:flex-wrap">
             <AlertDialogCancel disabled={deleteProject.isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteProject.isPending} onClick={(event) => {
+            {project.managed && !forceDelete && (
+              <Button variant="outline" disabled={deleteProject.isPending} onClick={() => {
+                deleteProject.reset();
+                setForceDelete(true);
+                setConfirmationName("");
+              }}>
+                Force delete…
+              </Button>
+            )}
+            <AlertDialogAction variant="destructive" disabled={deleteProject.isPending || (forceDelete && confirmationName !== project.name)} onClick={(event) => {
               event.preventDefault();
               void handleDelete();
             }}>
-              {deleteProject.isPending ? "Deleting…" : "Delete project"}
+              {deleteProject.isPending ? "Deleting…" : forceDelete ? "Permanently force delete" : deleteProject.error ? "Retry deletion" : "Delete project"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

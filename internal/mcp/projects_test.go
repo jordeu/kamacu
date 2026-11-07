@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -402,5 +403,32 @@ func TestBridge_DeleteProject_Managed409_PassesThroughStructuredBody(t *testing.
 	// The structured "reasons" array also survives in the raw body string.
 	if !strings.Contains(err.Error(), "reasons") {
 		t.Errorf("deleteProject error: want substring \"reasons\" (structured 409 body), got %q", err.Error())
+	}
+}
+
+func TestBridge_DeleteProject_ForceIsExplicit(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprint(force), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Force bool `json:"force"`
+				}
+				if r.Body != nil && r.ContentLength != 0 {
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("invalid request body: %v", err)
+					}
+				}
+				if body.Force != force {
+					t.Errorf("force=%v want %v", body.Force, force)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(srv.Close)
+			b := &bridge{base: srv.URL, token: "t", client: &http.Client{Timeout: 10 * time.Second}}
+			args := json.RawMessage(fmt.Sprintf(`{"project_id":7,"force":%t}`, force))
+			if _, err := b.deleteProject(context.Background(), newCallToolRequest(args)); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

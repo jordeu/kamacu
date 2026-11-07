@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -29,8 +30,8 @@ import (
 //     silently drops them.
 //   - delete_project (MCPPROJ-05, Plan 03): DELETE /api/projects/{id}. The v1.4
 //     two-pass gated removal (folder: hard delete never touching the dir;
-//     managed: all-or-nothing with structured 409 reasons) runs unchanged
-//     through the bridge.
+//     managed: all-or-nothing with structured 409 reasons). Optional force
+//     explicitly bypasses the managed-project preservation gates.
 //
 // Each tool is a thin HTTP-bridge handler that builds a path and optional body,
 // then delegates the response-handling half to bridge.call (Plan 01's shared
@@ -176,13 +177,17 @@ func registerProjectTools(s *mcp.Server, b *bridge) {
 	s.AddTool(
 		&mcp.Tool{
 			Name:        "delete_project",
-			Description: "Hard-delete a project. Folder projects: Kamacu deletes the row (CASCADE removes tasks) and NEVER touches the directory. Managed projects: Kamacu runs a two-pass all-or-nothing gated removal — the gate phase computes dirty/unpushed/stash/sessions across every task worktree AND the clone root; if ANY gate trips, returns 409 with a structured {error, reasons} body and removes NOTHING. Returns 204 on success, 404 if the project id is missing, 409 (with reasons) if a managed project is dirty.",
+			Description: "Hard-delete a project. Folder projects: Kamacu deletes the row (CASCADE removes tasks) and NEVER touches the directory. Managed projects: Kamacu runs a two-pass all-or-nothing gated removal — the gate phase computes dirty/unpushed/stash/sessions across every task worktree AND the clone root; if ANY gate trips, returns 409 with a structured {error, reasons} body and removes NOTHING. Optional force:true stops task sessions and permanently discards local changes, local commits, stashes, and locked task worktrees for managed projects. Requires explicit user consent to discard this work. Linked worktrees outside this project's task records must be removed separately, even with force. Folder directories remain untouched. Returns 204 on success, 404 if the project id is missing, 409 (with reasons) if a managed project is blocked without force.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"project_id": map[string]any{
 						"type":        "integer",
 						"description": "The project id. Folder projects: hard delete, directory never touched. Managed projects: two-pass gated removal — 409 with structured reasons if dirty/unpushed/stash/sessions.",
+					},
+					"force": map[string]any{
+						"type":        "boolean",
+						"description": "Permanently discard local work and stop task sessions for managed projects. Use only with explicit user consent. Defaults to false.",
 					},
 				},
 				"required": []string{"project_id"},
@@ -345,14 +350,18 @@ func (b *bridge) updateProject(ctx context.Context, req *mcp.CallToolRequest) (*
 // It DELETEs /api/projects/{id}. The v1.4 two-pass gated removal (folder
 // projects: hard delete, directory never touched; managed projects: gate
 // phase computes dirty/unpushed/stash/sessions, REMOVE phase tears down only
-// on all-clear, 409 with structured reasons otherwise) runs unchanged through
-// the bridge. A missing project surfaces Kamacu's 404 body verbatim.
+// on all-clear, 409 with structured reasons otherwise). Explicit force:true
+// forwards the destructive opt-in body. A missing project surfaces the 404 body.
 func (b *bridge) deleteProject(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var args struct {
 		ProjectID int64 `json:"project_id"`
+		Force     bool  `json:"force"`
 	}
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
 		return nil, fmt.Errorf("delete_project: invalid arguments: %w", err)
+	}
+	if args.Force {
+		return b.call(ctx, http.MethodDelete, fmt.Sprintf("/api/projects/%d", args.ProjectID), strings.NewReader(`{"force":true}`))
 	}
 	return b.call(ctx, http.MethodDelete, fmt.Sprintf("/api/projects/%d", args.ProjectID), nil)
 }

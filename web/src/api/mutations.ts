@@ -135,7 +135,8 @@ export function useUpdateProjectSettings() {
 export function useDeleteProject() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => del(`/api/projects/${id}`),
+    mutationFn: ({ id, force = false }: { id: number; force?: boolean }) =>
+      del(`/api/projects/${id}`, force ? { force: true } : undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
