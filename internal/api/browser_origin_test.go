@@ -14,13 +14,18 @@ func TestBrowserOriginGuard(t *testing.T) {
 		{"CLI", "", "", "/api/tasks", 204},
 		{"UI", "http://localhost:7333", "same-origin", "/api/tasks", 204},
 		{"dev proxy", "http://localhost:5173", "same-site", "/api/tasks", 204},
+		{"trusted proxy", "https://trusted.example", "cross-site", "/api/tasks", 204},
+		{"trusted proxy with port", "https://TRUSTED.EXAMPLE:8443", "cross-site", "/api/tasks", 204},
+		{"bare dev origin", "https://dev.example", "cross-site", "/api/tasks", 204},
+		{"bare dev origin wrong port", "https://dev.example:8443", "cross-site", "/api/tasks", 403},
+		{"dev wrong port", "http://localhost:5174", "same-site", "/api/tasks", 403},
 		{"opaque artifact", "null", "cross-site", "/api/tasks", 403},
 		{"external page", "https://example.com", "cross-site", "/api/tasks", 403},
 		{"cross-site without origin", "", "cross-site", "/api/tasks", 403},
 		{"opaque local assets", "null", "cross-site", "/api/artifact-content/id/rev/index.html", 204},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := BrowserOriginGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }), []string{"localhost:5173"})
+			handler := BrowserOriginGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }), []string{"localhost:5173", "dev.example"}, []string{"trusted.example"})
 			method := "POST"
 			if tc.name == "opaque local assets" {
 				method = "GET"

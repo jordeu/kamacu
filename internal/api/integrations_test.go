@@ -21,7 +21,7 @@ func TestIntegrationRoutes(t *testing.T) {
 	manager := integration.New(home, filepath.Join(home, ".config"), "/usr/bin/kamacu")
 	mux := http.NewServeMux()
 	IntegrationRoutes(mux, manager)
-	handler := BrowserOriginGuard(mux, nil)
+	handler := BrowserOriginGuard(mux, nil, nil)
 	call := func(method, path, origin string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, nil)
 		if origin != "" {

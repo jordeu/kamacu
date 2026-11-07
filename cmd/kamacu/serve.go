@@ -52,6 +52,7 @@ type serveCmd struct {
 	db                  string
 	claudeBin           string
 	devOrigins          []string
+	allowedHosts        []string
 	insecureAllowRemote bool
 	noIntegrationSync   bool
 }
@@ -63,7 +64,7 @@ func (serveCmd) Synopsis() string {
 }
 
 func (serveCmd) Usage() string {
-	return `kamacu serve [--debug] [--addr A] [--db D] [--claude-bin B] [--dev-origin H] [--insecure-allow-remote] [--no-integration-sync]
+	return `kamacu serve [--debug] [--addr A] [--db D] [--claude-bin B] [--dev-origin H] [--allowed-host H] [--insecure-allow-remote] [--no-integration-sync]
 `
 }
 
@@ -75,6 +76,14 @@ func (c *serveCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&c.claudeBin, "claude-bin", "", "path to the claude binary (default: resolve \"claude\" on PATH at spawn time)")
 	f.Func("dev-origin", "additional allowed Origin host:port for the Vite dev server (repeatable, e.g. localhost:5173)", func(v string) error {
 		c.devOrigins = append(c.devOrigins, v)
+		return nil
+	})
+	f.Func("allowed-host", "trusted proxy hostname, without scheme or port (repeatable; NO authentication — only use behind a proxy that restricts access, e.g. tailnet-only Tailscale Serve or Cloudflare Access; never a public URL)", func(v string) error {
+		host, err := validateAllowedHost(v)
+		if err != nil {
+			return err
+		}
+		c.allowedHosts = append(c.allowedHosts, host)
 		return nil
 	})
 	f.BoolVar(&c.insecureAllowRemote, "insecure-allow-remote", false, "opt-in: allow binding --addr to a non-loopback address (NO AUTH — anyone who can reach the address gets a shell)")
@@ -229,11 +238,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	}
 	hookToken := hex.EncodeToString(tokenBytes)
 
-	// Origin allowlist (D-20): exact loopback origins with the serving port,
-	// plus any --dev-origin entries (dev runs need the Vite server's origin:
-	// go run ./cmd/kamacu --dev-origin localhost:5173 --dev-origin 127.0.0.1:5173).
-	_, port, _ := net.SplitHostPort(c.addr)
-	originPatterns := append([]string{"127.0.0.1:" + port, "localhost:" + port}, c.devOrigins...)
+	originPatterns := c.originPatterns()
 
 	// D-23: worktrees live centrally outside every repo tree. Since Phase 6
 	// placement is settings-driven per creation (worktree_base, WT-01) —
@@ -461,8 +466,8 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	// hostCheck (DNS-rebinding defense) wraps the mux by default; the opt-in
 	// --insecure-allow-remote path serves the mux directly so non-loopback
 	// Host headers are accepted.
-	guarded := api.BrowserOriginGuard(mux, originPatterns)
-	var handler http.Handler = hostCheck(guarded)
+	guarded := api.BrowserOriginGuard(mux, originPatterns, c.allowedHosts)
+	var handler http.Handler = hostCheck(guarded, c.allowedHosts)
 	if c.insecureAllowRemote {
 		handler = guarded
 	}
@@ -579,21 +584,59 @@ func hookBaseURL(addr string) string {
 	}
 }
 
-// hostCheck is middleware wrapping the entire mux, rejecting non-loopback
-// Host headers (DNS-rebinding defense). Hostname-only and PORT-AGNOSTIC by
-// design: rebinding attacks present an attacker hostname, never a loopback
-// name, and port-agnosticism keeps the Vite dev proxy (which forwards
-// Host: 127.0.0.1:5173) working.
-func hostCheck(next http.Handler) http.Handler {
+// validateAllowedHost accepts only literal DNS hostnames or IPv4 addresses.
+// In particular, no URL components or websocket pattern syntax may enter the
+// allowlist. Validation happens while parsing flags, before startup side effects.
+func validateAllowedHost(value string) (string, error) {
+	host := strings.ToLower(value)
+	invalid := func() (string, error) {
+		return "", fmt.Errorf("invalid --allowed-host %q: expected a bare hostname (no scheme, port, path, userinfo or wildcards; catch-all addresses are forbidden)", value)
+	}
+	if host == "" || len(host) > 253 || host == "0.0.0.0" {
+		return invalid()
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return invalid()
+		}
+		for _, ch := range label {
+			if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-') {
+				return invalid()
+			}
+		}
+	}
+	return host, nil
+}
+
+func (c *serveCmd) originPatterns() []string {
+	_, port, _ := net.SplitHostPort(c.addr)
+	patterns := append([]string{"127.0.0.1:" + port, "localhost:" + port}, c.devOrigins...)
+	for _, host := range c.allowedHosts {
+		// coder/websocket needs both patterns to cover origins with a port.
+		// Hostnames are validated to exclude user-supplied pattern syntax.
+		patterns = append(patterns, host, host+":*")
+	}
+	return patterns
+}
+
+// hostCheck is middleware wrapping the entire mux, rejecting Host headers
+// outside loopback and the explicit allowlist (DNS-rebinding defense).
+// Hostname-only and PORT-AGNOSTIC by design: rebinding attacks present an
+// attacker hostname, never a loopback name. Port-agnosticism keeps the
+// Vite dev proxy (which forwards Host: 127.0.0.1:5173) working.
+func hostCheck(next http.Handler, allowedHosts []string) http.Handler {
+	allowed := make(map[string]bool, len(allowedHosts)+4)
+	for _, host := range append([]string{"localhost", "127.0.0.1", "::1", "[::1]"}, allowedHosts...) {
+		allowed[strings.ToLower(host)] = true
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h // strips the port, including the [::1]:7333 bracket form
 		}
-		switch host {
-		case "localhost", "127.0.0.1", "::1", "[::1]":
+		if allowed[strings.ToLower(host)] {
 			next.ServeHTTP(w, r)
-		default:
+		} else {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"forbidden host"}`))
