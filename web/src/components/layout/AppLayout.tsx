@@ -7,6 +7,7 @@ import { ActiveSessionsBar } from "@/components/layout/ActiveSessionsBar";
 import { ActiveWorkspaceProvider } from "@/lib/useActiveWorkspace";
 import { usePresenceBeacon } from "@/presence/usePresenceBeacon";
 
+import { MobileNavigation } from "@/components/layout/MobileNavigation";
 import { InboxSidebar } from "@/components/layout/InboxSidebar";
 
 const SIDEBAR_STORAGE_KEY = "kamacu.sidebar";
@@ -36,10 +37,10 @@ export function AppLayout() {
         onOpenChange={handleOpenChange}
         // Pin the shell to the viewport (shadcn's wrapper is only `min-h-svh`,
         // which grows with tall content and lets the whole window scroll —
-        // dragging the sidebar + Diff file tree up). `h-svh` + `overflow-hidden`
+        // dragging the sidebar + Diff file tree up). `h-dvh` + `overflow-hidden`
         // forces scrolling into the designated inner panes (e.g. the Diff tab's
         // right pane), so the file tree stays fixed while the diff scrolls.
-        className="h-svh overflow-hidden"
+        className="h-dvh min-h-0 overflow-hidden"
         style={{ "--sidebar-width": "15rem" } as CSSProperties}
       >
         {/* Single shared active-workspace source (Phase 26): wraps the sidebar,
@@ -53,8 +54,11 @@ export function AppLayout() {
               that occupies layout space, so <main> needs no collapsed padding and
               the floating re-expand trigger is retired — the rail's header
               SidebarTrigger is the re-expand entry point (D-02). */}
-          <main className="relative min-w-0 flex-1 overflow-hidden pb-9">
-            <Outlet />
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(2.75rem+env(safe-area-inset-bottom))] md:pb-9">
+            <MobileNavigation />
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+              <Outlet />
+            </div>
           </main>
           {/* D-13: mounted once outside <main>/<Outlet/> so the bar is present on
               every route. It is `fixed inset-x-0 bottom-0` (overlay) — a single

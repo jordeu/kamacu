@@ -450,7 +450,7 @@ export default function TaskPage() {
       keepMounted: true,
       // NO onClose — permanent tab (D-38): stopped, never closed.
       content: (
-        <div className="flex h-full min-h-[320px] w-full flex-col">
+        <div className="flex h-full min-h-0 w-full flex-col">
           {feedbackSession && agentSession?.id !== feedbackSession && <p role="status" className="mb-3 text-sm text-muted-foreground">The agent session that asked this question is no longer available. Resume the task’s agent to continue.</p>}
           <AgentTab
             scope={{ kind: "task", taskId: task.id }}
@@ -487,7 +487,7 @@ export default function TaskPage() {
       disabled: !task.worktree_path,
       disabledTooltip: `The diff needs a worktree`,
       content: (
-        <div className="flex h-full min-h-[320px] w-full flex-col">
+        <div className="flex h-full min-h-0 w-full flex-col">
           <DiffTab taskId={task.id} />
         </div>
       ),
@@ -524,7 +524,7 @@ export default function TaskPage() {
         // Bash content is exempt from the 860px constraint — terminal real
         // estate fills the main area below the strip (min 320px).
         content: (
-          <div className="flex h-full min-h-[320px] w-full flex-col">
+          <div className="flex h-full min-h-0 w-full flex-col">
             <TerminalPane
               key={s.id}
               sessionId={s.id}
@@ -587,7 +587,7 @@ export default function TaskPage() {
     // Full-width working surface (Layout Contract): terminals get the whole
     // main area; header/meta span full width (UI-01) while Description prose
     // keeps its 860px island.
-    <div className="flex h-full w-full flex-col gap-6 p-4">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-col gap-3 p-3 md:gap-6 md:p-4">
       <div className="w-full shrink-0 space-y-2">
         <header className="flex items-center gap-2">
           <Tooltip>

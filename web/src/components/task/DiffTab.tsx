@@ -130,9 +130,9 @@ export function DiffTab({ taskId }: { taskId: number }) {
   }`;
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
       {treeVisible && (
-        <div className="w-72 shrink-0 overflow-y-auto border-r border-border">
+        <div className="max-h-36 w-full shrink-0 overflow-y-auto border-b border-border md:max-h-none md:w-72 md:border-r md:border-b-0">
           <FileTree
             files={files}
             activePath={activePath}
@@ -146,7 +146,7 @@ export function DiffTab({ taskId }: { taskId: number }) {
             can scroll above it. Per-file headers pin to the scroll pane's top
             (DiffFileSection sticky top-0), tucked right under this bar. */}
         <div className="flex shrink-0 items-center gap-1 border-b border-border bg-background px-3 py-2">
-          <p className="flex-1 text-sm text-zinc-50">
+          <p className="min-w-0 flex-1 break-words text-sm text-zinc-50">
             {fileCount}
             {totals.additions > 0 && (
               <>

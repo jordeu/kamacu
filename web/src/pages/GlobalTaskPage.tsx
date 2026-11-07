@@ -378,7 +378,7 @@ export default function GlobalTaskPage() {
       keepMounted: true,
       // NO onClose — permanent tab (D-38): stopped, never closed.
       content: (
-        <div className="flex h-full min-h-[320px] w-full flex-col">
+        <div className="flex h-full min-h-0 w-full flex-col">
           {feedbackSession && agentSession?.id !== feedbackSession && <p role="status" className="mb-3 text-sm text-muted-foreground">The agent session that asked this question is no longer available. Resume the Scratchpad agent to continue.</p>}
           <AgentTab scope={{ kind: "global" }} agentSession={agentSession} autoFocus={feedbackSession === agentSession?.id} />
         </div>
@@ -416,7 +416,7 @@ export default function GlobalTaskPage() {
         // Bash content is exempt from any max-width constraint — terminal
         // real estate fills the main area below the strip (min 320px).
         content: (
-          <div className="flex h-full min-h-[320px] w-full flex-col">
+          <div className="flex h-full min-h-0 w-full flex-col">
             <TerminalPane
               key={s.id}
               sessionId={s.id}
@@ -483,7 +483,7 @@ export default function GlobalTaskPage() {
   return (
     // Full-width working surface (Layout Contract): terminals get the whole
     // main area; the header and banner span full width.
-    <div className="flex h-full w-full flex-col gap-6 p-4">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-col gap-3 p-3 md:gap-6 md:p-4">
       <div className="w-full shrink-0 space-y-2">
         <header className="flex items-center gap-2">
           {/* D-35: static label — no back-arrow (top-level destination like

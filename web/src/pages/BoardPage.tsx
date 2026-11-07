@@ -78,8 +78,8 @@ export default function BoardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between px-6 py-4">
-        <div className="flex min-w-0 items-center gap-2">
+      <header className="flex flex-wrap items-center justify-between gap-2 px-3 py-3 md:px-6 md:py-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <h1 className="truncate text-base font-medium">{project?.name ?? ""}</h1>
           {project?.github_repo && (
             <Button
@@ -100,7 +100,7 @@ export default function BoardPage() {
             </Button>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 md:gap-3">
           {isClaudeAgent ? <QuotaIndicator /> : null}
           {/* The only inverted high-contrast element on the page (UI-SPEC focal point). */}
           <div className="flex">
@@ -147,11 +147,11 @@ export default function BoardPage() {
         </div>
       </header>
       {isLoading ? (
-        <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-6 pb-6">
+        <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-3 pb-3 md:px-6 md:pb-6">
           {STATUSES.map((status) => (
             <div
               key={status}
-              className="flex min-w-[260px] flex-1 flex-col gap-2 rounded-md bg-[#101013] p-3"
+              className="flex w-[calc(100vw-3rem)] min-w-0 shrink-0 flex-col gap-2 md:w-auto md:min-w-[260px] md:flex-1 rounded-md bg-[#101013] p-3"
             >
               <Skeleton className="h-14 w-full" />
               <Skeleton className="h-14 w-full" />

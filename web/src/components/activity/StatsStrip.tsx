@@ -31,7 +31,7 @@ function TimeStatRow({
   help?: string;
 }) {
   return (
-    <div className="flex items-baseline gap-2 text-sm">
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
       <span className="flex min-w-[6.5rem] items-center gap-1 text-muted-foreground">
         {label}
         {help && (

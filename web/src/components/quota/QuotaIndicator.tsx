@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Popover } from "radix-ui";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -148,6 +150,38 @@ function QuotaPopup({
   );
 }
 
+/** Touch devices need an explicit popup trigger; HoverCard suppresses taps. */
+function QuotaDetails({ children, content }: { children: ReactNode; content: ReactNode }) {
+  const touchOnly = useMediaQuery("(hover: none)");
+  const trigger = (
+    <button
+      type="button"
+      aria-label="Claude quota details"
+      className="flex min-h-11 min-w-12 shrink-0 flex-col items-center justify-center gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-0"
+    >
+      {children}
+    </button>
+  );
+  if (touchOnly) {
+    return (
+      <Popover.Root>
+        <Popover.Trigger asChild>{trigger}</Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content align="end" sideOffset={8} aria-label="Claude quota" className="z-50 w-72 max-w-[calc(100vw-2rem)] rounded-lg bg-popover p-2.5 text-popover-foreground shadow-md ring-1 ring-foreground/10">
+            {content}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+    );
+  }
+  return (
+    <HoverCard openDelay={150}>
+      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+      <HoverCardContent align="end" className="w-72">{content}</HoverCardContent>
+    </HoverCard>
+  );
+}
+
 /** Compact "Claude 5h" quota trigger with an all-windows hover popup.
  *  Five-state render mapping (D-71/D-72/D-73): loading or no_credentials →
  *  nothing; windows present → bar + popup (stale footer variant); empty
@@ -168,22 +202,15 @@ export function QuotaIndicator() {
         ? "Token expired — re-authenticate with `claude`"
         : "Quota unavailable";
     return (
-      <HoverCard openDelay={150}>
-        <HoverCardTrigger asChild>
-          <div className="flex shrink-0 flex-col items-center gap-1">
-            <span className="text-xs leading-none text-muted-foreground">
-              Claude 5h
-            </span>
-            <TriangleAlert
-              aria-label="Quota warning"
-              className="size-3.5 text-amber-400"
-            />
-          </div>
-        </HoverCardTrigger>
-        <HoverCardContent align="end" className="w-72">
-          <p className="text-xs text-muted-foreground">{message}</p>
-        </HoverCardContent>
-      </HoverCard>
+      <QuotaDetails content={<p className="text-xs text-muted-foreground">{message}</p>}>
+        <span className="text-xs leading-none text-muted-foreground">
+          Claude 5h
+        </span>
+        <TriangleAlert
+          aria-label="Quota warning"
+          className="size-3.5 text-amber-400"
+        />
+      </QuotaDetails>
     );
   }
 
@@ -195,23 +222,16 @@ export function QuotaIndicator() {
   const maxUtil = Math.max(...windows.map((w) => w.utilization));
 
   return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <div className="flex shrink-0 flex-col items-center gap-1">
-          <span className="text-xs leading-none text-muted-foreground">
-            Claude 5h
-          </span>
-          <div className="h-1.5 w-12 overflow-hidden rounded-full bg-zinc-800">
-            <div
-              className={`h-full rounded-full ${barColor(maxUtil)}`}
-              style={{ width: `${fiveHourUtil}%` }}
-            />
-          </div>
-        </div>
-      </HoverCardTrigger>
-      <HoverCardContent align="end" className="w-72">
-        <QuotaPopup data={data} windows={windows} />
-      </HoverCardContent>
-    </HoverCard>
+    <QuotaDetails content={<QuotaPopup data={data} windows={windows} />}>
+      <span className="text-xs leading-none text-muted-foreground">
+        Claude 5h
+      </span>
+      <div className="h-1.5 w-12 overflow-hidden rounded-full bg-zinc-800">
+        <div
+          className={`h-full rounded-full ${barColor(maxUtil)}`}
+          style={{ width: `${fiveHourUtil}%` }}
+        />
+      </div>
+    </QuotaDetails>
   );
 }
