@@ -60,6 +60,27 @@ and asks whether `kamacu serve` should run as a background service at boot
 Once installed, start it (or let the service do it) and open
 http://127.0.0.1:7333 in a browser.
 
+### Access through a trusted proxy
+
+To access Kamacu from your phone through a tailnet-only Tailscale Serve proxy:
+
+```sh
+kamacu serve --allowed-host gm0z662y.tail18d2f.ts.net
+tailscale serve --bg 7333
+```
+
+Use your machine's actual tailnet hostname, then open its HTTPS URL from your
+phone on the tailnet. Repeat `--allowed-host` for additional trusted hostnames.
+Values must be bare hostnames, without a scheme, port, path, userinfo or
+wildcards. Matching is case-insensitive and allows any port for that hostname,
+including browser API requests and terminal websockets. The server still binds
+to loopback by default; without this flag, the existing loopback rules apply.
+
+**`--allowed-host` does not add authentication.** Anyone who can reach Kamacu
+can access its terminals. Only allow a hostname whose proxy already restricts
+who can connect, such as tailnet-only Tailscale Serve or Cloudflare Access.
+Never use it for a public URL.
+
 ### Development
 
 To build from a checkout instead, use Go 1.27.3+ and Node 22.22+ (Node 24 LTS recommended):

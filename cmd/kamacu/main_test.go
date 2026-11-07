@@ -75,7 +75,7 @@ func TestHostCheck(t *testing.T) {
 			h := hostCheck(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				handlerRan = true
 				w.WriteHeader(http.StatusOK)
-			}))
+			}), nil)
 			req := httptest.NewRequest("GET", "/api/sessions", nil)
 			req.Host = tt.host
 			rec := httptest.NewRecorder()
@@ -113,12 +113,12 @@ func TestHookBaseURL(t *testing.T) {
 		addr string
 		want string
 	}{
-		{"0.0.0.0:7333", "http://127.0.0.1:7333"},   // IPv4 wildcard -> loopback
-		{"[::]:7333", "http://127.0.0.1:7333"},       // IPv6 wildcard -> loopback
-		{":7333", "http://127.0.0.1:7333"},           // empty host (all ifaces) -> loopback
+		{"0.0.0.0:7333", "http://127.0.0.1:7333"},       // IPv4 wildcard -> loopback
+		{"[::]:7333", "http://127.0.0.1:7333"},          // IPv6 wildcard -> loopback
+		{":7333", "http://127.0.0.1:7333"},              // empty host (all ifaces) -> loopback
 		{"192.168.1.5:7333", "http://192.168.1.5:7333"}, // specific reachable IP: unchanged
-		{"127.0.0.1:7333", "http://127.0.0.1:7333"},  // already loopback: unchanged
-		{"localhost:7333", "http://localhost:7333"},  // hostname: unchanged
+		{"127.0.0.1:7333", "http://127.0.0.1:7333"},     // already loopback: unchanged
+		{"localhost:7333", "http://localhost:7333"},     // hostname: unchanged
 	}
 	for _, tt := range tests {
 		t.Run(tt.addr, func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestHookBaseURL(t *testing.T) {
 
 // TestInsecureAllowRemoteRelaxesHostCheck proves the flag's effect on the
 // hostCheck wrap WITHOUT booting main() or binding a socket: it replicates
-// main's handler-selection logic (hostCheck(mux) when the flag is false, the
+// main's handler-selection logic (hostCheck(mux, nil) when the flag is false, the
 // bare mux when true) and asserts that a non-loopback Host header is 403'd in
 // the default case but reaches the inner handler (200) when the flag is set.
 func TestInsecureAllowRemoteRelaxesHostCheck(t *testing.T) {
@@ -154,7 +154,7 @@ func TestInsecureAllowRemoteRelaxesHostCheck(t *testing.T) {
 			})
 
 			// Mirror main()'s selection exactly.
-			var handler http.Handler = hostCheck(mux)
+			var handler http.Handler = hostCheck(mux, nil)
 			if tt.insecureAllowRemote {
 				handler = mux
 			}

@@ -45,7 +45,7 @@ func TestInboxHTTPIdentityAndBrowserResolution(t *testing.T) {
 	defer svc.Close()
 	mux := http.NewServeMux()
 	InboxRoutes(mux, svc, "token")
-	handler := BrowserOriginGuard(mux, nil)
+	handler := BrowserOriginGuard(mux, nil, nil)
 	call := func(path, token, task, session string, body any) *httptest.ResponseRecorder {
 		t.Helper()
 		raw, _ := json.Marshal(body)
@@ -225,7 +225,7 @@ func TestInboxBrowser(t *testing.T) {
 		}
 		http.ServeFile(w, r, filepath.Join(root, "index.html"))
 	})
-	srv := httptest.NewServer(BrowserOriginGuard(mux, nil))
+	srv := httptest.NewServer(BrowserOriginGuard(mux, nil, nil))
 	defer srv.Close()
 	cmd := exec.Command("node", "../../scripts/inbox-browser-check.cjs", srv.URL)
 	if output, err := cmd.CombinedOutput(); err != nil {

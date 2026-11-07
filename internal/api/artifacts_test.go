@@ -53,7 +53,7 @@ func artifactServer(t *testing.T) (*httptest.Server, *artifact.Service) {
 		}
 		http.ServeFile(w, r, filepath.Join(root, "index.html"))
 	})
-	server := httptest.NewServer(BrowserOriginGuard(mux, nil))
+	server := httptest.NewServer(BrowserOriginGuard(mux, nil, nil))
 	t.Cleanup(server.Close)
 	return server, svc
 }
