@@ -63,6 +63,7 @@ type RuleFact struct {
 	Reason     string   `json:"reason,omitempty"`
 }
 type RuleEvaluation struct {
+	Blocking  bool     `json:"blocking,omitempty"`
 	OnUnknown string   `json:"on_unknown"`
 	RuleID    string   `json:"rule_id"`
 	ClauseID  string   `json:"clause_id"`
@@ -78,6 +79,7 @@ type SemanticJudgment struct {
 	Quote      string `json:"quote,omitempty"`
 }
 type ActivityDecision struct {
+	Snapshot        string              `json:"-"`
 	Semantic        []SemanticJudgment  `json:"semantic,omitempty"`
 	RuleSetID       string              `json:"rule_set_id"`
 	RuleSetRevision int64               `json:"rule_set_revision"`
@@ -92,26 +94,28 @@ type ReviewTarget struct {
 	PRNumber  int64 `json:"pr_number"`
 }
 type ActionPlan struct {
-	Bindings      []inbox.TaskLink `json:"bindings"`
-	WorkKind      string           `json:"work_kind,omitempty"`
-	SessionMode   string           `json:"session_mode,omitempty"`
-	SessionID     string           `json:"session_id,omitempty"`
-	OwnerEvidence string           `json:"owner_evidence,omitempty"`
-	Targets       []ReviewTarget   `json:"targets"`
-	Presentation  []string         `json:"presentation"`
-	Evidence      []triageEvidence `json:"evidence"`
-	RuleSetID     string           `json:"rule_set_id"`
-	Activities    []string         `json:"activities"`
-	Workflow      string           `json:"workflow"`
-	ProjectID     int64            `json:"project_id"`
-	TaskID        int64            `json:"task_id"`
-	PRNumber      int64            `json:"pr_number"`
-	TaskName      string           `json:"task_name"`
-	RuleIDs       []string         `json:"rule_ids"`
+	ClarificationKey string              `json:"clarification_key,omitempty"`
+	Uncertain        []UncertainActivity `json:"uncertain,omitempty"`
+	Bindings         []inbox.TaskLink    `json:"bindings"`
+	WorkKind         string              `json:"work_kind,omitempty"`
+	SessionMode      string              `json:"session_mode,omitempty"`
+	SessionID        string              `json:"session_id,omitempty"`
+	OwnerEvidence    string              `json:"owner_evidence,omitempty"`
+	Targets          []ReviewTarget      `json:"targets"`
+	Presentation     []string            `json:"presentation"`
+	Evidence         []triageEvidence    `json:"evidence"`
+	RuleSetID        string              `json:"rule_set_id"`
+	Activities       []string            `json:"activities"`
+	Workflow         string              `json:"workflow"`
+	ProjectID        int64               `json:"project_id"`
+	TaskID           int64               `json:"task_id"`
+	PRNumber         int64               `json:"pr_number"`
+	TaskName         string              `json:"task_name"`
+	RuleIDs          []string            `json:"rule_ids"`
 }
 
 var ruleFacts = map[string]string{
-	"activity.work_kind": "string", "activity.audience": "string", "activity.uncertain": "bool", "workflow.needs_session": "bool", "repository": "string", "project_id": "number", "actor": "string", "subject.type": "string", "subject.url": "string", "subject.title": "string", "activity.kind": "string", "activity.own": "bool", "pr.state": "string", "pr.draft": "bool", "pr.author": "string", "review.state": "string", "viewer.mentioned": "bool", "viewer.review_requested": "bool", "viewer.approved": "bool",
+	"activity.new": "bool", "activity.work_kind": "string", "activity.audience": "string", "activity.uncertain": "bool", "workflow.needs_session": "bool", "repository": "string", "project_id": "number", "actor": "string", "subject.type": "string", "subject.url": "string", "subject.title": "string", "activity.kind": "string", "activity.own": "bool", "pr.state": "string", "pr.draft": "bool", "pr.author": "string", "review.state": "string", "viewer.mentioned": "bool", "viewer.review_requested": "bool", "viewer.approved": "bool",
 }
 
 func strictRuleJSON(raw []byte, target any) error {
@@ -326,6 +330,14 @@ func (s *Service) SaveRuleDraft(ctx context.Context, base int64, rules []Notific
 		return RuleSet{}, err
 	}
 	defer tx.Rollback()
+	set, err := s.saveRuleDraftTx(ctx, tx, base, rules)
+	if err != nil {
+		return set, err
+	}
+	return set, tx.Commit()
+}
+func (s *Service) saveRuleDraftTx(ctx context.Context, tx *sql.Tx, base int64, rules []NotificationRule) (RuleSet, error) {
+	var err error
 	var latest int64
 	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(max(revision),0) FROM notification_rule_sets`).Scan(&latest); err != nil {
 		return RuleSet{}, err
@@ -386,7 +398,7 @@ func (s *Service) SaveRuleDraft(ctx context.Context, base int64, rules []Notific
 	if err != nil {
 		return set, err
 	}
-	return set, tx.Commit()
+	return set, nil
 }
 func (s *Service) ActivateRules(ctx context.Context, id string) (RuleSet, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -415,15 +427,13 @@ func (s *Service) ActivateRules(ctx context.Context, id string) (RuleSet, error)
 	}
 	// Pending cards from older rule sets must not remain executable dead ends.
 	// Requeue their sources and retire the cards atomically with activation.
-	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET raw_status='pending',held=0,raw_revision=raw_revision+1 WHERE id IN (SELECT links.event_id FROM notification_question_events links JOIN inbox_questions q ON q.id=links.question_id JOIN notification_card_plans p ON p.question_id=q.id WHERE q.status='pending' AND p.rule_set_id!=? UNION SELECT q.notification_id FROM inbox_questions q JOIN notification_card_plans p ON p.question_id=q.id WHERE q.status='pending' AND p.rule_set_id!=?)`, id, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET raw_status='pending',raw_revision=raw_revision+1 WHERE id IN (SELECT links.event_id FROM notification_question_events links JOIN inbox_questions q ON q.id=links.question_id JOIN notification_card_plans p ON p.question_id=q.id WHERE q.status='pending' AND p.rule_set_id!=? UNION SELECT q.notification_id FROM inbox_questions q JOIN notification_card_plans p ON p.question_id=q.id WHERE q.status='pending' AND p.rule_set_id!=?)`, id, id); err != nil {
 		return set, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE inbox_questions SET status='unanswered',reason='notification_rules_changed',revision=revision+1,updated_at=? WHERE status='pending' AND id IN (SELECT question_id FROM notification_card_plans WHERE rule_set_id!=?)`, time.Now().UnixMilli(), id); err != nil {
 		return set, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET held=0,raw_revision=raw_revision+1 WHERE raw_status='pending' AND held=1`); err != nil {
-		return set, err
-	}
+
 	set.Status = "active"
 	return set, tx.Commit()
 }
@@ -443,6 +453,9 @@ func evalExpression(e RuleExpression, facts map[string]RuleFact, semantic map[st
 	case "always":
 		return "true"
 	case "semantic":
+		if isNoveltyCondition(e.Text) {
+			return evalExpression(RuleExpression{Op: "eq", Fact: "activity.new", Value: true}, facts, nil)
+		}
 		if e.Text == sessionRoutingCondition {
 			return evalExpression(RuleExpression{Op: "eq", Fact: "workflow.needs_session", Value: true}, facts, nil)
 		}
@@ -505,7 +518,7 @@ func evalExpression(e RuleExpression, facts map[string]RuleFact, semantic map[st
 	}
 }
 func expressionActivity(e RuleExpression) bool {
-	if e.Op == "semantic" || slices.Contains([]string{"actor", "activity.kind", "activity.work_kind", "activity.audience", "activity.uncertain", "activity.own", "review.state"}, e.Fact) {
+	if e.Op == "semantic" || slices.Contains([]string{"actor", "activity.new", "activity.kind", "activity.work_kind", "activity.audience", "activity.uncertain", "activity.own", "review.state"}, e.Fact) {
 		return true
 	}
 	for _, a := range e.Args {
@@ -563,6 +576,8 @@ func subjectRuleFacts(subject *triageSubject, finding *intentFinding) map[string
 		}
 	}
 	if finding != nil {
+		facts["actor"] = RuleFact{Reason: "The source did not identify the author of this activity"}
+		facts["activity.own"] = RuleFact{Reason: "Activity author is unavailable; the PR author or review assignee does not identify who caused this update"}
 		known("activity.kind", finding.Intent)
 		if finding.WorkKind != "" {
 			known("activity.work_kind", finding.WorkKind)
@@ -607,9 +622,10 @@ func evaluateRuleSet(set RuleSet, facts map[string]RuleFact, semantic map[string
 				evaluation.Evidence = append(evaluation.Evidence, f.Evidence...)
 			}
 			if result == "unknown" {
-				evaluation.Reason = "required fact or semantic evidence is unavailable"
-				if outcome != "suppressed" && c.OnUnknown == "hold" && c.Category != "action" && c.Category != "grouping" {
-					outcome = "held"
+				evaluation.Reason = missingRuleEvidence(c.When, facts, semantic)
+				if outcome != "suppressed" && c.OnUnknown == "hold" && c.Category == "filtering" {
+					evaluation.Blocking = true
+					outcome = "clarification"
 				}
 			}
 			if result == "true" {
@@ -645,8 +661,13 @@ func evaluateRuleSet(set RuleSet, facts map[string]RuleFact, semantic map[string
 				v := evalExpression(c.When, facts, semantic)
 				conflict := v == "unknown" && c.OnUnknown == "hold" && (winner == nil || c.Priority >= winner.Priority)
 				conflict = conflict || (v == "true" && winner != nil && c.Priority == winner.Priority && (c.Effect != winner.Effect || c.Argument != winner.Argument))
-				if conflict && outcome != "suppressed" {
-					outcome = "held"
+				if conflict && category == "action" && outcome != "suppressed" {
+					for i := range evaluations {
+						if (evaluations[i].RuleID == rule.ID && evaluations[i].ClauseID == c.ID) || (v == "true" && winner != nil && evaluations[i].ClauseID == winner.ID) {
+							evaluations[i].Blocking = true
+						}
+					}
+					outcome = "clarification"
 				}
 			}
 		}

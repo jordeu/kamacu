@@ -1,3 +1,4 @@
+import { RuleImprovement } from "./RuleImprovement";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ArrowUpRight, ChevronRight } from "lucide-react";
@@ -50,6 +51,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
       {notification ? <a className="inline-flex items-center gap-1 text-sm text-blue-400" href={q.source_url} target="_blank" rel="noopener noreferrer">Open notification <ArrowUpRight className="size-4" /></a> : <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => pending && (q.origin!=="observer" || completion) ? submit("dismiss", undefined, true) : navigateToTask()} aria-label={q.task_id === 0 ? "Open Scratchpad" : `Open task: ${q.task_title}`}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"} <ArrowUpRight className="size-4" /></Button>}
     </div>
     {notification && !!q.linked_tasks?.length && <nav className="mt-4 space-y-2" aria-label="Linked tasks"><p className="text-xs text-muted-foreground">Linked {q.linked_tasks.length === 1 ? "task" : "tasks"}</p>{q.linked_tasks.map(task => <div key={task.task_id} className="flex flex-wrap items-center gap-2 text-sm"><Link className="text-blue-400 hover:underline" to={`/projects/${task.project_id}/tasks/${task.task_id}`} aria-label={`Open task ${task.task_id}: ${task.title}`}>Open task {task.task_id} <ArrowUpRight className="inline size-3" /></Link><span>{task.title}</span><span className="text-xs text-muted-foreground" title={task.evidence}>{task.role} · {task.status.replaceAll("_", " ")}</span></div>)}</nav>}
+    {notification && <RuleImprovement questionID={q.id} />}
     {pending ? <div className="mt-6 space-y-6">
       <div><h3 className="mb-2 text-sm font-medium text-muted-foreground">{notification ? "Notification summary" : "Task summary"}</h3><div className="whitespace-pre-wrap break-words text-sm leading-relaxed"><InboxText text={q.summary} /></div></div>
       <div><h3 className="mb-2 text-sm font-medium text-muted-foreground">{completion ? "What was done" : "Decision context"}</h3><Context text={q.context} /></div>

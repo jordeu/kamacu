@@ -10,6 +10,38 @@ import (
 )
 
 func notificationRuleRoutes(mux *http.ServeMux, s *notifications.Service) {
+	mux.HandleFunc("GET /api/notifications/rules/problems", func(w http.ResponseWriter, r *http.Request) {
+		result, err := s.RuleProblems(r.Context())
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, result)
+	})
+	mux.HandleFunc("POST /api/notifications/rules/improvements", func(w http.ResponseWriter, r *http.Request) {
+		var req notifications.RuleImprovementRequest
+		if !ruleDecode(w, r, &req) {
+			return
+		}
+		result, err := s.ImproveRules(r.Context(), req)
+		if err != nil {
+			status := 400
+			if errors.Is(err, notifications.ErrRulesChanged) {
+				status = 409
+			}
+			writeError(w, status, err.Error())
+			return
+		}
+		writeJSON(w, 201, result)
+	})
+	mux.HandleFunc("GET /api/notifications/rules/history/{id}", func(w http.ResponseWriter, r *http.Request) {
+		result, err := s.ReplayRuleHistory(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, result)
+	})
 	mux.HandleFunc("GET /api/notifications/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
 		set, err := s.RuleSet(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -84,14 +116,7 @@ func notificationRuleRoutes(mux *http.ServeMux, s *notifications.Service) {
 		}
 		writeJSON(w, 200, p)
 	})
-	mux.HandleFunc("POST /api/notifications/retry-held", func(w http.ResponseWriter, r *http.Request) {
-		n, err := s.RetryHeld(r.Context())
-		if err != nil {
-			writeError(w, 500, err.Error())
-			return
-		}
-		writeJSON(w, 200, map[string]int64{"retried": n})
-	})
+
 }
 
 func ruleDecode(w http.ResponseWriter, r *http.Request, target any) bool {

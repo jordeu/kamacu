@@ -68,7 +68,7 @@ func TestLLMFallbackEvaluatesCompoundRuleAndHoldsUnknown(t *testing.T) {
 			}
 			want := "admitted"
 			if result == "unknown" {
-				want = "held"
+				want = "clarification"
 			}
 			if len(subject.decisions) != 1 || subject.decisions[0].Outcome != want || len(subject.decisions[0].Semantic) != 2 {
 				t.Fatal(subject.decisions)

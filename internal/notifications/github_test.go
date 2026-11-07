@@ -353,7 +353,7 @@ func TestLongReleaseMentionScanPrecedesClipping(t *testing.T) {
 		{"no mention", "routine changes", "2026-11-04T12:00:00Z", "rule_suppressed"},
 		{"mention beyond excerpt", "@ALICE please investigate", "2026-11-04T12:00:00Z", ""},
 		{"different username", "@alice-other", "2026-11-04T12:00:00Z", "rule_suppressed"},
-		{"uncertain mention date", "@alice please investigate", "", "rule_held"},
+		{"uncertain mention date", "@alice please investigate", "", "rule_clarification"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
@@ -464,5 +464,36 @@ func TestGitHubReviewStateSurvivesEnrichmentAndProjectPrompt(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestGitHubTransientReadRetryIsBoundedAndHonorsCancellation(t *testing.T) {
+	for _, status := range []int{401, 429, 503} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			calls := 0
+			g := GitHub{Run: func(context.Context, ...string) ([]byte, error) {
+				calls++
+				return errorResponse(status), errors.New("exit status 1")
+			}}
+			_, _, err := g.api(context.Background(), "github.com", "repos/acme/repo/pulls/7")
+			want := 1
+			if status == 503 {
+				want = 2
+			}
+			if calls != want || err == nil {
+				t.Fatal(calls, err)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	g := GitHub{Run: func(context.Context, ...string) ([]byte, error) {
+		calls++
+		cancel()
+		return errorResponse(503), errors.New("exit status 1")
+	}}
+	_, _, err := g.api(ctx, "github.com", "repos/acme/repo/pulls/7")
+	if !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatal("retry ignored cancellation", calls, err)
 	}
 }

@@ -1,3 +1,4 @@
+import { RuleImprovement, RuleHistoryComparison } from "@/components/inbox/RuleImprovement";
 import { useState } from "react";
 import { useNotificationRules, useRuleMutation, useRulePreview, type NotificationRuleSet, type NotificationRule, type RuleExpression } from "@/api/notificationRules";
 import { Button } from "@/components/ui/button";
@@ -12,21 +13,23 @@ function describe(e: RuleExpression): string {
 }
 export function NotificationRules() {
  const query = useNotificationRules();
+ const [dirtyEditorID, setDirtyEditorID] = useState<string | null>(null);
+ const [diagnosing, setDiagnosing] = useState(false);
  if (query.isPending) return <p>Loading notification rules…</p>;
  if (query.isError) return <p role="alert">Could not load rules. <button className="underline" onClick={() => void query.refetch()}>Retry</button></p>;
  const latest = query.data[0];
  const active = query.data.find(s => s.status === "active");
- return <div className="space-y-3"><p className="text-xs text-muted-foreground">{active ? `Active rule set: revision ${active.revision}.` : "No active rule set. Save, prepare and activate rules before processing notifications."} Edits stay in a draft until activated. Rules define whether missing evidence holds activity outside the inbox.</p><RuleEditor key={latest?.id ?? "new"} set={latest} active={active} /></div>;
+ return <div className="space-y-3"><p className="text-xs text-muted-foreground">{active ? `Active rule set: revision ${active.revision}.` : "No active rule set. Save, prepare and activate rules before processing notifications."} Edits stay in a draft until activated. Missing evidence that affects filtering or routing creates an Inbox clarification.</p><RuleImprovement recurring disabled={dirtyEditorID === (latest?.id ?? "new") || latest?.status === "compiling"} disabledReason={latest?.status === "compiling" ? "Wait for rule preparation to finish." : "Save your rule edits before requesting suggestions."} onBusyChange={setDiagnosing} /><RuleEditor key={latest?.id ?? "new"} set={latest} active={active} diagnosing={diagnosing} onDirtyChange={dirty => setDirtyEditorID(dirty ? latest?.id ?? "new" : null)} /></div>;
 }
-function RuleEditor({ set, active }: { set?: NotificationRuleSet; active?: NotificationRuleSet }) {
+function RuleEditor({ set, active, diagnosing, onDirtyChange }: { set?: NotificationRuleSet; active?: NotificationRuleSet; diagnosing: boolean; onDirtyChange: (dirty: boolean) => void }) {
  const [editedRules, setEditedRules] = useState<NotificationRule[]>(set?.rules ?? []);
  const [dirty, setDirty] = useState(false);
  const rules = dirty ? editedRules : set?.rules ?? editedRules;
- const setRules = (value: NotificationRule[]) => { setEditedRules(value); setDirty(true); };
+ const setRules = (value: NotificationRule[]) => { setEditedRules(value); setDirty(true); onDirtyChange(true); };
  const [previewID, setPreviewID] = useState("");
  const save = useRuleMutation("drafts"), compile = useRuleMutation("compile"), activate = useRuleMutation("activate"), preview = useRuleMutation("preview");
  const result = useRulePreview(previewID);
- const busy = save.isPending || compile.isPending || activate.isPending || set?.status === "compiling";
+ const busy = diagnosing || save.isPending || compile.isPending || activate.isPending || set?.status === "compiling";
  const change = (i: number, patch: Partial<NotificationRule>) => setRules(rules.map((r, j) => j === i ? { ...r, ...patch } : r));
  return <section className="space-y-3 rounded border border-border p-3" aria-label="Notification rules">
   <h3 className="text-sm font-medium">Notification rules {set && <span className="text-muted-foreground">· revision {set.revision} · {set.status}</span>}</h3>
@@ -36,13 +39,14 @@ function RuleEditor({ set, active }: { set?: NotificationRuleSet; active?: Notif
    <p className="text-xs font-medium">{!rule.enabled ? "Disabled" : rule.mode === "llm" ? "LLM evaluated · not compiled" : rule.clauses?.length && rule.compiler_version ? "Compiled" : "Not compiled · awaiting preparation"}</p>
    <label className="text-xs">Execution mode <select className="ml-2 rounded border bg-background p-1" value={rule.mode === "llm" ? "llm" : "compiled"} disabled={busy} onChange={e => change(i, { mode: e.target.value as "compiled" | "llm", clauses: [], compiler_version: undefined, diagnostic: undefined, alternatives: [] })}><option value="compiled">Try compilation, fall back to LLM</option><option value="llm">Use LLM evaluation</option></select></label>
    <Textarea aria-label={`Rule ${i + 1}`} value={rule.text} disabled={busy} maxLength={8000} rows={3} onChange={e => change(i, { text: e.target.value, clauses: [], compiler_version: undefined, diagnostic: undefined, alternatives: [] })} />
-   {rule.mode === "llm" && <p className="text-xs text-muted-foreground">This rule is interpreted from its full text for each activity. Missing or ambiguous evidence holds the activity for clarification.</p>}
+   {rule.mode === "llm" && <p className="text-xs text-muted-foreground">This rule is interpreted from its full text for each activity. Missing or ambiguous evidence creates an Inbox clarification.</p>}
    {rule.diagnostic && <div className="space-y-1 text-xs" role="status"><p>Why this rule could not be compiled: {rule.diagnostic}</p>{!!rule.alternatives?.length && <><p>Suggested alternative rules (not applied automatically):</p><ul className="list-disc pl-4">{rule.alternatives.map((text, j) => <li key={j}>{text}</li>)}</ul></>}</div>}
-   {rule.mode !== "llm" && rule.clauses?.length > 0 && <details className="text-xs"><summary className="cursor-pointer">Compiled interpretation</summary>{rule.clauses.map(c => <p key={c.id} className="mt-2 break-words"><strong>{c.id} · {c.category}</strong>: {describe(c.when)} → {c.effect.replaceAll("_", " ")}{c.argument && ` (${c.argument})`}. Missing evidence: {c.on_unknown}. Priority: {c.priority}.</p>)}</details>}
+   {rule.mode !== "llm" && rule.clauses?.length > 0 && <details className="text-xs"><summary className="cursor-pointer">Compiled interpretation</summary>{rule.clauses.map(c => <p key={c.id} className="mt-2 break-words"><strong>{c.id} · {c.category}</strong>: {describe(c.when)} → {c.effect.replaceAll("_", " ")}{c.argument && ` (${c.argument})`}. Missing evidence: {c.on_unknown === "hold" ? "Ask in Inbox" : "Continue"}. Priority: {c.priority}.</p>)}</details>}
   </div>)}
-  <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy || rules.length >= 100} onClick={() => setRules([...rules, { id: "", revision: 0, text: "", enabled: true, clauses: [] }])}>Add rule</Button><Button size="sm" disabled={busy || rules.some(r => !r.text.trim()) || (!!set && !dirty)} onClick={() => save.mutate({ base_revision: set?.revision ?? 0, rules })}>Save draft</Button>
+  <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy || rules.length >= 100} onClick={() => setRules([...rules, { id: "", revision: 0, text: "", enabled: true, clauses: [] }])}>Add rule</Button><Button size="sm" disabled={busy || rules.some(r => !r.text.trim()) || (!!set && !dirty)} onClick={() => save.mutate({ base_revision: set?.revision ?? 0, rules }, { onSuccess: () => onDirtyChange(false) })}>Save draft</Button>
    {set && ["draft", "invalid"].includes(set.status) && <Button size="sm" variant="outline" disabled={busy || dirty} onClick={() => compile.mutate({ id: set.id })}>Prepare rules</Button>}
    {set && ["ready", "active"].includes(set.status) && <Button size="sm" variant="outline" disabled={busy || dirty || preview.isPending} onClick={() => preview.mutate({ id: set.id }, { onSuccess: data => setPreviewID(data.id) })}>Test on recent notifications</Button>}
+   {set && ["ready", "active"].includes(set.status) && !dirty && <RuleHistoryComparison setID={set.id} />}
    {set?.status === "ready" && <Button size="sm" disabled={busy || dirty} onClick={() => activate.mutate({ id: set.id })}>Activate revision {set.revision}</Button>}
   </div>
   {set?.status === "compiling" && <p role="status" className="text-xs">Preparing rules…</p>}

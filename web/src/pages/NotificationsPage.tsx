@@ -1,28 +1,25 @@
 import { useState } from "react";
 import { ArrowUpRight, Bell, Check, Clock } from "lucide-react";
 import { useArchiveNotification, useNotificationStatus, useRawNotifications } from "@/api/notifications";
-import { useRetryHeld } from "@/api/notificationRules";
 import { Button } from "@/components/ui/button";
 import { NotificationProcessing } from "@/components/inbox/NotificationProcessing";
 
 export default function NotificationsPage() {
- const [view, setView] = useState<"pending" | "archived" | "held">("pending");
+ const [view, setView] = useState<"pending" | "archived">("pending");
  const [offset, setOffset] = useState(0);
  const query = useRawNotifications(view, offset);
  const status = useNotificationStatus();
  const change = useArchiveNotification();
- const retry = useRetryHeld();
  return <main className="h-full overflow-y-auto p-4 sm:p-6">
    <div className="mx-auto max-w-5xl">
      <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
      <p className="mt-1 text-sm text-muted-foreground">Collected source notifications. Nothing is sent to the model until you choose Process pending.</p>
      <div className="mt-5 max-w-md overflow-hidden rounded border border-border"><NotificationProcessing /></div>
      <div className="mt-6 flex gap-2 border-b border-border pb-3" role="group" aria-label="Notification view">
-       {(["pending", "held", "archived"] as const).map(tab => <Button key={tab} variant={view === tab ? "secondary" : "ghost"} aria-pressed={view === tab} onClick={() => { setView(tab); setOffset(0); }}>
-         {tab === "pending" ? <Clock className="size-4" /> : <Check className="size-4" />}{tab === "pending" ? `Pending (${status.data?.pending_count ?? query.data?.pending_count ?? "…"})` : tab === "held" ? `Held (${status.data?.held_count ?? 0})` : "Archived"}
+       {(["pending", "archived"] as const).map(tab => <Button key={tab} variant={view === tab ? "secondary" : "ghost"} aria-pressed={view === tab} onClick={() => { setView(tab); setOffset(0); }}>
+         {tab === "pending" ? <Clock className="size-4" /> : <Check className="size-4" />}{tab === "pending" ? `Pending (${status.data?.pending_count ?? query.data?.pending_count ?? "…"})` : "Archived"}
        </Button>)}
      </div>
-     {view === "held" && <div className="my-3 text-sm"><p>Held notifications have unresolved rule conditions and do not produce inbox cards.</p><Button variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(undefined, { onSuccess: () => { setView("pending"); setOffset(0); } })}>Move held notifications to pending for retry</Button>{retry.isError && <p role="alert">{retry.error.message}</p>}</div>}
      {change.isError && <p role="alert" className="my-3 text-sm text-destructive">{change.error.message}</p>}
      {query.isPending && <p className="py-8 text-sm text-muted-foreground">Loading notifications…</p>}
      {query.isError && <p role="alert" className="py-4 text-sm">Could not load notifications. <Button variant="ghost" onClick={() => void query.refetch()}>Retry</Button></p>}

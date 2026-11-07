@@ -164,5 +164,20 @@ func (s *Service) previewRules(ctx context.Context, set RuleSet, ids []int64) (R
 			}
 		}
 	}
+	clarifications, err := s.clarificationActions(ctx, plans)
+	if err != nil {
+		return result, err
+	}
+	for _, a := range clarifications {
+		var plan ActionPlan
+		if err = strictRuleJSON([]byte(a.Plan), &plan); err != nil {
+			return result, err
+		}
+		options := []string{}
+		for _, o := range a.Request.Options {
+			options = append(options, o.Label)
+		}
+		result.Cards = append(result.Cards, BatchAction{Plan: plan, EventIDs: a.EventIDs, Summary: a.Request.Summary, Context: a.Request.Context, Question: a.Request.Question, Options: options})
+	}
 	return result, nil
 }

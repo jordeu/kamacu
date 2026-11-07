@@ -70,6 +70,15 @@ func TestNotificationRuleLifecycleRoutes(t *testing.T) {
 	if w = call("POST", "/api/notifications/rules/drafts", `{"base_revision":0,"rules":[]}`); w.Code != 409 {
 		t.Fatal("stale editor was not rejected", w.Code)
 	}
+	if w = call("GET", "/api/notifications/rules/problems", ""); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("GET", "/api/notifications/rules/history/"+draft.ID, ""); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", "/api/notifications/rules/improvements", `{"kind":"unclear_rule","instructions":""}`); w.Code != 400 {
+		t.Fatal("empty feedback accepted", w.Code)
+	}
 	for _, key := range []string{"notification_system_prompt", "notification_policy"} {
 		if w = call("PUT", "/api/settings/"+key, `{"value":"obsolete"}`); w.Code != 404 {
 			t.Fatal("old configuration remains writable", key, w.Code)
@@ -82,24 +91,19 @@ func TestNotificationRuleLifecycleRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`INSERT INTO notification_events(source_id,external_id,version,payload,created_at,held) VALUES(?,'held','v1','{}',0,1)`, source.ID); err != nil {
+	if _, err = db.Exec(`INSERT INTO notification_events(source_id,external_id,version,payload,created_at) VALUES(?,'event','v1','{}',0)`, source.ID); err != nil {
 		t.Fatal(err)
 	}
-	w = call("GET", "/api/notifications?status=held", "")
-	if w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
+	if w = call("GET", "/api/notifications?status=held", ""); w.Code != 400 {
+		t.Fatal("removed category is still available", w.Code)
+	}
+	if w = call("POST", "/api/notifications/retry-held", ""); w.Code != 404 && w.Code != 405 {
+		t.Fatal("removed retry route is still available", w.Code)
 	}
 	var page notifications.RawPage
-	json.Unmarshal(w.Body.Bytes(), &page)
-	if len(page.Items) != 1 || !page.Items[0].Held || page.PendingCount != 0 {
-		t.Fatal(page)
-	}
-	if w = call("POST", "/api/notifications/retry-held", ""); w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
 	w = call("GET", "/api/notifications?status=pending", "")
 	json.Unmarshal(w.Body.Bytes(), &page)
-	if w.Code != 200 || len(page.Items) != 1 || page.Items[0].Held {
+	if w.Code != 200 || len(page.Items) != 1 {
 		t.Fatal(page)
 	}
 }

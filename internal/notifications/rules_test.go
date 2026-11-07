@@ -21,7 +21,7 @@ func TestRuleExpressionsAndLocalExceptions(t *testing.T) {
 		want       string
 	}{
 		{"excluded without mention", "seqeralabs/platform", ptr(false), "suppressed"},
-		{"missing mention evidence", "seqeralabs/platform", nil, "held"},
+		{"missing mention evidence", "seqeralabs/platform", nil, "clarification"},
 		{"direct mention exception", "seqeralabs/platform", ptr(true), "admitted"},
 		{"other repository does not require mention", "acme/other", nil, "admitted"},
 	} {
@@ -75,7 +75,7 @@ func TestOnlyHighestPriorityRoutingCanHold(t *testing.T) {
 	}
 	rules.Rules[0].Clauses[3].Priority = 20
 	got, _, _ = evaluateRuleSet(rules, nil, nil, false)
-	if got != "held" {
+	if got != "clarification" {
 		t.Fatal("unknown higher priority must hold", got)
 	}
 }
@@ -195,7 +195,7 @@ func TestPlatformRuleProducesNoOverrideCard(t *testing.T) {
 				t.Fatal(status)
 			}
 			want := 0
-			if mode == "mentioned" {
+			if mode != "absent" {
 				want = 1
 			}
 			if status.ActionCount != want {
@@ -204,34 +204,17 @@ func TestPlatformRuleProducesNoOverrideCard(t *testing.T) {
 			if mode != "mentioned" && len(model.prompts) != 0 {
 				t.Fatal("excluded/held subjects were sent to the writer")
 			}
-			var held int
-			if err := s.DB.QueryRow(`SELECT held FROM notification_events LIMIT 1`).Scan(&held); err != nil {
-				t.Fatal(err)
-			}
-			if (held == 1) != (mode == "unknown") {
-				t.Fatal("wrong held disposition", held)
+			pending, _ := s.Status(ctx)
+			if pending.PendingCount != 0 {
+				t.Fatal("processed input must be archived", pending)
 			}
 			if mode == "unknown" {
-				pending, _ := s.Status(ctx)
-				if pending.PendingCount != 0 || pending.HeldCount != 1 {
-					t.Fatal(pending)
+				page, err := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+				if err != nil || len(page.Items) != 1 || !strings.Contains(page.Items[0].Context, "viewer.mentioned") {
+					t.Fatal("missing specific clarification", page, err)
 				}
-				if _, err := s.RequestProcessing(ctx); !errors.Is(err, ErrNoPending) {
-					t.Fatal("held inputs automatically retried", err)
-				}
-				page, err := s.ListRaw(ctx, "held", 0)
-				if err != nil || len(page.Items) != 1 || len(page.Items[0].Decisions) == 0 {
-					t.Fatalf("missing held explanation %+v %v", page, err)
-				}
-				e.EvidenceComplete = true
-				e.ContextWarnings = nil
-				s.Providers["github"] = &frozenRuleProvider{fakeProvider: &fakeProvider{}, fresh: e}
-				if n, err := s.RetryHeld(ctx); err != nil || n != 1 {
-					t.Fatal(n, err)
-				}
-				retry := process(t, s, model, "direct_question")
-				if retry.Status != "completed" || retry.ActionCount != 0 {
-					t.Fatal(retry)
+				if _, err = s.RequestProcessing(ctx); !errors.Is(err, ErrNoPending) {
+					t.Fatal("processed inputs were retried", err)
 				}
 			}
 		})
@@ -276,7 +259,7 @@ func TestSemanticConditionsRequireEveryCheckAndEvidence(t *testing.T) {
 			if err := s.evaluateActivities(context.Background(), []*triageSubject{subject}, set); err != nil {
 				t.Fatal(err)
 			}
-			want := map[string]string{"true": "suppressed", "false": "admitted", "unknown": "held"}[result]
+			want := map[string]string{"true": "suppressed", "false": "admitted", "unknown": "clarification"}[result]
 			if len(subject.decisions[0].Semantic) != 1 || subject.decisions[0].Semantic[0].EvidenceID != "comment" {
 				t.Fatal("semantic citation missing", subject.decisions)
 			}
@@ -416,6 +399,7 @@ func TestActivationRetiresPendingCardsAndRequeuesTheirSources(t *testing.T) {
 }
 func TestDevelopmentRuleImportIsDraftOnly(t *testing.T) {
 	s, _, _, source := fixture(t)
+	downgradeClarifications(t, s)
 	ctx := context.Background()
 	migration, err := os.ReadFile("../store/migrations/00037_notification_rules.sql")
 	if err != nil {
@@ -506,7 +490,7 @@ func TestImplementationOwnerIsSelectedBeforeGrouping(t *testing.T) {
 	}
 }
 
-func TestMixedHeldActivitiesDoNotRepeatPublishedActivity(t *testing.T) {
+func TestMixedClarificationsDoNotRepeatPublishedActivity(t *testing.T) {
 	s, model, _, source := fixture(t)
 	ctx := context.Background()
 	rule := NotificationRule{ID: "RSEM", Text: "Ignore questions that are already resolved", Enabled: true, Clauses: []RuleClause{{Category: "filtering", Effect: "suppress", OnUnknown: "hold", When: RuleExpression{Op: "all", Args: []RuleExpression{{Op: "eq", Fact: "activity.kind", Value: "direct_question"}, {Op: "semantic", Text: "Is this question already resolved?"}}}}}}
@@ -528,14 +512,14 @@ func TestMixedHeldActivitiesDoNotRepeatPublishedActivity(t *testing.T) {
 		return fixtureProjectCards(prompt, nil)
 	}
 	first := process(t, s, model, "")
-	if first.Status != "completed" || first.ActionCount != 1 {
+	if first.Status != "completed" || first.ActionCount != 2 {
 		t.Fatal(first)
 	}
 	status, _ := s.Status(ctx)
-	if status.HeldCount != 1 {
+	if status.PendingCount != 0 {
 		t.Fatal("mixed input was archived", status)
 	}
-	raw, err := s.ListRaw(ctx, "held", 0)
+	raw, err := s.ListRaw(ctx, "archived", 0)
 	if err != nil || len(raw.Items) != 1 {
 		t.Fatal(raw, err)
 	}
@@ -549,7 +533,15 @@ func TestMixedHeldActivitiesDoNotRepeatPublishedActivity(t *testing.T) {
 		t.Fatal("semantic audit was not persisted", raw)
 	}
 	resolved = "false"
-	if _, err := s.RetryHeld(ctx); err != nil {
+	cards, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	for _, q := range cards.Items {
+		if strings.Contains(q.Context, "RSEM") {
+			if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "", "rule_continue_once"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := s.executeNext(ctx); err != nil {
 		t.Fatal(err)
 	}
 	next := process(t, s, model, "")
@@ -557,12 +549,12 @@ func TestMixedHeldActivitiesDoNotRepeatPublishedActivity(t *testing.T) {
 		t.Fatal("retry repeated delivered activity", next)
 	}
 	status, _ = s.Status(ctx)
-	if status.HeldCount != 0 {
+	if status.PendingCount != 0 {
 		t.Fatal("resolved activity stayed held")
 	}
 	var count int
 	s.DB.QueryRow(`SELECT count(*) FROM inbox_questions`).Scan(&count)
-	if count != 2 {
+	if count != 3 {
 		t.Fatal("duplicated previously admitted activity", count)
 	}
 }

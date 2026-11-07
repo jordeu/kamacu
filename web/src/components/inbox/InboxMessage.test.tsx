@@ -18,6 +18,7 @@ it("hides internal notification comments while preserving visible Markdown and H
       <MemoryRouter><InboxMessage question={question} expanded onResult={() => {}} /></MemoryRouter>
     </QueryClientProvider>,
   );
+  expect(html).toContain("Improve rules");
   expect(html).not.toContain("kamacu-triage");
   expect(html).not.toContain("internal-fingerprint");
   expect(html).toContain("<strong>context</strong>");

@@ -35,6 +35,8 @@ var intentSchema = map[string]any{
 	}}}}
 
 type triageSubject struct {
+	rawFindings         []intentFinding
+	overrides           map[string][]string
 	projectID           int64
 	decisions           []ActivityDecision
 	matched             map[string][]RuleClause
@@ -200,6 +202,9 @@ func (s *Service) prepareRuleGroup(ctx context.Context, events []RawNotification
 				return err
 			}
 			subject.fresh = fresh
+			if err = s.loadRuleOverrides(ctx, subject, policy); err != nil {
+				return err
+			}
 			subject.reason = preflightRules(policy, subject)
 			return nil
 		})

@@ -10,7 +10,11 @@ import (
 // questions can be related through any contributing notification, not just the
 // primary link displayed on the card. Keep resolved history in the dependency
 // set as well, so a follow-up opened and answered during inference is detected.
-const relatedNotificationQuestions = `SELECT q.id,q.revision,q.status FROM inbox_questions q WHERE q.origin='notification' AND EXISTS (SELECT 1 FROM notification_events current JOIN notification_batch_events b ON b.event_id=current.id JOIN notification_events old ON old.source_id=current.source_id AND old.external_id=current.external_id WHERE b.batch_id=? AND (q.notification_id=old.id OR EXISTS(SELECT 1 FROM notification_question_events links WHERE links.question_id=q.id AND links.event_id=old.id)))`
+// Only application-generated cards have this typed option. Conversation
+// follow-ups may retain provenance but must not become merge destinations.
+const nativeClarificationOption = `EXISTS(SELECT 1 FROM json_each(q.options) o WHERE json_extract(o.value,'$.id')='rule_continue_once')`
+
+const relatedNotificationQuestions = `SELECT q.id,q.revision,q.status FROM inbox_questions q WHERE q.origin='notification' AND ((q.status='pending' AND ` + nativeClarificationOption + ` AND EXISTS(SELECT 1 FROM notification_card_plans p WHERE p.question_id=q.id AND COALESCE(json_extract(p.plan,'$.clarification_key'),'')!='')) OR EXISTS (SELECT 1 FROM notification_events current JOIN notification_batch_events b ON b.event_id=current.id JOIN notification_events old ON old.source_id=current.source_id AND old.external_id=current.external_id WHERE b.batch_id=? AND (q.notification_id=old.id OR EXISTS(SELECT 1 FROM notification_question_events links WHERE links.question_id=q.id AND links.event_id=old.id))))`
 
 // CaptureNotificationBatchQuestions runs in the caller's snapshot transaction.
 // It deliberately acquires no inbox mutex while that transaction is held.

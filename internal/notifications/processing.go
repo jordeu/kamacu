@@ -166,6 +166,11 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	}); err != nil {
 		return err
 	}
+	clarifications, err := s.clarificationActions(ctx, plans)
+	if err != nil {
+		return err
+	}
+	plan.actions = append(plan.actions, clarifications...)
 	// Publish once to preserve snapshot validation and avoid partial publication.
 	refs := []inbox.NotificationQuestionRef{}
 	seen := map[string]bool{}
@@ -178,7 +183,7 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	return notificationStage(ctx, "publication", func() error {
 		decisions := []inbox.NotificationDecision{}
 		for _, d := range plan.decisions {
-			decisions = append(decisions, inbox.NotificationDecision{Semantic: mustJSON(d.Semantic), ActivityID: d.ID, EventIDs: mustJSON(d.EventIDs), Outcome: d.Outcome, Evaluations: mustJSON(d.Evaluations), Facts: mustJSON(d.Facts)})
+			decisions = append(decisions, inbox.NotificationDecision{Snapshot: d.Snapshot, Semantic: mustJSON(d.Semantic), ActivityID: d.ID, EventIDs: mustJSON(d.EventIDs), Outcome: d.Outcome, Evaluations: mustJSON(d.Evaluations), Facts: mustJSON(d.Facts)})
 		}
 		return s.Inbox.ApplyNotificationBatch(ctx, id, plan.actions, refs, decisions...)
 	})

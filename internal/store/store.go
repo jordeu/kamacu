@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"net/url"
 
 	_ "modernc.org/sqlite" // driver name is "sqlite", NOT "sqlite3"
 )
@@ -10,7 +11,9 @@ import (
 // discipline: WAL journal mode, busy timeout, foreign keys enforced,
 // NORMAL synchronous, and immediate transaction locking.
 func Open(dbPath string) (*sql.DB, error) {
-	dsn := "file:" + dbPath +
+	// dbPath is a filesystem name, not a URI. Escape reserved characters so
+	// #, ? and percent escapes cannot select a different file or URI options.
+	dsn := "file:" + url.PathEscape(dbPath) +
 		"?_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(5000)" +
 		"&_pragma=foreign_keys(1)" +

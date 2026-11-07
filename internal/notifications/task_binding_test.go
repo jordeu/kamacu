@@ -200,6 +200,7 @@ func TestOwnershipLookupRunsWithoutSpecificRuleAndKeepsAmbiguity(t *testing.T) {
 
 func TestTaskLinkMigrationPreservesHistoryAndRequeuesStaleCards(t *testing.T) {
 	s, _, _, source := fixture(t)
+	downgradeClarifications(t, s)
 	ctx := context.Background()
 	raw, err := os.ReadFile("../store/migrations/00038_notification_task_links.sql")
 	if err != nil {
@@ -386,6 +387,7 @@ func TestReviewActionKeepsSourceImplementationLink(t *testing.T) {
 
 func TestMigrationBackfillsSessionOwnersAndReviewWorkspaces(t *testing.T) {
 	s, _, _, source := fixture(t)
+	downgradeClarifications(t, s)
 	ctx := context.Background()
 	if _, err := s.DB.Exec(`UPDATE tasks SET source='github_pr',pr_number=7 WHERE id=1`); err != nil {
 		t.Fatal(err)
