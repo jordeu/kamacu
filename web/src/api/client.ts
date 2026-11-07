@@ -6,6 +6,9 @@
 export interface ApiErrorReason {
   kind: string;
   target: string;
+  path?: string;
+  message?: string;
+  resolution?: string;
 }
 
 export class ApiError extends Error {

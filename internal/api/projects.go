@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -684,8 +685,32 @@ func (h *projectHandlers) githubOrigin(w http.ResponseWriter, r *http.Request) {
 // Question 3, recommended). Kind is a stable machine token; Target is a
 // human-readable subject ("task #N" or "the managed checkout").
 type deleteBlocker struct {
-	Kind   string `json:"kind"`   // "uncommitted" | "unpushed" | "stash" | "sessions"
-	Target string `json:"target"` // "task #<id>" | "the managed checkout"
+	Kind       string `json:"kind"`   // "uncommitted" | "unpushed" | "stash" | "sessions" | "linked_worktree"
+	Target     string `json:"target"` // "task #<id>" | "the managed checkout"
+	Path       string `json:"path,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Resolution string `json:"resolution,omitempty"`
+}
+
+// projectDeleteBlocker gives users the affected directory and recovery steps.
+// Keep the stable kind tokens shared with existing API consumers.
+func projectDeleteBlocker(kind, target, path, base string) deleteBlocker {
+	b := deleteBlocker{Kind: kind, Target: target, Path: path}
+	switch kind {
+	case "uncommitted":
+		b.Message = "Uncommitted changes or untracked files"
+		b.Resolution = "Run git status in this directory. Commit and merge changes you want to keep, or back them up outside this repository before discarding them. Stashing alone will still block deletion."
+	case "unpushed":
+		b.Message = "Commits not included in " + base
+		b.Resolution = "Run git log " + base + "..HEAD in this directory to inspect these commits. Merge work you want to keep into the default branch, then run git fetch origin and retry. Pushing a feature branch alone does not clear this check. Squash or rebase merges may also leave the original commits outside the default branch; back them up before resetting the local branch."
+	case "stash":
+		b.Message = "Stashed changes (shared across this repository)"
+		b.Resolution = "Run git stash list in this directory. Apply and preserve the changes, or back them up outside this repository, then drop the saved stash entries. Stashes in any task can block the entire project."
+	case "sessions":
+		b.Message = "Running agent or terminal sessions"
+		b.Resolution = "Open this task and stop its agent and terminal sessions, including any detached tmux sessions, then retry deletion."
+	}
+	return b
 }
 
 // managedTaskWorktree is a project's task (or PR-review) worktree to gate/remove.
@@ -694,7 +719,8 @@ type managedTaskWorktree struct {
 	path   string
 }
 
-// delete handles DELETE /api/projects/{id}.
+// delete handles DELETE /api/projects/{id}. An optional {"force":true}
+// body opts into discarding local work and stopping sessions for managed projects.
 //
 //   - Folder project (managed=0): today's behavior EXACTLY — DELETE FROM
 //     projects (CASCADE removes tasks); the repository on disk is NEVER touched
@@ -712,6 +738,21 @@ func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
+	}
+
+	var req struct {
+		Force bool `json:"force"`
+	}
+	if r.Body != nil {
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
 	}
 
 	// Load the marker + repo root. The marker is the SINGLE source of truth for
@@ -744,13 +785,45 @@ func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Managed path (CKOUT-03): gated, all-or-nothing removal. ---
-	h.deleteManaged(w, r, id, clone)
+	h.deleteManaged(w, r, id, clone, req.Force)
 }
 
 // deleteManaged runs the two-pass gated removal of a managed clone (CKOUT-03 /
-// D-07 / D-08). It is reached only after delete() confirmed managed=1.
-func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, id int64, clone string) {
+// D-07 / D-08), or explicit forced removal. It is reached only after
+// delete() confirmed managed=1.
+func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, id int64, clone string, force bool) {
 	ctx := r.Context()
+
+	worktrees, err := h.projectWorktrees(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// The clone's .git is shared by every linked worktree. Never remove it
+	// underneath a worktree outside this project's task records, even on force.
+	blockers, err := h.unownedProjectWorktrees(ctx, clone, worktrees)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(blockers) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   "Project deletion blocked. Resolve the items below, then retry.",
+			"reasons": blockers,
+		})
+		return
+	}
+
+	// Explicit force bypasses Git preservation checks, including a missing
+	// default branch. Filesystem errors still fail deletion.
+	if force {
+		if err := h.stopProjectSessions(ctx, id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.removeManaged(w, ctx, id, clone, worktrees, true)
+		return
+	}
 
 	// Resolve the clone's default branch ONCE (origin/<default>); it is the
 	// unpushed gate base for the clone AND every task worktree (they branch off
@@ -759,43 +832,46 @@ func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, 
 	defBranch, dberr := h.wt.DefaultBranch(ctx, clone)
 	unpushedBase := "origin/" + defBranch
 
-	// Enumerate the project's task/PR-review worktrees. PR-review worktrees
-	// (source='github_pr') branch off the same clone and MUST be gated/removed
-	// too — no source filter.
-	worktrees, err := h.projectWorktrees(ctx, id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	if dberr == nil && !h.wt.RefResolves(ctx, clone, unpushedBase) {
+		dberr = fmt.Errorf("remote default branch does not resolve")
 	}
 
-	// === GATE PHASE (compute fresh, mutate NOTHING; two-pass per Pitfall 8). ===
-	var blockers []deleteBlocker
-
+	// === GATE PHASE (compute fresh, mutate NOTHING). ===
 	// If origin/<default> could not be resolved we cannot run the unpushed gate
 	// safely → conservative blocker; remove nothing.
 	if dberr != nil {
 		blockers = append(blockers, deleteBlocker{
-			Kind: "unpushed", Target: "the managed checkout",
+			Kind: "unpushed", Target: "the managed checkout", Path: clone,
+			Message:    "Cannot determine the remote default branch",
+			Resolution: "In this directory, run git fetch origin, then git remote set-head origin --auto to restore origin/HEAD, and retry deletion. Check that the origin remote is reachable and has a default branch.",
 		})
 	}
 
 	for _, wt := range worktrees {
 		target := fmt.Sprintf("task #%d", wt.taskID)
-		// A manually-deleted worktree dir counts clean (it will simply be
-		// pruned in the remove phase) — only gate dirs that still exist.
-		if _, statErr := os.Stat(wt.path); statErr != nil {
-			// Still gate sessions for the task (a live session can exist with a
-			// vanished tree); skip the git gates for the missing dir.
-			if h.cleanupSessionCount(ctx, wt.taskID) > 0 {
-				blockers = append(blockers, deleteBlocker{Kind: "sessions", Target: target})
+		// Session checks include tasks whose worktree was cleaned up or never
+		// provisioned. Their agents may still be running in the clone root.
+		if h.cleanupSessionCount(ctx, wt.taskID) > 0 {
+			path := wt.path
+			if path == "" {
+				path = clone
 			}
+			blockers = append(blockers, projectDeleteBlocker("sessions", target, path, unpushedBase))
+		}
+		if wt.path == "" {
 			continue
+		}
+		if _, statErr := os.Stat(wt.path); os.IsNotExist(statErr) {
+			continue
+		} else if statErr != nil {
+			writeError(w, http.StatusInternalServerError, statErr.Error())
+			return
 		}
 		if dirty, derr := h.wt.DirtyCount(ctx, wt.path); derr != nil {
 			writeError(w, http.StatusInternalServerError, derr.Error())
 			return
 		} else if dirty > 0 {
-			blockers = append(blockers, deleteBlocker{Kind: "uncommitted", Target: target})
+			blockers = append(blockers, projectDeleteBlocker("uncommitted", target, wt.path, unpushedBase))
 		}
 		// Unpushed gate: origin/<default>..HEAD, NO fetch (network-free,
 		// conservative — research Open Question 2). dberr already blocked above
@@ -805,17 +881,14 @@ func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, 
 				writeError(w, http.StatusInternalServerError, uerr.Error())
 				return
 			} else if unpushed > 0 {
-				blockers = append(blockers, deleteBlocker{Kind: "unpushed", Target: target})
+				blockers = append(blockers, projectDeleteBlocker("unpushed", target, wt.path, unpushedBase))
 			}
 		}
 		if stash, serr := h.wt.StashCount(ctx, wt.path); serr != nil {
 			writeError(w, http.StatusInternalServerError, serr.Error())
 			return
 		} else if stash > 0 {
-			blockers = append(blockers, deleteBlocker{Kind: "stash", Target: target})
-		}
-		if h.cleanupSessionCount(ctx, wt.taskID) > 0 {
-			blockers = append(blockers, deleteBlocker{Kind: "sessions", Target: target})
+			blockers = append(blockers, projectDeleteBlocker("stash", target, wt.path, unpushedBase))
 		}
 	}
 
@@ -827,43 +900,47 @@ func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, 
 			writeError(w, http.StatusInternalServerError, derr.Error())
 			return
 		} else if dirty > 0 {
-			blockers = append(blockers, deleteBlocker{Kind: "uncommitted", Target: "the managed checkout"})
+			blockers = append(blockers, projectDeleteBlocker("uncommitted", "the managed checkout", clone, unpushedBase))
 		}
 		if dberr == nil {
 			if unpushed, uerr := h.wt.UnpushedCount(ctx, clone, unpushedBase); uerr != nil {
 				writeError(w, http.StatusInternalServerError, uerr.Error())
 				return
 			} else if unpushed > 0 {
-				blockers = append(blockers, deleteBlocker{Kind: "unpushed", Target: "the managed checkout"})
+				blockers = append(blockers, projectDeleteBlocker("unpushed", "the managed checkout", clone, unpushedBase))
 			}
 		}
 		if stash, serr := h.wt.StashCount(ctx, clone); serr != nil {
 			writeError(w, http.StatusInternalServerError, serr.Error())
 			return
 		} else if stash > 0 {
-			blockers = append(blockers, deleteBlocker{Kind: "stash", Target: "the managed checkout"})
+			blockers = append(blockers, projectDeleteBlocker("stash", "the managed checkout", clone, unpushedBase))
 		}
 	}
 
 	// ANY blocker → 409 with the structured reason list. REMOVE NOTHING (D-07).
 	if len(blockers) > 0 {
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":   "the project can't be deleted yet",
+			"error":   "Project deletion blocked. Resolve the items below, then retry.",
 			"reasons": blockers,
 		})
 		return
 	}
 
+	// Stop all tasks, including those without worktrees, before dropping rows.
+	if err := h.stopProjectSessions(ctx, id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	// === REMOVE PHASE (all clear). Order is load-bearing (Pitfall 1). ===
-	h.removeManaged(w, ctx, id, clone, worktrees)
+	h.removeManaged(w, ctx, id, clone, worktrees, false)
 }
 
-// projectWorktrees enumerates a project's task/PR-review worktrees (those with
-// a non-NULL worktree_path). No source filter: PR-review worktrees branch off
-// the same managed clone and are gated/removed alongside task worktrees.
+// projectWorktrees includes every task so session cleanup also covers tasks
+// without a worktree. An empty path means there is no directory to remove.
 func (h *projectHandlers) projectWorktrees(ctx context.Context, projectID int64) ([]managedTaskWorktree, error) {
 	rows, err := h.db.QueryContext(ctx,
-		`SELECT id, worktree_path FROM tasks WHERE project_id = ? AND worktree_path IS NOT NULL`, projectID)
+		`SELECT id, COALESCE(worktree_path, '') FROM tasks WHERE project_id = ?`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -879,14 +956,58 @@ func (h *projectHandlers) projectWorktrees(ctx context.Context, projectID int64)
 	return out, rows.Err()
 }
 
+// unownedProjectWorktrees protects linked worktrees not covered by the deletion
+// confirmation. Removing the clone would destroy their shared Git metadata.
+func (h *projectHandlers) unownedProjectWorktrees(ctx context.Context, clone string, tasks []managedTaskWorktree) ([]deleteBlocker, error) {
+	if _, err := os.Stat(clone); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	entries, err := h.wt.List(ctx, clone)
+	if err != nil {
+		return nil, err
+	}
+	canonical := func(path string) string {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return resolved
+		}
+		return filepath.Clean(path)
+	}
+	owned := map[string]bool{canonical(clone): true}
+	for _, task := range tasks {
+		if task.path != "" {
+			owned[canonical(task.path)] = true
+		}
+	}
+	var blockers []deleteBlocker
+	for _, entry := range entries {
+		if owned[canonical(entry.Path)] {
+			continue
+		}
+		if _, err := os.Stat(entry.Path); os.IsNotExist(err) {
+			continue
+		}
+		blockers = append(blockers, deleteBlocker{
+			Kind: "linked_worktree", Target: "a linked worktree outside this project's tasks", Path: entry.Path,
+			Message:    "This worktree still depends on the managed checkout",
+			Resolution: "Back up any work you want to keep, then remove this linked worktree using Worktree cleanup or git worktree remove before retrying. Force delete cannot bypass this check because this worktree is outside the project's task records.",
+		})
+	}
+	return blockers, nil
+}
+
 // removeManaged is the REMOVE phase of the managed delete — reached ONLY after
-// every gate passed (deleteManaged). The ordering is load-bearing (research
-// Pitfall 1): remove each LINKED worktree first (wt.Remove via the shared
+// every gate passed or force was explicitly requested (deleteManaged).
+// The ordering is load-bearing (Pitfall 1): remove each LINKED worktree first (wt.Remove via the shared
 // CleanupWorktreeGated), THEN os.RemoveAll the clone dir, THEN delete the rows
 // FK-ordered. The clone root is NEVER passed to wt.Remove — git refuses the main
 // worktree (Pitfall 2); it is removed with os.RemoveAll.
-func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Context, id int64, clone string, worktrees []managedTaskWorktree) {
+func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Context, id int64, clone string, worktrees []managedTaskWorktree, force bool) {
 	for _, wt := range worktrees {
+		if wt.path == "" {
+			continue
+		}
 		// stopSessions=true: the gate phase already verified idleness; any
 		// session that appeared since is intentionally reaped during teardown
 		// (the gate is the user-facing refuse; teardown stops what remains).
@@ -894,7 +1015,7 @@ func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Conte
 		live := h.liveTmuxNames(ctx, wt.taskID)
 		removed, reason, cerr := CleanupWorktreeGated(
 			ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
-			wt.taskID, clone, wt.path, count, true /*stopSessions*/, false /*force*/)
+			wt.taskID, clone, wt.path, count, true /*stopSessions*/, force)
 		if cerr != nil {
 			writeError(w, http.StatusInternalServerError, cerr.Error())
 			return
@@ -902,8 +1023,8 @@ func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Conte
 		if !removed {
 			// A race re-tripped a gate (rare/defensive). Refuse with the reason.
 			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":   "the project can't be deleted yet",
-				"reasons": []deleteBlocker{{Kind: gateReasonKind(reason), Target: fmt.Sprintf("task #%d", wt.taskID)}},
+				"error":   "Project deletion blocked. Resolve the items below, then retry.",
+				"reasons": []deleteBlocker{projectDeleteBlocker(gateReasonKind(reason), fmt.Sprintf("task #%d", wt.taskID), wt.path, "")},
 			})
 			return
 		}
@@ -921,6 +1042,58 @@ func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Conte
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// stopProjectSessions includes tasks without a worktree, so deleting their
+// rows cannot leave agents or detached terminals running after deletion.
+func (h *projectHandlers) stopProjectSessions(ctx context.Context, projectID int64) error {
+	rows, err := h.db.QueryContext(ctx, `SELECT id FROM tasks WHERE project_id = ?`, projectID)
+	if err != nil {
+		return err
+	}
+	var taskIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		taskIDs = append(taskIDs, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	// Kill persisted names directly: a failed liveness probe must not hide a
+	// detached session. KillSession is idempotent for sessions already gone.
+	rows, err = h.db.QueryContext(ctx, `SELECT name FROM tmux_sessions WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, projectID)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		names = append(names, name)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range taskIDs {
+		h.mgr.StopAllForTask(id)
+	}
+	for _, name := range names {
+		if err := h.tmuxClient.KillSession(ctx, name); err != nil {
+			return fmt.Errorf("stop terminal %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // deleteProjectRows clears task terminal records before cascading task deletion.

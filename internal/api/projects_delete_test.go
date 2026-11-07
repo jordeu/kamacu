@@ -14,10 +14,12 @@ package api
 import (
 	"database/sql"
 	"fmt"
+	"kamacu/internal/session"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +83,17 @@ func assertBlocked(t *testing.T, srv *httptest.Server, db *sql.DB, id int64, clo
 	reasons, ok := body["reasons"].([]any)
 	if !ok || len(reasons) == 0 {
 		t.Fatalf("blocked delete: body missing non-empty 'reasons' list; body=%v", body)
+	}
+	for _, raw := range reasons {
+		reason, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("invalid blocker: %v", raw)
+		}
+		for _, field := range []string{"kind", "target", "path", "message", "resolution"} {
+			if value, ok := reason[field].(string); !ok || value == "" {
+				t.Fatalf("blocker missing %s: %v", field, reason)
+			}
+		}
 	}
 	if _, err := os.Stat(clone); err != nil {
 		t.Fatalf("clone removed on a blocked delete (err=%v); must remove NOTHING", err)
@@ -308,5 +321,280 @@ func TestFolderDeleteWithTerminalRecords(t *testing.T) {
 	}
 	if _, err := os.Stat(repo); err != nil {
 		t.Fatalf("folder repository was touched: %v", err)
+	}
+}
+
+// Pushing a feature branch does not clear the default-branch comparison.
+// The recovery instructions must explain this rather than just suggest a push.
+func TestManagedDeleteExplainsPushedFeatureBranch(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	_, wt := addManagedTaskWorktree(t, srv, id, "Pushed Task")
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "feature.txt")
+	gitIn(t, wt, "commit", "-m", "feature commit")
+	gitIn(t, wt, "push", "origin", "HEAD:refs/heads/pushed-feature")
+	assertBlocked(t, srv, env.db, id, clone, wt)
+	_, body := deleteProject(t, srv, id)
+	for _, raw := range body["reasons"].([]any) {
+		reason := raw.(map[string]any)
+		if reason["kind"] == "unpushed" && reason["path"] == wt {
+			if !strings.Contains(reason["message"].(string), "origin/") ||
+				!strings.Contains(reason["resolution"].(string), "Pushing a feature branch alone does not clear this check") {
+				t.Fatalf("misleading pushed-branch guidance: %v", reason)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing feature-branch blocker: %v", body)
+}
+
+func TestManagedDeleteExplainsMissingDefaultBranch(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	gitIn(t, clone, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+	assertBlocked(t, srv, env.db, id, clone)
+	_, body := deleteProject(t, srv, id)
+	reason := body["reasons"].([]any)[0].(map[string]any)
+	if reason["path"] != clone || reason["message"] != "Cannot determine the remote default branch" ||
+		!strings.Contains(reason["resolution"].(string), "git remote set-head origin --auto") {
+		t.Fatalf("missing default-branch recovery steps: %v", reason)
+	}
+}
+
+func TestManagedDeleteForceDiscardsBlockedWork(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	_, wt := addManagedTaskWorktree(t, srv, id, "Discarded Task")
+	if err := os.WriteFile(filepath.Join(wt, "file.txt"), []byte("stash me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "stash")
+	if err := os.WriteFile(filepath.Join(wt, "local.txt"), []byte("local commit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "local.txt")
+	gitIn(t, wt, "commit", "-m", "local-only work")
+	for _, path := range []string{clone, wt} {
+		if err := os.WriteFile(filepath.Join(path, "untracked.txt"), []byte("discard me\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, clone, "worktree", "lock", wt)
+	assertBlocked(t, srv, env.db, id, clone, wt)
+	// Missing origin/HEAD must not prevent explicitly forced deletion either.
+	gitIn(t, clone, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+	status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), map[string]any{"force": true})
+	if status != http.StatusNoContent {
+		t.Fatalf("force delete: status=%d body=%v", status, body)
+	}
+	for _, path := range []string{clone, wt} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("force delete left %s: %v", path, err)
+		}
+	}
+	if projectExists(t, env.db, id) {
+		t.Fatal("force delete left project row")
+	}
+}
+
+func TestManagedDeleteForceStopsAllTaskSessions(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	task, wt := addManagedTaskWorktree(t, srv, id, "Running Task")
+	var noTreeTask int64
+	if err := env.db.QueryRow(`INSERT INTO tasks (project_id, title, position) VALUES (?, 'No worktree', 0) RETURNING id`, id).Scan(&noTreeTask); err != nil {
+		t.Fatal(err)
+	}
+	for _, taskID := range []int64{task, noTreeTask} {
+		sess, err := env.mgr.Spawn(session.SpawnOpts{Cwd: clone, TaskID: taskID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(sess.Stop)
+	}
+	assertBlocked(t, srv, env.db, id, clone, wt)
+	status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), map[string]any{"force": true})
+	if status != http.StatusNoContent {
+		t.Fatalf("force delete: status=%d body=%v", status, body)
+	}
+	for _, taskID := range []int64{task, noTreeTask} {
+		for _, info := range env.mgr.ListByTask(taskID) {
+			if info.Status == session.StatusRunning {
+				t.Fatalf("task %d session %s still running", taskID, info.ID)
+			}
+		}
+	}
+}
+
+func TestFolderDeleteForcePreservesRepository(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	repo := gitRepoWithCommit(t)
+	id := createProject(t, srv, repo)
+	path := filepath.Join(repo, "keep.txt")
+	if err := os.WriteFile(path, []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), map[string]any{"force": true})
+	if status != http.StatusNoContent {
+		t.Fatalf("force folder delete: status=%d body=%v", status, body)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "keep me\n" {
+		t.Fatalf("folder checkout modified: data=%q err=%v", data, err)
+	}
+	if projectExists(t, env.db, id) {
+		t.Fatal("folder project row still exists")
+	}
+}
+
+func TestManagedDeleteRejectsInvalidForce(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), map[string]any{"force": "true"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid force: status=%d body=%v", status, body)
+	}
+	if !projectExists(t, env.db, id) {
+		t.Fatal("invalid force removed project")
+	}
+	if _, err := os.Stat(clone); err != nil {
+		t.Fatalf("invalid force removed checkout: %v", err)
+	}
+}
+
+// Detached terminal records must be stopped even when the task has no worktree.
+// A stop failure must leave files and rows intact, and unrelated global terminals
+// must never be killed. The fake tmux only records kill-session invocations.
+func TestManagedDeleteForceDetachedTerminals(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			bin := t.TempDir()
+			calls := filepath.Join(bin, "calls")
+			t.Setenv("KAMACU_TEST_TMUX_CALLS", calls)
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			exitCode := "0"
+			if fail {
+				exitCode = "2"
+			}
+			script := "#!/bin/sh\nif [ \"$5\" = kill-session ]; then\n  echo \"$7\" >> \"$KAMACU_TEST_TMUX_CALLS\"\n  exit " + exitCode + "\nfi\nexit 1\n"
+			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			srv, env := newWorktreeServer(t)
+			id, _, clone := makeManagedProject(t, env.db)
+			var taskID int64
+			if err := env.db.QueryRow(`INSERT INTO tasks (project_id, title, position) VALUES (?, 'Detached terminal', 0) RETURNING id`, id).Scan(&taskID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name) VALUES (?, 1, 'force-delete-task')`, taskID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.db.Exec(`INSERT INTO tmux_sessions (scope, n, name) VALUES ('global', 1, 'keep-global')`); err != nil {
+				t.Fatal(err)
+			}
+			status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), map[string]any{"force": true})
+			if fail {
+				if status != http.StatusInternalServerError || !projectExists(t, env.db, id) {
+					t.Fatalf("stop failure did not preserve project: status=%d body=%v", status, body)
+				}
+				if _, err := os.Stat(clone); err != nil {
+					t.Fatalf("stop failure removed checkout: %v", err)
+				}
+			} else if status != http.StatusNoContent {
+				t.Fatalf("force delete: status=%d body=%v", status, body)
+			}
+			data, err := os.ReadFile(calls)
+			if err != nil || string(data) != "=force-delete-task\n" {
+				t.Fatalf("unexpected terminal kills: %q err=%v", data, err)
+			}
+		})
+	}
+}
+
+func TestManagedDeleteProtectsUnownedLinkedWorktrees(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprint(force), func(t *testing.T) {
+			srv, env := newWorktreeServer(t)
+			id, _, clone := makeManagedProject(t, env.db)
+			_, taskTree := addManagedTaskWorktree(t, srv, id, "Owned task")
+			externalTree := filepath.Join(t.TempDir(), "external")
+			gitIn(t, clone, "worktree", "add", "-b", "external", externalTree)
+			status, body := doJSON(t, "DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), map[string]any{"force": force})
+			if status != http.StatusConflict {
+				t.Fatalf("unowned worktree: status=%d body=%v", status, body)
+			}
+			reason := body["reasons"].([]any)[0].(map[string]any)
+			if reason["kind"] != "linked_worktree" || reason["path"] != externalTree || reason["resolution"] == "" {
+				t.Fatalf("missing linked-worktree guidance: %v", reason)
+			}
+			if !projectExists(t, env.db, id) {
+				t.Fatal("blocked delete removed project")
+			}
+			for _, path := range []string{clone, taskTree, externalTree} {
+				gitIn(t, path, "rev-parse", "--git-dir")
+			}
+			// Once removed through normal worktree cleanup, deletion is allowed.
+			gitIn(t, clone, "worktree", "remove", externalTree)
+			status, body = doJSON(t, "DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), map[string]any{"force": force})
+			if status != http.StatusNoContent {
+				t.Fatalf("delete after resolving linked worktree: status=%d body=%v", status, body)
+			}
+		})
+	}
+}
+
+func TestManagedDeleteGateSessionWithoutWorktree(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	var taskID int64
+	if err := env.db.QueryRow(`INSERT INTO tasks (project_id, title, position) VALUES (?, 'No tree', 0) RETURNING id`, id).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := env.mgr.Spawn(session.SpawnOpts{Cwd: clone, TaskID: taskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sess.Stop)
+	assertBlocked(t, srv, env.db, id, clone)
+	_, body := deleteProject(t, srv, id)
+	reason := body["reasons"].([]any)[0].(map[string]any)
+	if reason["kind"] != "sessions" || reason["path"] != clone {
+		t.Fatalf("missing no-worktree session blocker: %v", reason)
+	}
+	sess.Stop()
+	status, body := deleteProject(t, srv, id)
+	if status != http.StatusNoContent {
+		t.Fatalf("delete after stopping session: status=%d body=%v", status, body)
+	}
+}
+
+func TestManagedDeleteExplainsDanglingDefaultBranch(t *testing.T) {
+	srv, env := newWorktreeServer(t)
+	id, _, clone := makeManagedProject(t, env.db)
+	gitIn(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/deleted-default")
+	assertBlocked(t, srv, env.db, id, clone)
+}
+
+func TestManagedDeleteRejectsTrailingJSON(t *testing.T) {
+	for _, suffix := range []string{` {"force":false}`, ` invalid`} {
+		t.Run(suffix, func(t *testing.T) {
+			srv, env := newWorktreeServer(t)
+			id, _, clone := makeManagedProject(t, env.db)
+			req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/api/projects/%d", srv.URL, id), strings.NewReader(`{"force":true}`+suffix))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest || !projectExists(t, env.db, id) {
+				t.Fatalf("invalid delete body did not preserve project: status=%d", resp.StatusCode)
+			}
+			gitIn(t, clone, "rev-parse", "--git-dir")
+		})
 	}
 }
