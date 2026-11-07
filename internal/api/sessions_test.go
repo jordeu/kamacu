@@ -2378,11 +2378,18 @@ func TestWrapInputForWrite(t *testing.T) {
 
 func TestAgentStartMovesOnlyTodoToInProgress(t *testing.T) {
 	for _, resume := range []bool{false, true} {
-		for _, initial := range []string{"todo", "in_progress", "in_review", "done"} {
+		for _, initial := range []string{"todo", "snoozed", "in_progress", "in_review", "done"} {
 			t.Run(fmt.Sprintf("resume=%v/%s", resume, initial), func(t *testing.T) {
 				srv, _, db, globRoot, _ := newResumeServer(t)
 				id, _ := worktreeTask(t, srv, "Start work")
-				if _, err := db.Exec(`UPDATE tasks SET status = ?, position = 99 WHERE id = ?`, initial, id); err != nil {
+				initialStatus := initial
+				if initial == "snoozed" {
+					initialStatus = "todo"
+					if _, err := db.Exec(`UPDATE tasks SET snoozed_until='2099-01-01T09:00:00.000Z', snoozed_from='in_review' WHERE id=?`, id); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err := db.Exec(`UPDATE tasks SET status = ?, position = 99 WHERE id = ?`, initialStatus, id); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := db.Exec(`INSERT INTO tasks (project_id, title, status, position)
@@ -2402,18 +2409,21 @@ func TestAgentStartMovesOnlyTodoToInProgress(t *testing.T) {
 				}
 				var status string
 				var position float64
-				var entered sql.NullString
-				if err := db.QueryRow(`SELECT status, position, in_progress_at FROM tasks WHERE id = ?`, id).Scan(&status, &position, &entered); err != nil {
+				var entered, snoozedUntil, snoozedFrom sql.NullString
+				if err := db.QueryRow(`SELECT status, position, in_progress_at, snoozed_until, snoozed_from FROM tasks WHERE id = ?`, id).Scan(&status, &position, &entered, &snoozedUntil, &snoozedFrom); err != nil {
 					t.Fatal(err)
 				}
 				want := initial
-				if initial == "todo" {
+				if initialStatus == "todo" {
 					want = "in_progress"
 					if !entered.Valid || position != -4 {
 						t.Fatalf("transition did not stamp time and position: %v, %v", entered, position)
 					}
 				} else if position != 99 || entered.Valid {
 					t.Fatalf("existing column was modified: position=%v entered=%v", position, entered)
+				}
+				if snoozedUntil.Valid || snoozedFrom.Valid {
+					t.Fatal("starting work left a stale snooze timer")
 				}
 				if status != want {
 					t.Fatalf("status = %s, want %s", status, want)

@@ -32,6 +32,8 @@ type Task struct {
 	Title         string              `json:"title"`
 	Description   string              `json:"description"`
 	Status        string              `json:"status"`
+	SnoozedUntil  *string             `json:"snoozed_until"`
+	SnoozedFrom   *string             `json:"snoozed_from"`
 	Recurrent     bool                `json:"recurrent"`
 	Position      float64             `json:"position"`
 	CreatedAt     string              `json:"created_at"`
@@ -66,12 +68,12 @@ type taskHandlers struct {
 	tmuxClient tmux.Client
 }
 
-const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url, recurrent`
+const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url, recurrent, snoozed_until, snoozed_from`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent)
+		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent, &t.SnoozedUntil, &t.SnoozedFrom)
 	return t, err
 }
 
@@ -698,9 +700,11 @@ func (h *taskHandlers) persistTaskMove(ctx context.Context, tx *sql.Tx, id int64
 		"done":        "done_at",
 	}[status]
 	t, err := scanTask(tx.QueryRowContext(ctx,
-		`UPDATE tasks SET status = ?, position = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		`UPDATE tasks SET snoozed_until = CASE WHEN ? = 'todo' THEN snoozed_until ELSE NULL END,
+           snoozed_from = CASE WHEN ? = 'todo' THEN snoozed_from ELSE NULL END,
+           status = ?, position = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 		   `+statusAtCol+` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ? RETURNING `+taskColumns, status, pos, id))
+		 WHERE id = ? RETURNING `+taskColumns, status, status, status, pos, id))
 	if err != nil {
 		return Task{}, nil, err
 	}

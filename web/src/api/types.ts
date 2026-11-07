@@ -84,6 +84,8 @@ export interface Task {
   description: string;
   status: Status;
   recurrent: boolean;
+  snoozed_until?: string | null;
+  snoozed_from?: "in_progress" | "in_review" | null;
   position: number;
   created_at: string;
   updated_at: string;

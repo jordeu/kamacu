@@ -208,7 +208,14 @@ function applyMove(
   const newPositions = new Map(column.map((t, i) => [t.id, i + 1]));
 
   return tasks.map((t) => {
-    if (t.id === id) return { ...t, status, position: newPositions.get(id)! };
+    if (t.id === id) {
+      return {
+        ...t,
+        status,
+        ...(status !== "todo" ? { snoozed_until: null, snoozed_from: null } : {}),
+        position: newPositions.get(id)!,
+      };
+    }
     const position = newPositions.get(t.id);
     return position !== undefined ? { ...t, position } : t;
   });

@@ -20,8 +20,10 @@ export function Column({ status, tasks, topSlot }: ColumnProps) {
   // collide with task ids.
   const { setNodeRef, isOver } = useDroppable({ id: `column:${status}` });
 
-  const recurrent = status === "todo" ? tasks.filter((t) => t.recurrent) : [];
-  const ordinary = status === "todo" ? tasks.filter((t) => !t.recurrent) : tasks;
+  const recurrent = status === "todo" ? tasks.filter((t) => t.recurrent && !t.snoozed_until) : [];
+  const ordinary = status === "todo" ? tasks.filter((t) => !t.recurrent && !t.snoozed_until) : tasks;
+
+  const snoozed = status === "todo" ? tasks.filter((t) => t.snoozed_until) : [];
 
   return (
     <div className="flex min-h-0 min-w-[260px] flex-1 flex-col">
@@ -34,7 +36,7 @@ export function Column({ status, tasks, topSlot }: ColumnProps) {
         </span>
       </div>
       <SortableContext
-        items={[...ordinary, ...recurrent].map((t) => t.id)}
+        items={[...ordinary, ...recurrent, ...snoozed].map((t) => t.id)}
         strategy={verticalListSortingStrategy}
       >
         <div
@@ -61,6 +63,15 @@ export function Column({ status, tasks, topSlot }: ColumnProps) {
               {recurrent.map((task) => (
                 <TaskCard key={task.id} task={task} />
               ))}
+            </>
+          )}
+          {snoozed.length > 0 && (
+            <>
+              <div className="mt-2 flex items-baseline gap-2 border-t border-border pt-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Snoozed</span>
+                <span className="text-xs font-medium text-muted-foreground">{snoozed.length}</span>
+              </div>
+              {snoozed.map((task) => <TaskCard key={task.id} task={task} />)}
             </>
           )}
         </div>
