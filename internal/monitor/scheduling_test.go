@@ -76,17 +76,15 @@ func TestGenerationUrgentInvalidations(t *testing.T) {
 		name   string
 		change func(*observation.Snapshot, *string, *TaskContext)
 	}{
-		{"question", func(s *observation.Snapshot, _ *string, _ *TaskContext) { s.Screen = "Continue?\n" + s.Screen }},
+		{"question", func(s *observation.Snapshot, _ *string, _ *TaskContext) {
+			s.Screen = strings.Replace(s.Screen, "Testing", "Continue?\n1. Yes\n2. No\nEnter to select · ↑/↓ to navigate · Esc to cancel", 1)
+		}},
 		{"permission", func(s *observation.Snapshot, _ *string, _ *TaskContext) {
-			s.Screen = "Allow access\n1. Yes\n2. No\n" + s.Screen
+			s.Screen = strings.Replace(s.Screen, "Testing", "Allow access\n1. Yes\n2. No\nPress enter to confirm or Esc to cancel", 1)
 		}},
 		{"native menu", func(s *observation.Snapshot, _ *string, _ *TaskContext) {
-			s.Screen = "Enter to select · ↑/↓ to navigate · Esc to cancel\n" + s.Screen
+			s.Screen = strings.Replace(s.Screen, "Testing", "Choose a route\n1. Keep\n2. Replace\nEnter to select · ↑/↓ to navigate · Esc to cancel", 1)
 		}},
-		{"error", func(s *observation.Snapshot, _ *string, _ *TaskContext) {
-			s.Screen = "Error: authentication failed\n" + s.Screen
-		}},
-		{"scrolled question", func(s *observation.Snapshot, _ *string, _ *TaskContext) { s.History = []string{"Continue?"} }},
 		{"input", func(s *observation.Snapshot, _ *string, _ *TaskContext) { s.Input++ }},
 		{"profile", func(_ *observation.Snapshot, p *string, _ *TaskContext) { *p = "changed" }},
 		{"task", func(_ *observation.Snapshot, _ *string, t *TaskContext) { t.Description = "changed" }},
@@ -106,7 +104,11 @@ func TestGenerationUrgentInvalidations(t *testing.T) {
 				t.Fatal("scheduled while busy", got)
 			}
 			w.busy = false
-			if got := inferenceSchedule(w, true, s, now.Add(2*time.Second)); got != "urgent" {
+			expected := "urgent"
+			if tc.name == "input" {
+				expected = "input_settled"
+			}
+			if got := inferenceSchedule(w, true, s, now.Add(2*time.Second)); got != expected {
 				t.Fatal("lost urgent event", got)
 			}
 			w.retryAfter = now.Add(20 * time.Second)
@@ -157,13 +159,14 @@ func TestCosmeticResultsNeverRebaseAttention(t *testing.T) {
 func TestAttentionSignalsIgnoreRepaintHistory(t *testing.T) {
 	old := observation.Snapshot{Screen: "Continue?\n• Working (4s • esc to interrupt)"}
 	current := observation.Snapshot{Screen: "Continue?\n• Working (14s • esc to interrupt)", History: []string{old.Screen, old.Screen}}
-	if attentionFingerprint(old) != attentionFingerprint(current) {
+	if attentionFingerprint(old, "codex") != attentionFingerprint(current, "codex") {
 		t.Fatal("repaint history created new attention")
 	}
 	current.History = append(current.History, "Permission required")
-	if attentionFingerprint(old) == attentionFingerprint(current) {
-		t.Fatal("new historical attention missed")
+	if attentionFingerprint(old, "codex") != attentionFingerprint(current, "codex") {
+		t.Fatal("historical keywords became urgent")
 	}
+
 }
 
 func TestUncertainAndExistingAttentionFallbacks(t *testing.T) {
@@ -238,11 +241,14 @@ func TestHistoryExpiryDoesNotCreateUrgencyOrPreemptInference(t *testing.T) {
 	current.Revision++
 	current.History = append(current.History, "New permission required")
 	observeScheduling(w, current, "p", task, now.Add(2*time.Second))
-	if !w.urgent || !newAttention(w.inflightSignals, w.observedSignals) {
-		t.Fatal("new historical attention was missed")
+	if w.urgent || newAttention(w.inflightSignals, w.observedSignals) {
+		t.Fatal("historical keywords preempted inference")
 	}
-	if !newAttention(attentionEvidence{history: "Continue?"}, attentionEvidence{current: "Continue?"}) {
-		t.Fatal("new visible question was missed")
+	current.Revision++
+	current.Screen = "Allow access?\n1. Yes\n2. No\nPress enter to confirm or Esc to cancel"
+	observeScheduling(w, current, "p", task, now.Add(3*time.Second))
+	if !w.urgent || !newAttention(w.inflightSignals, w.observedSignals) {
+		t.Fatal("new native dialog was missed")
 	}
 }
 

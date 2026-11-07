@@ -97,7 +97,7 @@ func TestReplayGenerationScheduling(t *testing.T) {
 	})
 	var w *watch
 	session := ""
-	deferred, recognized, urgent, fallback := 0, 0, 0, 0
+	deferred, recognized, urgent, fallback, typing, inputSettled := 0, 0, 0, 0, 0, 0
 	deferredKinds := map[string]int{}
 	for _, sample := range samples {
 		if sample.session != session {
@@ -113,15 +113,18 @@ func TestReplayGenerationScheduling(t *testing.T) {
 		case "generation":
 			deferred++
 			deferredKinds[sample.kind]++
+		case "typing":
+			typing++
+		case "input_settled":
+			inputSettled++
 		case "urgent":
 			urgent++
 		case "fallback":
 			fallback++
 		}
-		if reason != "generation" && reason != "" {
-			w.lastAttempt = sample.at
-			w.urgent = false
+		if reason != "generation" && reason != "typing" && reason != "" {
+			w.startAttempt(sample.at)
 		}
 	}
-	t.Logf("sampled_requests=%d recognized_generation=%d deferral_opportunities=%d urgent_checks=%d fallback_checks=%d deferred_response_kinds=%v; assumes no in-flight calls, not measured savings or detection latency", len(samples), recognized, deferred, urgent, fallback, deferredKinds)
+	t.Logf("sampled_requests=%d recognized_generation=%d deferral_opportunities=%d urgent_checks=%d fallback_checks=%d typing_deferrals=%d input_settled_checks=%d deferred_response_kinds=%v; assumes no in-flight calls, not measured savings or detection latency", len(samples), recognized, deferred, urgent, fallback, typing, inputSettled, deferredKinds)
 }

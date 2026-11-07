@@ -23,10 +23,16 @@ func generationFixture(t *testing.T, classifier Classifier) (*Service, *session.
 	bin := filepath.Join(dir, "agent")
 	script := `#!/bin/sh
 printf 'Testing\r\n• Working (4s • esc to interrupt)'
-while [ ! -f repaint ]; do sleep 0.01; done
+while [ ! -f repaint ]; do
+ if [ -f noisy ] && [ ! -f logged ]; then
+  printf '\033[2J\033[HTesting\r\nerror: retrying; done=0; value?.name ?? fallback\r\n• Working (4s • esc to interrupt)'
+  touch logged
+ fi
+ sleep 0.01
+done
 printf '\033[2J\033[HTesting\r\n• Working (14s • esc to interrupt)'
 while [ ! -f dialog ]; do sleep 0.01; done
-printf '\033[2J\033[HAllow access?\r\n1. Yes\r\n2. No\r\n• Working (14s • esc to interrupt)'
+printf '\033[2J\033[HAllow access?\r\n1. Yes\r\n2. No\r\nPress enter to confirm or Esc to cancel\r\n• Working (14s • esc to interrupt)'
 while [ ! -f complete ]; do sleep 0.01; done
 printf '\033[2J\033[HAll done\r\n> '
 exec sleep 60
@@ -259,5 +265,118 @@ func TestServiceRejectsInvalidAttentionBeforeSavingValidWork(t *testing.T) {
 	page, err := svc.Inbox.List(ctx, nil, false, 0)
 	if err != nil || len(page.Items) != 0 {
 		t.Fatal("invalid attention published", page, err)
+	}
+}
+
+func TestTypingCancelsImmediatelyAndDebouncesReplacement(t *testing.T) {
+	var calls atomic.Int32
+	started := make(chan struct{})
+	svc, sess, p, _ := generationFixture(t, classifierFunc(func(ctx context.Context, _ Profile, s observation.Snapshot) (Decision, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-ctx.Done()
+			return Decision{}, ctx.Err()
+		}
+		return Decision{State: "working", Kind: "none", Evidence: "Testing", InputMode: "none"}, nil
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.tick(ctx)
+	svc.mu.Lock()
+	svc.states[sess.Info().ID].observationStarted = time.Now().Add(-generationFallback)
+	svc.mu.Unlock()
+	svc.tick(ctx)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("initial inference not started")
+	}
+	if err := sess.WriteInput([]byte("typing")); err != nil {
+		t.Fatal(err)
+	}
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	// The old result must be canceled immediately; recent input must not start
+	// another call, even when generation stopped or the old screen remains.
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	if calls.Load() != 1 || svc.Metrics.Snapshot()[p.ID].ObsoleteResults != 1 || svc.Metrics.Snapshot()[p.ID].TypingDeferrals != 1 {
+		t.Fatal("typing caused replacement churn", calls.Load(), svc.Metrics.Snapshot())
+	}
+	svc.mu.Lock()
+	w := svc.states[sess.Info().ID]
+	reason := w.cancelReason
+	w.lastInputAt = time.Now().Add(-typingDebounce)
+	svc.mu.Unlock()
+	if reason != "input" {
+		t.Fatal("cancellation not attributed to input", reason)
+	}
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	if calls.Load() != 2 || svc.Metrics.Snapshot()[p.ID].InputSettledCalls != 1 {
+		t.Fatal("replacement missing after quiet input", calls.Load(), svc.Metrics.Snapshot())
+	}
+}
+
+func TestTypingHidesPreviousQuestionImmediately(t *testing.T) {
+	svc, sess, _, _ := reviewFixture(t, fixtureClassifier{})
+	ctx := context.Background()
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	page, err := svc.Inbox.List(ctx, nil, false, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal("initial question missing", page, err)
+	}
+	if err = sess.WriteInput([]byte("t")); err != nil {
+		t.Fatal(err)
+	}
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	page, err = svc.Inbox.List(ctx, nil, false, 0)
+	if err != nil || len(page.Items) != 0 {
+		t.Fatal("obsolete question remained visible during debounce", page, err)
+	}
+}
+
+func TestOrdinaryLogsDoNotCancelOrRestartGenerationInference(t *testing.T) {
+	var calls atomic.Int32
+	started, release := make(chan struct{}), make(chan struct{})
+	svc, sess, p, dir := generationFixture(t, classifierFunc(func(ctx context.Context, _ Profile, s observation.Snapshot) (Decision, error) {
+		calls.Add(1)
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return Decision{}, ctx.Err()
+		}
+		return Decision{State: "working", Kind: "none", Evidence: "Testing", InputMode: "none"}, nil
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.tick(ctx)
+	svc.mu.Lock()
+	svc.states[sess.Info().ID].observationStarted = time.Now().Add(-generationFallback)
+	svc.mu.Unlock()
+	svc.tick(ctx)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("fallback not started")
+	}
+	advanceGeneration(t, sess, dir, "noisy", "value?.name ?? fallback")
+	svc.tick(ctx)
+	svc.mu.Lock()
+	reason := svc.states[sess.Info().ID].cancelReason
+	svc.mu.Unlock()
+	if reason != "" {
+		t.Fatal("ordinary logs preempted inference", reason)
+	}
+	close(release)
+	svc.jobs.Wait()
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	got := svc.Metrics.Snapshot()[p.ID]
+	if calls.Load() != 1 || got.ObsoleteResults != 0 || got.StaleResults != 1 {
+		t.Fatal("log keywords caused urgent replacement calls", calls.Load(), got)
 	}
 }
