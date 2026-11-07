@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -58,59 +57,22 @@ func normalizedScreen(screen, engine string) string {
 
 func activeGeneration(screen, engine string) bool { return generationLine(screen, engine) >= 0 }
 
-// These signals only accelerate inference, never determine state or authorize
-// input. False positives cost a call; false negatives retain a periodic fallback.
-var attentionSignal = regexp.MustCompile(`(?i)\?|enter to select|esc to cancel|\b(permission|approval|allow|approve|failed|error|completed|finished)\b|\bdone\b`)
+// Only a recognized current dialog can accelerate or preempt inference.
+// Historical menus, conversational text and log/code keywords are analyzed by
+// the normal quiet-period scheduler or the generation fallback.
+type attentionEvidence struct{ current string }
 
-type attentionEvidence struct{ current, history string }
+func (a attentionEvidence) present() bool { return a.current != "" }
 
-func (a attentionEvidence) present() bool { return a.current != "" || a.history != "" }
-
-// Removal and history expiry never preempt inference. A signal newly visible
-// on screen is urgent even if it was previously present only in history.
 func newAttention(old, current attentionEvidence) bool {
-	hasNew := func(before, after string) bool {
-		seen := map[string]bool{}
-		for _, line := range strings.Split(before, "\n") {
-			seen[line] = true
-		}
-		for _, line := range strings.Split(after, "\n") {
-			if line != "" && !seen[line] {
-				return true
-			}
-		}
-		return false
-	}
-	return hasNew(old.current, current.current) || hasNew(old.current+"\n"+old.history, current.history)
+	return current.present() && current.current != old.current
 }
 
-func attentionFingerprint(s observation.Snapshot) attentionEvidence {
-	var current []string
-	visible := map[string]bool{}
-	for _, line := range strings.Split(s.Screen, "\n") {
-		if attentionSignal.MatchString(line) {
-			current = append(current, line)
-			visible[line] = true
-		}
-	}
-	// Repeated repaints must not create new urgency by duplicating historical
-	// question lines. Keep current and historical signals distinct so a question
-	// that scrolls into view is still a new scheduling event.
-	historical := map[string]bool{}
-	for _, screen := range s.History {
-		for _, line := range strings.Split(screen, "\n") {
-			if attentionSignal.MatchString(line) && !visible[line] {
-				historical[line] = true
-			}
-		}
-	}
-	var history []string
-	for line := range historical {
-		history = append(history, line)
-	}
-	sort.Strings(history)
-	return attentionEvidence{strings.Join(current, "\n"), strings.Join(history, "\n")}
+func attentionFingerprint(s observation.Snapshot, engine string) attentionEvidence {
+	return attentionEvidence{current: dialogFingerprint(s.Screen, engine)}
 }
+
+const typingDebounce = time.Second
 
 const generationFallback = 30 * time.Second
 
@@ -122,16 +84,23 @@ func observeScheduling(w *watch, s observation.Snapshot, profile string, task Ta
 	}
 	content := meaningfulFingerprint(s, task.Engine)
 	active := activeGeneration(s.Screen, task.Engine)
-	signals := attentionFingerprint(s)
+	signals := attentionFingerprint(s, task.Engine)
 	if w.observedRevision == 0 {
 		w.observationStarted = now
 		w.lastChange = now
 		w.urgent = signals.present()
+		if s.Input > 0 && (s.InputAt.IsZero() || now.Sub(s.InputAt) < typingDebounce) {
+			noteTyping(w, s, now)
+		}
 	} else {
 		if content != w.observedContent {
 			w.lastChange = now
 		}
-		if s.Input != w.observedInput || profile != w.observedProfile || task != w.observedTask {
+		if s.Input != w.observedInput {
+			noteTyping(w, s, now)
+			w.retryAfter = time.Time{}
+		}
+		if profile != w.observedProfile || task != w.observedTask {
 			w.urgent = true
 			w.retryAfter = time.Time{}
 		}
@@ -139,14 +108,47 @@ func observeScheduling(w *watch, s observation.Snapshot, profile string, task Ta
 			w.urgent = true
 		}
 	}
+	if newAttention(w.observedSignals, signals) && !w.lastInputAt.IsZero() && s.At.After(w.lastInputAt) {
+		w.freshDialog = true
+	}
 	w.observedRevision = s.Revision
 	w.observedInput, w.observedProfile, w.observedTask = s.Input, profile, task
 	w.observedContent, w.observedSignals, w.generating = content, signals, active
 }
 
+func noteTyping(w *watch, s observation.Snapshot, now time.Time) {
+	w.lastInputAt = s.InputAt
+	if w.lastInputAt.IsZero() || w.lastInputAt.After(now) {
+		w.lastInputAt = now
+	}
+	w.inputPending = true
+	w.freshDialog = false
+}
+
+// Called only after acquiring a worker (or modeling a launched replay call).
+func (w *watch) startAttempt(now time.Time) {
+	w.reusable = false
+	w.urgent = false
+	w.deferred = false
+	w.inputPending = false
+	w.freshDialog = false
+	w.typingDeferred = false
+	w.cancelReason = ""
+	w.lastAttempt = now
+}
+
 func inferenceSchedule(w *watch, stale bool, s observation.Snapshot, now time.Time) string {
 	if w.busy || s.UnsupportedSize || s.Screen == "" || now.Before(w.retryAfter) {
 		return ""
+	}
+	if (stale || w.inputPending || w.urgent) && !w.lastInputAt.IsZero() && now.Sub(w.lastInputAt) < typingDebounce && !(w.freshDialog && w.observedSignals.present()) {
+		return "typing"
+	}
+	if w.urgent && w.freshDialog {
+		return "urgent"
+	}
+	if w.inputPending {
+		return "input_settled"
 	}
 	if w.urgent {
 		return "urgent"

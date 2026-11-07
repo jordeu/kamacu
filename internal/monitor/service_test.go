@@ -407,8 +407,11 @@ func TestFreshEvidenceAfterInputCreatesNewEpisodeAndSurvivesReload(t *testing.T)
 	svc.mu.Lock()
 	svc.states[sess.Info().ID].lastAttempt = time.Time{}
 	svc.mu.Unlock()
-	svc.tick(ctx)
-	svc.jobs.Wait()
+	eventually(t, func() bool {
+		svc.tick(ctx)
+		svc.jobs.Wait()
+		return sess.Info().Monitor.State == "unknown"
+	})
 	svc.Classifier = classifierFunc(func(_ context.Context, _ Profile, _ observation.Snapshot) (Decision, error) {
 		return Decision{State: "waiting", Kind: "question", Evidence: "new output", Question: "Continue?", InputMode: "text"}, nil
 	})

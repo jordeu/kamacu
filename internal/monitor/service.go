@@ -43,6 +43,11 @@ type watch struct {
 	retryAfter           time.Time
 	reusable             bool
 	lastChange           time.Time
+	lastInputAt          time.Time
+	inputPending         bool
+	freshDialog          bool
+	typingDeferred       bool
+	cancelReason         string
 	observedRevision     uint64
 	observedContent      string
 	observedSignals      attentionEvidence
@@ -182,8 +187,21 @@ func (s *Service) tick(ctx context.Context) {
 		}
 		now := time.Now()
 		observeScheduling(w, obs, p.Key(), task, now)
-		if w.busy && w.cancel != nil && (w.inflightInput != obs.Input || w.inflightProfile != p.Key() || w.inflightTask != task || newAttention(w.inflightSignals, w.observedSignals) || (w.inflightGenerating && !w.generating)) {
-			w.cancel()
+		if w.busy && w.cancel != nil && w.cancelReason == "" {
+			switch {
+			case w.inflightInput != obs.Input:
+				w.cancelReason = "input"
+			case w.inflightProfile != p.Key() || w.inflightTask != task:
+				w.cancelReason = "context"
+			case newAttention(w.inflightSignals, w.observedSignals):
+				w.cancelReason = "dialog"
+			case w.inflightGenerating && !w.generating:
+				w.cancelReason = "generation_stopped"
+			}
+			if w.cancelReason != "" {
+				slog.Debug("terminal inference canceled", "session", info.ID, "reason", w.cancelReason, "revision", obs.Revision)
+				w.cancel()
+			}
 		}
 		viewed := s.Presence.ViewingSession(info.ID)
 		// Hide immediately even if inference is busy. Never expose an obsolete
@@ -203,7 +221,13 @@ func (s *Service) tick(ctx context.Context) {
 			slog.Debug("terminal routine decision reused after cosmetic repaint", "session", info.ID, "revision", obs.Revision)
 		}
 		reason := inferenceSchedule(w, stale, obs, now)
-		if reason == "generation" {
+		if reason == "typing" {
+			if !w.typingDeferred {
+				s.Metrics.monitorEvent(p.ID, "typing_deferred", 1)
+				slog.Debug("terminal inference deferred while typing", "session", info.ID, "debounce_ms", typingDebounce.Milliseconds())
+			}
+			w.typingDeferred = true
+		} else if reason == "generation" {
 			if !w.deferred {
 				s.Metrics.monitorEvent(p.ID, "generation_deferred", 1)
 				slog.Debug("terminal inference deferred during generation", "session", info.ID, "fallback_seconds", generationFallback.Seconds())
@@ -213,10 +237,11 @@ func (s *Service) tick(ctx context.Context) {
 			select {
 			case s.workers <- struct{}{}:
 				w.busy = true
-				w.reusable = false
-				w.urgent, w.deferred = false, false
-				w.lastAttempt = now
+				w.startAttempt(now)
 				w.inflightSignals, w.inflightGenerating = w.observedSignals, w.generating
+				if reason == "input_settled" {
+					s.Metrics.monitorEvent(p.ID, "input_settled", 1)
+				}
 				if reason == "fallback" {
 					s.Metrics.monitorEvent(p.ID, "fallback", 1)
 				}

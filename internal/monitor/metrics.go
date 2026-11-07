@@ -12,6 +12,8 @@ type Metrics struct {
 	profiles map[int64]ProfileMetrics
 }
 type ProfileMetrics struct {
+	TypingDeferrals          uint64  `json:"typing_deferrals"`
+	InputSettledCalls        uint64  `json:"input_settled_calls"`
 	GenerationDeferrals      uint64  `json:"generation_deferrals"`
 	CosmeticReuses           uint64  `json:"cosmetic_reuses"`
 	FallbackCalls            uint64  `json:"fallback_calls"`
@@ -46,6 +48,10 @@ func (m *Metrics) monitorEvent(id int64, event string, count uint64) {
 	}
 	v := m.profiles[id]
 	switch event {
+	case "typing_deferred":
+		v.TypingDeferrals += count
+	case "input_settled":
+		v.InputSettledCalls += count
 	case "generation_deferred":
 		v.GenerationDeferrals += count
 	case "cosmetic_reuse":
