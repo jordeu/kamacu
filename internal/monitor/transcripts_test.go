@@ -69,6 +69,8 @@ func TestHTTPTranscripts(t *testing.T) {
 }
 
 func TestCLITranscripts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	for _, backend := range []string{"claude_cli", "codex_cli"} {
 		t.Run(backend, func(t *testing.T) {
 			dir := t.TempDir()
