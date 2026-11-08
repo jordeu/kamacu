@@ -289,11 +289,16 @@ func runCLI(ctx context.Context, p Profile, prompt string, usage **Usage) ([]byt
 	return runCLIJSON(ctx, p, prompt, decisionSchema, usage)
 }
 func runCLIJSON(ctx context.Context, p Profile, prompt string, responseSchema any, usage **Usage) ([]byte, error) {
-	dir, e := os.MkdirTemp("", "kamacu-classifier-")
+	cacheDir, e := os.UserCacheDir()
 	if e != nil {
 		return nil, e
 	}
-	defer os.RemoveAll(dir)
+	// Keep the cwd stable so CLI providers do not accumulate project metadata
+	// for a new directory on every call. Per-call files must live elsewhere.
+	dir := filepath.Join(cacheDir, "kamacu", "classifier")
+	if e = os.MkdirAll(dir, 0700); e != nil {
+		return nil, e
+	}
 	schema, _ := json.Marshal(responseSchema)
 	bin := p.Executable
 	var args []string
@@ -301,7 +306,7 @@ func runCLIJSON(ctx context.Context, p Profile, prompt string, responseSchema an
 		if bin == "" {
 			bin = "claude"
 		}
-		args = []string{"-p", "--output-format", "json", "--json-schema", string(schema), "--tools", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--no-session-persistence", "--setting-sources", "", "--settings", `{"disableAllHooks":true}`}
+		args = []string{"-p", "--output-format", "json", "--json-schema", string(schema), "--tools", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--no-session-persistence", "--setting-sources", "", "--settings", `{"disableAllHooks":true,"autoMemoryEnabled":false}`}
 		if p.Model != "" {
 			args = append(args, "--model", p.Model)
 		}
@@ -309,8 +314,15 @@ func runCLIJSON(ctx context.Context, p Profile, prompt string, responseSchema an
 		if bin == "" {
 			bin = "codex"
 		}
-		schemaFile := filepath.Join(dir, "schema.json")
-		if e = os.WriteFile(schemaFile, schema, 0600); e != nil {
+		f, e := os.CreateTemp("", "kamacu-classifier-schema-*.json")
+		if e != nil {
+			return nil, e
+		}
+		schemaFile := f.Name()
+		defer os.Remove(schemaFile)
+		_, writeErr := f.Write(schema)
+		closeErr := f.Close()
+		if e = errors.Join(writeErr, closeErr); e != nil {
 			return nil, e
 		}
 		args = []string{"exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "read-only", "--output-schema", schemaFile, "-c", "features.shell_tool=false", "-c", "features.multi_agent=false", "-c", "features.hooks=false", "-c", "features.apps=false", "-c", "features.remote_plugin=false", "-c", "features.goals=false", "-c", "features.memories=false", "-c", "features.shell_snapshot=false", "-c", "features.view_image_tool=false", "-c", "features.apply_patch_freeform=false", "-c", "web_search=\"disabled\"", "-c", "mcp_servers={}", "-c", "hooks={}", "-"}
