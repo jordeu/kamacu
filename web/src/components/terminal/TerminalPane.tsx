@@ -13,6 +13,7 @@ import {
 } from "./xtermTheme";
 import { useTerminalSocket, type ConnState } from "./useTerminalSocket";
 import { isBrowserSwitchShortcut } from "./keyboard";
+import { attachTwoFingerScroll } from "./touchScroll";
 
 export interface TerminalPaneProps {
   sessionId: string;
@@ -127,6 +128,11 @@ export function TerminalPane({
       // \x1b[200~..\x1b[201~ when the app enabled CSI ?2004h; onData carries it through (D-17)
     });
     term.open(el);
+    const detachTouchScroll = attachTwoFingerScroll(
+      el,
+      (lines) => term.scrollLines(lines),
+      () => (el.querySelector(".xterm-screen")?.getBoundingClientRect().height ?? 0) / term.rows || terminalFontSize,
+    );
     const fit = new FitAddon();
     term.loadAddon(fit);
     try {
@@ -196,6 +202,7 @@ export function TerminalPane({
       fitAndSendRef.current = () => {};
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
       ro.disconnect();
+      detachTouchScroll();
       term.dispose(); // disposes loaded addons (fit, webgl) with it
     };
   }, [sessionId, sendResize]);
@@ -357,7 +364,9 @@ export function TerminalPane({
         }`}
         onClick={() => term?.focus()}
       >
-        <div ref={viewportRef} className="h-full w-full" />
+        {/* Reserve touch panning here from the first contact, before a second
+            finger arrives. Taps and keyboard focus still use native clicks. */}
+        <div ref={viewportRef} className="h-full w-full touch-none" />
         {conn.kind === "connecting" && showConnecting && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <span className="text-sm text-muted-foreground">Connecting…</span>
