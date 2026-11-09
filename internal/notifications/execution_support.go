@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 )
 
@@ -40,16 +41,23 @@ func (s *Service) saveHistory(ctx context.Context, id string, h []trace) error {
 }
 func (s *Service) finishRun(ctx context.Context, id, state, result string, h []trace, canRetry ...bool) error {
 	retryable := len(canRetry) > 0 && canRetry[0]
-	if err := s.saveHistory(ctx, id, h); err != nil {
-		return err
-	}
 	// Write the result before the terminal run state: recovery is conservative
 	// if the process stops between these writes.
 	if err := s.Inbox.FinishNotification(ctx, id, state, result); err != nil {
 		return err
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE notification_runs SET state=?,updated_at=?,attention_retryable=?,attention_pending=CASE WHEN ? IN ('failed','blocked','partial','uncertain') AND attention_question_id='' THEN 1 ELSE attention_pending END WHERE id=?`, state, time.Now().UnixMilli(), retryable, state, id)
-	return err
+	_, err := s.DB.ExecContext(ctx, `UPDATE notification_runs SET state=?,updated_at=?,attention_retryable=?,attention_pending=CASE WHEN ? IN ('failed','blocked','partial','uncertain') AND (attention_question_id='' OR EXISTS(SELECT 1 FROM inbox_questions a WHERE a.id=notification_runs.attention_question_id AND a.reason='automatic_recovery' AND a.status='unanswered')) THEN 1 ELSE attention_pending END WHERE id=?`, state, time.Now().UnixMilli(), retryable, state, id)
+	if err != nil {
+		return err
+	}
+	// History is a derived cache. Its failure must not invalidate a confirmed
+	// journal outcome or prevent the run from reaching its terminal state.
+	cacheCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	if e := s.saveHistory(cacheCtx, id, h); e != nil {
+		slog.Warn("notification history cache update deferred", "run", id, "error", e)
+	}
+	return nil
 }
 
 // conversation retains what the user saw and the actual tools/results from

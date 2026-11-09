@@ -286,6 +286,12 @@ func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, 
 	if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?)`, id, "notification:"+id, id, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, previous.NotificationID, previous.SourceName, previous.SourceURL, group); err != nil {
 		return Question{}, err
 	}
+	if c.Informational {
+		if _, err = tx.ExecContext(ctx, `UPDATE inbox_questions SET reason='operational_failure' WHERE id=?`, id); err != nil {
+			return Question{}, err
+		}
+	}
+
 	if err = before(tx); err != nil {
 		return Question{}, err
 	}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"kamacu/internal/inbox"
-	"kamacu/internal/inboxaction"
 	"kamacu/internal/monitor"
 	"kamacu/internal/settings"
 )
@@ -122,71 +121,9 @@ func (s *Service) Recover(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, `UPDATE notification_batches SET status='failed',error='Processing was interrupted. Notifications remain pending; start processing again.',updated_at=? WHERE status='running'`, time.Now().UnixMilli()); err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id,action FROM notification_runs WHERE state='running'`)
-	if err != nil {
-		return err
-	}
-	type interrupted struct{ id, action string }
-	runs := []interrupted{}
-	for rows.Next() {
-		var run interrupted
-		if err = rows.Scan(&run.id, &run.action); err != nil {
-			rows.Close()
-			return err
-		}
-		runs = append(runs, run)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, run := range runs {
-		if _, err = tx.ExecContext(ctx, `UPDATE notification_action_steps SET state=CASE WHEN is_mutation=1 THEN 'uncertain' ELSE 'blocked' END,result='Step interrupted by restart; inspect before continuing.',finished_at=? WHERE run_id=? AND state='running'`, time.Now().UnixMilli(), run.id); err != nil {
-			return err
-		}
-		var unknown, blocked, mutations int
-		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(sum(state='uncertain'),0),COALESCE(sum(state IN ('blocked','failed')),0),COALESCE(sum(state='succeeded' AND is_mutation=1),0) FROM notification_action_steps WHERE run_id=?`, run.id).Scan(&unknown, &blocked, &mutations); err != nil {
-			return err
-		}
-		state := "queued"
-		if unknown > 0 {
-			state = "uncertain"
-		} else if run.action == "{}" || blocked > 0 {
-			state = "blocked"
-			if mutations > 0 {
-				state = "partial"
-			}
-		}
-		retryable := false
-		if state != "queued" && state != "uncertain" {
-			var seq inboxaction.Sequence
-			if json.Unmarshal([]byte(run.action), &seq) == nil && seq.Validate() == nil && seq.Guards.ResumeRunID == "" {
-				retryable = true
-			}
-		}
-		result := "Execution was interrupted. Check the recorded steps and linked tasks before continuing."
-		if state == "queued" {
-			result = "Resuming recorded action steps after restart; completed steps will not be repeated."
-		}
-		if run.action == "{}" {
-			result = "Reply interpretation was interrupted before work started. Provide the reply again or handle it yourself."
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE notification_runs SET state=?,attention_pending=?,attention_retryable=?,updated_at=? WHERE id=?`, state, state != "queued", retryable, time.Now().UnixMilli(), run.id); err != nil {
-			return err
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE inbox_questions SET delivery_status=?,execution_result=?,revision=revision+1,updated_at=? WHERE id=?`, state, result, time.Now().UnixMilli(), run.id); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-
+	return s.recoverActionRuns(ctx, true)
 }
+
 func (s *Service) Run(ctx context.Context) {
 	actionDone := make(chan struct{})
 	defer func() { <-actionDone }()

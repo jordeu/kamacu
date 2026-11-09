@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -32,15 +33,16 @@ type ActionStep struct {
 	FinishedAt  *int64          `json:"finished_at"`
 }
 type ActionRun struct {
-	State  string          `json:"state"`
-	Action json.RawMessage `json:"action"`
-	Steps  []ActionStep    `json:"steps"`
+	State         string          `json:"state"`
+	RecoveryClass string          `json:"recovery_class,omitempty"`
+	Action        json.RawMessage `json:"action"`
+	Steps         []ActionStep    `json:"steps"`
 }
 
 func (s *Service) ActionRun(ctx context.Context, id string) (ActionRun, error) {
 	out := ActionRun{Steps: []ActionStep{}}
 	var raw string
-	if err := s.DB.QueryRowContext(ctx, `SELECT state,action FROM notification_runs WHERE id=?`, id).Scan(&out.State, &raw); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT state,action,recovery_class FROM notification_runs WHERE id=?`, id).Scan(&out.State, &raw, &out.RecoveryClass); err != nil {
 		return out, err
 	}
 	out.Action = json.RawMessage(raw)
@@ -76,11 +78,14 @@ type actionExecutor struct {
 func (s *Service) executeNext(ctx context.Context) error {
 	s.actionMu.Lock()
 	defer s.actionMu.Unlock()
+	if err := s.recoverActionRuns(ctx, false); err != nil {
+		return err
+	}
 	if delivered, err := s.deliverPendingActionAttention(ctx); err != nil || delivered {
 		return err
 	}
 	var id string
-	if err := s.DB.QueryRowContext(ctx, `SELECT id FROM notification_runs WHERE state='queued' ORDER BY updated_at,id LIMIT 1`).Scan(&id); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT id FROM notification_runs WHERE state='queued' AND next_attempt<=? ORDER BY updated_at,id LIMIT 1`, time.Now().UnixMilli()).Scan(&id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -138,13 +143,24 @@ func (s *Service) executeNext(ctx context.Context) error {
 		}
 	}
 
-	var previousHistory string
-	if err = s.DB.QueryRowContext(ctx, `SELECT history FROM notification_runs WHERE id=?`, id).Scan(&previousHistory); err != nil {
+	rows, err := s.DB.QueryContext(ctx, `SELECT kind,result FROM notification_action_steps WHERE run_id=? AND state='succeeded' AND kind NOT IN ('operation_complete','diagnose_failure') ORDER BY started_at,rowid`, id)
+	if err != nil {
 		return ex.finish(err)
 	}
-	if err = json.Unmarshal([]byte(previousHistory), &ex.history); err != nil {
+	for rows.Next() {
+		var t trace
+		if err = rows.Scan(&t.Tool, &t.Result); err != nil {
+			rows.Close()
+			return ex.finish(err)
+		}
+		ex.history = append(ex.history, t)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
 		return ex.finish(err)
 	}
+
 	var mutations int
 	if err = s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_action_steps WHERE run_id=? AND is_mutation=1 AND state='succeeded'`, id).Scan(&mutations); err != nil {
 		return ex.finish(err)
@@ -218,6 +234,16 @@ func (s *Service) executeNext(ctx context.Context) error {
 	return ex.finish(nil)
 }
 func (ex *actionExecutor) finish(cause error) error {
+	var storage *recordingError
+	if !errors.Is(cause, errActionUncertain) {
+		if errors.As(cause, &storage) {
+			return ex.deferRecovery(storage)
+		}
+		if cause != nil && transientStorageError(cause) && !errors.Is(cause, ErrActionBlocked) {
+			return ex.deferRecovery(&recordingError{phase: "storage_read", err: cause})
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	state := "succeeded"
@@ -372,11 +398,11 @@ func (ex *actionExecutor) preflight(ctx context.Context) error {
 // step records intent before a side effect. A recorded success is reusable, but
 // an in-flight/uncertain mutation is never replayed, including after a restart.
 func (ex *actionExecutor) step(ctx context.Context, a inboxaction.Action, key, kind string, args any, mutation bool, work func() (string, error)) (string, error) {
-	var state, result, recordedOperation, recordedKind string
+	var state, result, recordedOperation, recordedKind, failureClass string
 	var err error
 	baseKey := key
 	for recheck := 0; ; recheck++ {
-		err = ex.s.DB.QueryRowContext(ctx, `SELECT state,result,operation_id,kind FROM notification_action_steps WHERE run_id=? AND step_key=?`, ex.q.ID, key).Scan(&state, &result, &recordedOperation, &recordedKind)
+		err = ex.s.DB.QueryRowContext(ctx, `SELECT state,result,operation_id,kind,failure_class FROM notification_action_steps WHERE run_id=? AND step_key=?`, ex.q.ID, key).Scan(&state, &result, &recordedOperation, &recordedKind, &failureClass)
 		if errors.Is(err, sql.ErrNoRows) {
 			break
 		}
@@ -398,38 +424,71 @@ func (ex *actionExecutor) step(ctx context.Context, a inboxaction.Action, key, k
 			}
 			return result, nil
 		}
+		// Intent persistence is known not to have invoked work. Reuse its logical
+		// key so completion/delivery lookups still recognize a later success.
+		if state == "blocked" && failureClass == "intent" || !mutation && kind == "operation_complete" && retryableRead(state, failureClass) {
+			break
+		}
+		if !mutation && retryableRead(state, failureClass) {
+			key = fmt.Sprintf("%s/recheck_%d", baseKey, recheck+1)
+			continue
+		}
+		if !mutation {
+			return "", fmt.Errorf("%w: %s", ErrActionBlocked, result)
+		}
+
 		return "", fmt.Errorf("%w: step %s already has state %s", errActionUncertain, key, state)
 	}
 
-	if mutation {
-		if err = ex.validateTarget(ctx, a); err != nil {
-			if permanentActionGuard(err) {
-				ex.retrySafe = false
-			}
-			return "", err
-		}
-		if err = ex.guards(ctx); err != nil {
-			if permanentActionGuard(err) {
-				ex.retrySafe = false
-			}
-			return "", err
-		}
-	}
 	now := time.Now().UnixMilli()
-	if _, err = ex.s.DB.ExecContext(ctx, `INSERT INTO notification_action_steps(run_id,step_key,operation_id,kind,is_mutation,arguments,state,started_at) VALUES(?,?,?,?,?,?,'running',?)`, ex.q.ID, key, a.ID, kind, mutation, mustJSON(args), now); err != nil {
-		return "", err
+	if err = ex.s.journalWrite(ctx, "step_intent", func(c context.Context, tx *sql.Tx) error {
+		_, e := tx.ExecContext(c, `INSERT INTO notification_action_steps(run_id,step_key,operation_id,kind,is_mutation,arguments,state,started_at) VALUES(?,?,?,?,?,?,'running',?) ON CONFLICT(run_id,step_key) DO UPDATE SET state='running',result='',failure_class='',started_at=excluded.started_at,finished_at=NULL WHERE (notification_action_steps.state='blocked' AND notification_action_steps.failure_class='intent') OR (notification_action_steps.kind='operation_complete' AND notification_action_steps.is_mutation=0 AND (notification_action_steps.state='running' OR (notification_action_steps.state IN ('blocked','failed') AND notification_action_steps.failure_class IN ('interrupted_read','read_result','intent'))))`, ex.q.ID, key, a.ID, kind, mutation, mustJSON(args), now)
+		if e != nil {
+			return e
+		}
+		var op, actualKind, argsJSON, actualState string
+		var mut bool
+		if e = tx.QueryRowContext(c, `SELECT operation_id,kind,arguments,state,is_mutation FROM notification_action_steps WHERE run_id=? AND step_key=?`, ex.q.ID, key).Scan(&op, &actualKind, &argsJSON, &actualState, &mut); e != nil {
+			return e
+		}
+		if op != a.ID || actualKind != kind || argsJSON != mustJSON(args) || actualState != "running" || mut != mutation {
+			return errActionUncertain
+		}
+
+		return e
+	}); err != nil {
+		return "", &recordingError{key: key, phase: "intent", err: err}
 	}
 	progress := a.ID
 	if a.Kind == "start_reviews" && a.TaskName != "" {
 		progress = a.TaskName
 	}
-	if err = ex.s.Inbox.FinishNotification(ctx, ex.q.ID, "running", fmt.Sprintf("%s: %s", progress, kind)); err != nil {
-		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_, _ = ex.s.DB.ExecContext(recordCtx, `UPDATE notification_action_steps SET state='blocked',result=?,finished_at=? WHERE run_id=? AND step_key=?`, err.Error(), time.Now().UnixMilli(), ex.q.ID, key)
-		return "", err
+	if mutation || kind == "wait_ready" {
+		ex.progress(ctx, fmt.Sprintf("%s: %s", progress, kind))
 	}
-	result, workErr := work()
+
+	// Recording intent and updating progress may wait for the database. Check
+	// authorization and the target afterwards, immediately before the effect.
+	result = ""
+	var workErr error
+	if mutation {
+		workErr = ex.guards(ctx)
+		if workErr == nil {
+			workErr = ex.validateTarget(ctx, a)
+		}
+		if workErr != nil && transientStorageError(workErr) {
+			return "", &recordingError{key: key, phase: "intent", err: workErr}
+		}
+		if workErr != nil && !errors.Is(workErr, ErrActionBlocked) {
+			workErr = fmt.Errorf("%w: %v", ErrActionBlocked, workErr)
+		}
+	}
+	if workErr == nil {
+		result, workErr = work()
+	}
+	if !mutation && ctx.Err() != nil {
+		workErr = ctx.Err()
+	}
 	if permanentActionGuard(workErr) {
 		ex.retrySafe = false
 	}
@@ -442,7 +501,8 @@ func (ex *actionExecutor) step(ctx context.Context, a inboxaction.Action, key, k
 			state = "uncertain"
 		}
 	}
-	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 	defer cancel()
 	if mutation && (workErr == nil || state == "uncertain") {
 		ex.mutated = true
@@ -452,8 +512,35 @@ func (ex *actionExecutor) step(ctx context.Context, a inboxaction.Action, key, k
 		recorded = workErr.Error()
 	}
 	task, session := resultIdentity(result)
-	if _, err = ex.s.DB.ExecContext(recordCtx, `UPDATE notification_action_steps SET state=?,result=?,task_id=?,session_id=?,finished_at=? WHERE run_id=? AND step_key=?`, state, recorded, task, session, time.Now().UnixMilli(), ex.q.ID, key); err != nil {
-		return "", fmt.Errorf("%w: cannot record step result: %v", errActionUncertain, err)
+	resultClass := ""
+	if !mutation && workErr != nil && transientStorageError(workErr) {
+		resultClass = "read_result"
+	}
+	history := append(append([]trace{}, ex.history...), trace{Tool: kind, Result: result})
+	if err = ex.s.journalWrite(recordCtx, "step_result", func(c context.Context, tx *sql.Tx) error {
+		if res, e := tx.ExecContext(c, `UPDATE notification_action_steps SET state=?,result=?,task_id=?,session_id=?,finished_at=?,failure_class=? WHERE run_id=? AND step_key=?`, state, recorded, task, session, time.Now().UnixMilli(), resultClass, ex.q.ID, key); e != nil {
+			return e
+		} else if n, e := res.RowsAffected(); e != nil {
+			return e
+		} else if n != 1 {
+			return sql.ErrNoRows
+		}
+		_, e := tx.ExecContext(c, `UPDATE notification_runs SET updated_at=? WHERE id=?`, time.Now().UnixMilli(), ex.q.ID)
+		return e
+	}); err != nil {
+		if !mutation {
+			return "", &recordingError{key: key, phase: "read_result", err: err}
+		}
+		if errors.Is(workErr, ErrActionBlocked) {
+			return "", &recordingError{key: key, phase: "no_effect", err: err, outcome: workErr}
+		}
+		// The journal is authoritative if a commit succeeded despite a timeout.
+		var actual, actualResult string
+		if e := ex.s.DB.QueryRowContext(recordCtx, `SELECT state,result FROM notification_action_steps WHERE run_id=? AND step_key=?`, ex.q.ID, key).Scan(&actual, &actualResult); e == nil && actual == state && actualResult == recorded {
+			slog.Debug("notification result confirmed after recording error", "run", ex.q.ID, "step", key)
+		} else {
+			return "", fmt.Errorf("%w: cannot confirm mutation result for %s: %v", errActionUncertain, kind, err)
+		}
 	}
 	if workErr != nil {
 		if state == "uncertain" {
@@ -461,10 +548,8 @@ func (ex *actionExecutor) step(ctx context.Context, a inboxaction.Action, key, k
 		}
 		return "", workErr
 	}
-	ex.history = append(ex.history, trace{Tool: kind, Result: result})
-	if err = ex.s.saveHistory(recordCtx, ex.q.ID, ex.history); err != nil {
-		return "", fmt.Errorf("%w: cannot record history: %v", errActionUncertain, err)
-	}
+	ex.history = history
+
 	return result, nil
 }
 func resultIdentity(raw string) (int64, string) {

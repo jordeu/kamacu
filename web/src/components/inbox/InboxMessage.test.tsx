@@ -226,3 +226,41 @@ it("shows saved direct actions and explains that free text is interpreted once",
   expect(html).toContain("Configured review prompt");
   expect(html).toContain("interpreted once before execution");
 });
+
+it("shows exhausted recovery as an operational issue without requesting a reply", () => {
+  const question: FeedbackQuestion = {
+    id: "operational",
+    task_id: 0,
+    project_id: 0,
+    task_title: "",
+    project_name: "",
+    session_id: "",
+    abstract: "Database recording failed",
+    summary: "Automatic recovery stopped",
+    question: "No reply is required.",
+    context: "The database remained unavailable. Existing work is preserved.",
+    options: [{ id: "ignore", label: "Dismiss this notice" }],
+    status: "pending",
+    reason: "operational_failure",
+    answer: "",
+    answer_source: "",
+    revision: 1,
+    created_at: 1,
+    updated_at: 1,
+    acknowledged_at: null,
+    origin: "notification",
+  };
+  const html = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <InboxMessage question={question} expanded onResult={() => {}} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(html).toContain("Operational issue");
+  expect(html).toContain("Failure details");
+  expect(html).toContain("Dismiss this notice");
+  expect(html).not.toContain("Needs reply");
+  expect(html).not.toContain("Write your own answer");
+  expect(html).not.toContain("Improve rules");
+});
