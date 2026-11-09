@@ -29,6 +29,9 @@ func actionAttentionCopy(run ActionRun, uncertain, canRetry bool, result string)
 	failures := []ActionStep{}
 	sent := 0
 	for i, step := range run.Steps {
+		if step.Kind == "diagnose_failure" {
+			continue
+		}
 		key, _, _ := strings.Cut(step.Key, "/recheck_")
 		if latest[key] != i {
 			continue
@@ -56,6 +59,9 @@ func actionAttentionCopy(run ActionRun, uncertain, canRetry bool, result string)
 			target = fmt.Sprintf("PR %d: ", args.PR)
 		}
 		phase := map[string]string{"wait_ready": "could not confirm a safe agent input prompt", "start_task_agent": "could not start the agent", "open_review": "could not open the review workspace", "verify_review": "could not verify the current PR state", "send_session_message": "could not confirm instruction delivery", "create_task": "could not create the task", "move_task": "could not move the task", "close_session": "could not confirm session shutdown", "update_task": "could not update the task", "set_task_pr_link": "could not link the PR"}[step.Kind]
+		if step.Kind == "send_session_message" && step.State == "blocked" {
+			phase = "instructions were not sent"
+		}
 		if phase == "" {
 			phase = "could not complete the requested step"
 		}
@@ -88,9 +94,9 @@ func actionAttentionCopy(run ActionRun, uncertain, canRetry bool, result string)
 		if sent > 0 {
 			out.context += fmt.Sprintf(" %s succeeded; those will be skipped on retry.", attentionCount(sent, "other instruction delivery"))
 		}
-		out.context += "\n\nOpen the linked task terminals. If an agent asks you to trust a workspace, sign in, or choose an option, handle that in its terminal."
+		out.context += "\n\nOpen the linked task terminals. If an agent asks you to trust a workspace, sign in, or choose an option, handle that in its terminal. If you enter anything there, provide fresh instructions in your reply so Kamacu can reassess the changed session."
 		if canRetry {
-			out.context += " Once the normal input prompt is visible, retry sending. Kamacu will recheck readiness and reuse tasks and sessions that are still available."
+			out.context += " If you only waited for startup and entered no input, retry once the normal input prompt is visible. Kamacu will recheck readiness and reuse tasks and sessions that are still available."
 		} else {
 			out.context += " Once the terminal is ready, provide new instructions. This saved action cannot be safely retried automatically."
 		}

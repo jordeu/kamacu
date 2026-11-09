@@ -163,3 +163,24 @@ prompts** (or instructions) when safe, reusing recorded setup and successful han
 If retry is unavailable, the notice asks for inspection and new instructions.
 Uncertain mutations require inspection and never offer automatic retry.
 **Dismiss this notice** closes the notice without cancelling existing work.
+
+The task's recorded agent startup can advance its own `todo` guard to
+`in_progress` when the same agent session still owns the task. A completed,
+deleted or otherwise changed target of unfinished work invalidates the saved action; retrying the
+unchanged action is not offered. For a completed recurring task, a uniquely
+matching pending instance can be proposed with a fresh saved action, requiring
+an explicit choice before switching tasks.
+
+Failures without a clear deterministic explanation receive one read-only model
+diagnosis using the saved action, journal and current task state. Diagnosis
+cannot execute work or override guards. Its result is persisted so publishing a
+notice again does not repeat inference, and is not reused for another failed
+run. If diagnosis is unavailable, the notice shows the concrete recorded error
+in its visible text instead of a generic "action could not finish" question.
+
+Retry guards apply to unfinished operations; a completed task does not block
+unrelated remaining work. A session started by the action retains its input
+guard, so manually entered instructions cannot be followed by a duplicate
+handoff on retry. After entering input in its terminal, provide fresh instructions
+instead of retrying the old sequence. Optional recurrence metadata cannot hide
+the underlying failure notice.

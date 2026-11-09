@@ -62,6 +62,7 @@ func (s *Service) ActionRun(ctx context.Context, id string) (ActionRun, error) {
 }
 
 type actionExecutor struct {
+	context   context.Context
 	retrySafe bool
 	s         *Service
 	q         inbox.Question
@@ -100,7 +101,7 @@ func (s *Service) executeNext(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	ctx = diagnostics.WithGroup(ctx, diagnostics.Group{Kind: "reply", ID: id})
-	ex := &actionExecutor{s: s, q: q, sources: map[string]Source{}, history: []trace{}}
+	ex := &actionExecutor{context: ctx, s: s, q: q, sources: map[string]Source{}, history: []trace{}}
 	if err = s.Inbox.FinishNotification(ctx, id, "running", "Preparing the saved Inbox action."); err != nil {
 		return err
 	}
@@ -175,6 +176,9 @@ func (s *Service) executeNext(ctx context.Context) error {
 		return ex.finish(nil)
 	}
 	if err = ex.preflight(ctx); err != nil {
+		if permanentActionGuard(err) {
+			ex.retrySafe = false
+		}
 		return ex.finish(err)
 	}
 	refs := map[string]int64{}
@@ -236,7 +240,11 @@ func (ex *actionExecutor) finish(cause error) error {
 		return err
 	}
 	if cause != nil {
-		return ex.s.deliverActionAttention(ctx, ex.q.ID)
+		deliveryCtx := ex.context
+		if deliveryCtx == nil {
+			deliveryCtx = context.Background()
+		}
+		return ex.s.deliverActionAttention(deliveryCtx, ex.q.ID)
 	}
 	return nil
 }
@@ -253,6 +261,9 @@ func (ex *actionExecutor) guards(ctx context.Context) error {
 	if ex.seq.Guards.RuleSetID != "" {
 		set, err := ex.s.activeRuleSet(ctx)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: notification rules changed; refresh the message", ErrActionBlocked)
+			}
 			return err
 		}
 		if set.ID != ex.seq.Guards.RuleSetID {
@@ -298,9 +309,20 @@ func (ex *actionExecutor) preflight(ctx context.Context) error {
 			return fmt.Errorf("%w: configured review prompt changed; refresh this message", ErrActionBlocked)
 		}
 	}
-	for id, expected := range ex.seq.Guards.TaskStatus {
+	for id := range ex.seq.Guards.TaskStatus {
+		needed, err := ex.taskGuardRequired(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !needed {
+			continue
+		}
 		var status string
 		if err := ex.s.DB.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id=?`, id).Scan(&status); err != nil {
+			return err
+		}
+		expected, err := ex.expectedStatus(ctx, id, status)
+		if err != nil {
 			return err
 		}
 		if status != expected {
@@ -381,9 +403,15 @@ func (ex *actionExecutor) step(ctx context.Context, a inboxaction.Action, key, k
 
 	if mutation {
 		if err = ex.validateTarget(ctx, a); err != nil {
+			if permanentActionGuard(err) {
+				ex.retrySafe = false
+			}
 			return "", err
 		}
 		if err = ex.guards(ctx); err != nil {
+			if permanentActionGuard(err) {
+				ex.retrySafe = false
+			}
 			return "", err
 		}
 	}
@@ -402,6 +430,9 @@ func (ex *actionExecutor) step(ctx context.Context, a inboxaction.Action, key, k
 		return "", err
 	}
 	result, workErr := work()
+	if permanentActionGuard(workErr) {
+		ex.retrySafe = false
+	}
 	state = "succeeded"
 	if workErr != nil {
 		state = "failed"
@@ -750,6 +781,22 @@ func (ex *actionExecutor) submit(ctx context.Context, a inboxaction.Action, key,
 				return "", fmt.Errorf("%w: session received new input", ErrActionBlocked)
 			}
 		}
+		if _, saved := ex.seq.Guards.Sessions[sid]; !saved {
+			var started int
+			if e := ex.s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_action_steps WHERE run_id=? AND kind='start_task_agent' AND state='succeeded' AND task_id=? AND session_id=?`, ex.q.ID, a.TaskID, sid).Scan(&started); e != nil {
+				return "", e
+			}
+			if started > 0 {
+				expected, e := ex.expectedInput(ctx, sid, 0)
+				if e != nil {
+					return "", e
+				}
+				if ready.Input != expected {
+					return "", fmt.Errorf("%w: the started session received new input; inspect task %d before requesting more work", ErrActionBlocked, a.TaskID)
+				}
+			}
+		}
+
 		var pending string
 		e := ex.s.DB.QueryRowContext(ctx, `SELECT state FROM notification_review_prompts WHERE task_id=?`, a.TaskID).Scan(&pending)
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
@@ -921,6 +968,26 @@ func (ex *actionExecutor) expectedStatus(ctx context.Context, id int64, fallback
 	if err == nil {
 		expected = moved
 	}
+	// The normal start-agent API moves a manual todo task to in_progress. Accept
+	// only that transition when this run recorded the start and still owns its
+	// live session. Never adopt a move to done or an unrelated replacement agent.
+	if expected == "todo" && fallback == "in_progress" && ex.s.TaskSession != nil {
+		var raw, operation string
+		e := ex.s.DB.QueryRowContext(ctx, `SELECT result,operation_id FROM notification_action_steps WHERE run_id=? AND kind='start_task_agent' AND state='succeeded' AND json_extract(arguments,'$.task_id')=? ORDER BY finished_at DESC,rowid DESC LIMIT 1`, ex.q.ID, id).Scan(&raw, &operation)
+		if e != nil && !errors.Is(e, sql.ErrNoRows) {
+			return "", e
+		}
+		task, sid := resultIdentity(raw)
+		if e == nil && task == id && sid != "" && ex.s.TaskSession(id) == sid {
+			for _, a := range ex.seq.Actions {
+				if a.ID == operation && a.TaskID == id && (a.Kind == "continue_task" || a.Kind == "run_recurring_task") {
+					expected = "in_progress"
+					break
+				}
+			}
+		}
+	}
+
 	return expected, nil
 }
 
@@ -931,4 +998,45 @@ func (ex *actionExecutor) expectedInput(ctx context.Context, id string, fallback
 		return fallback, nil
 	}
 	return input, err
+}
+
+// Completed operations do not need their old task status to remain frozen.
+// Keep the guard when another unfinished operation still references that task.
+func (ex *actionExecutor) taskGuardRequired(ctx context.Context, id int64) (bool, error) {
+	rows, err := ex.s.DB.QueryContext(ctx, `SELECT operation_id,result FROM notification_action_steps WHERE run_id=? AND kind='operation_complete' AND state='succeeded' AND step_key=operation_id||'/complete'`, ex.q.ID)
+	if err != nil {
+		return false, err
+	}
+	completed := map[string]string{}
+	for rows.Next() {
+		var op, result string
+		if err = rows.Scan(&op, &result); err != nil {
+			rows.Close()
+			return false, err
+		}
+		completed[op] = result
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return false, err
+	}
+	refs := map[string]int64{}
+	for _, a := range ex.seq.Actions {
+		task := a.TaskID
+		if a.TaskRef != "" {
+			task = refs[a.TaskRef]
+		}
+		result, done := completed[a.ID]
+		if done {
+			if resolved, _ := resultIdentity(result); resolved > 0 {
+				task = resolved
+			}
+		}
+		refs[a.ID] = task
+		if task == id && !done {
+			return true, nil
+		}
+	}
+	return false, nil
 }
