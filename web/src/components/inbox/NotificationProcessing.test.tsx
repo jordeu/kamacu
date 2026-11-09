@@ -46,3 +46,5 @@ describe("manual notification processing control", () => {
   expect(html).toMatch(/<button[^>]*\sdisabled(?:=|\s|>)/);
  });
 });
+
+it("requires an explicit notification model without blocking collection",()=>{const html=show({pending_count:23,model_configured:false,processing:null});expect(html).toContain("23 pending notifications");expect(html).toContain("Choose a notification model in Settings");expect(html).toMatch(/<button[^>]*\sdisabled(?:=|\s|>)/);});

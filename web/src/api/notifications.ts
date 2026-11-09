@@ -49,7 +49,7 @@ export interface NotificationProcessing {
  action_count: number;
  notification_count: number;
 }
-export interface NotificationStatus { pending_count: number; processing: NotificationProcessing | null }
+export interface NotificationStatus { model_configured?: boolean; pending_count: number; processing: NotificationProcessing | null }
 export interface RawNotificationPage { items: RawNotification[]; pending_count: number; has_more: boolean }
 export function useRawNotifications(status: "pending" | "archived", offset = 0) {
  return useQuery({ queryKey: ["raw-notifications", status, offset], queryFn: () => get<RawNotificationPage>(`/api/notifications?status=${status}&offset=${offset}`), refetchInterval: 3000 });

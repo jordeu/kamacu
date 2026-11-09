@@ -401,14 +401,10 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 				// Scan the complete API body before clipping model evidence.
 				mentioned := textMentionsViewer(body, s.Account)
 				complete := true
-				if len(body) > 12000 {
-					body = strings.ToValidUTF8(body[:12000], "")
-					complete = false
-					event.EvidenceComplete = false
-				}
-				if evidenceBytes+len(body) > 96000 {
+				if evidenceBytes+len(body) > 16<<20 {
 					event.EvidenceComplete = false
 					event.MentionScanComplete = false
+					event.ContextWarnings = append(event.ContextWarnings, "Source evidence exceeded 16 MiB; remaining material was not loaded")
 					break
 				}
 				evidenceBytes += len(body)

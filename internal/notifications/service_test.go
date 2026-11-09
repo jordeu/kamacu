@@ -71,11 +71,6 @@ func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt st
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prompts = append(m.prompts, prompt)
-	if !m.ownerRespond {
-		if raw, ok, err := fixtureOwnershipResponse(prompt); ok {
-			return raw, err
-		}
-	}
 
 	if _, input, ok := strings.Cut(prompt, "PLAN INPUT:\n"); ok {
 		if m.planResponse != nil {
@@ -96,18 +91,16 @@ func (m *fakeModel) GenerateJSON(_ context.Context, _ monitor.Profile, prompt st
 	if len(m.responses) > 0 {
 		response := m.responses[0]
 		m.responses = m.responses[1:]
-		return marshalFixtureResponse(prompt, response)
+		return json.Marshal(response)
 	}
 	if m.respond != nil {
 		response, err := m.respond(prompt)
 		if err != nil {
 			return nil, err
 		}
-		return marshalFixtureResponse(prompt, response)
+		return json.Marshal(response)
 	}
-	if len(m.steps) == 0 && strings.Contains(prompt, projectCardsMarker) {
-		return fixtureProjectCardsJSON(prompt, nil)
-	}
+
 	if len(m.steps) == 0 {
 		return nil, errors.New("no model response")
 	}
@@ -180,7 +173,7 @@ func fixture(t *testing.T) (*Service, *fakeModel, *fakeTools, Source) {
 		t.Fatal(err)
 	}
 	s.Providers["github"] = &fakeProvider{}
-	activateTestRules(t, s, nil)
+	configureTestModel(t, s)
 	return s, model, tools, source
 }
 func event() Event {

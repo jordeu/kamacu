@@ -40,8 +40,9 @@ type Processing struct {
 	NotificationCount int    `json:"notification_count"`
 }
 type Status struct {
-	PendingCount int         `json:"pending_count"`
-	Processing   *Processing `json:"processing"`
+	ModelConfigured bool        `json:"model_configured"`
+	PendingCount    int         `json:"pending_count"`
+	Processing      *Processing `json:"processing"`
 }
 
 const processingColumns = `id,status,created_at,updated_at,error,action_count,(SELECT count(*) FROM notification_batch_events e WHERE e.batch_id=notification_batches.id)`
@@ -52,6 +53,11 @@ func scanProcessing(row interface{ Scan(...any) error }) (p Processing, err erro
 }
 func (s *Service) Status(ctx context.Context) (Status, error) {
 	var status Status
+	config, err := s.Config(ctx)
+	if err != nil {
+		return status, err
+	}
+	status.ModelConfigured = config.ProfileID != nil
 	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_events WHERE raw_status='pending'`).Scan(&status.PendingCount); err != nil {
 		return status, err
 	}
@@ -137,6 +143,15 @@ func (s *Service) SetRawStatus(ctx context.Context, id int64, status string) err
 // RequestProcessing records an exact snapshot of all pending notifications. A
 // second click returns the active run, and later arrivals stay pending.
 func (s *Service) RequestProcessing(ctx context.Context) (Processing, error) {
+	config, err := s.Config(ctx)
+	if err != nil {
+		return Processing{}, err
+	}
+	profile, err := s.notificationProfile(ctx)
+	if err != nil {
+		return Processing{}, err
+	}
+	frozen := mustJSON(map[string]any{"settings": config, "profile": profile})
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Processing{}, err
@@ -165,7 +180,7 @@ func (s *Service) RequestProcessing(ctx context.Context) (Processing, error) {
 	}
 	now := time.Now().UnixMilli()
 	p := Processing{ID: uuid.NewString(), Status: "queued", CreatedAt: now, UpdatedAt: now, NotificationCount: count}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO notification_batches(id,status,created_at,updated_at,rule_set_id) VALUES(?,'queued',?,?,?)`, p.ID, now, now, rulesID.String); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO notification_batches(id,status,created_at,updated_at,rule_set_id,processor_config) VALUES(?,'queued',?,?,?,?)`, p.ID, now, now, rulesID.String, frozen); err != nil {
 		return p, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO notification_batch_events SELECT ?,id,raw_revision FROM notification_events WHERE raw_status='pending'`, p.ID); err != nil {
@@ -179,7 +194,7 @@ func (s *Service) RequestProcessing(ctx context.Context) (Processing, error) {
 }
 
 func (s *Service) EventDecisions(ctx context.Context, id int64) ([]ActivityDecision, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT activity_id,event_ids,outcome,evaluations,facts,semantic,b.rule_set_id,r.revision FROM notification_rule_decisions d JOIN notification_batches b ON b.id=d.batch_id JOIN notification_rule_sets r ON r.id=b.rule_set_id WHERE EXISTS(SELECT 1 FROM json_each(d.event_ids) WHERE value=?) ORDER BY d.rowid DESC LIMIT 30`, id)
+	rows, err := s.DB.QueryContext(ctx, `SELECT b.id,activity_id,event_ids,outcome,evaluations,facts,semantic,b.rule_set_id,r.revision,d.explanation,d.rule_ids,d.evidence_refs FROM notification_rule_decisions d JOIN notification_batches b ON b.id=d.batch_id JOIN notification_rule_sets r ON r.id=b.rule_set_id WHERE EXISTS(SELECT 1 FROM json_each(d.event_ids) WHERE value=?) ORDER BY d.rowid DESC LIMIT 30`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -187,8 +202,8 @@ func (s *Service) EventDecisions(ctx context.Context, id int64) ([]ActivityDecis
 	out := []ActivityDecision{}
 	for rows.Next() {
 		var d ActivityDecision
-		var ids, evals, facts, semantic string
-		if err = rows.Scan(&d.ID, &ids, &d.Outcome, &evals, &facts, &semantic, &d.RuleSetID, &d.RuleSetRevision); err != nil {
+		var ids, evals, facts, semantic, ruleIDs, evidenceRefs string
+		if err = rows.Scan(&d.BatchID, &d.ID, &ids, &d.Outcome, &evals, &facts, &semantic, &d.RuleSetID, &d.RuleSetRevision, &d.Reason, &ruleIDs, &evidenceRefs); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal([]byte(ids), &d.EventIDs); err != nil {
@@ -201,6 +216,12 @@ func (s *Service) EventDecisions(ctx context.Context, id int64) ([]ActivityDecis
 			return nil, err
 		}
 		if err = json.Unmarshal([]byte(semantic), &d.Semantic); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(ruleIDs), &d.RuleIDs); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(evidenceRefs), &d.EvidenceRefs); err != nil {
 			return nil, err
 		}
 		out = append(out, d)

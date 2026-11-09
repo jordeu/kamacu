@@ -298,7 +298,7 @@ func TestGitHubMentionEvidenceIncludesLaterCommentPages(t *testing.T) {
 	}
 }
 
-func TestGitHubClippedBodiesCannotProveNoMention(t *testing.T) {
+func TestGitHubPreservesLongBodyMentionsForTheAgent(t *testing.T) {
 	g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
 		if strings.Contains(args[len(args)-1], "?") {
 			return response(`[]`, ""), nil
@@ -309,7 +309,7 @@ func TestGitHubClippedBodiesCannotProveNoMention(t *testing.T) {
 	e := event()
 	e.SubjectURL = "https://api.github.com/repos/acme/repo/pulls/7"
 	fresh, err := g.Enrich(context.Background(), Source{}, e)
-	if err != nil || fresh.EvidenceComplete || mentionStatus([]RawNotification{{Event: e}}, fresh, "alice") != nil {
+	if err != nil || !fresh.EvidenceComplete || !strings.Contains(fresh.Evidence[0].Text, "@alice") {
 		t.Fatalf("clipped evidence treated as complete: %+v %v", fresh, err)
 	}
 }
@@ -369,15 +369,16 @@ func TestLongReleaseMentionScanPrecedesClipping(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fresh.EvidenceComplete || !fresh.MentionScanComplete || len(fresh.Evidence[0].Text) > 12000 {
-				t.Fatal("expected clipped prose and complete mention scan")
+			if !fresh.EvidenceComplete || !fresh.MentionScanComplete || len(fresh.Evidence[0].Text) < 13000 {
+				t.Fatal("expected full source prose and complete mention scan")
 			}
-			policy := repositoryTestRules(e.Repository)
-			if got := preflightRules(policy, &triageSubject{events: []RawNotification{{Event: e}}, fresh: fresh, viewer: "alice"}); got != tc.want {
-				t.Fatalf("policy = %q, want %q", got, tc.want)
+			mention := mentionStatus([]RawNotification{{Event: e}}, fresh, "alice")
+			if tc.want == "" && (mention == nil || !*mention) {
+				t.Fatal("mention was not preserved", mention)
 			}
-			if mentionStatus([]RawNotification{{Event: e}}, fresh, "bob") != nil {
-				t.Fatal("scan for alice proved absence for another viewer")
+
+			if other := mentionStatus([]RawNotification{{Event: e}}, fresh, "bob"); other == nil || *other {
+				t.Fatal("complete full-text source could not establish absence for another viewer")
 			}
 		})
 	}
@@ -408,7 +409,7 @@ func TestGitHubReviewStateSurvivesEnrichmentAndProjectPrompt(t *testing.T) {
 	for _, state := range []string{"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"} {
 		for _, body := range []string{"Thanks, everything is addressed. LGTM. Merge the dependency before releasing.", ""} {
 			t.Run(state+"/"+body, func(t *testing.T) {
-				s, _, _, source := fixture(t)
+				_, _, _, source := fixture(t)
 				g := GitHub{Run: func(_ context.Context, args ...string) ([]byte, error) {
 					path := args[len(args)-1]
 					if strings.HasSuffix(path, "/reviews?per_page=100") {
@@ -440,28 +441,14 @@ func TestGitHubReviewStateSurvivesEnrichmentAndProjectPrompt(t *testing.T) {
 				if body != "" && review.Text != body {
 					t.Fatal("review body changed")
 				}
-				subject := &triageSubject{fresh: fresh, events: []RawNotification{{ID: 1, SourceID: source.ID, Event: e}}}
-				input, data, err := s.projectInput(context.Background(), []*triageSubject{subject}, RuleSet{})
-				if err != nil {
-					t.Fatal(err)
+				payload := mustJSON(fresh)
+				if !strings.Contains(payload, `"review_state":"`+state+`"`) {
+					t.Fatal("review facts lost from source snapshot")
 				}
-				for _, marker := range []string{projectEvidenceMarker, projectCardsMarker} {
-					prompt, _, err := projectPrompt("test", "", marker, input, data)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if body == "" && !strings.Contains(prompt, `"review_body_empty":true`) {
-						t.Fatal("model could mistake generated state text for reviewer prose")
-					}
-					if !strings.Contains(prompt, `"review_state":"`+state+`"`) {
-						t.Fatal("review state lost before model call")
-					}
+				if body == "" && !strings.Contains(payload, `"review_body_empty":true`) {
+					t.Fatal("synthetic state citation lost its marker")
 				}
-				// Even an empty-body review now has a source-backed citation.
-				raw, _ := json.Marshal(intentResponse{Findings: []intentFinding{{Intent: "review_feedback", EvidenceID: review.ID, Quote: review.Text}}})
-				if _, err := decodeIntent(raw, fresh.Evidence, ""); err != nil {
-					t.Fatal(err)
-				}
+
 			})
 		}
 	}

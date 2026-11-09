@@ -8,11 +8,10 @@ import (
 	"slices"
 )
 
-func isReviewWork(f intentFinding) bool {
-	return f.Intent == "review_request" || f.WorkKind == "review"
-}
-
 func (s *Service) addPlanBinding(ctx context.Context, plan *ActionPlan, id int64, role, source, evidence string) error {
+	if !slices.Contains([]string{"implementation", "review", "recurring", "investigation"}, role) {
+		return errors.New("unknown task binding role")
+	}
 	var b inbox.TaskLink
 	b.TaskID = id
 	b.Role = role
@@ -26,7 +25,7 @@ func (s *Service) addPlanBinding(ctx context.Context, plan *ActionPlan, id int64
 	if role == "review" && taskSource != "github_pr" {
 		return errors.New("review requires a PR review task, not an implementation task")
 	}
-	if role == "implementation" && taskSource == "github_pr" {
+	if (role == "implementation" || role == "investigation") && taskSource == "github_pr" {
 		return errors.New("implementation ownership cannot use a PR review task")
 	}
 	if role == "recurring" && !recurrent {
@@ -68,52 +67,6 @@ func (s *Service) setPlanSession(plan *ActionPlan) {
 			}
 		}
 	}
-}
-
-func (s *Service) implementationOwners(ctx context.Context, subject *triageSubject, pr int64) ([]int64, error) {
-	ids := []int64{}
-	for _, work := range subject.fresh.RelatedWork {
-		if work.Link.Role == "implementation" && !slices.Contains(ids, work.Link.TaskID) {
-			ids = append(ids, work.Link.TaskID)
-		}
-	}
-	if pr > 0 {
-		rows, err := s.DB.QueryContext(ctx, `SELECT t.id FROM task_pr_links l JOIN tasks t ON t.id=l.task_id WHERE lower(l.repository)=lower(?) AND l.number=? AND l.role='implementation' AND t.source!='github_pr'
- UNION SELECT t.id FROM session_pr_links l LEFT JOIN session_work w ON w.session_id=l.session_id JOIN tasks t ON t.id=COALESCE(l.task_id,w.task_id) LEFT JOIN task_pr_links explicit ON explicit.task_id=t.id AND lower(explicit.repository)=lower(l.repository) AND explicit.number=l.number WHERE lower(l.repository)=lower(?) AND l.number=? AND t.source!='github_pr' AND COALESCE(explicit.role,l.role)='implementation' ORDER BY 1`, subject.fresh.Repository, pr, subject.fresh.Repository, pr)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var id int64
-			if err = rows.Scan(&id); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			if !slices.Contains(ids, id) {
-				ids = append(ids, id)
-			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if pr > 0 {
-		filtered := ids[:0]
-		for _, id := range ids {
-			var rejected int
-			if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM task_pr_links WHERE task_id=? AND lower(repository)=lower(?) AND number=? AND role!='implementation'`, id, subject.fresh.Repository, pr).Scan(&rejected); err != nil {
-				return nil, err
-			}
-			if rejected == 0 {
-				filtered = append(filtered, id)
-			}
-		}
-		ids = filtered
-	}
-	slices.Sort(ids)
-	return ids, nil
 }
 
 func notificationActionLabel(plan ActionPlan) string {

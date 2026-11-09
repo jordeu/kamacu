@@ -337,7 +337,10 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 	defer notificationMCP.Close()
-	notificationService := notifications.New(db, inboxService, classifier, notificationMCP)
+	notificationMetrics := &monitor.Metrics{}
+	notificationBackend := monitor.Backend{Metrics: notificationMetrics, Transcripts: transcripts}
+	notificationService := notifications.New(db, inboxService, notificationBackend, notificationMCP)
+	notificationService.Metrics = notificationMetrics
 	notificationService.TaskSession = func(taskID int64) string {
 		for _, info := range mgr.ListByTask(taskID) {
 			if info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested {

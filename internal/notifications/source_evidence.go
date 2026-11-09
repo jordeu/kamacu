@@ -1,25 +1,9 @@
 package notifications
 
 import (
-	"fmt"
 	"strings"
 	"time"
 )
-
-// The current GitHub assignment is independent of notification-reason recency.
-// Only a positive assignment to the verified source account proves a request.
-func currentReviewRequestEvidence(subject *triageSubject) *SubjectEvidence {
-	f := subject.fresh.PRFacts
-	if f == nil || !f.Available || f.Stale || f.State != "open" || subject.viewer == "" || !strings.EqualFold(f.Viewer, subject.viewer) {
-		return nil
-	}
-	for _, reviewer := range f.RequestedReviewers {
-		if strings.EqualFold(reviewer, subject.viewer) {
-			return &SubjectEvidence{ID: "current-review-request", URL: subject.fresh.URL, Text: fmt.Sprintf("GitHub currently requests a review from %s on %s.", subject.viewer, subject.fresh.URL), Complete: true, Current: true}
-		}
-	}
-	return nil
-}
 
 type evidenceRecency uint8
 
@@ -78,24 +62,55 @@ func scopeEvidence(events []RawNotification, subject Event, item SubjectEvidence
 	return evidenceCurrent
 }
 
-func classifierEvidence(events []RawNotification, subject Event) ([]SubjectEvidence, bool) {
-	evidence := []SubjectEvidence{}
-	complete := subject.EvidenceComplete && len(subject.ContextWarnings) == 0
-	for _, item := range subject.Evidence {
-		recency := scopeEvidence(events, subject, item)
+func textMentionsViewer(text, viewer string) bool {
+	if viewer == "" {
+		return false
+	}
+	text = strings.ToLower(text)
+	needle := "@" + strings.ToLower(viewer)
+	for at := strings.Index(text, needle); at >= 0; {
+		end := at + len(needle)
+		if end == len(text) || !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789_-", rune(text[end])) {
+			return true
+		}
+		next := strings.Index(text[end:], needle)
+		if next < 0 {
+			break
+		}
+		at = end + next
+	}
+	return false
+}
+
+// mentionStatus is tri-state. Negative evidence requires complete discussion
+// retrieval, or a full-text scan performed before clipping model excerpts.
+func mentionStatus(events []RawNotification, e Event, viewer string) *bool {
+	yes, no := true, false
+	if viewer == "" {
+		return nil
+	}
+	uncertainMention := false
+	scanned := e.MentionScanComplete
+	for _, item := range e.Evidence {
+		recency := scopeEvidence(events, e, item)
 		if recency == evidenceHistorical {
 			continue
 		}
-		// Unknown dates cannot justify dropping an otherwise relevant question.
-		// Include issue bodies too; their URL is the subject URL, not a comment URL.
-		if recency == evidenceUnknown {
-			complete = false
+		mentioned := textMentionsViewer(item.Text, viewer)
+		if item.ViewerMention != nil && strings.EqualFold(item.MentionViewer, viewer) {
+			mentioned = *item.ViewerMention
+		} else {
+			scanned = false
 		}
-		item.Current = recency == evidenceCurrent
-		evidence = append(evidence, item)
+		if mentioned {
+			if recency == evidenceCurrent {
+				return &yes
+			}
+			uncertainMention = true
+		}
 	}
-	if len(subject.Evidence) == 0 && subject.Context != "" {
-		evidence = append(evidence, SubjectEvidence{ID: "context", Text: subject.Context, URL: subject.URL})
+	if !uncertainMention && (e.EvidenceComplete || scanned) && len(e.ContextWarnings) == 0 {
+		return &no
 	}
-	return evidence, complete
+	return nil
 }

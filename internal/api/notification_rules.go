@@ -10,45 +10,41 @@ import (
 )
 
 func notificationRuleRoutes(mux *http.ServeMux, s *notifications.Service) {
-	mux.HandleFunc("GET /api/notifications/rules/problems", func(w http.ResponseWriter, r *http.Request) {
-		result, err := s.RuleProblems(r.Context())
+	mux.HandleFunc("GET /api/notifications/usage", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.Metrics.Snapshot()) })
+	fail := func(w http.ResponseWriter, err error) {
+		code := 400
+		if errors.Is(err, notifications.ErrRulesChanged) {
+			code = 409
+		}
+		writeError(w, code, err.Error())
+	}
+	mux.HandleFunc("GET /api/notifications/config", func(w http.ResponseWriter, r *http.Request) {
+		c, err := s.Config(r.Context())
 		if err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
-		writeJSON(w, 200, result)
+		writeJSON(w, 200, c)
 	})
-	mux.HandleFunc("POST /api/notifications/rules/improvements", func(w http.ResponseWriter, r *http.Request) {
-		var req notifications.RuleImprovementRequest
-		if !ruleDecode(w, r, &req) {
+	mux.HandleFunc("PUT /api/notifications/config", func(w http.ResponseWriter, r *http.Request) {
+		var c notifications.Config
+		if !ruleDecode(w, r, &c) {
 			return
 		}
-		result, err := s.ImproveRules(r.Context(), req)
+		c, err := s.SaveConfig(r.Context(), c)
 		if err != nil {
-			status := 400
-			if errors.Is(err, notifications.ErrRulesChanged) {
-				status = 409
-			}
-			writeError(w, status, err.Error())
+			fail(w, err)
 			return
 		}
-		writeJSON(w, 201, result)
+		writeJSON(w, 200, c)
 	})
-	mux.HandleFunc("GET /api/notifications/rules/history/{id}", func(w http.ResponseWriter, r *http.Request) {
-		result, err := s.ReplayRuleHistory(r.Context(), r.PathValue("id"))
+	mux.HandleFunc("POST /api/notifications/config/test", func(w http.ResponseWriter, r *http.Request) {
+		err := s.TestModel(r.Context())
 		if err != nil {
-			writeError(w, 400, err.Error())
+			writeError(w, 502, err.Error())
 			return
 		}
-		writeJSON(w, 200, result)
-	})
-	mux.HandleFunc("GET /api/notifications/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
-		set, err := s.RuleSet(r.Context(), r.PathValue("id"))
-		if err != nil {
-			writeError(w, 404, err.Error())
-			return
-		}
-		writeJSON(w, 200, set)
+		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("GET /api/notifications/rules", func(w http.ResponseWriter, r *http.Request) {
 		sets, err := s.RuleSets(r.Context())
@@ -58,7 +54,15 @@ func notificationRuleRoutes(mux *http.ServeMux, s *notifications.Service) {
 		}
 		writeJSON(w, 200, sets)
 	})
-	mux.HandleFunc("POST /api/notifications/rules/drafts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/notifications/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
+		set, err := s.RuleSet(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, 404, err.Error())
+			return
+		}
+		writeJSON(w, 200, set)
+	})
+	mux.HandleFunc("PUT /api/notifications/rules", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Base  int64                            `json:"base_revision"`
 			Rules []notifications.NotificationRule `json:"rules"`
@@ -66,78 +70,78 @@ func notificationRuleRoutes(mux *http.ServeMux, s *notifications.Service) {
 		if !ruleDecode(w, r, &body) {
 			return
 		}
-		set, err := s.SaveRuleDraft(r.Context(), body.Base, body.Rules)
+		set, err := s.SaveRules(r.Context(), body.Base, body.Rules)
 		if err != nil {
-			status := 400
-			if errors.Is(err, notifications.ErrRulesChanged) {
-				status = 409
-			}
-			writeError(w, status, err.Error())
-			return
-		}
-		writeJSON(w, 201, set)
-	})
-	mux.HandleFunc("POST /api/notifications/rules/{id}/compile", func(w http.ResponseWriter, r *http.Request) {
-		set, err := s.QueueRuleCompilation(r.Context(), r.PathValue("id"))
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		writeJSON(w, 202, set)
-	})
-	mux.HandleFunc("POST /api/notifications/rules/{id}/activate", func(w http.ResponseWriter, r *http.Request) {
-		set, err := s.ActivateRules(r.Context(), r.PathValue("id"))
-		if err != nil {
-			writeError(w, 409, err.Error())
+			fail(w, err)
 			return
 		}
 		writeJSON(w, 200, set)
 	})
+	mux.HandleFunc("POST /api/notifications/rules/improvements", func(w http.ResponseWriter, r *http.Request) {
+		var req notifications.RuleImprovementRequest
+		if !ruleDecode(w, r, &req) {
+			return
+		}
+		out, err := s.ImproveRules(r.Context(), req)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, out)
+	})
 	mux.HandleFunc("POST /api/notifications/rules/previews", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			SetID string  `json:"rule_set_id"`
-			IDs   []int64 `json:"event_ids"`
+			ID     string  `json:"rule_set_id"`
+			Events []int64 `json:"event_ids"`
 		}
 		if !ruleDecode(w, r, &body) {
 			return
 		}
-		p, err := s.QueueRulePreview(r.Context(), body.SetID, body.IDs)
+		out, err := s.QueueRulePreview(r.Context(), body.ID, body.Events)
 		if err != nil {
-			writeError(w, 400, err.Error())
+			fail(w, err)
 			return
 		}
-		writeJSON(w, 202, p)
+		writeJSON(w, 202, out)
 	})
 	mux.HandleFunc("GET /api/notifications/rules/previews/{id}", func(w http.ResponseWriter, r *http.Request) {
-		p, err := s.RulePreview(r.Context(), r.PathValue("id"))
+		out, err := s.RulePreview(r.Context(), r.PathValue("id"))
 		if err != nil {
 			writeError(w, 404, err.Error())
 			return
 		}
-		writeJSON(w, 200, p)
+		writeJSON(w, 200, out)
 	})
-
+	mux.HandleFunc("GET /api/notifications/batches/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var snapshot, result, config, trace, status string
+		input := `'{}'`
+		if r.URL.Query().Get("input") == "1" {
+			input = "processor_snapshot"
+		}
+		err := s.DB.QueryRowContext(r.Context(), `SELECT `+input+`,processor_result,processor_config,processor_trace,status FROM notification_batches WHERE id=?`, r.PathValue("id")).Scan(&snapshot, &result, &config, &trace, &status)
+		if err != nil {
+			writeError(w, 404, "batch not found")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"status": status, "snapshot": json.RawMessage(snapshot), "result": json.RawMessage(result), "config": json.RawMessage(config), "reads": json.RawMessage(trace)})
+	})
 }
-
 func ruleDecode(w http.ResponseWriter, r *http.Request, target any) bool {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 128<<10))
+	// Up to 100 rules of 8000 bytes each, allowing JSON escape expansion.
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 6<<20))
 	if err != nil {
-		writeError(w, 400, "rule request exceeds limits")
+		writeError(w, 400, "request exceeds limits")
 		return false
 	}
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		writeError(w, 400, "rule request must be a JSON object")
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '{' {
+		writeError(w, 400, "request must be an object")
 		return false
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if err = d.Decode(target); err != nil {
-		writeError(w, 400, "invalid rule request")
-		return false
-	}
-	if d.Decode(new(any)) != io.EOF {
-		writeError(w, 400, "invalid trailing rule request data")
+	if d.Decode(target) != nil || d.Decode(new(any)) != io.EOF {
+		writeError(w, 400, "invalid request")
 		return false
 	}
 	return true

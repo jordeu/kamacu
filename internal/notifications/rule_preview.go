@@ -5,13 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"time"
-
 	"github.com/google/uuid"
+	"kamacu/internal/diagnostics"
+	"time"
 )
 
-type rulePreviewKey struct{}
 type RulePreview struct {
 	ID        string          `json:"id"`
 	RuleSetID string          `json:"rule_set_id"`
@@ -19,20 +17,12 @@ type RulePreview struct {
 	Result    json.RawMessage `json:"result"`
 	Error     string          `json:"error"`
 }
-type RulePreviewResult struct {
-	Decisions []ActivityDecision `json:"decisions"`
-	Cards     []BatchAction      `json:"cards"`
-}
 
 func (s *Service) QueueRulePreview(ctx context.Context, setID string, ids []int64) (RulePreview, error) {
-	set, err := scanRuleSet(s.DB.QueryRowContext(ctx, `SELECT `+ruleSetColumns+` FROM notification_rule_sets WHERE id=?`, setID))
-	if err != nil {
+	if _, err := s.RuleSet(ctx, setID); err != nil {
 		return RulePreview{}, err
 	}
-	if set.Status != "ready" && set.Status != "active" {
-		return RulePreview{}, errors.New("compile rules before previewing")
-	}
-	if err = validateRuleSet(set, true); err != nil {
+	if _, err := s.notificationProfile(ctx); err != nil {
 		return RulePreview{}, err
 	}
 	if len(ids) == 0 {
@@ -54,12 +44,19 @@ func (s *Service) QueueRulePreview(ctx context.Context, setID string, ids []int6
 			return RulePreview{}, err
 		}
 	}
-	if len(ids) == 0 || len(ids) > 50 {
-		return RulePreview{}, errors.New("preview requires 1–50 notification IDs")
+	if len(ids) == 0 || len(ids) > 100 {
+		return RulePreview{}, errors.New("preview requires 1–100 notification IDs")
+	}
+	seen := map[int64]bool{}
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			return RulePreview{}, errors.New("invalid preview notification IDs")
+		}
+		seen[id] = true
 	}
 	p := RulePreview{ID: uuid.NewString(), RuleSetID: setID, Status: "queued", Result: json.RawMessage(`{}`)}
 	now := time.Now().UnixMilli()
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO notification_rule_previews(id,rule_set_id,event_ids,status,created_at,updated_at) VALUES(?,?,?,'queued',?,?)`, p.ID, setID, mustJSON(ids), now, now)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO notification_rule_previews(id,rule_set_id,event_ids,status,created_at,updated_at) VALUES(?,?,?,'queued',?,?)`, p.ID, setID, mustJSON(ids), now, now)
 	return p, err
 }
 func (s *Service) RulePreview(ctx context.Context, id string) (RulePreview, error) {
@@ -70,114 +67,63 @@ func (s *Service) RulePreview(ctx context.Context, id string) (RulePreview, erro
 	return p, err
 }
 func (s *Service) processRulePreview(ctx context.Context) error {
-	var id, setID, raw string
-	err := s.DB.QueryRowContext(ctx, `SELECT id,rule_set_id,event_ids FROM notification_rule_previews WHERE status='queued' ORDER BY created_at LIMIT 1`).Scan(&id, &setID, &raw)
+	var id, setID, idsJSON string
+	err := s.DB.QueryRowContext(ctx, `SELECT id,rule_set_id,event_ids FROM notification_rule_previews WHERE status='queued' ORDER BY created_at LIMIT 1`).Scan(&id, &setID, &idsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	r, err := s.DB.ExecContext(ctx, `UPDATE notification_rule_previews SET status='running' WHERE id=? AND status='queued'`, id)
-	if err != nil {
+	if _, err = s.DB.ExecContext(ctx, `UPDATE notification_rule_previews SET status='running',updated_at=? WHERE id=?`, time.Now().UnixMilli(), id); err != nil {
 		return err
 	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
-		return nil
-	}
-	set, runErr := scanRuleSet(s.DB.QueryRowContext(ctx, `SELECT `+ruleSetColumns+` FROM notification_rule_sets WHERE id=?`, setID))
-	var result RulePreviewResult
-	if runErr == nil {
+	ctx = diagnostics.WithGroup(ctx, diagnostics.Group{Kind: "preview", ID: id, StartedAt: time.Now()})
+	ctx = withNotificationRun(ctx, "preview:"+id)
+	result, runErr := func() (AgentTurn, error) {
+		run, cancel, config, err := s.modelContext(ctx)
+		if err != nil {
+			return AgentTurn{}, err
+		}
+		defer cancel()
+		rules, err := s.RuleSet(run, setID)
+		if err != nil {
+			return AgentTurn{}, err
+		}
 		var ids []int64
-		runErr = json.Unmarshal([]byte(raw), &ids)
-		if runErr == nil {
-			result, runErr = s.previewRules(ctx, set, ids)
+		if err = json.Unmarshal([]byte(idsJSON), &ids); err != nil {
+			return AgentTurn{}, err
 		}
-	}
-	state, detail := "completed", ""
+		events := []RawNotification{}
+		for _, id := range ids {
+			var e RawNotification
+			var payload string
+			if err = s.DB.QueryRowContext(run, `SELECT e.id,e.source_id,s.name,e.payload FROM notification_events e JOIN notification_sources s ON s.id=e.source_id WHERE e.id=?`, id).Scan(&e.ID, &e.SourceID, &e.SourceName, &payload); err != nil {
+				return AgentTurn{}, err
+			}
+			if err = json.Unmarshal([]byte(payload), &e.Event); err != nil {
+				return AgentTurn{}, err
+			}
+			events = append(events, e)
+		}
+		snapshot, err := s.agentSnapshot(run, events, rules)
+		if err != nil {
+			return AgentTurn{}, err
+		}
+		turn, _, err := s.runNotificationAgent(run, snapshot, config)
+		if err != nil {
+			return turn, err
+		}
+		_, _, _, err = s.agentActions(run, snapshot, turn)
+		return turn, err
+	}()
+	status, message := "completed", ""
 	if runErr != nil {
-		state, detail = "failed", runErr.Error()
+		status = "failed"
+		message = runErr.Error()
 	}
-	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	_, err = s.DB.ExecContext(recordCtx, `UPDATE notification_rule_previews SET status=?,result=?,error=?,updated_at=? WHERE id=?`, state, mustJSON(result), detail, time.Now().UnixMilli(), id)
+	_, err = s.DB.ExecContext(record, `UPDATE notification_rule_previews SET status=?,result=?,error=?,updated_at=? WHERE id=?`, status, mustJSON(result), message, time.Now().UnixMilli(), id)
 	return err
-}
-func (s *Service) previewRules(ctx context.Context, set RuleSet, ids []int64) (RulePreviewResult, error) {
-	result := RulePreviewResult{Decisions: []ActivityDecision{}, Cards: []BatchAction{}}
-	events := []RawNotification{}
-	seen := map[int64]bool{}
-	for _, id := range ids {
-		if id <= 0 || seen[id] {
-			return result, errors.New("invalid or duplicate preview ID")
-		}
-		seen[id] = true
-		var e RawNotification
-		var payload string
-		if err := s.DB.QueryRowContext(ctx, `SELECT e.id,e.source_id,s.name,e.payload FROM notification_events e JOIN notification_sources s ON s.id=e.source_id WHERE e.id=?`, id).Scan(&e.ID, &e.SourceID, &e.SourceName, &payload); err != nil {
-			return result, err
-		}
-		if err := json.Unmarshal([]byte(payload), &e.Event); err != nil {
-			return result, err
-		}
-		events = append(events, e)
-	}
-	groups, err := s.notificationProjectGroups(ctx, events)
-	if err != nil {
-		return result, err
-	}
-	ctx = withNotificationRun(ctx, "preview:"+set.ID)
-	ctx = context.WithValue(ctx, rulePreviewKey{}, true)
-	plans := make([]notificationPlan, len(groups))
-	cards := make([][]BatchAction, len(groups))
-	err = parallelNotifications(ctx, len(groups), notificationProjectConcurrency, func(ctx context.Context, i int) error {
-		if err := s.prepareRuleGroup(ctx, groups[i], set, &plans[i]); err != nil {
-			return err
-		}
-		for _, g := range plans[i].groups {
-			if err := s.evaluateActivities(ctx, g.subjects, set); err != nil {
-				return err
-			}
-			if err := s.prepareActivityPlans(ctx, g.subjects, set); err != nil {
-				return err
-			}
-			d, err := s.renderTriage(ctx, g.subjects, nil, set)
-			if err != nil {
-				return err
-			}
-			if err = s.draftProjectCards(ctx, &d, g.subjects, set, ""); err != nil {
-				return err
-			}
-			cards[i] = append(cards[i], d.Actions...)
-		}
-		return nil
-	})
-	if err != nil {
-		return result, fmt.Errorf("preview: %w", err)
-	}
-	for i, p := range plans {
-		result.Cards = append(result.Cards, cards[i]...)
-		for _, g := range p.groups {
-			for _, subject := range g.subjects {
-				result.Decisions = append(result.Decisions, subject.decisions...)
-			}
-		}
-	}
-	clarifications, err := s.clarificationActions(ctx, plans)
-	if err != nil {
-		return result, err
-	}
-	for _, a := range clarifications {
-		var plan ActionPlan
-		if err = strictRuleJSON([]byte(a.Plan), &plan); err != nil {
-			return result, err
-		}
-		options := []string{}
-		for _, o := range a.Request.Options {
-			options = append(options, o.Label)
-		}
-		result.Cards = append(result.Cards, BatchAction{Plan: plan, EventIDs: a.EventIDs, Summary: a.Request.Summary, Context: a.Request.Context, Question: a.Request.Question, Options: options})
-	}
-	return result, nil
 }

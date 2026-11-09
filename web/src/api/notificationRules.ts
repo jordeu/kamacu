@@ -1,15 +1,96 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, post } from "./client";
-
-export interface RuleExpression { op: string; fact?: string; value?: unknown; args?: RuleExpression[]; text?: string }
-export interface RuleClause { id: string; category: string; when: RuleExpression; effect: string; argument: string; priority: number; on_unknown: string }
-export interface NotificationRule { mode?: "compiled" | "llm"; diagnostic?: string; alternatives?: string[]; id: string; revision: number; text: string; enabled: boolean; clauses: RuleClause[]; compiler_version?: string }
-export interface NotificationRuleSet { id: string; revision: number; status: "draft" | "compiling" | "ready" | "invalid" | "active" | "retired"; rules: NotificationRule[]; diagnostics: string[] }
-export interface RuleDecision { semantic?: { condition: string; result: string; evidence_id?: string; quote?: string }[]; rule_set_id: string; rule_set_revision: number; activity_id: string; outcome: string; evaluations: { rule_id: string; clause_id: string; result: string; effect: string; on_unknown: string; reason?: string }[]; facts: Record<string, { known: boolean; value: unknown; reason?: string }> }
-export interface RulePreview { id: string; rule_set_id: string; status: string; error: string; result: { decisions?: RuleDecision[]; cards?: { summary: string; question: string; options: string[] }[] } }
-export function useNotificationRules() { return useQuery({ queryKey: ["notification-rules"], queryFn: () => get<NotificationRuleSet[]>("/api/notifications/rules"), refetchInterval: 2000 }); }
-export function useRuleMutation(operation: "drafts" | "compile" | "activate" | "preview") {
- const qc = useQueryClient();
- return useMutation({ mutationFn: async (input: { id?: string; base_revision?: number; rules?: NotificationRule[] }): Promise<NotificationRuleSet | RulePreview> => operation === "drafts" ? post<NotificationRuleSet>("/api/notifications/rules/drafts", input) : operation === "preview" ? post<RulePreview>("/api/notifications/rules/previews", { rule_set_id: input.id }) : post<NotificationRuleSet>(`/api/notifications/rules/${input.id}/${operation}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["notification-rules"] }) });
+import { get, post, put } from "./client";
+export interface NotificationRule {
+  id: string;
+  revision: number;
+  text: string;
+  enabled: boolean;
 }
-export function useRulePreview(id: string) { return useQuery({ queryKey: ["notification-rule-preview", id], queryFn: () => get<RulePreview>(`/api/notifications/rules/previews/${id}`), enabled: !!id, refetchInterval: q => ["completed", "failed"].includes(q.state.data?.status ?? "") ? false : 1000 }); }
+export interface NotificationRuleSet {
+  id: string;
+  revision: number;
+  status: string;
+  rules: NotificationRule[];
+}
+export interface RuleDecision {
+  batch_id: string;
+  rule_set_id: string;
+  rule_set_revision: number;
+  activity_id: string;
+  event_ids: number[];
+  outcome: string;
+  reason: string;
+  rule_ids: string[];
+  evidence_refs: string[];
+  facts?: Record<string, unknown>;
+  evaluations?: unknown[];
+  semantic?: unknown[];
+}
+export interface RulePreview {
+  id: string;
+  rule_set_id: string;
+  status: string;
+  error: string;
+  result: {
+    messages?: {
+      summary: string;
+      context: string;
+      question: string;
+      why_it_matters: string;
+      rule_ids: string[];
+    }[];
+    decisions?: {
+      event_ids: number[];
+      outcome: string;
+      reason: string;
+      rule_ids: string[];
+    }[];
+  };
+}
+export function useNotificationRules() {
+  return useQuery({
+    queryKey: ["notification-rules"],
+    queryFn: () => get<NotificationRuleSet[]>("/api/notifications/rules"),
+  });
+}
+export function useSaveNotificationRules() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { base_revision: number; rules: NotificationRule[] }) =>
+      put<NotificationRuleSet>("/api/notifications/rules", input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notification-rules"] }),
+  });
+}
+export function useStartRulePreview() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      post<RulePreview>("/api/notifications/rules/previews", {
+        rule_set_id: id,
+      }),
+  });
+}
+export function useRulePreview(id: string) {
+  return useQuery({
+    queryKey: ["notification-rule-preview", id],
+    queryFn: () => get<RulePreview>(`/api/notifications/rules/previews/${id}`),
+    enabled: !!id,
+    refetchInterval: (q) =>
+      ["completed", "failed"].includes(q.state.data?.status ?? "")
+        ? false
+        : 1000,
+  });
+}
+export interface NotificationConfig {
+  profile_id: number | null;
+  revision: number;
+  context_bytes: number;
+  output_tokens: number;
+  timeout_seconds: number;
+  max_reads: number;
+}
+export function useNotificationConfig() {
+  return useQuery({
+    queryKey: ["notification-config"],
+    queryFn: () => get<NotificationConfig>("/api/notifications/config"),
+  });
+}
