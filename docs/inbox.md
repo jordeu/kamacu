@@ -81,6 +81,17 @@ in one workflow. Rules have stable IDs and save directly; there is no compiler,
 held category, or automatic uncertainty-rule bypass. Preview runs the same agent
 without publishing messages or starting work.
 
+Before publishing, Kamacu checks whether any source discussion changed during
+processing. It refreshes only changed discussions and supplies them as final
+notes alongside the previous proposal and existing read results. The agent can
+revise the complete response once, preserving unaffected work. Routine bot
+updates do not themselves require feedback. This check does not restart the
+batch repeatedly; saved actions still validate current state when executed.
+Refreshed evidence receives new IDs; obsolete source reads cannot be cited in
+the final response. Large source bodies appear once in the prompt. The batch
+trace retains the refreshed evidence, original reads and previous proposal,
+including when the final revision fails.
+
 ### Saved option actions
 
 Each actionable notification option carries its own versioned sequence of typed
@@ -126,7 +137,7 @@ its exact action, resolved task/session IDs, per-step intent, arguments and resu
 create a visible pending follow-up with task links and the original execution
 trace. Failure notices are recorded durably and delivered after restart or a
 transient publication failure, without replacing another pending question. When every attempted mutation
-has a definite outcome, **Retry remaining safe steps** reuses recorded successes
+has a definite outcome, **Retry unfinished steps** reuses recorded successes
 without another model call. Uncertain writes offer inspection instead of retry. Grouped reviews track
 independent PR handoffs without a model-step ceiling. Overall outcomes include
 succeeded, blocked, failed, partial and uncertain; submission means PTY delivery,
@@ -144,3 +155,11 @@ inspection. Task and session links survive partial execution.
 Migration preserves old history and uncertain executions, retires older pending
 notification cards, and returns unexecuted inputs to pending for regeneration.
 It does not replay previously answered or uncertain work.
+
+When a saved action cannot finish, its notice names the stopped step and affected
+tasks, distinguishes prompts that were sent from those still pending, and gives
+concrete recovery instructions. Readiness failures offer **Retry sending review
+prompts** (or instructions) when safe, reusing recorded setup and successful handoffs.
+If retry is unavailable, the notice asks for inspection and new instructions.
+Uncertain mutations require inspection and never offer automatic retry.
+**Dismiss this notice** closes the notice without cancelling existing work.

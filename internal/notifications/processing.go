@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"slices"
 	"time"
 
 	"kamacu/internal/diagnostics"
@@ -108,10 +107,10 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	if _, err = s.DB.ExecContext(ctx, `UPDATE notification_batches SET processor_snapshot=? WHERE id=?`, mustJSON(snapshot), id); err != nil {
 		return err
 	}
-	turn, trace, err := s.runNotificationAgent(ctx, snapshot, config)
+	turn, trace, err := s.runNotificationAgentWithUpdates(ctx, &snapshot, config, true)
 	recordCtx, recordCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer recordCancel()
-	if _, recordErr := s.DB.ExecContext(recordCtx, `UPDATE notification_batches SET processor_result=?,processor_trace=? WHERE id=?`, mustJSON(turn), mustJSON(trace), id); recordErr != nil {
+	if _, recordErr := s.DB.ExecContext(recordCtx, `UPDATE notification_batches SET processor_snapshot=?,processor_result=?,processor_trace=? WHERE id=?`, mustJSON(snapshot), mustJSON(turn), mustJSON(trace), id); recordErr != nil {
 		return recordErr
 	}
 	if err != nil {
@@ -135,37 +134,23 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	if mustJSON(freshConfig) != mustJSON(config) || freshProfile.Key() != profile.Key() {
 		return ErrRulesChanged
 	}
+	checkedSources := map[string]bool{}
 	for _, event := range events {
+		if checkedSources[event.SourceID] {
+			continue
+		}
+		checkedSources[event.SourceID] = true
 		if err = s.sourceEnabled(ctx, event.SourceID); err != nil {
 			return err
 		}
-	}
-	for _, sub := range snapshot.Subjects {
-		sourceID := ""
-		for _, e := range events {
-			if slices.Contains(sub.EventIDs, e.ID) {
-				sourceID = e.SourceID
-				break
-			}
-		}
-		source, err := scanSource(s.DB.QueryRowContext(ctx, `SELECT `+sourceColumns+` FROM notification_sources WHERE id=?`, sourceID))
+		source, err := scanSource(s.DB.QueryRowContext(ctx, `SELECT `+sourceColumns+` FROM notification_sources WHERE id=?`, event.SourceID))
 		if err != nil {
 			return err
 		}
 		if err = s.checkIdentity(ctx, source); err != nil {
 			return err
 		}
-		if reader, ok := s.Providers[source.Provider].(interface {
-			SubjectVersion(context.Context, Source, Event) (string, error)
-		}); ok && sub.Event.SubjectUpdatedAt != "" {
-			version, err := reader.SubjectVersion(freshGitHubReadCache(ctx), source, sub.Event)
-			if err != nil {
-				return err
-			}
-			if version != sub.Event.SubjectUpdatedAt {
-				return errors.New("source discussion changed while processing; process pending notifications again with its latest state")
-			}
-		}
 	}
+
 	return s.Inbox.ApplyNotificationBatch(ctx, id, actions, refs, decisions...)
 }

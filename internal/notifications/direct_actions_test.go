@@ -1024,3 +1024,54 @@ func TestAttentionDoesNotDisappearBehindAnExistingPendingReply(t *testing.T) {
 		t.Fatal("existing question overwritten", old)
 	}
 }
+
+func TestReviewReadinessNoticeExplainsRecoveryAndRetriesWithoutDuplicateTasks(t *testing.T) {
+	s, model, r, tools, source := directFixture(t)
+	r.readyErr = fmt.Errorf("%w: agent did not become ready within the action deadline; open its terminal", ErrActionBlocked)
+	q := directCard(t, s, source, inboxaction.Action{ID: "reviews", Kind: "start_reviews", ProjectID: 1, PRNumbers: []int64{7, 8, 9}})
+	out := runDirect(t, s, q)
+	pending, err := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
+	if err != nil || len(pending.Items) != 1 {
+		t.Fatal(pending, err)
+	}
+	notice := pending.Items[0]
+	if out.DeliveryStatus != "partial" || !strings.Contains(notice.Summary, "3 review prompts") || strings.Contains(notice.Summary, "partial") || !strings.Contains(notice.Context, "Open the linked task terminals") || !strings.Contains(notice.Context, "stopped before sending 3 review prompts") || len(r.submitted) != 0 || len(notice.LinkedTasks) != 3 {
+		t.Fatal(out, notice, r.submitted)
+	}
+	retry := false
+	dismiss := false
+	for _, option := range notice.Options {
+		if option.ID == "retry_remaining" {
+			retry = option.Label == "Retry sending review prompts" && option.Action != nil && option.Action.Guards.ResumeRunID == q.ID
+		}
+		if option.ID == "ignore" {
+			dismiss = option.Label == "Dismiss this notice" && strings.Contains(option.ActionSummary, "do not start or cancel work")
+		}
+	}
+	if !retry || !dismiss {
+		t.Fatal(notice.Options)
+	}
+	initialCreates := 0
+	for _, name := range tools.calls {
+		if name == "open_review" || name == "start_task_agent" {
+			initialCreates++
+		}
+	}
+	r.readyErr = nil
+	if _, err = s.Inbox.Answer(context.Background(), nil, notice.ID, notice.Revision, "", "retry_remaining"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.executeNext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := s.Inbox.Get(context.Background(), notice.ID)
+	finalCreates := 0
+	for _, name := range tools.calls {
+		if name == "open_review" || name == "start_task_agent" {
+			finalCreates++
+		}
+	}
+	if err != nil || retried.DeliveryStatus != "succeeded" || len(r.submitted) != 3 || finalCreates != initialCreates || len(model.prompts) != 0 {
+		t.Fatal(retried, r.submitted, tools.calls, model.prompts, err)
+	}
+}

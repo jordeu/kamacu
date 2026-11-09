@@ -86,25 +86,34 @@ func inboxInputPrompt(engine, screen string) bool {
 	if engine == "codex" {
 		return codexScreenStatus(screen) == "idle"
 	}
+
 	lines := strings.Split(screen, "\n")
 	last := -1
+	hasPrompt := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if emptyAgentPrompt.MatchString(line) || (engine == "claude" || engine == "") && strings.HasPrefix(trimmed, "❯ Try ") {
+		// The latest input row wins. An older empty prompt does not authorize
+		// submitting into a newer row that already contains a user's draft.
+		if strings.HasPrefix(trimmed, "❯") || strings.HasPrefix(trimmed, "›") || strings.HasPrefix(trimmed, ">") {
 			last = i
+			hasPrompt = emptyAgentPrompt.MatchString(trimmed) || (engine == "claude" || engine == "") && strings.HasPrefix(trimmed, "❯ Try ")
 		}
 		if engine == "opencode" && strings.Contains(trimmed, "Ask anything") {
 			last = i
+			hasPrompt = true
 		}
 	}
-	if last < 0 {
+	if !hasPrompt {
 		return false
 	}
-	tail := strings.ToLower(strings.Join(lines[last+1:], "\n"))
+	// Dialog hints can precede the cursor row. Inspect its surrounding UI rather
+	// than treating phrases in old conversation output as a current dialog.
+	nearby := strings.ToLower(strings.Join(lines[max(0, last-3):], "\n"))
 	for _, hint := range []string{"enter to select", "enter to confirm", "enter to submit answer", "trust this folder", "trust this workspace"} {
-		if strings.Contains(tail, hint) {
+		if strings.Contains(nearby, hint) {
 			return false
 		}
 	}
-	return true
+
+	return hasPrompt
 }
