@@ -184,3 +184,27 @@ guard, so manually entered instructions cannot be followed by a duplicate
 handoff on retry. After entering input in its terminal, provide fresh instructions
 instead of retrying the old sequence. Optional recurrence metadata cannot hide
 the underlying failure notice.
+
+### Automatic recording recovery
+
+A readiness check or other read-only operation cannot create uncertain side
+effects. Temporary database failures retry the same journal write before any
+work is repeated. Lost read results can be read again. Successful side effects
+are reused, while unconfirmed side effects remain blocked for inspection.
+
+Recovery uses persisted attempts and backoff (five automatic resumptions), and
+updates the original message's execution progress without creating a question.
+Task, session and input guards are checked again before continuing. Startup
+reconciles older read-only recording failures only when all mutations are known
+and the user has not handled the failure notice or started a retry. Superseded
+notices are archived while recovery runs and refreshed if a real problem remains.
+
+If the database remains unavailable, the final notice is an **Operational
+issue**, with no required reply or free-text answer form. A bounded read-only
+model diagnosis can explain the failure, but cannot authorize a repeated side
+effect. Execution history is derived from the journal; a history-cache or UI
+progress failure does not invalidate confirmed work.
+
+Database diagnostics report connection-pool waits and journal transaction time
+separately. Agent-status polling releases its database cursor before inspecting
+transcripts and scans the transcript tree once per request.

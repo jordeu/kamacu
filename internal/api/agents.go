@@ -18,9 +18,10 @@ func AgentRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB) {
 }
 
 type agentHandlers struct {
-	mgr      *session.Manager
-	db       *sql.DB
-	globRoot string // ~/.claude/projects; tests inject a temp dir
+	mgr             *session.Manager
+	db              *sql.DB
+	transcriptCheck func(string, string) bool // optional filesystem probe for tests
+	globRoot        string                    // ~/.claude/projects; tests inject a temp dir
 }
 
 // agentStatusEntry is the exact JSON contract the 04-03 frontend consumes.
@@ -46,6 +47,10 @@ type agentStatusEntry struct {
 // that task replaces it (UI-SPEC: "Exited dot persists until a new agent
 // session starts"). Bash sessions never drive board state (D-48).
 func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
+	transcriptAvailable := transcriptLookup(a.globRoot)
+	if a.transcriptCheck != nil {
+		transcriptAvailable = func(id string) bool { return a.transcriptCheck(a.globRoot, id) }
+	}
 	// mgr.List() is newest-first (contract), so the FIRST agent entry seen
 	// per task is the newest.
 	newest := make(map[int64]session.Info)
@@ -141,7 +146,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			resumable := info.AgentStatus == "exited" && m.wtp.Valid &&
 				(m.engine == "opencode" && m.ocsid.Valid ||
 					m.engine == "codex" ||
-					m.engine != "opencode" && m.engine != "codex" && m.csid.Valid && transcriptExists(a.globRoot, m.csid.String))
+					m.engine != "opencode" && m.engine != "codex" && m.csid.Valid && transcriptAvailable(m.csid.String))
 			entries = append(entries, agentStatusEntry{
 				TaskID:         tid,
 				ProjectID:      m.projectID,
@@ -198,7 +203,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			Monitor:        globalAgent.Monitor,
 			ExitCode:       globalAgent.ExitCode,
 			StopRequested:  globalAgent.StopRequested,
-			Resumable:      globalAgent.AgentStatus == "exited" && gstate.resumable(a.globRoot),
+			Resumable:      globalAgent.AgentStatus == "exited" && gstate.resumable(a.globRoot, transcriptAvailable),
 			ResumeFallback: globalAgent.AgentStatus == "exited" && gstate.engine == "codex" && gstate.cxid.String == "",
 			PRNumber:       nil,
 			Source:         "global",
@@ -227,7 +232,14 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer rows.Close()
+	type persistedAgent struct {
+		id, pid                    int64
+		engine                     string
+		csid, ocsid, cxid, wtp     sql.NullString
+		prNumber                   sql.NullInt64
+		source, title, projectName string
+	}
+	persisted := []persistedAgent{}
 	for rows.Next() {
 		var id, pid int64
 		var engine string
@@ -236,9 +248,21 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		var source string
 		var title, projectName string
 		if err := rows.Scan(&id, &pid, &engine, &csid, &ocsid, &cxid, &wtp, &prNumber, &source, &title, &projectName); err != nil {
+			rows.Close()
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		persisted = append(persisted, persistedAgent{id, pid, engine, csid, ocsid, cxid, wtp, prNumber, source, title, projectName})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows.Close()
+	for _, meta := range persisted {
+		id, pid, engine, csid, ocsid, cxid, prNumber, source, title, projectName := meta.id, meta.pid, meta.engine, meta.csid, meta.ocsid, meta.cxid, meta.prNumber, meta.source, meta.title, meta.projectName
+
 		if _, hasManagerEntry := newest[id]; hasManagerEntry {
 			continue // already covered by the manager-derived pass
 		}
@@ -249,7 +273,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		// deleted) surfaces nothing.
 		resumable := engine == "opencode" && ocsid.Valid ||
 			engine == "codex" ||
-			engine != "opencode" && engine != "codex" && csid.Valid && transcriptExists(a.globRoot, csid.String)
+			engine != "opencode" && engine != "codex" && csid.Valid && transcriptAvailable(csid.String)
 		if !resumable {
 			continue
 		}
@@ -272,10 +296,6 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 			ProjectName:    projectName,
 		})
 	}
-	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	// Pass 2b — DB-derived post-restart global entry (GSESS-02): NO live
 	// manager entry, but the singleton carries a resumable engine id. Emitted
 	// only when resumable (the task pass's D-57 posture — non-resumable past
@@ -283,7 +303,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	// listed the global agent: at most ONE global entry in the feed at any
 	// time (Pitfall 1). Same synthesized shape as Pass 1b with sessionId ""
 	// and the honest exited state.
-	if !hasGlobalAgent && gstate.resumable(a.globRoot) {
+	if !hasGlobalAgent && gstate.resumable(a.globRoot, transcriptAvailable) {
 		entries = append(entries, agentStatusEntry{
 			TaskID:         0,
 			ProjectID:      0,
@@ -338,7 +358,7 @@ func (a *agentHandlers) loadGlobalResumeState() (globalResumeState, error) {
 // case). opencode and codex key off their persisted *_session_id alone (no
 // kamacu-side transcript files); claude keys off csid + the cwd-agnostic
 // transcript glob.
-func (g globalResumeState) resumable(globRoot string) bool {
+func (g globalResumeState) resumable(globRoot string, lookup ...func(string) bool) bool {
 	if g.rootPath == "" {
 		return false
 	}
@@ -348,5 +368,11 @@ func (g globalResumeState) resumable(globRoot string) bool {
 	case "codex":
 		return true
 	}
-	return g.csid.Valid && transcriptExists(globRoot, g.csid.String)
+	if !g.csid.Valid {
+		return false
+	}
+	if len(lookup) > 0 {
+		return lookup[0](g.csid.String)
+	}
+	return transcriptExists(globRoot, g.csid.String)
 }

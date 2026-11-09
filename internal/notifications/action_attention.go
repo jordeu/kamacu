@@ -35,9 +35,14 @@ func (ex *actionExecutor) attention(ctx context.Context, state, result string) e
 	canRetry := ex.retrySafe && unknown == 0 && state != "uncertain" && ex.seq.Validate() == nil
 
 	uncertain := unknown > 0 || state == "uncertain"
+	operational := run.RecoveryClass == "exhausted"
+	if operational {
+		canRetry = false
+	}
 	var replacement *inbox.Option
 	copy := actionAttentionCopy(run, uncertain, canRetry, result)
 	stale := false
+	diagnosed := false
 	if !uncertain {
 		detail, option, e := ex.staleTaskAttention(ctx, run)
 		if e != nil {
@@ -50,7 +55,7 @@ func (ex *actionExecutor) attention(ctx context.Context, state, result string) e
 			stale = true
 		}
 	}
-	if !stale && !uncertain && (copy.summary == "Your requested action could not finish" || strings.Contains(copy.summary, "could not complete the requested step")) {
+	if !stale && !uncertain && (operational || copy.summary == "Your requested action could not finish" || strings.Contains(copy.summary, "could not complete the requested step")) {
 		var diagnosis *failureDiagnosis
 		// Concrete deterministic guard explanations need no model call. Unknown
 		// internal/transport failures get one read-only diagnosis before a notice.
@@ -60,12 +65,25 @@ func (ex *actionExecutor) attention(ctx context.Context, state, result string) e
 		copy.summary = concreteFailureFallback(run, result)
 		copy.question = copy.summary + "."
 		if diagnosis != nil {
+			diagnosed = true
 			canRetry = canRetry && diagnosis.RetryRecommended
 			copy.summary = diagnosis.Summary
 			copy.context = diagnosis.Explanation + "\n\nNext step: " + diagnosis.NextStep + "\n\nRecorded failure: " + result
 			copy.question = diagnosis.NextStep
 		}
 	}
+	if operational {
+		replacement = nil
+		canRetry = false
+		copy.summary = "Automatic action recovery stopped: database recording failed"
+		copy.question = "Kamacu could not finish automatic recovery. No reply is required."
+		details := result
+		if diagnosed {
+			details = copy.context
+		}
+		copy.context = "The database recording failure persisted beyond the automatic recovery budget. Recorded task/session setup is preserved. No uncertain mutation will be repeated. This is an operational failure, not a request for instructions.\n\n" + details
+	}
+
 	if replacement != nil {
 		options = append(options, *replacement)
 	}
@@ -86,7 +104,7 @@ func (ex *actionExecutor) attention(ctx context.Context, state, result string) e
 	options = append(options, inbox.Option{ID: "ignore", Label: "Dismiss this notice", Action: &ignore, ActionSummary: "Close this notice. Keep existing tasks and sessions; do not start or cancel work."})
 
 	context := copy.context + "\n\nOriginal request: " + q.Question + "\n" + q.Summary
-	_, err = ex.s.Inbox.PublishNotificationAttention(ctx, q.ID, inbox.Create{Abstract: copy.summary, Summary: copy.summary, Context: context, Question: copy.question, Options: options})
+	_, err = ex.s.Inbox.PublishNotificationAttention(ctx, q.ID, inbox.Create{Informational: operational, Abstract: copy.summary, Summary: copy.summary, Context: context, Question: copy.question, Options: options})
 	return err
 }
 
@@ -138,7 +156,7 @@ func (ex *actionExecutor) copyCompletedSteps(ctx context.Context) error {
 // database, rather than an in-memory error path, decides whether delivery is due.
 func (s *Service) deliverPendingActionAttention(ctx context.Context) (bool, error) {
 	var id string
-	err := s.DB.QueryRowContext(ctx, `SELECT id FROM notification_runs WHERE attention_pending=1 AND attention_question_id='' ORDER BY updated_at,id LIMIT 1`).Scan(&id)
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM notification_runs WHERE attention_pending=1 AND (attention_question_id='' OR EXISTS(SELECT 1 FROM inbox_questions a WHERE a.id=notification_runs.attention_question_id AND a.reason='automatic_recovery' AND a.status='unanswered')) ORDER BY updated_at,id LIMIT 1`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

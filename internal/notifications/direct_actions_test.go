@@ -1078,7 +1078,7 @@ func TestReviewReadinessNoticeExplainsRecoveryAndRetriesWithoutDuplicateTasks(t 
 
 func TestOwnAgentStartupMayAdvanceTodoWithoutInvalidatingHandoff(t *testing.T) {
 	s, m, r, tools, source := directFixture(t)
-	s.DB.Exec(`UPDATE tasks SET recurrent=1 WHERE id=1`)
+	s.DB.Exec(`UPDATE tasks SET recurrent=1,status='todo' WHERE id=1`)
 	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "run_recurring_task", ProjectID: 1, TaskID: 1, TaskName: "renovate", Instructions: "Review the updates"})
 	tools.before = func(name string) {
 		if name == "start_task_agent" {

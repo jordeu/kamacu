@@ -94,6 +94,7 @@ type Question struct {
 	AcknowledgedAt       *int64     `json:"acknowledged_at"`
 }
 type Create struct {
+	Informational                     bool `json:"-"`
 	completionTaskStatus              string
 	origin, deliveryMode              string
 	evidenceRevision, inputGeneration uint64

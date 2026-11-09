@@ -146,6 +146,9 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 	defer db.Close()
+	poolCtx, cancelPool := context.WithCancel(ctx)
+	defer cancelPool()
+	go store.ObservePool(poolCtx, db)
 
 	if err := store.Migrate(db); err != nil {
 		slog.Error("running migrations", "error", err)

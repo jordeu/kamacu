@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -33,4 +34,26 @@ func defaultTranscriptGlobRoot() string {
 		return ""
 	}
 	return filepath.Join(home, ".claude", "projects")
+}
+
+// Status polling checks many tasks. Scan transcripts once, outside DB cursors,
+// instead of globbing the entire projects tree separately for every task.
+func transcriptLookup(root string) func(string) bool {
+	var index map[string]bool
+	return func(id string) bool {
+		if root == "" || id == "" {
+			return false
+		}
+		if _, err := uuid.Parse(id); err != nil {
+			return false
+		}
+		if index == nil {
+			index = map[string]bool{}
+			matches, _ := filepath.Glob(filepath.Join(root, "*", "*.jsonl"))
+			for _, path := range matches {
+				index[strings.TrimSuffix(filepath.Base(path), ".jsonl")] = true
+			}
+		}
+		return index[id]
+	}
 }

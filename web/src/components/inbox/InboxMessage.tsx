@@ -46,6 +46,7 @@ export function InboxMessage({
     ? completionActions(q)
     : q.options;
   const pending = q.status === "pending";
+  const operational = q.reason === "operational_failure";
   function navigateToTask() {
     onNavigate?.();
     navigate(feedbackTaskURL(q));
@@ -178,7 +179,7 @@ export function InboxMessage({
             label="Original execution steps"
           />
         )}
-        {notification && <RuleImprovement questionID={q.id} />}
+        {notification && !operational && <RuleImprovement questionID={q.id} />}
         {pending ? (
           <div className="mt-6 space-y-6">
             <div>
@@ -191,7 +192,11 @@ export function InboxMessage({
             </div>
             <div>
               <h3 className="mb-2 text-sm font-medium text-muted-foreground">
-                {completion ? "What was done" : "Decision context"}
+                {operational
+                  ? "Failure details"
+                  : completion
+                    ? "What was done"
+                    : "Decision context"}
               </h3>
               <Context text={q.context} />
             </div>
@@ -289,14 +294,20 @@ export function InboxMessage({
         {pending && (
           <div className="mt-6 space-y-4 border-t border-border pt-5">
             <p className="text-sm font-medium">
-              {completion ? "What next?" : "Your answer"}{" "}
+              {operational
+                ? "Recovery actions"
+                : completion
+                  ? "What next?"
+                  : "Your answer"}{" "}
               {choices.length > 0 &&
                 (completion ||
                   (q.delivery_mode !== "terminal" && !q.hidden)) && (
                   <span className="ml-1 font-normal text-muted-foreground">
-                    {completion
-                      ? "Choose what happens next."
-                      : "Choose an option to send it immediately."}
+                    {operational
+                      ? "No reply is required."
+                      : completion
+                        ? "Choose what happens next."
+                        : "Choose an option to send it immediately."}
                   </span>
                 )}
             </p>
@@ -365,6 +376,7 @@ export function InboxMessage({
                 </div>
               )}
             {!completion &&
+              !operational &&
               q.delivery_mode !== "terminal" &&
               q.delivery_mode !== "claude_question" &&
               !q.hidden && (
@@ -485,7 +497,11 @@ export function InboxMessage({
                 aria-hidden="true"
               />
               <span className="hidden sm:inline">
-                {completion ? "Completed" : "Needs reply"}
+                {operational
+                  ? "Operational issue"
+                  : completion
+                    ? "Completed"
+                    : "Needs reply"}
               </span>
             </span>
           ) : (

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -502,5 +503,35 @@ func TestAgentStatusLiveTracksProcessNotClassification(t *testing.T) {
 	entries := statusEntriesDirect(t, mgr, db, t.TempDir())
 	if len(entries) != 1 || entries[0]["live"] != false || entries[0]["status"] != "exited" {
 		t.Fatalf("stopped terminal still live: %+v", entries)
+	}
+}
+
+func TestAgentStatusReleasesDatabaseBeforeTranscriptChecks(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "status.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO projects(id,name,repo_path) VALUES(1,'Project','/tmp/project');INSERT INTO tasks(id,project_id,title,status,position,worktree_path,claude_session_id) VALUES(1,1,'Task','done',0,'/tmp/task','aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001')`); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	h := &agentHandlers{db: db, mgr: session.NewManager(), globRoot: t.TempDir(), transcriptCheck: func(root, id string) bool {
+		calls++
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		var count int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM tasks`).Scan(&count); err != nil {
+			t.Fatal("filesystem work held the sole database connection", err)
+		}
+		return true
+	}}
+	w := httptest.NewRecorder()
+	h.status(w, httptest.NewRequest("GET", "/api/agents/status", nil))
+	if w.Code != http.StatusOK || calls != 1 {
+		t.Fatal(w.Code, calls, w.Body.String())
 	}
 }
