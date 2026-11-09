@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"kamacu/internal/inbox"
+	"kamacu/internal/inboxaction"
 	"kamacu/internal/store"
 )
 
@@ -18,7 +19,8 @@ const agentPrompt = `You are the notification decision-making agent. Read the en
 Do not invent acknowledgements or follow-up work for resolved events. A merged PR usually resolves requests to merge and awaited approvals; preserve genuinely unresolved or post-merge requests. Apply repository exclusions and their actual mention exceptions; a team assignment is not a personal mention. Routine bot reports with no new findings need no feedback. Do not repeat material already covered by an answered, dismissed, or pending Inbox message. A dismissal is evidence of handling that material, not a permanent new preference. An answer requesting clarification, or a successfully delivered follow-up question, does not establish completion of the underlying work. Prefer a concrete task proposal over repeating an unhelpful earlier question. An answered message with failed or uncertain delivery is not proof that its requested work completed; check task/session state and never automatically resend it.
 Choose an existing active or closed implementation task when evidence links it to the work. If no task owns an actionable issue, propose creating a new investigation task instead of asking the user to name a nonexistent owner. Reviews use route_review and PR review workspaces, never ordinary todo tasks; an explicit rule can group reviews in an existing recurring task via route_recurring. Missing metadata alone does not justify an Inbox question: use the available read-only tools first, and ask only when the answer materially changes a useful next step. Preserve known task links independently of action choices.
 The initial bundle includes full details when they fit. Otherwise it contains a complete index with detail_available=true. read_subject, read_task and read_history retrieve exact frozen detail pages; offset is a byte cursor and next_offset=-1 means complete. More read-only Kamacu tools may be listed. Never call tools outside this supplied catalog. No mutation tools are available. Source failures and unread pages must not be treated as verified negative facts.
-Return one JSON turn: action=read with reads [{tool_name,arguments (JSON string)}], or action=finish with messages, decisions and supersede_ids. Populate unused arrays with []. A finish decision must cover every event ID exactly once, as outcome=ignore or message, with a concise reason, relevant enabled rule_ids, and evidence_refs drawn from the subject evidence IDs or recorded read IDs. Messages may group related events, but must refer only to events marked message; every such event must have a message. Every message needs a self-contained summary, context, question, why_it_matters, rule_ids, evidence_refs, linked_task_ids, suggested_replies (up to three concise optional reply choices), and plan {workflow,project_id,task_id,pr_numbers,task_name,work_kind}. Use full source URLs. Each message must cite at least one evidence ID from its own subjects, alongside any successful lookup IDs used for additional context. Unavailable lookups are not evidence. Refer to applicable rule IDs; use [] when no specific rule applies. Avoid generic 'inspect this activity' or repeated 'nothing has been done' disclaimers. For genuinely necessary clarification, workflow=clarify and the question itself asks for the missing information. Supersede only pending questions whose entire outstanding request is now resolved or replaced; never discard unrelated items in a grouped card. No work is started by this response. Only a later Inbox reply can authorize actions.`
+Return one JSON turn: action=read with reads [{tool_name,arguments (JSON string)}], or action=finish with messages, decisions and supersede_ids. Populate unused arrays with []. A finish decision must cover every event ID exactly once, as outcome=ignore or message, with a concise reason, relevant enabled rule_ids, and evidence_refs drawn from the subject evidence IDs or recorded read IDs. Messages may group related events, but must refer only to events marked message; every such event must have a message. Every message needs a self-contained summary, context, question, why_it_matters, rule_ids, evidence_refs, linked_task_ids, options (one to four typed options), and plan {workflow,project_id,task_id,pr_numbers,task_name,work_kind}. Use full source URLs. Each message must cite at least one evidence ID from its own subjects, alongside any successful lookup IDs used for additional context. Unavailable lookups are not evidence. Refer to applicable rule IDs; use [] when no specific rule applies. Avoid generic 'inspect this activity' or repeated 'nothing has been done' disclaimers. For genuinely necessary clarification, workflow=clarify and the question itself asks for the missing information. Supersede only pending questions whose entire outstanding request is now resolved or replaced; never discard unrelated items in a grouped card. No work is started by this response. Only a later Inbox reply can authorize actions.
+Each actionable option must contain a distinct saved sequence: {id,label,mode:"action",actions:[...]}. An operation has busy_policy,id,kind,project_id,task_id,task_ref,session_id,pr_numbers,task_name,instructions,status,title,description,link_role; unused values are 0, "", or []. Supported kinds: start_reviews, run_recurring_task, continue_task, create_investigation, send_to_session, close_session, complete_task, update_task, associate_pr, ignore, open_task. No arbitrary tools, shell commands, or loops. busy_policy defaults to ""/wait_idle. An explicit alternative can use send_now to submit while a task is working; Kamacu labels it accordingly. Permission/choice dialogs are never automatically answered. Task_ref refers to an earlier task-producing operation's id instead of task_id. Write the complete handoff instructions now, using full source URLs, so buttons need no extra model call. start_reviews uses the configured application review prompt; its optional instructions are follow-up context, never a replacement initial prompt. Reviews cannot use continue_task/create_investigation. Different options such as Review all, Review only one, or Ignore must have different operation targets. Ignore/open_task must be standalone. complete_task uses status done/in_review, the known task and explicit live session_id when present. Closing/moving a task is only offered when the source evidence supports completion. For clarification-only choices use mode:"reply",actions:[]; all other buttons use mode:"action". Always allow free-text replies. Kamacu validates/snapshots targets, sessions and prompts, then performs startup, readiness, paste+Enter and progress without further model decisions.`
 
 type AgentSubject struct {
 	ViewerMentioned *bool             `json:"viewer_mentioned"`
@@ -32,6 +34,7 @@ type AgentSubject struct {
 	Event           Event             `json:"source"`
 }
 type AgentTask struct {
+	SessionState       *ActionSession      `json:"session_state,omitempty"`
 	ReadID             string              `json:"read_id"`
 	Description        string              `json:"description,omitempty"`
 	Work               []store.SessionWork `json:"recent_session_work,omitempty"`
@@ -69,16 +72,16 @@ type AgentPlan struct {
 	WorkKind  string  `json:"work_kind"`
 }
 type AgentMessage struct {
-	EventIDs         []int64   `json:"event_ids"`
-	Summary          string    `json:"summary"`
-	Context          string    `json:"context"`
-	Question         string    `json:"question"`
-	Why              string    `json:"why_it_matters"`
-	RuleIDs          []string  `json:"rule_ids"`
-	EvidenceRefs     []string  `json:"evidence_refs"`
-	LinkedTaskIDs    []int64   `json:"linked_task_ids"`
-	SuggestedReplies []string  `json:"suggested_replies"`
-	Plan             AgentPlan `json:"plan"`
+	EventIDs      []int64       `json:"event_ids"`
+	Summary       string        `json:"summary"`
+	Context       string        `json:"context"`
+	Question      string        `json:"question"`
+	Why           string        `json:"why_it_matters"`
+	RuleIDs       []string      `json:"rule_ids"`
+	EvidenceRefs  []string      `json:"evidence_refs"`
+	LinkedTaskIDs []int64       `json:"linked_task_ids"`
+	Options       []AgentOption `json:"options"`
+	Plan          AgentPlan     `json:"plan"`
 }
 type AgentDecision struct {
 	EventIDs     []int64  `json:"event_ids"`
@@ -213,6 +216,13 @@ func (s *Service) agentSnapshot(ctx context.Context, events []RawNotification, r
 		}
 		if s.TaskSession != nil {
 			t.LiveSession = s.TaskSession(t.ID)
+			if t.LiveSession != "" && s.Actions != nil {
+				state, err := s.Actions.Session(ctx, t.LiveSession)
+				if err != nil {
+					return out, err
+				}
+				t.SessionState = &state
+			}
 		}
 		out.Tasks = append(out.Tasks, t)
 	}
@@ -562,15 +572,18 @@ func validateAgentResponse(snapshot AgentSnapshot, t AgentTurn, evidence map[str
 		if len(m.EventIDs) == 0 || strings.TrimSpace(m.Why) == "" || len(m.Why) > 4000 || len(m.EvidenceRefs) == 0 {
 			return errors.New("messages require source evidence and an explanation")
 		}
-		if len(m.SuggestedReplies) > 3 {
-			return errors.New("too many suggested replies")
+		if len(m.Options) > 4 {
+			return errors.New("too many Inbox options")
 		}
-		seenReplies := map[string]bool{}
-		for _, reply := range m.SuggestedReplies {
-			if strings.TrimSpace(reply) == "" || len(reply) > 500 || seenReplies[reply] {
-				return errors.New("invalid or duplicate suggested reply")
+		if m.Plan.Workflow != "clarify" && len(m.Options) == 0 {
+			return errors.New("actionable messages require saved option actions")
+		}
+		optionIDs := map[string]bool{}
+		for _, o := range m.Options {
+			if optionIDs[o.ID] || o.ID == "triage_noop" {
+				return errors.New("option IDs must be unique; triage_noop is reserved")
 			}
-			seenReplies[reply] = true
+			optionIDs[o.ID] = true
 		}
 		sourceEvidence := map[string]bool{}
 		for _, sub := range snapshot.Subjects {
@@ -599,9 +612,10 @@ func validateAgentResponse(snapshot AgentSnapshot, t AgentTurn, evidence map[str
 			}
 			messaged[id] = true
 		}
-		if _, err := decodeStep([]byte(mustJSON(Step{Action: "ask", Summary: m.Summary, Context: m.Context, Question: m.Question, Options: []string{}}))); err != nil {
-			return err
+		if strings.TrimSpace(m.Question) == "" || strings.TrimSpace(m.Summary) == "" || strings.TrimSpace(m.Context) == "" || len(m.Question) > 4000 || len(m.Summary) > 1600 || len(m.Context) > 24000 {
+			return errors.New("notification message fields are required and must fit their length limits")
 		}
+
 		if m.Plan.TaskID < 0 || m.Plan.ProjectID < 0 || len(m.Plan.PRNumbers) > 20 {
 			return errors.New("action requires valid task/project IDs and bounded PR targets")
 		}
@@ -756,13 +770,30 @@ func (s *Service) agentActions(ctx context.Context, snapshot AgentSnapshot, t Ag
 		}
 		s.setPlanSession(&p)
 		options := []inbox.Option{}
-		if p.Workflow != "clarify" {
-			options = append(options, inbox.Option{ID: "execute_plan", Label: notificationActionLabel(p)})
+		for _, o := range m.Options {
+			option, err := s.optionSequence(ctx, snapshot, m, o)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			options = append(options, option)
+			if option.Action != nil {
+				links, err := actionLinks(ctx, s, *option.Action)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				for _, l := range links {
+					if !slices.ContainsFunc(p.Bindings, func(b inbox.TaskLink) bool { return b.TaskID == l.TaskID }) {
+						p.Bindings = append(p.Bindings, l)
+					}
+				}
+			}
 		}
-		for i, reply := range m.SuggestedReplies {
-			options = append(options, inbox.Option{ID: fmt.Sprintf("suggestion_%d", i+1), Label: reply})
+		ignore := inboxaction.Sequence{Version: inboxaction.Version, Actions: []inboxaction.Action{{ID: "ignore", Kind: "ignore"}}}
+		if !slices.ContainsFunc(options, func(o inbox.Option) bool {
+			return o.Action != nil && len(o.Action.Actions) == 1 && o.Action.Actions[0].Kind == "ignore"
+		}) {
+			options = append(options, inbox.Option{ID: "triage_noop", Label: "Leave these updates alone", Action: &ignore, ActionSummary: ignore.Summary()})
 		}
-		options = append(options, inbox.Option{ID: "triage_noop", Label: "Leave these updates alone"})
 		source := subjects[m.EventIDs[0]]
 		context := m.Context + "\n\nWhy this appeared: " + m.Why
 		if len(m.RuleIDs) > 0 {
@@ -817,7 +848,7 @@ var agentSchema = func() map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": keys}
 	}
 	plan := object(map[string]any{"workflow": str, "project_id": integer, "task_id": integer, "pr_numbers": array(integer), "task_name": str, "work_kind": str})
-	message := object(map[string]any{"event_ids": array(integer), "summary": str, "context": str, "question": str, "why_it_matters": str, "rule_ids": array(str), "evidence_refs": array(str), "linked_task_ids": array(integer), "suggested_replies": array(str), "plan": plan})
+	message := object(map[string]any{"event_ids": array(integer), "summary": str, "context": str, "question": str, "why_it_matters": str, "rule_ids": array(str), "evidence_refs": array(str), "linked_task_ids": array(integer), "options": array(agentOptionSchema()), "plan": plan})
 	decision := object(map[string]any{"event_ids": array(integer), "outcome": str, "reason": str, "rule_ids": array(str), "evidence_refs": array(str)})
 	return object(map[string]any{"action": str, "reads": array(object(map[string]any{"tool_name": str, "arguments": str})), "messages": array(message), "decisions": array(decision), "supersede_ids": array(str)})
 }()

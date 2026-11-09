@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"kamacu/internal/store"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -482,4 +483,33 @@ func compactGitHub(v any) any {
 	default:
 		return v
 	}
+}
+
+// ActionPR fetches only current PR identity/state/title for a saved review action.
+// Execution does not need to reload the full discussion into a model prompt.
+func (g GitHub) ActionPR(ctx context.Context, s Source, event Event) (Event, error) {
+	repo, n, err := store.PRIdentity(event.URL, 0)
+	if err != nil {
+		return event, err
+	}
+	raw, _, err := g.api(freshGitHubReadCache(ctx), g.config(s).Hostname, fmt.Sprintf("repos/%s/pulls/%d", repo, n))
+	if err != nil {
+		return event, err
+	}
+	var p struct {
+		Title  string `json:"title"`
+		State  string `json:"state"`
+		Draft  *bool  `json:"draft"`
+		Merged bool   `json:"merged"`
+	}
+	if err = json.Unmarshal(raw, &p); err != nil {
+		return event, err
+	}
+	event.SubjectTitle = p.Title
+	event.SubjectState = p.State
+	event.PRFacts = &PRFacts{Available: true, State: p.State, Draft: p.Draft}
+	if p.Merged {
+		event.PRFacts.State = "merged"
+	}
+	return event, nil
 }

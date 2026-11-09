@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"kamacu/internal/inbox"
+	"kamacu/internal/inboxaction"
 	"kamacu/internal/monitor"
 	"kamacu/internal/settings"
 )
@@ -25,6 +25,7 @@ type Model interface {
 type Service struct {
 	DB             *sql.DB
 	Inbox          *inbox.Service
+	Actions        ActionRuntime
 	Metrics        *monitor.Metrics
 	Model          Model
 	Tools          Tools
@@ -34,6 +35,7 @@ type Service struct {
 	Providers      map[string]Provider
 	// workMu serializes ticks; source CRUD has its own short lock.
 	workMu   sync.Mutex
+	actionMu sync.Mutex
 	sourceMu sync.Mutex
 }
 
@@ -120,14 +122,89 @@ func (s *Service) Recover(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, `UPDATE notification_batches SET status='failed',error='Processing was interrupted. Notifications remain pending; start processing again.',updated_at=? WHERE status='running'`, time.Now().UnixMilli()); err != nil {
 		return err
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE notification_runs SET state='uncertain' WHERE state='running'`)
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE inbox_questions SET delivery_status='uncertain',execution_result='Execution was interrupted. Check the linked task or session before asking to try again.' WHERE id IN (SELECT id FROM notification_runs WHERE state='uncertain')`)
-	return err
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id,action FROM notification_runs WHERE state='running'`)
+	if err != nil {
+		return err
+	}
+	type interrupted struct{ id, action string }
+	runs := []interrupted{}
+	for rows.Next() {
+		var run interrupted
+		if err = rows.Scan(&run.id, &run.action); err != nil {
+			rows.Close()
+			return err
+		}
+		runs = append(runs, run)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if _, err = tx.ExecContext(ctx, `UPDATE notification_action_steps SET state=CASE WHEN is_mutation=1 THEN 'uncertain' ELSE 'blocked' END,result='Step interrupted by restart; inspect before continuing.',finished_at=? WHERE run_id=? AND state='running'`, time.Now().UnixMilli(), run.id); err != nil {
+			return err
+		}
+		var unknown, blocked, mutations int
+		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(sum(state='uncertain'),0),COALESCE(sum(state IN ('blocked','failed')),0),COALESCE(sum(state='succeeded' AND is_mutation=1),0) FROM notification_action_steps WHERE run_id=?`, run.id).Scan(&unknown, &blocked, &mutations); err != nil {
+			return err
+		}
+		state := "queued"
+		if unknown > 0 {
+			state = "uncertain"
+		} else if run.action == "{}" || blocked > 0 {
+			state = "blocked"
+			if mutations > 0 {
+				state = "partial"
+			}
+		}
+		retryable := false
+		if state != "queued" && state != "uncertain" {
+			var seq inboxaction.Sequence
+			if json.Unmarshal([]byte(run.action), &seq) == nil && seq.Validate() == nil && seq.Guards.ResumeRunID == "" {
+				retryable = true
+			}
+		}
+		result := "Execution was interrupted. Check the recorded steps and linked tasks before continuing."
+		if state == "queued" {
+			result = "Resuming recorded action steps after restart; completed steps will not be repeated."
+		}
+		if run.action == "{}" {
+			result = "Reply interpretation was interrupted before work started. Provide the reply again or handle it yourself."
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE notification_runs SET state=?,attention_pending=?,attention_retryable=?,updated_at=? WHERE id=?`, state, state != "queued", retryable, time.Now().UnixMilli(), run.id); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE inbox_questions SET delivery_status=?,execution_result=?,revision=revision+1,updated_at=? WHERE id=?`, state, result, time.Now().UnixMilli(), run.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+
 }
 func (s *Service) Run(ctx context.Context) {
+	actionDone := make(chan struct{})
+	defer func() { <-actionDone }()
+	go func() {
+		defer close(actionDone)
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.executeNext(ctx); err != nil && ctx.Err() == nil {
+					slog.Warn("Inbox action execution", "error", err)
+				}
+			}
+		}
+	}()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -144,11 +221,7 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) Tick(ctx context.Context) error {
 	s.workMu.Lock()
 	defer s.workMu.Unlock()
-	// Reply execution has priority over collection; terminal monitoring has its
-	// own workers and is never blocked by this service's locks or inference.
-	if err := s.executeNext(ctx); err != nil {
-		return err
-	}
+	// Inbox actions have their own worker and never block source collection.
 	if err := s.processRulePreview(ctx); err != nil {
 		return err
 	}
@@ -234,59 +307,6 @@ func (s *Service) ingest(ctx context.Context, source Source, batch Batch) error 
 		return err
 	}
 	return tx.Commit()
-}
-
-func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
-	if len(prompt) > 192000 {
-		return Step{}, errors.New("notification context exceeds inference limit; narrow the request")
-	}
-	if s.Model == nil {
-		return Step{}, errors.New("notification model is unavailable")
-	}
-	p, err := s.notificationProfile(ctx)
-	if err != nil {
-		return Step{}, err
-	}
-	callCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	start := time.Now()
-	slog.Debug("notification inference started", "profile", p.ID, "prompt_bytes", len(prompt))
-	var step Step
-	_, err = s.Model.GenerateValidatedJSON(callCtx, p, prompt, stepSchema, func(raw []byte) error {
-		var validationErr error
-		step, validationErr = decodeStep(raw)
-		return validationErr
-	})
-	slog.Debug("notification inference finished", "profile", p.ID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
-	if err != nil {
-		return Step{}, err
-	}
-
-	return step, nil
-}
-func (s *Service) projectContext(ctx context.Context, repo string) (string, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.name,t.id,t.title,t.status,t.source,t.pr_number,t.recurrent FROM projects p LEFT JOIN tasks t ON t.project_id=p.id WHERE lower(p.github_repo)=lower(?) ORDER BY p.id,CASE WHEN t.status='done' THEN 1 ELSE 0 END,t.updated_at DESC LIMIT 100`, repo)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var pid int64
-		var name string
-		var tid, pr sql.NullInt64
-		var title, status, source sql.NullString
-		var recurrent sql.NullBool
-		if err = rows.Scan(&pid, &name, &tid, &title, &status, &source, &pr, &recurrent); err != nil {
-			return "", err
-		}
-		out = append(out, map[string]any{"project_id": pid, "project_name": name, "task_id": tid.Int64, "title": title.String, "status": status.String, "source": source.String, "pr_number": pr.Int64, "recurrent": recurrent.Bool})
-	}
-	raw, _ := json.Marshal(out)
-	return string(raw), rows.Err()
-}
-func sourceUnavailable(err error) string {
-	return fmt.Sprintf("Notification processing failed: %v", err)
 }
 
 // RemoveSource disconnects collection but preserves notification history.

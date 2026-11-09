@@ -13,6 +13,18 @@ import (
 
 func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
 	notificationRuleRoutes(mux, service)
+	mux.HandleFunc("GET /api/notifications/actions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		run, err := service.ActionRun(r.Context(), r.PathValue("id"))
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeError(w, 404, "action run not found")
+			} else {
+				writeError(w, 500, err.Error())
+			}
+			return
+		}
+		writeJSON(w, 200, run)
+	})
 
 	mux.HandleFunc("GET /api/notifications", func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")

@@ -68,169 +68,79 @@ The live corpus is opt-in and submits only synthetic fixtures to the current Cla
 
 ## External notification sources
 
-Under **Settings → Notification sources**, add GitHub to collect new activity in
-repositories linked to Kamacu projects. Collection uses the server's current
-`gh` login and the GitHub notifications API. Install and authenticate `gh` with
-access to notifications first. This first provider supports github.com; the
-provider registry also supports adding other source implementations.
+Add GitHub under Settings → Notifications. Collection uses the server's bound
+`gh` account and repositories linked to registered projects. Polling, collection,
+and manual archiving do not invoke a model or change GitHub read state. Pausing a
+source retains its checkpoint; disconnecting retains its history.
 
-Collection starts at registration time, without importing an old unread backlog.
-GitHub read/done state stays unchanged. Polling starts at one-minute intervals
-and respects GitHub's advertised polling interval. Failed or incomplete scans
-retain their checkpoint. The source is bound to the first successfully observed
-account: switching `gh` accounts produces a diagnostic instead of mixing account
-history. Account identity is checked again before enrichment and every notification
-action, independently of polling. A mismatch stops processing before further
-actions. Disconnect and add the source again to start with another account.
-Disconnection preserves inbox history. Pausing retains the checkpoint and catches
-up on activity after resuming. Turning off GitHub integration pauses collection
-and notification actions too.
+Choose a notification processing model independently of terminal monitoring.
+**Process pending** captures the pending event revisions, rules and Inbox history.
+One batch agent reads the plain numbered rules and context, with bounded read-only
+lookups when needed. It decides relevance, grouping, task ownership and wording
+in one workflow. Rules have stable IDs and save directly; there is no compiler,
+held category, or automatic uncertainty-rule bypass. Preview runs the same agent
+without publishing messages or starting work.
 
-Collected notifications appear in **Notifications**, with **Pending**, **Held**, and
-**Archived** lists. Collection and manual archiving do not invoke a model.
-**Process pending** captures a durable snapshot of pending inputs and the active
-rule-set revision. New arrivals wait for the next run. Repeated clicks join the
-active run. Processing requires an active rule set.
+### Saved option actions
 
-### Notification rules
+Each actionable notification option carries its own versioned sequence of typed
+application operations. Different buttons can target different PR subsets or
+existing tasks. The browser sends only the option ID and question revision;
+Kamacu atomically saves that exact option action with the answer. Selecting a
+button does not invoke the orchestration model. Clarification choices are marked
+as replies and are interpreted like free text.
 
-Under notification settings, write one instruction per rule. Each rule has a stable
-ID and revision. Saving creates a draft; **Prepare rules** queues a model job that
-converts changed instructions into validated conditions and effects. Unchanged
-compiled instructions can be reused. The compiler identifies filtering, grouping,
-action, and presentation clauses. Each rule shows **Compiled**, **LLM evaluated · not
-compiled**, or **Not compiled · awaiting preparation**. When compilation cannot
-represent a rule faithfully, that rule falls back to LLM evaluation; its explanation
-and suggested alternative rules appear beside its text. The suggestions are never
-applied automatically. Other rules can still compile. You can also explicitly choose
-**Use LLM evaluation**, or choose automatic compilation again to retry a rewrite.
-Review each rule's mode and compiled interpretation, including
-its missing-evidence behavior and priority, then explicitly activate the revision.
-The global monitoring model handles compilation and notification processing.
+Supported operations are `start_reviews`, `run_recurring_task`, `continue_task`,
+`create_investigation`, `send_to_session`, `close_session`, `complete_task`,
+`update_task`, `associate_pr`, `ignore`, and `open_task`. Sequences have 1–10
+operations and up to 20 PRs per operation. A task reference can refer to an earlier
+task-producing operation instead of inventing an ID. Operations cannot execute
+arbitrary MCP tools, shell commands, or GitHub mutations. Task-agent instructions
+are saved and previewable before the user selects an option.
 
-Filtering conditions on repository and verified subject facts run before activity
-classification. Conditions evaluate to true, false, or unknown. Unknown evidence
-holds affected activity outside the inbox by default; continuing requires an explicit
-rule instruction. A direct-mention exception belongs to its own rule and cannot
-bypass unrelated exclusions. A team review request does not prove an individual
-assignment. Only verified individual assignment or a current directly addressed
-request can produce a personal review request.
+Review actions open or reuse proper PR review tasks, verify current PR state and
+account identity, resolve the configured review prompt, start/resume an agent if
+needed, wait for its input readiness, and submit the prompt with bracketed paste
+followed by a separate Enter key. Existing initialized review agents receive the
+saved follow-up context; initial prompts with uncertain delivery are never resent.
+Starting an agent is not counted as successful handoff until submission succeeds.
 
-The model classifies independent activities using cited source evidence. Factual
-conditions run in code; semantic conditions use a bounded model check that must
-cover every condition and cite supplied evidence. LLM-evaluated rules are interpreted
-from their full text for each activity, including filtering, grouping, routing and
-presentation. Every rule must receive a result with source-backed effects; ambiguous
-meaning or missing evidence holds the activity. Compiled exclusions cannot be bypassed
-by a fallback rule. Interpretation failures leave inputs pending for retry.
-Suppression wins over action
-selection. Conflicting action or grouping choices hold the activity for inspection.
-Grouping runs after filtering and action planning, so different owners or workflows
-are not combined. The writer describes the resulting plan and cannot override it. Its input contains
-only admitted citations, their source identity, PR authorship, latest loaded review-state
-metadata for cited reviewers, and resolved action plans; project
-task catalogs, full discussions, and excluded activities are omitted. Writer inputs
-are limited to 32 KB, splitting large inputs between existing cards while preserving
-each card's grouping. `notification writer input` logs report prompt bytes, card count,
-and subject count for each batch/project.
+Task continuation and recurring operations reuse current task sessions or resume
+stored conversations and deliver the saved instructions. Investigation operations
+create a task and deliver their instructions. Completion operations stop only the
+explicit captured session, check for new input or replacement sessions, and use
+the board's existing transactional move/recurrence behavior. Ignore and navigation
+require no model or source enrichment.
 
-Session routing checks the linked review or implementation owner against the live
-process manager and refreshes local routing context before publication, even when
-GitHub has not changed. Without a live lookup, bounded history can prove a current
-session exists but cannot prove its absence. Unknown or stale lifecycle evidence
-remains unknown; it is not guessed by a model. The previously compiled new-session condition also uses this factual path,
-so it does not require recompilation. GitHub reads are reused only within one subject
-retrieval phase. Revalidation starts with a fresh cache and identity checks are never
-cached.
-Merged or closed PRs do not produce obsolete review requests.
+### Free text, progress and recovery
 
-**Test on recent notifications** runs the selected compiled revision without
-publishing inbox cards or archiving inputs. It shows decisions and proposed cards,
-including activities previously delivered to the inbox. Normal processing instead
-deduplicates previously delivered activity. Preview and compilation jobs expose
-queued/running/completed or failed states and diagnostics.
+A free-text reply uses one bounded notification-model planning call to produce the
+same typed operations, or a focused clarification. The executor then runs without
+further model calls. It does not ask a model to choose each tool, inspect tool
+success, or write a final completion message. Task agents still use their own
+models for actual work.
 
-Each processed activity records its rule-set revision, clause results, facts,
-missing evidence, and source-backed semantic judgments. Expand a notification's
-decisions to inspect why it was admitted, suppressed, held, or deduplicated.
-Held activities remain available in **Held** and can be explicitly retried after
-fixing missing context. Other independent activities from the same input may still
-produce inbox cards without being repeated on retry. Activating new rules releases
-held inputs for reevaluation, retires stale pending cards, and requeues their inputs.
-Publication and execution reject plans captured under a different active revision.
+The action worker is separate from collection and triage. Each execution records
+its exact action, resolved task/session IDs, per-step intent, arguments and result.
+**Execution steps** in the Inbox exposes the durable trace. Failed/blocked actions
+create a visible pending follow-up with task links and the original execution
+trace. Failure notices are recorded durably and delivered after restart or a
+transient publication failure, without replacing another pending question. When every attempted mutation
+has a definite outcome, **Retry remaining safe steps** reuses recorded successes
+without another model call. Uncertain writes offer inspection instead of retry. Grouped reviews track
+independent PR handoffs without a model-step ceiling. Overall outcomes include
+succeeded, blocked, failed, partial and uncertain; submission means PTY delivery,
+not completion of the task agent's work.
 
-This replaces the former prompt and structured notification preferences. On upgrade,
-existing development preferences are imported into an inactive draft for review,
-compilation, and activation. There is no runtime fallback. Pending cards and queued
-replies from the former path are invalidated and their inputs are requeued; tasks
-and inbox history are retained.
+Before side effects, Kamacu checks current identity/source gates, rule revision,
+task roles and relevant session/task/prompt preconditions. Busy sessions wait for an idle input prompt by default. An explicitly labelled
+“send now, even if working” alternative can submit to a working input surface;
+permission/choice dialogs are never answered automatically. Changed targets
+produce specific attention/progress states instead of guessing or interrupting
+work. Completed steps are reusable after restart. Interrupted mutations remain
+uncertain and are never automatically repeated; interrupted reads are blocked for
+inspection. Task and session links survive partial execution.
 
-### Processing and execution
-
-Independent projects use up to three workers. Retrieval and revalidation share
-limits of four subject jobs and four GitHub requests. Results publish atomically
-in stable project order, together with decisions, card plans, and raw-item status.
-A failed or interrupted run leaves its inputs available for an explicit retry.
-Missing comments preserve other verified facts and become unknown evidence where
-necessary. Authentication, account, rate-limit, and transport failures stop the run.
-Oversized snapshots fail visibly rather than silently truncating pending inputs.
-Inputs in an active snapshot cannot be manually archived or restored.
-
-Server logs record `notification stage finished` with stage, duration, batch, and
-repository where applicable. Stages include retrieval, classification, semantic
-rules, action planning, drafting, revalidation, and publication. Compilation has its
-own stage. Overlapping durations must not be summed as total batch time;
-`notification batch finished` records total duration and errors.
-
-Each card stores a typed action plan separately from its displayed text. Review
-requests default to PR-review workspaces rather than ordinary Todo tasks. An explicit
-rule can instead select an existing named recurring task for grouped reviews.
-Other activities
-can route to an implementation owner, an explicitly named recurring task, or a new
-investigation task. Ambiguous targets require clarification. Cards offer one planned
-action and dismissal. No task mutation occurs before an inbox reply.
-
-Notification work kind (review, implementation, investigation) is separate from
-personal/team audience and evidence uncertainty. A team review opportunity can
-therefore propose an optional review workspace without claiming a personal request.
-Uncertain recency does not turn a review into a generic investigation.
-
-Ownership is resolved before card grouping. Verified task/PR associations and
-session/PR associations identify existing owners; review workspaces are matched by
-project and PR. When no owner is linked, a bounded task-catalog lookup includes
-completed tasks and may select a cited title/description match. Ambiguous matches,
-or a negative match against an incomplete catalog, require clarification. Verified PR owners may belong to another project; weak title matching remains
-restricted to the notification's project. Rejected task associations are excluded
-from matching and rechecked before execution. A new explicit target chosen in a
-user reply can override the saved action without changing the PR's ownership record.
-An explicit review rule can select a review workspace while retaining the source
-implementation owner's navigation link. Linked
-owners survive generic new-session rules: an exited agent means resume/start an
-agent on the same task, not create another task. Explicit recurring-task rules
-remain supported. Live sessions are rechecked before execution.
-
-Inbox cards persist one or more **Linked tasks** independently of their proposed
-actions and terminal ownership. **Open task** navigates without answering, dismissing,
-or executing the notification. Grouped cards retain all contributing task links;
-archived cards and follow-ups retain them too. Newly provisioned tasks are linked
-immediately, even if a later execution step fails. Action-button labels come from
-the validated workflow rather than the prose-writing model.
-
-On upgrade, existing task associations are backfilled for navigation. Pending
-notification cards are retired and their inputs requeued for explicit processing
-with the new ownership-preserving plans. Queued replies from the old plans are
-failed before execution; interrupted running actions retain normal uncertain-result
-recovery. History and its task links remain available.
-
-Clicking the proposed action executes its saved plan. A free-text reply is separately
-interpreted and validated; changing the workflow or target requires explicit user
-instructions. Execution restricts mutations to the plan's workflow, projects, tasks,
-and PRs, and checks the active rules again before each mutation. Creating a task or
-review workspace alone cannot count as completing an action that requires starting
-its agent. Follow-ups preserve the latest validated execution plan and source evidence.
-Clarification answers are replanned even when selected using a button.
-
-Notification questions survive restarts. Replies are saved and queued atomically;
-results appear with the answer in **Archived**. **Reply again** preserves previous
-answers and execution history. Failed or interrupted actions are never automatically
-repeated; uncertain delivery requires checking the target before another attempt.
+Migration preserves old history and uncertain executions, retires older pending
+notification cards, and returns unexecuted inputs to pending for regeneration.
+It does not replay previously answered or uncertain work.
