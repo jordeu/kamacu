@@ -15,8 +15,25 @@ describe("completion actions", () => {
   it("shows only offered actions with consistent labels", () => {
     expect(completionActions(completion)).toEqual([{ id: "move_to_done", label: "Move to done and close session" }]);
     expect(completionActions({ ...completion, options: [] })).toEqual([]);
-    expect(completionActions({ ...completion, options: [{ id: "exit", label: "Old exit action" }] })).toEqual([]);
+    expect(completionActions({ ...completion, options: [{ id: "exit", label: "Old exit action" }] })).toEqual([{ id: "exit", label: "Close session" }]);
     expect(completionActions({ ...completion, task_id: 0 })).toEqual([]);
+  });
+
+  it("offers closing Scratchpad and highlights recommendations without hiding other moves", () => {
+    const options = [
+      { id: "move_to_review", label: "Review" },
+      { id: "move_to_done", label: "Done", recommended: true },
+      { id: "exit", label: "Exit" },
+    ];
+    expect(completionActions({ ...completion, options })).toEqual([
+      { id: "move_to_review", label: "Move to review and close session" },
+      { id: "move_to_done", label: "Move to done and close session (Recommended)" },
+      { id: "exit", label: "Close session" },
+    ]);
+    expect(completionActions({ ...completion, task_id: 0, options })).toEqual([{ id: "exit", label: "Close session" }]);
+    const question = { ...completion, status: "answered" as const, reason: "exit" };
+    expect(completionClosesSession(question)).toBe(true);
+    expect(feedbackOutcomeMessage({ outcome: "accepted", question })).toBe("Message archived. Agent session is closing.");
   });
 
   it("reports the move and close outcome without claiming terminal delivery", () => {
