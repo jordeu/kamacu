@@ -28,6 +28,17 @@ export interface TermSession {
   global?: boolean;
 }
 
+// An event refresh can finish before the spawn response. Keep the server's
+// existing entry (which may already be exited) instead of duplicating it or
+// replacing it with the older spawn snapshot.
+export function mergeSpawnedSession(
+  old: TermSession[] | undefined,
+  session: TermSession,
+): TermSession[] {
+  if (old?.some((entry) => entry.id === session.id)) return old;
+  return [session, ...(old ?? [])];
+}
+
 export function useSessions(taskId?: number) {
   return useQuery({
     queryKey: taskId !== undefined ? ["sessions", taskId] : ["sessions"],
@@ -54,7 +65,7 @@ export function useSpawnSession(taskId?: number) {
       // scoped cache BEFORE invalidating so the new tab renders immediately.
       if (taskId !== undefined) {
         queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
-          old ? [session, ...old] : [session],
+          mergeSpawnedSession(old, session),
         );
       }
       // Prefix-matches the scoped ["sessions", taskId] keys too.
@@ -83,7 +94,7 @@ export function useReattachTmux(taskId: number) {
       // drops the orphaned ghost (its row no longer surfaces a survivor entry
       // once the live session covers the name).
       queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
-        old ? [session, ...old] : [session],
+        mergeSpawnedSession(old, session),
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
@@ -99,7 +110,7 @@ export function useSpawnAgent(taskId: number) {
       // Same spawn-select race fix as useSpawnSession: write the fresh
       // session into the scoped cache so the pane attaches immediately.
       queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
-        old ? [session, ...old] : [session],
+        mergeSpawnedSession(old, session),
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       // Board/tab dots appear without waiting a poll period.
@@ -123,7 +134,7 @@ export function useResumeAgent(taskId: number) {
       // Same spawn-select race fix as useSpawnAgent: write the fresh session
       // into the scoped cache so the pane attaches from the mutation result.
       queryClient.setQueryData<TermSession[]>(["sessions", taskId], (old) =>
-        old ? [session, ...old] : [session],
+        mergeSpawnedSession(old, session),
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
@@ -203,7 +214,7 @@ export function useSpawnGlobalSession() {
     onSuccess: (session) => {
       // Spawn-select race fix, global spelling (useSpawnSession precedent).
       queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
-        old ? [session, ...old] : [session],
+        mergeSpawnedSession(old, session),
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
@@ -217,7 +228,7 @@ export function useSpawnGlobalAgent() {
       post<TermSession>("/api/sessions", { scope: "global", kind: "agent" }),
     onSuccess: (session) => {
       queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
-        old ? [session, ...old] : [session],
+        mergeSpawnedSession(old, session),
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       // The bar's Global · Scratchpad row appears without waiting a poll.
@@ -237,7 +248,7 @@ export function useResumeGlobalAgent() {
       }),
     onSuccess: (session) => {
       queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
-        old ? [session, ...old] : [session],
+        mergeSpawnedSession(old, session),
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
@@ -260,7 +271,7 @@ export function useReattachGlobalTmux() {
       }),
     onSuccess: (session) => {
       queryClient.setQueryData<TermSession[]>(["sessions", "global"], (old) =>
-        old ? [session, ...old] : [session],
+        mergeSpawnedSession(old, session),
       );
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
