@@ -24,30 +24,33 @@ func (ex *actionExecutor) attention(ctx context.Context, state, result string) e
 	if err = ex.s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_action_steps WHERE run_id=? AND (state='uncertain' OR (is_mutation=1 AND state='running'))`, q.ID).Scan(&unknown); err != nil {
 		return err
 	}
-	if ex.retrySafe && unknown == 0 && state != "uncertain" && ex.seq.Validate() == nil {
+
+	run, err := ex.s.ActionRun(ctx, q.ID)
+	if err != nil {
+		return err
+	}
+	if len(result) > 12000 {
+		result = strings.ToValidUTF8(result[:12000], "") + "\n[More details are in Original execution steps.]"
+	}
+	canRetry := ex.retrySafe && unknown == 0 && state != "uncertain" && ex.seq.Validate() == nil
+	copy := actionAttentionCopy(run, unknown > 0 || state == "uncertain", canRetry, result)
+	if canRetry {
 		retry := ex.seq
 		retry.Guards.ResumeRunID = q.ID
-		options = append(options, inbox.Option{ID: "retry_remaining", Label: "Retry remaining safe steps", Action: &retry, ActionSummary: "Retry after fixing the reported condition. Reuse recorded successful steps; do not repeat completed handoffs."})
+		options = append(options, inbox.Option{ID: "retry_remaining", Label: copy.retryLabel, Action: &retry, ActionSummary: copy.retrySummary})
 	}
 	for _, link := range q.LinkedTasks {
 		if len(options) >= 3 {
 			break
 		}
 		seq := inboxaction.Sequence{Version: 1, Actions: []inboxaction.Action{{ID: "open", Kind: "open_task", ProjectID: link.ProjectID, TaskID: link.TaskID}}}
-		options = append(options, inbox.Option{ID: fmt.Sprintf("open_%d", link.TaskID), Label: fmt.Sprintf("Open task %d", link.TaskID), Action: &seq, ActionSummary: seq.Summary()})
+		options = append(options, inbox.Option{ID: fmt.Sprintf("open_%d", link.TaskID), Label: fmt.Sprintf("Inspect task %d", link.TaskID), Action: &seq, ActionSummary: seq.Summary()})
 	}
 	ignore := inboxaction.Sequence{Version: 1, Actions: []inboxaction.Action{{ID: "ignore", Kind: "ignore"}}}
-	options = append(options, inbox.Option{ID: "ignore", Label: "Leave this for me to handle", Action: &ignore, ActionSummary: ignore.Summary()})
-	if len(result) > 12000 {
-		result = strings.ToValidUTF8(result[:12000], "") + "\n[Full details are preserved in the original execution trace.]"
-	}
-	context := result + "\n\nOriginal request: " + q.Question + "\n" + q.Summary
-	if unknown == 0 && state != "uncertain" {
-		context += "\nFix the reported condition before retrying. Recorded successes will not be repeated."
-	} else {
-		context += "\nAn action may already have taken effect. Inspect the linked tasks/sessions before giving fresh instructions. There is no automatic retry."
-	}
-	_, err = ex.s.Inbox.PublishNotificationAttention(ctx, q.ID, inbox.Create{Abstract: "An Inbox action needs attention", Summary: "An Inbox action needs attention: " + state, Context: context, Question: "The action stopped. How would you like to handle it?", Options: options})
+	options = append(options, inbox.Option{ID: "ignore", Label: "Dismiss this notice", Action: &ignore, ActionSummary: "Close this notice. Keep existing tasks and sessions; do not start or cancel work."})
+
+	context := copy.context + "\n\nOriginal request: " + q.Question + "\n" + q.Summary
+	_, err = ex.s.Inbox.PublishNotificationAttention(ctx, q.ID, inbox.Create{Abstract: copy.summary, Summary: copy.summary, Context: context, Question: copy.question, Options: options})
 	return err
 }
 

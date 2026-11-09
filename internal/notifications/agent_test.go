@@ -277,25 +277,172 @@ func TestSettingsAndRuleChangesInvalidateAProcessingRun(t *testing.T) {
 	}
 }
 
-type changedSourceProvider struct{ *fakeProvider }
+type changedSourceProvider struct {
+	*fakeProvider
+	changedURL    string
+	update        string
+	refreshError  error
+	versionChecks int
+}
 
 func (p *changedSourceProvider) Enrich(ctx context.Context, s Source, e Event) (Event, error) {
 	out, err := p.fakeProvider.Enrich(ctx, s, e)
 	out.SubjectUpdatedAt = "before"
+	if e.SubjectUpdatedAt != "" && e.URL == p.changedURL {
+		if p.refreshError != nil {
+			return out, p.refreshError
+		}
+		out.SubjectUpdatedAt = "after"
+		out.Context = p.update
+		if p.update == "PR merged" {
+			out.SubjectState = "closed"
+			out.PRFacts.State = "merged"
+		}
+	}
+	out.Evidence = []SubjectEvidence{{URL: e.URL, Text: out.Context, Complete: true}}
 	return out, err
 }
-func (p *changedSourceProvider) SubjectVersion(context.Context, Source, Event) (string, error) {
-	return "after", nil
+func (p *changedSourceProvider) SubjectVersion(_ context.Context, _ Source, e Event) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.versionChecks++
+	if e.URL == p.changedURL {
+		return "after", nil
+	}
+	return "before", nil
 }
-func TestSourceChangesBeforePublicationKeepNotificationsPending(t *testing.T) {
+
+func TestSourceChangesBecomeFinalNotesInsteadOfDiscardingBatch(t *testing.T) {
+	for _, update := range []string{"Routine bot coverage update", "PR merged"} {
+		t.Run(update, func(t *testing.T) {
+			s, model, _, source := fixture(t)
+			provider := &changedSourceProvider{fakeProvider: &fakeProvider{}, changedURL: event().URL, update: update}
+			s.Providers["github"] = provider
+			seed(t, s, source, event())
+			other := event()
+			other.ExternalID = "second"
+			other.URL = "https://github.com/acme/repo/pull/8"
+			seed(t, s, source, other)
+			calls := 0
+			model.respond = func(prompt string) (any, error) {
+				calls++
+				snap := inputSnapshot(t, prompt)
+				if calls == 1 {
+					return finalResponse(snap, true), nil
+				}
+				if !strings.Contains(prompt, "FINAL SOURCE NOTES:") || !strings.Contains(prompt, "previous_proposal") || !strings.Contains(prompt, update) {
+					t.Fatal("missing proposal or final update")
+				}
+				out := finalResponse(snap, update != "PR merged")
+				return out, nil
+			}
+			p := processAgent(t, s)
+			status, _ := s.Status(context.Background())
+			if p.Status != "completed" || status.PendingCount != 0 || calls != 2 || provider.versionChecks != 2 || provider.enrichCalls != 3 {
+				t.Fatal(p, status, calls, provider.versionChecks, provider.enrichCalls)
+			}
+			var snapshot AgentSnapshot
+			var trace []AgentReadResult
+			var raw, rawTrace string
+			if err := s.DB.QueryRow(`SELECT processor_snapshot,processor_trace FROM notification_batches WHERE id=?`, p.ID).Scan(&raw, &rawTrace); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(rawTrace), &trace); err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.Subjects[0].Event.SubjectUpdatedAt != "after" || snapshot.Subjects[1].Event.SubjectUpdatedAt != "before" || len(trace) != 1 || trace[0].Name != "source_updates" {
+				t.Fatal(snapshot, trace)
+			}
+			cards, err := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
+			expected := 1
+			if update == "PR merged" {
+				expected = 0
+			}
+			if err != nil || len(cards.Items) != expected {
+				t.Fatal(cards, err)
+			}
+		})
+	}
+}
+
+func TestUnchangedSourcesDoNotNeedAnotherModelCall(t *testing.T) {
 	s, model, _, source := fixture(t)
-	s.Providers["github"] = &changedSourceProvider{&fakeProvider{}}
+	provider := &changedSourceProvider{fakeProvider: &fakeProvider{}}
+	s.Providers["github"] = provider
 	seed(t, s, source, event())
-	model.respond = func(p string) (any, error) { return finalResponse(inputSnapshot(t, p), true), nil }
+	model.respond = func(prompt string) (any, error) { return finalResponse(inputSnapshot(t, prompt), true), nil }
+	p := processAgent(t, s)
+	if p.Status != "completed" || len(model.prompts) != 1 || provider.enrichCalls != 1 || provider.versionChecks != 1 {
+		t.Fatal(p, len(model.prompts), provider.enrichCalls, provider.versionChecks)
+	}
+}
+
+func TestFinalNotesRetainReadsWithoutConsumingReadBudget(t *testing.T) {
+	s, model, _, source := fixture(t)
+	provider := &changedSourceProvider{fakeProvider: &fakeProvider{}, changedURL: event().URL, update: "Routine bot coverage update"}
+	s.Providers["github"] = provider
+	seed(t, s, source, event())
+	cfg, _ := s.Config(context.Background())
+	cfg.MaxReads = 1
+	if _, err := s.SaveConfig(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	model.respond = func(prompt string) (any, error) {
+		calls++
+		if calls == 1 {
+			return AgentTurn{Action: "read", Reads: []AgentRead{{Name: "read_subject", Arguments: `{"id":"S1","offset":0}`}}}, nil
+		}
+		if calls == 3 && (!strings.Contains(prompt, `read:1`) || !strings.Contains(prompt, "READ_BUDGET_REMAINING:\n0") || !strings.Contains(prompt, "FINAL SOURCE NOTES:")) {
+			t.Fatal("lost reads or budget")
+		}
+		return finalResponse(inputSnapshot(t, prompt), true), nil
+	}
+	p := processAgent(t, s)
+	if p.Status != "completed" || calls != 3 || provider.versionChecks != 1 {
+		t.Fatal(p, calls, provider.versionChecks)
+	}
+}
+
+func TestSourceRefreshFailurePreservesPendingNotifications(t *testing.T) {
+	s, model, _, source := fixture(t)
+	s.Providers["github"] = &changedSourceProvider{fakeProvider: &fakeProvider{}, changedURL: event().URL, refreshError: errors.New("refresh failed")}
+	seed(t, s, source, event())
+	model.respond = func(prompt string) (any, error) { return finalResponse(inputSnapshot(t, prompt), true), nil }
 	p := processAgent(t, s)
 	status, _ := s.Status(context.Background())
-	if p.Status != "failed" || status.PendingCount != 1 {
+	if p.Status != "failed" || status.PendingCount != 1 || !strings.Contains(p.Error, "refresh failed") {
 		t.Fatal(p, status)
+	}
+}
+
+func TestWorkflowCorrectionNamesSupportedValues(t *testing.T) {
+	s, model, _, source := fixture(t)
+	seed(t, s, source, event())
+	calls := 0
+	model.respond = func(prompt string) (any, error) {
+		calls++
+		out := finalResponse(inputSnapshot(t, prompt), true)
+		if calls == 1 {
+			out.Messages[0].Plan.Workflow = "continue_task"
+		} else if !strings.Contains(prompt, `unknown task workflow "continue_task"; use route_review, route_implementation`) {
+			t.Fatal("missing actionable repair instruction")
+		}
+		return out, nil
+	}
+	p := processAgent(t, s)
+	if p.Status != "completed" || calls != 2 {
+		t.Fatal(p, calls)
+	}
+	props := agentSchema["properties"].(map[string]any)
+	message := props["messages"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	plan := message["plan"].(map[string]any)["properties"].(map[string]any)
+	values := plan["workflow"].(map[string]any)["enum"].([]string)
+	if len(values) != 5 || values[1] != "route_implementation" {
+		t.Fatal(values)
 	}
 }
 
@@ -668,5 +815,110 @@ func TestAgentClarificationPreservesKnownTaskWithoutExecution(t *testing.T) {
 	card := cards.Items[0]
 	if len(card.LinkedTasks) != 1 || card.LinkedTasks[0].TaskID != 1 || card.LinkedTasks[0].Role != "implementation" || len(card.Options) != 1 || card.Options[0].ID != "triage_noop" || len(tools.calls) > 0 {
 		t.Fatal(card, tools.calls)
+	}
+}
+
+func TestFinalRevisionRejectsSupersededSourceEvidence(t *testing.T) {
+	for _, stale := range []string{"S1/E1", "read:1"} {
+		t.Run(stale, func(t *testing.T) {
+			s, model, _, source := fixture(t)
+			s.Providers["github"] = &changedSourceProvider{fakeProvider: &fakeProvider{}, changedURL: event().URL, update: "A new direct request"}
+			seed(t, s, source, event())
+			cfg, _ := s.Config(context.Background())
+			cfg.MaxReads = 1
+			if _, err := s.SaveConfig(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			model.respond = func(prompt string) (any, error) {
+				calls++
+				if calls == 1 {
+					return AgentTurn{Action: "read", Reads: []AgentRead{{Name: "read_subject", Arguments: `{"id":"S1","offset":0}`}}}, nil
+				}
+				snap := inputSnapshot(t, prompt)
+				out := finalResponse(snap, true)
+				if calls == 3 {
+					if !strings.HasPrefix(snap.Subjects[0].Event.Evidence[0].ID, "S1/final/") || !strings.Contains(prompt, `superseded`) {
+						t.Fatal("missing fresh IDs or obsolete-read marker")
+					}
+					out.Messages[0].EvidenceRefs = append(out.Messages[0].EvidenceRefs, stale)
+				}
+				if calls == 4 && !strings.Contains(prompt, "Previous reply was rejected.") {
+					t.Fatal("stale evidence did not produce correction", prompt[len(prompt)-700:])
+				}
+				return out, nil
+			}
+			p := processAgent(t, s)
+			if p.Status != "completed" || calls != 4 {
+				t.Fatal(p, calls)
+			}
+			var raw string
+			var trace []AgentReadResult
+			if err := s.DB.QueryRow(`SELECT processor_trace FROM notification_batches WHERE id=?`, p.ID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(raw), &trace); err != nil {
+				t.Fatal(err)
+			}
+			if len(trace) != 2 || !trace[0].Superseded || !strings.Contains(trace[0].Result, "Review requested") {
+				t.Fatal("original read lost", trace)
+			}
+		})
+	}
+}
+
+func TestFinalNotesDoNotDuplicateLargeSourceBodies(t *testing.T) {
+	s, model, _, source := fixture(t)
+	updated := strings.Repeat("new source ", 1700)
+	s.Providers["github"] = &changedSourceProvider{fakeProvider: &fakeProvider{contextText: strings.Repeat("old source ", 1700)}, changedURL: event().URL, update: updated}
+	seed(t, s, source, event())
+	cfg, _ := s.Config(context.Background())
+	cfg.MaxReads = 0
+	cfg.ContextBytes = 64000
+	if _, err := s.SaveConfig(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	model.respond = func(prompt string) (any, error) {
+		calls++
+		if len(prompt) > cfg.ContextBytes {
+			t.Fatal("prompt exceeds budget", len(prompt))
+		}
+		if calls == 2 && strings.Count(prompt, updated) != 2 {
+			t.Fatal("source is duplicated outside latest batch", strings.Count(prompt, updated))
+		}
+		return finalResponse(inputSnapshot(t, prompt), true), nil
+	}
+	p := processAgent(t, s)
+	if p.Status != "completed" || calls != 2 {
+		t.Fatal(p, calls)
+	}
+}
+
+func TestFinalRevisionFailureKeepsTheValidProposalForDiagnosis(t *testing.T) {
+	s, model, _, source := fixture(t)
+	s.Providers["github"] = &changedSourceProvider{fakeProvider: &fakeProvider{}, changedURL: event().URL, update: "Changed source"}
+	seed(t, s, source, event())
+	calls := 0
+	model.respond = func(prompt string) (any, error) {
+		calls++
+		if calls == 2 {
+			return nil, errors.New("model unavailable")
+		}
+		return finalResponse(inputSnapshot(t, prompt), true), nil
+	}
+	p := processAgent(t, s)
+	status, _ := s.Status(context.Background())
+	var raw string
+	var proposal AgentTurn
+	if err := s.DB.QueryRow(`SELECT processor_result FROM notification_batches WHERE id=?`, p.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(raw), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	cards, err := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
+	if p.Status != "failed" || status.PendingCount != 1 || calls != 2 || len(proposal.Messages) != 1 || err != nil || len(cards.Items) != 0 {
+		t.Fatal(p, status, calls, proposal, cards, err)
 	}
 }
