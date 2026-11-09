@@ -1075,3 +1075,300 @@ func TestReviewReadinessNoticeExplainsRecoveryAndRetriesWithoutDuplicateTasks(t 
 		t.Fatal(retried, r.submitted, tools.calls, model.prompts, err)
 	}
 }
+
+func TestOwnAgentStartupMayAdvanceTodoWithoutInvalidatingHandoff(t *testing.T) {
+	s, m, r, tools, source := directFixture(t)
+	s.DB.Exec(`UPDATE tasks SET recurrent=1 WHERE id=1`)
+	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "run_recurring_task", ProjectID: 1, TaskID: 1, TaskName: "renovate", Instructions: "Review the updates"})
+	tools.before = func(name string) {
+		if name == "start_task_agent" {
+			s.DB.Exec(`UPDATE tasks SET status='in_progress' WHERE id=1`)
+		}
+	}
+	out := runDirect(t, s, q)
+	if out.DeliveryStatus != "succeeded" || len(r.submitted) != 1 || len(m.prompts) != 0 {
+		t.Fatal(out, r.submitted, m.prompts)
+	}
+}
+
+func TestCompletedRecurringTaskDoesNotOfferAnImpossibleRetry(t *testing.T) {
+	s, m, r, tools, source := directFixture(t)
+	ctx := context.Background()
+	s.DB.Exec(`UPDATE tasks SET recurrent=1 WHERE id=1`)
+	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "run_recurring_task", ProjectID: 1, TaskID: 1, TaskName: "renovate", Instructions: "Review the updates"})
+	tools.before = func(name string) {
+		if name == "start_task_agent" {
+			s.DB.Exec(`UPDATE tasks SET status='in_progress' WHERE status='todo'`)
+		}
+	}
+	r.readyErr = fmt.Errorf("%w: agent is busy", ErrActionBlocked)
+	runDirect(t, s, q)
+	pending, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	first := pending.Items[0]
+	if _, err := s.DB.Exec(`UPDATE tasks SET status='done' WHERE id=1;INSERT INTO tasks(id,project_id,title,status,recurrent,position) VALUES(500,1,'renovate','todo',1,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Inbox.Answer(ctx, nil, first.ID, first.Revision, "", "retry_remaining"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ = s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if len(pending.Items) != 1 {
+		t.Fatal(pending)
+	}
+	next := pending.Items[0]
+	found := false
+	for _, o := range next.Options {
+		if o.ID == "retry_remaining" {
+			t.Fatal("impossible retry still offered", next)
+		}
+		if o.ID == "use_current_recurrence" {
+			found = o.Action != nil && o.Action.Actions[0].TaskID == 500 && o.Action.Guards.TaskStatus[500] == "todo" && o.Action.Guards.ResumeRunID == ""
+		}
+	}
+	if !found || !strings.Contains(next.Summary, "Task 1 is done") || !strings.Contains(next.Question, "task 500") || len(r.submitted) != 0 || len(m.prompts) != 0 {
+		t.Fatal(next, m.prompts, r.submitted)
+	}
+	r.readyErr = nil
+	if _, err := s.Inbox.Answer(ctx, nil, next.ID, next.Revision, "", "use_current_recurrence"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := s.Inbox.Get(ctx, next.ID)
+	var old string
+	s.DB.QueryRow(`SELECT status FROM tasks WHERE id=1`).Scan(&old)
+	if out.DeliveryStatus != "succeeded" || old != "done" || len(r.submitted) != 1 || len(m.prompts) != 0 {
+		t.Fatal(out, old, r.submitted, m.prompts)
+	}
+}
+
+func TestUnexplainedFailureUsesOnePersistedReadOnlyDiagnosis(t *testing.T) {
+	s, m, r, tools, source := directFixture(t)
+	ctx := context.Background()
+	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "continue_task", ProjectID: 1, TaskID: 1, Instructions: "Check the feedback"})
+	if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "", "go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.finishRun(ctx, q.ID, "failed", "Cannot resolve the saved task reference", nil, true); err != nil {
+		t.Fatal(err)
+	}
+	m.responses = []any{map[string]any{"retry_recommended": false, "summary": "Saved task reference could not be resolved", "explanation": "Kamacu could not resolve the task reference before delivering instructions. No instruction delivery was recorded.", "next_step": "Inspect task 1 to confirm its intended work, or dismiss this notice."}}
+	if _, err := s.DB.Exec(`CREATE TRIGGER fail_diagnosis_notice BEFORE INSERT ON inbox_questions WHEN NEW.notification_group LIKE 'action-attention:%' BEGIN SELECT RAISE(ABORT,'notice publication failed');END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.executeNext(ctx); err == nil {
+		t.Fatal("expected publication failure")
+	}
+	s.DB.Exec(`DROP TRIGGER fail_diagnosis_notice`)
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if len(pending.Items) != 1 || pending.Items[0].Summary != "Saved task reference could not be resolved" || len(m.prompts) != 1 || len(r.submitted) != 0 || len(tools.calls) != 0 {
+		t.Fatal(pending, m.prompts, r.submitted, tools.calls)
+	}
+	for _, o := range pending.Items[0].Options {
+		if o.ID == "retry_remaining" {
+			t.Fatal("retry offered despite diagnosis recommending against it")
+		}
+	}
+	if !strings.Contains(m.prompts[0], "current_tasks") || !strings.Contains(m.prompts[0], "requested_action") {
+		t.Fatal("missing diagnostic evidence")
+	}
+}
+
+func TestFailureDiagnosisCannotEnableAnUnsafeRetry(t *testing.T) {
+	s, m, r, tools, source := directFixture(t)
+	ctx := context.Background()
+	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "continue_task", ProjectID: 1, TaskID: 1, Instructions: "Check the feedback"})
+	if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "", "go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.finishRun(ctx, q.ID, "failed", "Cannot resolve the saved task reference", nil); err != nil {
+		t.Fatal(err)
+	}
+	m.responses = []any{map[string]any{"retry_recommended": true, "summary": "An old reference failed", "explanation": "The reference is outdated.", "next_step": "Retry the unchanged saved action"}}
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if len(pending.Items) != 1 || strings.Contains(pending.Items[0].Question, "Check the problem") || len(m.prompts) != 1 {
+		t.Fatal(pending, m.prompts)
+	}
+	for _, o := range pending.Items[0].Options {
+		if o.ID == "retry_remaining" {
+			t.Fatal("model enabled an unsafe retry")
+		}
+	}
+	if len(r.submitted) != 0 || len(tools.calls) != 0 {
+		t.Fatal(r.submitted, tools.calls)
+	}
+	if err := s.deliverActionAttention(ctx, q.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.prompts) != 1 {
+		t.Fatal("invalid diagnosis retried", m.prompts)
+	}
+}
+
+func TestOwnStartupDoesNotAuthorizeSubmissionAfterExternalInput(t *testing.T) {
+	s, m, r, tools, source := directFixture(t)
+	ctx := context.Background()
+	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "continue_task", ProjectID: 1, TaskID: 1, Instructions: "Check feedback"})
+	tools.before = func(name string) {
+		if name == "start_task_agent" {
+			if _, err := s.DB.Exec(`UPDATE tasks SET status='in_progress' WHERE id=1`); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	r.readyErr = fmt.Errorf("%w: agent is busy", ErrActionBlocked)
+	runDirect(t, s, q)
+	pending, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	notice := pending.Items[0]
+	if _, err := s.Inbox.Answer(ctx, nil, notice.ID, notice.Revision, "", "retry_remaining"); err != nil {
+		t.Fatal(err)
+	}
+	for sid, v := range r.sessions {
+		v.Input++
+		r.sessions[sid] = v
+	}
+	r.readyErr = nil
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := s.Inbox.Get(ctx, notice.ID)
+	pending, _ = s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if out.DeliveryStatus != "partial" || len(r.submitted) != 0 || len(m.prompts) != 0 || len(pending.Items) != 1 {
+		t.Fatal(out, r.submitted, m.prompts, pending)
+	}
+	next := pending.Items[0]
+	if !strings.Contains(next.Context, "received new input") || !strings.Contains(next.Context, "instructions were not sent") {
+		t.Fatal(next)
+	}
+	for _, o := range next.Options {
+		if o.ID == "retry_remaining" {
+			t.Fatal("stale input guard was offered for retry")
+		}
+	}
+}
+
+func TestCompletedTaskDoesNotBlockRetryOfUnrelatedRemainingWork(t *testing.T) {
+	s, m, r, tools, source := directFixture(t)
+	ctx := context.Background()
+	q := directCard(t, s, source, inboxaction.Action{ID: "first", Kind: "continue_task", ProjectID: 1, TaskID: 1, Instructions: "Check implementation feedback"}, inboxaction.Action{ID: "reviews", Kind: "start_reviews", ProjectID: 1, PRNumbers: []int64{7}})
+	tools.before = func(name string) {
+		if name == "open_review" {
+			r.readyErr = fmt.Errorf("%w: agent is busy", ErrActionBlocked)
+		}
+	}
+	runDirect(t, s, q)
+	if len(r.submitted) != 1 {
+		t.Fatal(r.submitted)
+	}
+	pending, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	notice := pending.Items[0]
+	if _, err := s.DB.Exec(`UPDATE tasks SET status='done' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	tools.before = nil
+	r.readyErr = nil
+	if _, err := s.Inbox.Answer(ctx, nil, notice.ID, notice.Revision, "", "retry_remaining"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := s.Inbox.Get(ctx, notice.ID)
+	if out.DeliveryStatus != "succeeded" || len(r.submitted) != 2 || len(m.prompts) != 0 {
+		t.Fatal(out, r.submitted, m.prompts)
+	}
+}
+
+func TestMatchingRecurrenceDoesNotHideNoticeWhenRulesAreUnavailable(t *testing.T) {
+	s, _, _, _, source := directFixture(t)
+	ctx := context.Background()
+	s.DB.Exec(`UPDATE tasks SET recurrent=1 WHERE id=1`)
+	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "run_recurring_task", ProjectID: 1, TaskID: 1, TaskName: "renovate", Instructions: "Review updates"})
+	if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "", "go"); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Exec(`UPDATE tasks SET status='done' WHERE id=1;INSERT INTO tasks(id,project_id,title,status,recurrent,position) VALUES(500,1,'renovate','todo',1,0);UPDATE notification_rule_state SET active_set_id=NULL`)
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
+	if err != nil || len(pending.Items) != 1 || !strings.Contains(pending.Items[0].Summary, "Task 1 is done") {
+		t.Fatal(pending, err)
+	}
+	for _, o := range pending.Items[0].Options {
+		if o.ID == "retry_remaining" || o.ID == "use_current_recurrence" {
+			t.Fatal(o)
+		}
+	}
+}
+
+func TestFailureDiagnosisPrioritizesTasksCreatedByTheRun(t *testing.T) {
+	s, m, _, _, source := directFixture(t)
+	ctx := context.Background()
+	q := directCard(t, s, source, inboxaction.Action{ID: "investigate", Kind: "create_investigation", ProjectID: 1, TaskName: "Investigate feedback", Instructions: "Check source feedback"})
+	if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "", "go"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO tasks(id,project_id,title,status,position) VALUES(500,1,'Created investigation','done',0);INSERT INTO notification_action_steps(run_id,step_key,operation_id,kind,is_mutation,arguments,state,result,task_id,started_at) VALUES(?,'investigate/create','investigate','create_task',1,'{}','succeeded','{"id":500}',500,0)`, q.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i := 600; i < 641; i++ {
+		if _, err := s.DB.Exec(`INSERT INTO tasks(id,project_id,title,status,position,recurrent) VALUES(?,1,'Other recurrence','todo',0,1)`, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.finishRun(ctx, q.ID, "partial", "Cannot resolve the created task's saved reference", nil); err != nil {
+		t.Fatal(err)
+	}
+	m.respond = func(prompt string) (any, error) {
+		_, raw, ok := strings.Cut(prompt, "INPUT:\n")
+		if !ok {
+			t.Fatal("missing diagnostic input")
+		}
+		var input struct {
+			Tasks   []AgentTask `json:"current_tasks"`
+			Limited bool        `json:"task_index_may_be_incomplete"`
+		}
+		if err := json.Unmarshal([]byte(raw), &input); err != nil {
+			t.Fatal(err)
+		}
+		if len(input.Tasks) != 40 || input.Tasks[0].ID != 500 || input.Tasks[0].Status != "done" || !input.Limited {
+			t.Fatal(input)
+		}
+		return map[string]any{"retry_recommended": false, "summary": "The investigation's saved reference could not be resolved", "explanation": "Task 500 exists and is done; this failed step does not establish what its investigation found.", "next_step": "Inspect task 500 for its results or dismiss this notice."}, nil
+	}
+	if err := s.executeNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.prompts) != 1 {
+		t.Fatal(m.prompts)
+	}
+}
+
+func TestMatchingRecurringOptionPreservesExplicitSendNowWarning(t *testing.T) {
+	s, _, _, _, source := directFixture(t)
+	ctx := context.Background()
+	s.DB.Exec(`UPDATE tasks SET recurrent=1 WHERE id=1`)
+	q := directCard(t, s, source, inboxaction.Action{ID: "run", Kind: "run_recurring_task", ProjectID: 1, TaskID: 1, TaskName: "renovate", Instructions: "Review updates", BusyPolicy: "send_now"})
+	s.DB.Exec(`UPDATE tasks SET status='done' WHERE id=1;INSERT INTO tasks(id,project_id,title,status,recurrent,position) VALUES(500,1,'renovate','todo',1,0)`)
+	ex := &actionExecutor{s: s, q: q, seq: *q.Options[0].Action}
+	copy, option, err := ex.staleTaskAttention(ctx, ActionRun{})
+	if err != nil || copy == nil || option == nil || !strings.Contains(option.Label, "send now, even if working") {
+		t.Fatal(copy, option, err)
+	}
+	s.DB.Exec(`INSERT INTO tasks(id,project_id,title,status,recurrent,position) VALUES(501,1,'renovate','todo',1,0)`)
+	copy, option, err = ex.staleTaskAttention(ctx, ActionRun{})
+	if err != nil || copy == nil || option != nil {
+		t.Fatal("ambiguous match offered", copy, option, err)
+	}
+}

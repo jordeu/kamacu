@@ -33,7 +33,43 @@ func (ex *actionExecutor) attention(ctx context.Context, state, result string) e
 		result = strings.ToValidUTF8(result[:12000], "") + "\n[More details are in Original execution steps.]"
 	}
 	canRetry := ex.retrySafe && unknown == 0 && state != "uncertain" && ex.seq.Validate() == nil
-	copy := actionAttentionCopy(run, unknown > 0 || state == "uncertain", canRetry, result)
+
+	uncertain := unknown > 0 || state == "uncertain"
+	var replacement *inbox.Option
+	copy := actionAttentionCopy(run, uncertain, canRetry, result)
+	stale := false
+	if !uncertain {
+		detail, option, e := ex.staleTaskAttention(ctx, run)
+		if e != nil {
+			return e
+		}
+		if detail != nil {
+			copy = *detail
+			replacement = option
+			canRetry = false
+			stale = true
+		}
+	}
+	if !stale && !uncertain && (copy.summary == "Your requested action could not finish" || strings.Contains(copy.summary, "could not complete the requested step")) {
+		var diagnosis *failureDiagnosis
+		// Concrete deterministic guard explanations need no model call. Unknown
+		// internal/transport failures get one read-only diagnosis before a notice.
+		if !strings.Contains(result, ErrActionBlocked.Error()+": ") {
+			diagnosis = ex.s.diagnoseActionFailure(ctx, q, run, result, canRetry)
+		}
+		copy.summary = concreteFailureFallback(run, result)
+		copy.question = copy.summary + "."
+		if diagnosis != nil {
+			canRetry = canRetry && diagnosis.RetryRecommended
+			copy.summary = diagnosis.Summary
+			copy.context = diagnosis.Explanation + "\n\nNext step: " + diagnosis.NextStep + "\n\nRecorded failure: " + result
+			copy.question = diagnosis.NextStep
+		}
+	}
+	if replacement != nil {
+		options = append(options, *replacement)
+	}
+
 	if canRetry {
 		retry := ex.seq
 		retry.Guards.ResumeRunID = q.ID
@@ -92,7 +128,7 @@ func (ex *actionExecutor) copyCompletedSteps(ctx context.Context) error {
 	if unknown > 0 {
 		return errors.New("uncertain actions cannot be retried automatically")
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO notification_action_steps(run_id,step_key,operation_id,kind,is_mutation,arguments,state,result,task_id,session_id,started_at,finished_at) SELECT ?,step_key,operation_id,kind,is_mutation,arguments,state,result,task_id,session_id,started_at,finished_at FROM notification_action_steps WHERE run_id=? AND state='succeeded'`, ex.q.ID, parent); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO notification_action_steps(run_id,step_key,operation_id,kind,is_mutation,arguments,state,result,task_id,session_id,started_at,finished_at) SELECT ?,step_key,operation_id,kind,is_mutation,arguments,state,result,task_id,session_id,started_at,finished_at FROM notification_action_steps WHERE run_id=? AND state='succeeded' AND kind!='diagnose_failure'`, ex.q.ID, parent); err != nil {
 		return err
 	}
 	return tx.Commit()
