@@ -35,6 +35,7 @@ import (
 func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxClient tmux.Client) {
 	s := &sessionHandlers{mgr: mgr, db: db, globRoot: defaultTranscriptGlobRoot(), tmuxClient: tmuxClient}
 	mux.HandleFunc("GET /api/sessions", s.list)
+	mux.HandleFunc("GET /api/sessions/events", s.events)
 	mux.HandleFunc("POST /api/sessions", s.create)
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
 	mux.HandleFunc("POST /api/sessions/{id}/input", s.input)

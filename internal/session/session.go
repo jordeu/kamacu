@@ -133,6 +133,7 @@ type Session struct {
 	pumpDone  chan struct{} // closed once the final PTY output has been consumed
 	termGrace time.Duration // D-14 grace between SIGTERM and SIGKILL
 	stopOnce  sync.Once
+	onExit    func() // immutable; called after exit state is published, outside mu
 }
 
 // pump reads the PTY master and fans every chunk out to the ring and to all
@@ -206,6 +207,9 @@ func (s *Session) waitExit() {
 		timer.Stop()
 	}
 	s.markExited(code)
+	if s.onExit != nil {
+		s.onExit()
+	}
 	_ = s.ptmx.Close() // AFTER Wait — the pump's Read already returned EIO
 	close(s.done)
 }
