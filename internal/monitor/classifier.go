@@ -388,6 +388,19 @@ func runCLIJSON(ctx context.Context, p Profile, prompt string, responseSchema an
 func (b Backend) http(ctx context.Context, p Profile, prompt string, usage **Usage) ([]byte, error) {
 	return b.httpJSON(ctx, p, prompt, decisionSchema, usage)
 }
+
+// GenerationOptions lets notification reasoning use its own limits without
+// changing short terminal-monitoring requests.
+type GenerationOptions struct {
+	OutputTokens int
+	Timeout      time.Duration
+}
+type generationOptionsKey struct{}
+
+func WithGenerationOptions(ctx context.Context, o GenerationOptions) context.Context {
+	return context.WithValue(ctx, generationOptionsKey{}, o)
+}
+
 func (b Backend) httpJSON(ctx context.Context, p Profile, prompt string, responseSchema any, usage **Usage) ([]byte, error) {
 	key := ""
 	if p.CredentialEnv != "" {
@@ -400,10 +413,19 @@ func (b Backend) httpJSON(ctx context.Context, p Profile, prompt string, respons
 	var body any
 	if p.Backend == "anthropic_api" {
 		endpoint += "/messages"
-		body = map[string]any{"model": p.Model, "max_tokens": 4096, "messages": []any{map[string]string{"role": "user", "content": prompt}}}
+		tokens := 4096
+		if o, ok := ctx.Value(generationOptionsKey{}).(GenerationOptions); ok && o.OutputTokens > 0 {
+			tokens = o.OutputTokens
+		}
+		body = map[string]any{"model": p.Model, "max_tokens": tokens, "messages": []any{map[string]string{"role": "user", "content": prompt}}}
 	} else {
 		endpoint += "/chat/completions"
 		body = map[string]any{"model": p.Model, "messages": []any{map[string]string{"role": "user", "content": prompt}}, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "structured_response", "strict": true, "schema": responseSchema}}}
+	}
+	if p.Backend != "anthropic_api" {
+		if o, ok := ctx.Value(generationOptionsKey{}).(GenerationOptions); ok && o.OutputTokens > 0 {
+			body.(map[string]any)["max_completion_tokens"] = o.OutputTokens
+		}
 	}
 	data, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(data))
@@ -419,7 +441,11 @@ func (b Backend) httpJSON(ctx context.Context, p Profile, prompt string, respons
 	}
 	client := b.Client
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		timeout := 30 * time.Second
+		if o, ok := ctx.Value(generationOptionsKey{}).(GenerationOptions); ok && o.Timeout > 0 {
+			timeout = o.Timeout
+		}
+		client = &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	resp, err := client.Do(req)
 	if err != nil {

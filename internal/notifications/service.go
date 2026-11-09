@@ -25,6 +25,7 @@ type Model interface {
 type Service struct {
 	DB             *sql.DB
 	Inbox          *inbox.Service
+	Metrics        *monitor.Metrics
 	Model          Model
 	Tools          Tools
 	SessionTask    func(string) (int64, bool)
@@ -143,15 +144,12 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) Tick(ctx context.Context) error {
 	s.workMu.Lock()
 	defer s.workMu.Unlock()
-	if err := s.processRulePreview(ctx); err != nil {
-		return err
-	}
-	if err := s.compileNextRuleSet(ctx); err != nil {
-		return err
-	}
 	// Reply execution has priority over collection; terminal monitoring has its
 	// own workers and is never blocked by this service's locks or inference.
 	if err := s.executeNext(ctx); err != nil {
+		return err
+	}
+	if err := s.processRulePreview(ctx); err != nil {
 		return err
 	}
 	sources, err := s.Sources(ctx)
@@ -245,11 +243,11 @@ func (s *Service) infer(ctx context.Context, prompt string) (Step, error) {
 	if s.Model == nil {
 		return Step{}, errors.New("notification model is unavailable")
 	}
-	p, err := monitor.Resolve(ctx, s.DB, 0)
+	p, err := s.notificationProfile(ctx)
 	if err != nil {
 		return Step{}, err
 	}
-	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	start := time.Now()
 	slog.Debug("notification inference started", "profile", p.ID, "prompt_bytes", len(prompt))

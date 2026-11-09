@@ -81,6 +81,24 @@ can access its terminals. Only allow a hostname whose proxy already restricts
 who can connect, such as tailnet-only Tailscale Serve or Cloudflare Access.
 Never use it for a public URL.
 
+### Notification processing
+
+Choose a model in **Settings → Notifications → Notification processing model**
+before processing notifications. This selection is independent of terminal
+monitoring; collection continues while no notification model is selected.
+The same notification model handles Inbox replies and suggested rule changes.
+
+Notification rules are an ordered list of plain instructions with stable IDs.
+Saving applies them directly, without compilation. A notification agent considers
+each batch together with source evidence, project/task/session context and Inbox
+history, using bounded read-only lookups when needed. It proposes messages and
+actions; task execution requires an Inbox reply. Preview uses the same agent
+without publishing messages or starting work.
+
+Processing details show the selected model, frozen input, decisions, rule IDs
+and lookup trace. Context, API output, deadline and lookup limits are configurable;
+a run that exceeds its budget fails visibly and leaves its inputs pending.
+
 ### Development
 
 To build from a checkout instead, use Go 1.27.3+ and Node 22.22+ (Node 24 LTS recommended):

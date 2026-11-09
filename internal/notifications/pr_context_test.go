@@ -92,22 +92,22 @@ func (p contextFactsProvider) PRContext(_ context.Context, _ Source, _ string, _
 	yes := true
 	return PRFacts{Source: "github_api", Available: true, State: "open", HeadCommit: "new-head", Viewer: "alice", ReviewsComplete: true, ViewerEverApproved: &yes, ViewerReviews: []ViewerReview{{State: "APPROVED", CommitID: "old-head"}}}
 }
-func TestNotificationModelConsumesFactsInProjectContext(t *testing.T) {
-	s, model, _, source := fixture(t)
+func TestNotificationModelConsumesFullFactsContext(t *testing.T) {
+	s, _, _, source := fixture(t)
 	s.Providers["github"] = contextFactsProvider{&fakeProvider{}}
-	seed(t, s, source, event())
-	result := process(t, s, model, "routine")
-	if result.Status != "completed" || len(model.prompts) < 2 {
-		t.Fatalf("%+v calls=%d", result, len(model.prompts))
+	rules, _ := s.activeRuleSet(context.Background())
+	raw := RawNotification{ID: seed(t, s, source, event()), SourceID: source.ID, Event: event()}
+	snapshot, err := s.agentSnapshot(context.Background(), []RawNotification{raw}, rules)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, prompt := range model.prompts {
-		for _, fact := range []string{`"pr_facts":`, `"viewer_ever_approved":true`, `"viewer":"alice"`} {
-			if !strings.Contains(prompt, fact) {
-				t.Fatalf("missing %s", fact)
-			}
-		}
-		if len(prompt) > projectPromptLimit {
-			t.Fatal("unbounded prompt")
+	prompt, err := snapshotView(snapshot, 1500000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range []string{`"pr_facts":`, `"viewer_ever_approved":true`, `"viewer":"alice"`} {
+		if !strings.Contains(prompt, fact) {
+			t.Fatal("missing source fact", fact)
 		}
 	}
 }
@@ -152,32 +152,21 @@ func TestWorkDecorationBudgetsAndDeduplicatesSessionEvidence(t *testing.T) {
 	}
 }
 
-func TestNotificationProcessingBoundsManySessionsAndKeepsLookupFacts(t *testing.T) {
-	s, model, _, source := fixture(t)
+func TestLargeNotificationContextHasCompleteIndexAndReadableDetails(t *testing.T) {
+	s, _, _, source := fixture(t)
 	ctx := context.Background()
-	s.Providers["github"] = contextFactsProvider{&fakeProvider{}}
-	if err := store.PutPRLink(ctx, s.DB, store.PRLink{TaskID: 1, Repository: "acme/repo", Number: 7, Role: "review", Source: "explicit", Evidence: "Review task", ObservedAt: time.Now()}); err != nil {
-		t.Fatal(err)
+	e := event()
+	e.Context = strings.Repeat("TRANSCRIPT_SENTINEL ", 10000)
+	snapshot := AgentSnapshot{Subjects: []AgentSubject{{ID: "S1", EventIDs: []int64{1}, Event: e}}}
+	initial, err := snapshotView(snapshot, 64000)
+	if err != nil || !strings.Contains(initial, `"detail_available":true`) {
+		t.Fatal(initial, err)
 	}
-	idTask := int64(1)
-	for i := 0; i < 20; i++ {
-		if err := store.PutSessionWork(ctx, s.DB, store.SessionWork{SessionID: fmt.Sprint(i), TaskID: &idTask, State: "idle", Summary: strings.Repeat("work ", 700), Evidence: strings.Repeat("TRANSCRIPT_SENTINEL ", 400), ObservedAt: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
+	page, err := s.agentRead(ctx, snapshot, AgentRead{Name: "read_subject", Arguments: `{"id":"S1","offset":0}`}, Config{ContextBytes: 64000, MaxReads: 12})
+	if err != nil || !strings.Contains(page, "TRANSCRIPT_SENTINEL") {
+		t.Fatal("full data not available", err)
 	}
-	seed(t, s, source, event())
-	result := process(t, s, model, "routine")
-	if result.Status != "completed" {
-		t.Fatal(result)
-	}
-	for _, prompt := range model.prompts {
-		if strings.Contains(prompt, "TRANSCRIPT_SENTINEL") || len(prompt) > projectPromptLimit {
-			t.Fatal("classifier received unbounded session context")
-		}
-		if !strings.Contains(prompt, `"viewer_ever_approved":true`) {
-			t.Fatal("lost aggregate facts")
-		}
-	}
+	_ = source
 }
 
 func TestNotificationBoundsReviewDetailsWithoutLosingApproval(t *testing.T) {

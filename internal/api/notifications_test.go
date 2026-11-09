@@ -145,14 +145,7 @@ func TestRawNotificationRoutesAndManualProcessingRequest(t *testing.T) {
 	if w = call("PATCH", path, `{"status":"processed"}`); w.Code != 400 {
 		t.Fatal("accepted third raw state")
 	}
-	draft, err := service.SaveRuleDraft(context.Background(), 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(`UPDATE notification_rule_sets SET status='ready' WHERE id=?`, draft.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = service.ActivateRules(context.Background(), draft.ID); err != nil {
+	if _, err = db.Exec(`INSERT INTO monitor_profiles(id,name,backend,model,endpoint) VALUES(88,'Notifications','openai_compatible','test','http://localhost'); UPDATE notification_settings SET profile_id=88 WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
 	w = call("POST", "/api/notifications/process", "")

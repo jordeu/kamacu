@@ -190,16 +190,12 @@ func (s *Service) executeNext(ctx context.Context) error {
 			}
 		}
 	}
-	if q.Reason == "rule_continue_once" && q.AnswerSource == "inbox" {
-		for _, option := range q.Options {
-			if option.ID == q.Reason && option.Label == q.Answer {
-				if err := s.continueRuleClarification(ctx, q); err != nil {
-					return fail(err)
-				}
-				return s.finishRun(ctx, id, "succeeded", "Updates moved to Pending. Process pending notifications to evaluate them once without the uncertain rules. Other rules still apply. No work was started.", history)
-			}
-		}
+	modelCtx, cancelModel, _, err := s.modelContext(ctx)
+	if err != nil {
+		return fail(err)
 	}
+	defer cancelModel()
+	ctx = modelCtx
 	related, err := s.loadActionContext(ctx, q.ID)
 	if err != nil {
 		return fail(err)
@@ -221,7 +217,7 @@ func (s *Service) executeNext(ctx context.Context) error {
 	if actionPlan.RuleSetID != activeRules.ID {
 		return fail(ErrRulesChanged)
 	}
-	custom := mustJSON(actionPlan)
+	custom := mustJSON(actionPlan) + "\nUSER RULES:\n" + mustJSON(activeRules.Rules)
 	knownJSON, _ := json.Marshal(related.Projects)
 	known := string(knownJSON)
 	if s.Tools == nil {
@@ -255,7 +251,7 @@ func (s *Service) executeNext(ctx context.Context) error {
 		return fail(err)
 	}
 	prompt += "\nEXECUTION PLAN (validated user reply):\n" + mustJSON(actionPlan)
-	runCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	reviewOnly := actionPlan.Workflow == "route_review"
 	reviewRoutingCorrected := false

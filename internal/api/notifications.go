@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"kamacu/internal/notifications"
 )
@@ -48,7 +49,7 @@ func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
 	})
 	mux.HandleFunc("POST /api/notifications/process", func(w http.ResponseWriter, r *http.Request) {
 		process, err := service.RequestProcessing(r.Context())
-		if errors.Is(err, notifications.ErrNoPending) || errors.Is(err, notifications.ErrNoActiveRules) {
+		if errors.Is(err, notifications.ErrNoPending) || errors.Is(err, notifications.ErrNoActiveRules) || (err != nil && strings.Contains(err.Error(), "choose a notification processing model")) {
 			writeError(w, 409, err.Error())
 			return
 		}

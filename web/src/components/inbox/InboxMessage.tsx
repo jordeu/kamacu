@@ -61,6 +61,7 @@ export function InboxMessage({ question: q, onResult, expanded, dialog = false, 
         {q.origin==="observer" && q.status==="answered" && (completionClosesSession(q) ? " · Session exit requested" : ` · ${q.delivery_status === "uncertain" ? "Delivery uncertain — review the terminal" : q.delivery_status || "Delivery pending"}`)}
  {!notification && q.origin!=="observer" && q.status === "answered" && (completion && q.reason === "exit" ? " · Session exit requested" : q.answer_source === "session" ? " · Answered in terminal" : q.acknowledged_at ? " · Received by agent" : " · Awaiting agent")}
         {notification && q.status === "answered" && ` · ${q.delivery_status || "queued"}`}
+        {q.reason === "notification_processor_changed" && " · Requeued for the new notification processor. Process pending updates after choosing a notification model."}
         {q.reason === "notification_task_routing_changed" && " · Requeued for task matching. Process pending notifications to refresh this message."}
         {q.reason === "notification_superseded" && " · New activity made this question obsolete"}
         {q.reason === "heartbeat_expired" && " · Agent stopped polling"}

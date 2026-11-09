@@ -4,18 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
-	"testing"
-
 	"kamacu/internal/inbox"
 	"kamacu/internal/notifications"
 	"kamacu/internal/store"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
 )
 
-func TestNotificationRuleLifecycleRoutes(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "rules.db"))
+func TestNotificationAgentSettingsAndRules(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,82 +28,62 @@ func TestNotificationRuleLifecycleRoutes(t *testing.T) {
 	s := notifications.New(db, box, nil, nil)
 	mux := http.NewServeMux()
 	NotificationRoutes(mux, s)
-	SettingsRoutes(mux, db)
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)))
 		return w
 	}
-	for _, body := range []string{`null`, `{} {}`, `{"unknown":true}`} {
-		if w := call("POST", "/api/notifications/rules/drafts", body); w.Code != 400 {
-			t.Fatal("invalid draft accepted", w.Code, body)
-		}
-	}
-	w := call("POST", "/api/notifications/rules/drafts", `{"base_revision":0,"rules":[]}`)
-	if w.Code != 201 {
+	w := call("GET", "/api/notifications/config", "")
+	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	var draft notifications.RuleSet
-	if err = json.Unmarshal(w.Body.Bytes(), &draft); err != nil {
+	var c notifications.Config
+	json.Unmarshal(w.Body.Bytes(), &c)
+	if c.ProfileID != nil {
+		t.Fatal("notification model silently inherited monitoring")
+	}
+	if _, err = db.Exec(`INSERT INTO monitor_profiles(id,name,backend,model,endpoint) VALUES(1,'Monitor','openai_compatible','small','http://localhost'),(2,'Notifications','openai_compatible','strong','http://localhost'); UPDATE monitor_settings SET default_profile_id=1 WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
-	if w = call("POST", "/api/notifications/rules/"+draft.ID+"/activate", ""); w.Code != 409 {
-		t.Fatal("draft activated without compilation")
-	}
-	if w = call("POST", "/api/notifications/rules/"+draft.ID+"/compile", ""); w.Code != 202 {
+	id := int64(2)
+	c.ProfileID = &id
+	w = call("PUT", "/api/notifications/config", string(mustJSONTest(c)))
+	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if err = s.Tick(context.Background()); err != nil {
-		t.Fatal(err)
+	var monitoring int64
+	db.QueryRow(`SELECT default_profile_id FROM monitor_settings WHERE id=1`).Scan(&monitoring)
+	if monitoring != 1 {
+		t.Fatal("changed monitoring selection")
 	}
-	if w = call("GET", "/api/notifications/rules", ""); w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	var sets []notifications.RuleSet
-	json.Unmarshal(w.Body.Bytes(), &sets)
-	if len(sets) != 1 || sets[0].Status != "ready" {
-		t.Fatal(sets)
-	}
-	if w = call("POST", "/api/notifications/rules/"+draft.ID+"/activate", ""); w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	if w = call("POST", "/api/notifications/rules/drafts", `{"base_revision":0,"rules":[]}`); w.Code != 409 {
-		t.Fatal("stale editor was not rejected", w.Code)
-	}
-	if w = call("GET", "/api/notifications/rules/problems", ""); w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	if w = call("GET", "/api/notifications/rules/history/"+draft.ID, ""); w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	if w = call("POST", "/api/notifications/rules/improvements", `{"kind":"unclear_rule","instructions":""}`); w.Code != 400 {
-		t.Fatal("empty feedback accepted", w.Code)
-	}
-	for _, key := range []string{"notification_system_prompt", "notification_policy"} {
-		if w = call("PUT", "/api/settings/"+key, `{"value":"obsolete"}`); w.Code != 404 {
-			t.Fatal("old configuration remains writable", key, w.Code)
-		}
-	}
-	if w = call("POST", "/api/notifications/rules/previews", `{"rule_set_id":"`+draft.ID+`"}`); w.Code != 400 {
-		t.Fatal("empty preview accepted")
-	}
-	source, err := s.AddSource(context.Background(), "github", "GitHub", json.RawMessage(`{}`))
+	set, err := s.SaveRules(context.Background(), 1, []notifications.NotificationRule{{ID: "R003", Text: "Group Renovate reviews and propose the recurring task", Enabled: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`INSERT INTO notification_events(source_id,external_id,version,payload,created_at) VALUES(?,'event','v1','{}',0)`, source.ID); err != nil {
-		t.Fatal(err)
+	if set.Status != "active" || set.Rules[0].ID != "R003" {
+		t.Fatal(set)
 	}
-	if w = call("GET", "/api/notifications?status=held", ""); w.Code != 400 {
-		t.Fatal("removed category is still available", w.Code)
+	for _, path := range []string{"/api/notifications/rules/" + set.ID + "/compile", "/api/notifications/rules/" + set.ID + "/activate", "/api/notifications/rules/drafts"} {
+		if w = call("POST", path, `{}`); w.Code < 400 {
+			t.Fatal("obsolete compiler endpoint is available", path)
+		}
 	}
-	if w = call("POST", "/api/notifications/retry-held", ""); w.Code != 404 && w.Code != 405 {
-		t.Fatal("removed retry route is still available", w.Code)
+	if w = call("PUT", "/api/notifications/rules", `{"base_revision":1,"rules":[]}`); w.Code != 409 {
+		t.Fatal("stale edit accepted", w.Code)
 	}
-	var page notifications.RawPage
-	w = call("GET", "/api/notifications?status=pending", "")
-	json.Unmarshal(w.Body.Bytes(), &page)
-	if w.Code != 200 || len(page.Items) != 1 {
-		t.Fatal(page)
+	if w = call("PUT", "/api/notifications/rules", `{"base_revision":2,"rules":[{"id":"X","text":"x","enabled":true,"clauses":[]}]}`); w.Code != 400 {
+		t.Fatal("compiler clauses accepted", w.Code)
+	}
+	rules := []notifications.NotificationRule{}
+	for i := 0; i < 20; i++ {
+		rules = append(rules, notifications.NotificationRule{Text: strings.Repeat("a", 8000), Enabled: true})
+	}
+	w = call("PUT", "/api/notifications/rules", string(mustJSONTest(map[string]any{"base_revision": set.Revision, "rules": rules})))
+	if w.Code != 200 {
+		t.Fatal("valid plain rule list was rejected by the HTTP body limit", w.Code, w.Body.String())
+	}
+	if w = call("POST", "/api/notifications/config/test", `{}`); w.Code != 502 {
+		t.Fatal("missing model backend reported success", w.Code)
 	}
 }
+func mustJSONTest(v any) []byte { b, _ := json.Marshal(v); return b }
