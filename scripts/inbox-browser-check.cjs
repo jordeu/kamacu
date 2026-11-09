@@ -176,7 +176,15 @@ const path = require('node:path');
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
     // External exits stay on the task, even while its terminal is focused.
     // A terminal exit prompts only while the agent tab is actively viewed.
-    for (const scenario of ['external', 'other-tab', 'terminal']) {
+    const setWindowFocus = focused => page.evaluate(value => {
+      document.hasFocus = () => value;
+      window.dispatchEvent(new Event(value ? 'focus' : 'blur'));
+    }, focused);
+    const setWindowVisibility = visible => page.evaluate(value => {
+      Object.defineProperty(document, 'visibilityState', {configurable:true, get:() => value ? 'visible' : 'hidden'});
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, visible);
+    for (const scenario of ['external', 'other-tab', 'other-tab-focus-return', 'background-window', 'background-tab', 'focus-return', 'visibility-return', 'terminal', 'terminal-stop']) {
       taskSession = {...taskSession, status:'running', exitCode:undefined, exitSource:undefined, stopRequested:false};
       taskSocket = undefined;
       await page.goto(base+'/projects/1/tasks/1?feedback_session=browser-session');
@@ -184,17 +192,30 @@ const path = require('node:path');
       await page.getByRole('tab',{name:'Agent',exact:true}).waitFor();
       await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
       assert.ok(taskSocket,'agent terminal did not connect');
-      if (scenario === 'other-tab') await page.getByRole('tab',{name:'Description',exact:true}).click();
-      taskSession = {...taskSession, status:'exited', exitCode:143, stopRequested:true, exitSource:scenario === 'external' ? 'external' : 'terminal'};
+      if (scenario.startsWith('other-tab')) await page.getByRole('tab',{name:'Description',exact:true}).click();
+      if (scenario.endsWith('focus-return') || scenario === 'background-window') {
+        // Control window focus independently of terminal focus. Session data
+        // stays identical while away, as it does for a quiet agent prompt.
+        await setWindowFocus(false);
+        if (scenario.endsWith('focus-return')) await setWindowFocus(true);
+      }
+      if (scenario === 'visibility-return' || scenario === 'background-tab') {
+        await setWindowVisibility(false);
+        if (scenario === 'visibility-return') await setWindowVisibility(true);
+      }
+      const exitCode = scenario === 'terminal-stop' ? 143 : 0;
+      taskSession = {...taskSession, status:'exited', exitCode, stopRequested:scenario === 'terminal-stop', exitSource:scenario === 'external' ? 'external' : 'terminal'};
       const refresh = page.waitForResponse(response => new URL(response.url()).pathname === '/api/sessions' && new URL(response.url()).searchParams.get('task_id') === '1');
-      taskSocket.send(Buffer.from('x'+JSON.stringify({code:143})));
+      taskSocket.send(Buffer.from('x'+JSON.stringify({code:exitCode})));
       await refresh;
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      if (scenario === 'terminal') {
+      if (['terminal', 'terminal-stop', 'focus-return', 'visibility-return'].includes(scenario)) {
         await page.waitForURL('**/projects/1');
         await page.getByRole('dialog',{name:'Agent session ended',exact:true}).waitFor();
         await page.getByRole('button',{name:'Keep In Progress',exact:true}).click();
       } else {
+        if (scenario === 'background-window') await setWindowFocus(true);
+        if (scenario === 'background-tab') await setWindowVisibility(true);
         // Let the UI render the exit, then confirm revisiting the tab stays quiet.
         await page.getByRole('tab',{name:'Agent',exact:true}).click();
         await page.getByRole('button',{name:'Reset session',exact:true}).waitFor();

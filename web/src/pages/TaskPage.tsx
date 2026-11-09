@@ -145,17 +145,25 @@ export default function TaskPage() {
   const [activeTab, setActiveTab] = useState("agent");
   const observedAgent = useRef<ViewedAgent | null>(null);
   useEffect(() => {
-    // Do not defer an exit prompt until the user returns to this window.
-    const clearWhenAway = () => {
-      if (document.visibilityState !== "visible" || !document.hasFocus()) observedAgent.current = null;
+    const updateViewedAgent = () => {
+      if (activeTab !== "agent" || document.visibilityState !== "visible" || !document.hasFocus()) {
+        // Do not defer an exit prompt until the user returns to this window.
+        observedAgent.current = null;
+      } else if (sessionsFetched && task && agentSession?.status === "running") {
+        // Returning to a quiet terminal may not change any query data. Restore
+        // the observation on focus too, so its next exit is still handled.
+        observedAgent.current = { taskId, sessionId: agentSession.id };
+      }
     };
-    window.addEventListener("blur", clearWhenAway);
-    document.addEventListener("visibilitychange", clearWhenAway);
+    window.addEventListener("blur", updateViewedAgent);
+    window.addEventListener("focus", updateViewedAgent);
+    document.addEventListener("visibilitychange", updateViewedAgent);
     return () => {
-      window.removeEventListener("blur", clearWhenAway);
-      document.removeEventListener("visibilitychange", clearWhenAway);
+      window.removeEventListener("blur", updateViewedAgent);
+      window.removeEventListener("focus", updateViewedAgent);
+      document.removeEventListener("visibilitychange", updateViewedAgent);
     };
-  }, []);
+  }, [activeTab, sessionsFetched, task, taskId, agentSession]);
   useEffect(() => {
     // Ignore cached exits on revisit: only a process observed running during
     // this visit can take the user back to the board.
