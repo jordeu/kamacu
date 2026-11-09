@@ -28,11 +28,17 @@ func TestCompletionMoveActions(t *testing.T) {
 		{"move failure", inbox.MoveToDone, "in_progress", 500},
 		{"answer failure", inbox.MoveToDone, "in_progress", 500},
 		{"recurring", inbox.MoveToDone, "in_progress", 200},
-		{"not offered", inbox.MoveToDone, "in_progress", 400},
+		{"not recommended", inbox.MoveToDone, "in_progress", 200},
 		{"PR review", inbox.MoveToDone, "in_progress", 400},
 		{"stale message", inbox.MoveToDone, "in_progress", 200},
 		{"hidden", inbox.MoveToDone, "in_progress", 409},
 		{"new input", inbox.MoveToDone, "in_progress", 409},
+		{"close PR review", inbox.CloseSession, "todo", 200},
+		{"close done task", inbox.CloseSession, "done", 200},
+		{"close new input", inbox.CloseSession, "in_progress", 409},
+		{"close new output", inbox.CloseSession, "in_progress", 409},
+		{"close hidden", inbox.CloseSession, "in_progress", 409},
+		{"close stale message", inbox.CloseSession, "in_progress", 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -52,13 +58,16 @@ func TestCompletionMoveActions(t *testing.T) {
 			if _, err = db.Exec(`UPDATE tasks SET status=? WHERE id=1`, tc.status); err != nil {
 				t.Fatal(err)
 			}
-			if tc.name == "PR review" {
+			if tc.name == "PR review" || tc.name == "close PR review" {
 				if _, err = db.Exec(`UPDATE tasks SET source='github_pr' WHERE id=1`); err != nil {
 					t.Fatal(err)
 				}
 			}
 			var input uint64
-			svc := inbox.New(db, func(string) inbox.Session { return inbox.Session{TaskID: 1, Live: true, Revision: 1, Input: input} })
+			revision := uint64(1)
+			svc := inbox.New(db, func(string) inbox.Session {
+				return inbox.Session{TaskID: 1, Live: true, Revision: revision, Input: input}
+			})
 			defer svc.Close()
 			ConfigureInboxTaskMoves(svc, db, worktree.NewService(t.TempDir()))
 			if tc.name == "recurring" {
@@ -66,8 +75,8 @@ func TestCompletionMoveActions(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			options := []inbox.Option{{ID: tc.action, Label: "model-provided label"}}
-			if tc.name == "not offered" {
+			options := []inbox.Option{{ID: tc.action, Label: "model-provided label", Recommended: true}}
+			if tc.name == "not recommended" {
 				options = nil
 			}
 			created, err := svc.Observe(ctx, inbox.Identity{TaskID: 1, SessionID: "origin"}, inbox.Create{Key: "done", Abstract: "Done", Summary: "Done", Context: "Verified", Question: "Work completed", Options: options}, "completion", "terminal", 1, 0)
@@ -84,10 +93,13 @@ func TestCompletionMoveActions(t *testing.T) {
 			if tc.name == "answer failure" {
 				_, err = db.Exec(`CREATE TRIGGER fail_answer BEFORE UPDATE OF status ON inbox_questions BEGIN SELECT RAISE(ABORT,'failed answer'); END`)
 			}
-			if tc.name == "new input" {
+			if tc.name == "new input" || tc.name == "close new input" {
 				input = 1
 			}
-			if tc.name == "hidden" {
+			if tc.name == "close new output" {
+				revision++
+			}
+			if tc.name == "hidden" || tc.name == "close hidden" {
 				err = svc.HideObserved(ctx, "origin", true)
 			}
 			if err != nil {
@@ -101,11 +113,11 @@ func TestCompletionMoveActions(t *testing.T) {
 				}
 				stopped++
 			})
-			revision := q.Revision
-			if tc.name == "stale message" {
-				revision--
+			messageRevision := q.Revision
+			if tc.name == "stale message" || tc.name == "close stale message" {
+				messageRevision--
 			}
-			raw, _ := json.Marshal(inboxAnswer{Revision: revision, OptionID: tc.action})
+			raw, _ := json.Marshal(inboxAnswer{Revision: messageRevision, OptionID: tc.action})
 			call := func() {
 				w := httptest.NewRecorder()
 				mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/inbox/"+q.ID+"/answer", bytes.NewReader(raw)))
@@ -122,8 +134,12 @@ func TestCompletionMoveActions(t *testing.T) {
 			if err = db.QueryRow(`SELECT status FROM tasks WHERE id=1`).Scan(&status); err != nil {
 				t.Fatal(err)
 			}
-			if tc.code == 200 && tc.name != "stale message" {
-				if status != inbox.CompletionTarget(tc.action) || saved.Status != "answered" || saved.AcknowledgedAt == nil || stopped != 1 {
+			if tc.code == 200 && tc.name != "stale message" && tc.name != "close stale message" {
+				target := inbox.CompletionTarget(tc.action)
+				if tc.action == inbox.CloseSession {
+					target = tc.status
+				}
+				if status != target || saved.Status != "answered" || saved.AcknowledgedAt == nil || stopped != 1 {
 					t.Fatalf("status=%s message=%+v stops=%d", status, saved, stopped)
 				}
 				// A retry closes only the same originating session and never moves again.
