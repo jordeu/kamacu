@@ -36,6 +36,7 @@ export interface FeedbackQuestion {
   options: {
     id: string;
     label: string;
+    recommended?: boolean;
     action_summary?: string;
     action?: {
       version: number;
@@ -132,12 +133,22 @@ export function useFeedbackAction() {
 const completionLabels: Record<string, string> = {
   move_to_review: "Move to review and close session",
   move_to_done: "Move to done and close session",
+  exit: "Close session",
 };
 export function completionActions(q: FeedbackQuestion) {
-  if (q.kind !== "completion" || q.task_id === 0) return [];
+  if (q.kind !== "completion") return [];
   return Object.entries(completionLabels)
-    .filter(([id]) => q.options.some((option) => option.id === id))
-    .map(([id, label]) => ({ id, label }));
+    .filter(
+      ([id]) =>
+        (id === "exit" || q.task_id !== 0) &&
+        q.options.some((option) => option.id === id),
+    )
+    .map(([id, label]) => ({
+      id,
+      label: q.options.some((option) => option.id === id && option.recommended)
+        ? `${label} (Recommended)`
+        : label,
+    }));
 }
 export function completionClosesSession(q: FeedbackQuestion) {
   return (

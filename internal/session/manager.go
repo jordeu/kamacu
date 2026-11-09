@@ -65,6 +65,7 @@ type Manager struct {
 
 	agentReady    func(int64) error
 	mu            sync.Mutex
+	changed       chan struct{} // closed and replaced on each lifecycle transition
 	sessions      map[string]*Session
 	counter       int           // monotonic global "bash #N" label counter; never reused
 	taskCounters  map[int64]int // per-task "Bash N" label counters; never reused or reset
@@ -77,6 +78,7 @@ type Manager struct {
 // NewManager returns an empty Manager.
 func NewManager() *Manager {
 	return &Manager{
+		changed:      make(chan struct{}),
 		sessions:     make(map[string]*Session),
 		taskCounters: make(map[int64]int),
 	}
@@ -481,13 +483,34 @@ func (m *Manager) Spawn(opts SpawnOpts) (result *Session, resultErr error) {
 		s.killer = func() error { return tc.KillSession(context.Background(), opts.TmuxName) }
 	}
 
-	go s.pump()
-	go s.waitExit()
-
+	s.onExit = m.notifyChange
 	m.mu.Lock()
 	m.sessions[s.id] = s
+	m.notifyChangeLocked()
 	m.mu.Unlock()
+	go s.pump()
+	go s.waitExit()
 	return s, nil
+}
+
+// Changes returns a broadcast signal for the next session lifecycle change.
+// Call before reading session state, then call again after each notification.
+// Slow consumers coalesce changes without blocking session processes.
+func (m *Manager) Changes() <-chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.changed
+}
+
+func (m *Manager) notifyChange() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notifyChangeLocked()
+}
+
+func (m *Manager) notifyChangeLocked() {
+	close(m.changed)
+	m.changed = make(chan struct{})
 }
 
 // HasLiveTmux reports whether any RUNNING in-memory session is bound to the
@@ -627,6 +650,7 @@ func (m *Manager) Remove(id string) error {
 		return ErrStillRunning
 	}
 	delete(m.sessions, id)
+	m.notifyChangeLocked()
 	return nil
 }
 

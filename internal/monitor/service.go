@@ -573,6 +573,6 @@ func (s *Service) taskContext(ctx context.Context, info session.Info) (TaskConte
 		task.Scope = "scratchpad"
 		return task, nil
 	}
-	err := s.DB.QueryRowContext(ctx, `SELECT t.title,t.description,t.status,t.source,p.id,p.name FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?`, info.TaskID).Scan(&task.Title, &task.Description, &task.Status, &task.Source, &task.ProjectID, &task.ProjectName)
+	err := s.DB.QueryRowContext(ctx, `SELECT t.title,t.description,t.status,t.source,p.id,p.name,COALESCE(p.github_repo,'') FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?`, info.TaskID).Scan(&task.Title, &task.Description, &task.Status, &task.Source, &task.ProjectID, &task.ProjectName, &task.Repository)
 	return task, err
 }

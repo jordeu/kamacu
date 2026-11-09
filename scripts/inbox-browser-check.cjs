@@ -34,7 +34,10 @@ const path = require('node:path');
     await page.route('**/api/**', async route => {
       const name = new URL(route.request().url()).pathname;
       if (name.startsWith('/api/test-monitor') || name.startsWith('/api/monitor') || name.startsWith('/api/inbox') || name.startsWith('/api/agent-feedback') || name.startsWith('/api/integrations') || name.startsWith('/api/artifact-') || /^\/api\/tasks\/0\/artifact/.test(name)) return route.continue();
-      const data = name === '/api/workspaces' ? [{ id: 1, name: 'Work' }]
+      const data = name === '/api/notifications/rules' ? [{id:'active',revision:1,status:'active',rules:[]}]
+        : name === '/api/notifications/config' ? {profile_id:null,revision:1,context_bytes:24000,output_tokens:4000,timeout_seconds:60,max_reads:5}
+        : name === '/api/notifications/usage' ? {}
+        : name === '/api/workspaces' ? [{ id: 1, name: 'Work' }]
         : name === '/api/projects' ? [{ id: 1, name: 'Kamacu', workspace_id: 1, icon_letters: 'KA', icon_color: 'blue' }]
         : name === '/api/tasks/1' ? task
         : name === '/api/sessions' && new URL(route.request().url()).searchParams.get('scope') === 'global' ? [{ id:'scratch-session', taskId:0, global:true, kind:'agent', engine:'custom', status:'running', label:'Agent', createdAt:new Date().toISOString() }]
@@ -85,8 +88,8 @@ const path = require('node:path');
       await row.waitFor({state:'attached'});
       if (await row.getAttribute('open') === null) await row.locator(':scope > summary').click();
     }
-    for (const mode of ['dismiss', 'move_to_review', 'move_to_done', 'no-actions']) {
-      const actions = mode === 'dismiss' ? ['move_to_review','move_to_done'] : mode === 'no-actions' ? [] : [mode];
+    for (const mode of ['dismiss', 'move_to_review', 'move_to_done', 'unrecommended-done', 'no-actions', 'exit']) {
+      const actions = mode === 'dismiss' ? ['move_to_review','move_to_done'] : (mode === 'no-actions' || mode === 'unrecommended-done') ? [] : [mode];
       const completed = await complete('completed-'+mode, actions);
       await page.reload();
       await expand(completed.question);
@@ -101,22 +104,22 @@ const path = require('node:path');
       assert.equal(await page.getByLabel('Send the next prompt', {exact:true}).count(), 0);
       assert.equal(await page.getByRole('button', {name:'Seen',exact:true}).count(), 0);
       for (const [id,label] of [['move_to_review','Move to review and close session'],['move_to_done','Move to done and close session']]) {
-        assert.equal(await page.getByRole('button',{name:label,exact:true}).count(),actions.includes(id) ? 1 : 0);
+        assert.equal(await page.getByRole('button',{name:label + (actions.includes(id) ? ' (Recommended)' : ''),exact:true}).count(),1);
       }
-      assert.equal(await page.getByRole('button',{name:'OK, exit session',exact:true}).count(),0);
+      assert.equal(await page.getByRole('button',{name:'Close session',exact:true}).count(),1);
       await page.getByRole('button',{name:'Dismiss',exact:true}).waitFor();
       await page.getByRole('button',{name:'Open task: Improve task navigation',exact:true}).waitFor();
-      await page.getByRole('button',{name:mode === 'move_to_review' ? 'Move to review and close session' : mode === 'move_to_done' ? 'Move to done and close session' : 'Dismiss',exact:true}).click();
-      await page.getByText(mode === 'move_to_review' ? 'Task moved to review. Message archived and agent session is closing.' : mode === 'move_to_done' ? 'Task moved to done. Message archived and agent session is closing.' : 'Message dismissed and archived.', {exact:true}).waitFor();
+      await page.getByRole('button',{name:mode === 'move_to_review' ? 'Move to review and close session (Recommended)' : mode === 'unrecommended-done' ? 'Move to done and close session' : mode === 'move_to_done' ? 'Move to done and close session (Recommended)' : mode === 'exit' ? 'Close session' : 'Dismiss',exact:true}).click();
+      await page.getByText(mode === 'move_to_review' ? 'Task moved to review. Message archived and agent session is closing.' : (mode === 'move_to_done' || mode === 'unrecommended-done') ? 'Task moved to done. Message archived and agent session is closing.' : mode === 'exit' ? 'Message archived. Agent session is closing.' : 'Message dismissed and archived.', {exact:true}).waitFor();
       const result = await agent('wait', {question_id:completed.question.id,wait_seconds:0});
-      assert.equal(result.question.status,mode.startsWith('move_') ? 'answered' : 'dismissed');
-      assert.equal(result.question.reason,mode.startsWith('move_') ? mode : '');
+      assert.equal(result.question.status,(mode.startsWith('move_') || mode === 'unrecommended-done' || mode === 'exit') ? 'answered' : 'dismissed');
+      assert.equal(result.question.reason,(mode.startsWith('move_') || mode === 'unrecommended-done' || mode === 'exit') ? (mode === 'unrecommended-done' ? 'move_to_done' : mode) : '');
       assert.equal(await page.getByRole('dialog',{name:'Agent session ended',exact:true}).count(),0,'inbox exit opened the task-status dialog');
     }
     await complete('completed-sidebar',['move_to_done']);
     await page.getByRole('button',{name:'Expand inbox sidebar',exact:true}).click();
     const sidebar = page.getByRole('complementary',{name:'Inbox sidebar',exact:true});
-    await sidebar.getByRole('button',{name:'Move to done and close session',exact:true}).click();
+    await sidebar.getByRole('button',{name:'Move to done and close session (Recommended)',exact:true}).click();
     await sidebar.getByText('Task moved to done. Message archived and agent session is closing.',{exact:true}).waitFor();
     assert.equal(await page.getByRole('dialog',{name:'Agent session ended',exact:true}).count(),0,'sidebar exit opened the task-status dialog');
     await page.getByRole('button',{name:'Collapse inbox sidebar',exact:true}).click();
@@ -173,7 +176,15 @@ const path = require('node:path');
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
     // External exits stay on the task, even while its terminal is focused.
     // A terminal exit prompts only while the agent tab is actively viewed.
-    for (const scenario of ['external', 'other-tab', 'terminal']) {
+    const setWindowFocus = focused => page.evaluate(value => {
+      document.hasFocus = () => value;
+      window.dispatchEvent(new Event(value ? 'focus' : 'blur'));
+    }, focused);
+    const setWindowVisibility = visible => page.evaluate(value => {
+      Object.defineProperty(document, 'visibilityState', {configurable:true, get:() => value ? 'visible' : 'hidden'});
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, visible);
+    for (const scenario of ['external', 'other-tab', 'other-tab-focus-return', 'background-window', 'background-tab', 'focus-return', 'visibility-return', 'terminal', 'terminal-stop']) {
       taskSession = {...taskSession, status:'running', exitCode:undefined, exitSource:undefined, stopRequested:false};
       taskSocket = undefined;
       await page.goto(base+'/projects/1/tasks/1?feedback_session=browser-session');
@@ -181,17 +192,30 @@ const path = require('node:path');
       await page.getByRole('tab',{name:'Agent',exact:true}).waitFor();
       await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
       assert.ok(taskSocket,'agent terminal did not connect');
-      if (scenario === 'other-tab') await page.getByRole('tab',{name:'Description',exact:true}).click();
-      taskSession = {...taskSession, status:'exited', exitCode:143, stopRequested:true, exitSource:scenario === 'external' ? 'external' : 'terminal'};
+      if (scenario.startsWith('other-tab')) await page.getByRole('tab',{name:'Description',exact:true}).click();
+      if (scenario.endsWith('focus-return') || scenario === 'background-window') {
+        // Control window focus independently of terminal focus. Session data
+        // stays identical while away, as it does for a quiet agent prompt.
+        await setWindowFocus(false);
+        if (scenario.endsWith('focus-return')) await setWindowFocus(true);
+      }
+      if (scenario === 'visibility-return' || scenario === 'background-tab') {
+        await setWindowVisibility(false);
+        if (scenario === 'visibility-return') await setWindowVisibility(true);
+      }
+      const exitCode = scenario === 'terminal-stop' ? 143 : 0;
+      taskSession = {...taskSession, status:'exited', exitCode, stopRequested:scenario === 'terminal-stop', exitSource:scenario === 'external' ? 'external' : 'terminal'};
       const refresh = page.waitForResponse(response => new URL(response.url()).pathname === '/api/sessions' && new URL(response.url()).searchParams.get('task_id') === '1');
-      taskSocket.send(Buffer.from('x'+JSON.stringify({code:143})));
+      taskSocket.send(Buffer.from('x'+JSON.stringify({code:exitCode})));
       await refresh;
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      if (scenario === 'terminal') {
+      if (['terminal', 'terminal-stop', 'focus-return', 'visibility-return'].includes(scenario)) {
         await page.waitForURL('**/projects/1');
         await page.getByRole('dialog',{name:'Agent session ended',exact:true}).waitFor();
         await page.getByRole('button',{name:'Keep In Progress',exact:true}).click();
       } else {
+        if (scenario === 'background-window') await setWindowFocus(true);
+        if (scenario === 'background-tab') await setWindowVisibility(true);
         // Let the UI render the exit, then confirm revisiting the tab stays quiet.
         await page.getByRole('tab',{name:'Agent',exact:true}).click();
         await page.getByRole('button',{name:'Reset session',exact:true}).waitFor();
@@ -239,17 +263,26 @@ const path = require('node:path');
     const scratchCompletion = await complete('scratch-completion', ['move_to_review','move_to_done'], 0);
     await page.goto(base+'/inbox');
     await expand(scratchCompletion.question);
+    await page.getByRole('button',{name:'Close session',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:/Move to (review|done) and close session/}).count(),0);
     await page.getByRole('button',{name:'Dismiss',exact:true}).waitFor();
     await page.getByRole('button',{name:'Open Scratchpad',exact:true}).click();
     await page.waitForURL('**/global?feedback_session=scratch-session');
+    const scratchClose = await complete('scratch-close', [], 0);
+    await page.goto(base+'/inbox');
+    await expand(scratchClose.question);
+    await page.getByRole('button',{name:'Close session',exact:true}).click();
+    await page.getByText('Message archived. Agent session is closing.',{exact:true}).waitFor();
+    const scratchClosed = await (await fetch(base+`/api/inbox/${scratchClose.question.id}`)).json();
+    assert.equal(scratchClosed.status,'answered');
+    assert.equal(scratchClosed.reason,'exit');
     // Observer cards keep their identity when opened, hidden, and restored.
     const observed=await (await fetch(base+'/api/test-monitor/observe',{method:'POST'})).json();
     await page.goto(base+'/inbox');
     await expand(observed.question);
     await page.getByRole('heading',{name:'Image upload security',exact:true}).waitFor();
     await page.getByText('I require authentication and workspace membership before accepting uploads.',{exact:true}).waitFor();
-    assert.equal(await page.getByRole('link',{name:'Review the PR',exact:true}).getAttribute('href'),'https://github.com/example/demo/pull/42');
+    assert.equal(await page.locator('a[href="https://github.com/example/demo/pull/42"]').getAttribute('href'),'https://github.com/example/demo/pull/42');
     await page.getByRole('button',{name:'Open Scratchpad',exact:true}).click();
     await page.waitForURL('**/global?feedback_session=scratch-session');
     let observedState=await (await fetch(base+`/api/inbox/${observed.question.id}`)).json();
@@ -265,7 +298,7 @@ const path = require('node:path');
     await page.getByText('No messages waiting',{exact:true}).waitFor();
     observedState=await (await fetch(base+`/api/inbox/${observed.question.id}`)).json();
     assert.equal(observedState.answer,'1. Yes, continue.');
-    await page.goto(base + '/settings');
+    await page.goto(base + '/settings?section=monitoring');
     const monitoring = page.getByRole('region', {name:'Terminal monitoring'});
     await monitoring.getByText('No monitoring models yet', {exact:true}).waitFor();
     assert.equal(await page.getByRole('dialog').count(), 0);
@@ -303,6 +336,7 @@ const path = require('node:path');
     assert.ok(cfg.default_profile_id);
     assert.equal(cfg.workspaces[0].profile_id,null);
     if(directory) await page.screenshot({path:path.join(directory,'monitoring-mobile.png'),fullPage:true});
+    await page.getByRole('tab',{name:'Agents',exact:true}).click();
     await page.getByRole('button', {name: 'Enable Claude Code integration', exact: true}).click();
     await page.getByRole('button', {name: 'Repair Claude Code integration', exact: true}).waitFor();
     await page.getByText('Enabled · MCP registered.', {exact:true}).waitFor();

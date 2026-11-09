@@ -485,7 +485,7 @@ func TestCompletionActionsAndNextPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			q := r.Question
-			if q.Kind != "completion" || len(q.Options) != 0 {
+			if q.Kind != "completion" || len(q.Options) != 3 {
 				t.Fatalf("completion: %+v", q)
 			}
 			retry, err := s.Complete(ctx, who, Create{Key: "finished", Abstract: "Compact message", Summary: "Implemented feature", Context: "Tests passed"})

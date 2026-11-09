@@ -46,6 +46,7 @@ type Option struct {
 	Label         string                `json:"label"`
 	Action        *inboxaction.Sequence `json:"action,omitempty"`
 	ActionSummary string                `json:"action_summary,omitempty"`
+	Recommended   bool                  `json:"recommended,omitempty"`
 }
 type TaskLink struct {
 	TaskID    int64  `json:"task_id"`
@@ -322,6 +323,14 @@ func (s *Service) create(ctx context.Context, who Identity, c Create, kind strin
 	if s.terminalManaged {
 		return Result{}, fmt.Errorf("%w: Kamacu now creates inbox messages from terminal output; display your question or completion in the terminal", ErrInvalid)
 	}
+	if kind == "completion" {
+		if err := s.valid(who); err != nil {
+			return Result{}, err
+		}
+		if err := s.prepareCompletion(ctx, who, &c); err != nil {
+			return Result{}, err
+		}
+	}
 	return s.createLocked(ctx, who, c, kind)
 }
 func (s *Service) createLocked(ctx context.Context, who Identity, c Create, kind string) (Result, error) {
@@ -506,6 +515,12 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	}
 	var moved func()
 	var before func(*sql.Tx) error
+	if q.Kind == "completion" && optionID == CloseSession {
+		if who != nil {
+			return Result{}, fmt.Errorf("%w: session closing requires a user inbox action", ErrInvalid)
+		}
+		before = func(*sql.Tx) error { return s.validCompletionSession(q) }
+	}
 	if q.Origin == "notification" {
 		// Preserve a selected typed action. Free-text answers leave this empty;
 		// the worker must not infer a no-op from a substring of user prose.

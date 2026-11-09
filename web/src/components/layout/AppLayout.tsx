@@ -6,6 +6,7 @@ import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { ActiveSessionsBar } from "@/components/layout/ActiveSessionsBar";
 import { ActiveWorkspaceProvider } from "@/lib/useActiveWorkspace";
 import { usePresenceBeacon } from "@/presence/usePresenceBeacon";
+import { useSessionEvents } from "@/api/sessionEvents";
 
 import { MobileNavigation } from "@/components/layout/MobileNavigation";
 import { InboxSidebar } from "@/components/layout/InboxSidebar";
@@ -17,6 +18,7 @@ export function AppLayout() {
   // the current route + focused session + visibility on every route. It has
   // no UI — the surface exists for the agents reading the snapshot.
   usePresenceBeacon();
+  useSessionEvents();
 
   // D-04: collapsed state persists across reloads. The generated shadcn
   // SidebarProvider only writes a cookie (never reads it back in an SPA),

@@ -144,7 +144,7 @@ func TestInboxBrowser(t *testing.T) {
 	}
 	svc := inbox.New(db, func(id string) inbox.Session {
 		if id == "scratch-session" {
-			return inbox.Session{Global: true, Live: true}
+			return inbox.Session{Global: true, Live: true, Revision: 1}
 		}
 		if id == "browser-session" {
 			return inbox.Session{TaskID: 1, Live: true, Revision: 1}
@@ -235,7 +235,7 @@ func TestInboxBrowser(t *testing.T) {
 	}
 }
 
-func TestScratchpadCompletionHasNoCloseAction(t *testing.T) {
+func TestScratchpadCompletionClosesSession(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "completion.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestScratchpadCompletionHasNoCloseAction(t *testing.T) {
 	raw, _ := json.Marshal(inboxAnswer{Revision: r.Question.Revision, OptionID: "exit"})
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/inbox/"+r.Question.ID+"/answer", bytes.NewReader(raw)))
-	if w.Code != 400 || stopped || len(r.Question.Options) != 0 {
+	if w.Code != 200 || !stopped || len(r.Question.Options) != 1 {
 		t.Fatalf("scratchpad close: %d %s stopped=%v", w.Code, w.Body, stopped)
 	}
 }
