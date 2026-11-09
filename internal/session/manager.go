@@ -61,6 +61,8 @@ func stripKamacuEnv(env []string) []string {
 // remove) each live in a single method so Phase 4 can add DB writes inside
 // them without restructuring.
 type Manager struct {
+	taskLifecycle sync.Map // task id → *sync.Mutex, shared by spawn and Inbox completion
+
 	agentReady    func(int64) error
 	mu            sync.Mutex
 	sessions      map[string]*Session
@@ -633,4 +635,13 @@ func (m *Manager) SetAgentReady(ready func(int64) error) {
 	m.mu.Lock()
 	m.agentReady = ready
 	m.mu.Unlock()
+}
+
+// LockTaskLifecycle serializes task agent creation with guarded task completion.
+// It does not hold the session registry mutex while callers use the manager.
+func (m *Manager) LockTaskLifecycle(id int64) func() {
+	value, _ := m.taskLifecycle.LoadOrStore(id, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }

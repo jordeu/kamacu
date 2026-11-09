@@ -86,13 +86,15 @@ Never use it for a public URL.
 Choose a model in **Settings → Notifications → Notification processing model**
 before processing notifications. This selection is independent of terminal
 monitoring; collection continues while no notification model is selected.
-The same notification model handles Inbox replies and suggested rule changes.
+The same notification model interprets free-text Inbox replies and suggests rule
+changes. Saved option actions execute directly without extra model calls.
 
 Notification rules are an ordered list of plain instructions with stable IDs.
 Saving applies them directly, without compilation. A notification agent considers
 each batch together with source evidence, project/task/session context and Inbox
 history, using bounded read-only lookups when needed. It proposes messages and
-actions; task execution requires an Inbox reply. Preview uses the same agent
+actions with distinct, previewable option actions. Selecting a button executes its
+saved workflow directly; free text is interpreted once. Preview uses the same agent
 without publishing messages or starting work.
 
 Processing details show the selected model, frozen input, decisions, rule IDs

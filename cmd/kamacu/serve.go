@@ -341,6 +341,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	notificationBackend := monitor.Backend{Metrics: notificationMetrics, Transcripts: transcripts}
 	notificationService := notifications.New(db, inboxService, notificationBackend, notificationMCP)
 	notificationService.Metrics = notificationMetrics
+	api.ConfigureNotificationActions(notificationService, db, mgr, wtSvc)
 	notificationService.TaskSession = func(taskID int64) string {
 		for _, info := range mgr.ListByTask(taskID) {
 			if info.Kind == session.KindAgent && info.Status == session.StatusRunning && !info.StopRequested {
@@ -370,7 +371,6 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		return subcommands.ExitFailure
 	}
 	api.NotificationRoutes(mux, notificationService)
-	go notificationService.Run(ctx)
 
 	mgr.SetAgentReady(func(taskID int64) error { _, err := monitor.Resolve(ctx, db, taskID); return err })
 	terminalMonitor := monitor.New(db, mgr, inboxService, presenceTracker, classifier)
@@ -475,7 +475,19 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		handler = guarded
 	}
 	handler = debugRequests(handler)
-	if err := http.ListenAndServe(c.addr, handler); err != nil {
+	listener, err := net.Listen("tcp", c.addr)
+	if err != nil {
+		slog.Error("server stopped", "error", err)
+		return subcommands.ExitFailure
+	}
+	defer listener.Close()
+	// Recovered actions use local HTTP tools. Bind the listener before their
+	// worker starts so startup cannot turn a safe queued action into a failure.
+	actionCtx, cancelActions := context.WithCancel(ctx)
+	actionDone := make(chan struct{})
+	go func() { defer close(actionDone); notificationService.Run(actionCtx) }()
+	defer func() { cancelActions(); <-actionDone }()
+	if err := http.Serve(listener, handler); err != nil {
 		slog.Error("server stopped", "error", err)
 		return subcommands.ExitFailure
 	}

@@ -54,7 +54,7 @@ func (s *Service) publishNotificationLocked(ctx context.Context, eventID int64, 
 func (s *Service) FinishNotification(ctx context.Context, id, state, result string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.transition(ctx, id, "execution_"+state, "", `UPDATE inbox_questions SET delivery_status=?,execution_result=?,updated_at=? WHERE id=? AND origin='notification'`, state, result, s.now().UnixMilli(), id)
+	return s.transition(ctx, id, "execution_"+state, "", `UPDATE inbox_questions SET revision=revision+CASE WHEN delivery_status!=? THEN 1 ELSE 0 END,delivery_status=?,execution_result=?,updated_at=? WHERE id=? AND origin='notification'`, state, state, result, s.now().UnixMilli(), id)
 }
 
 // ContinueNotification creates a fresh reply opportunity without rewriting the

@@ -20,6 +20,7 @@ func (s *Service) LinkNotificationTasks(ctx context.Context, questionID string, 
 	if origin != "notification" {
 		return ErrInvalid
 	}
+	changed := false
 	for _, link := range links {
 		var project int64
 		if err = tx.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id=?`, link.TaskID).Scan(&project); err != nil {
@@ -28,7 +29,19 @@ func (s *Service) LinkNotificationTasks(ctx context.Context, questionID string, 
 		if project != link.ProjectID {
 			return ErrInvalid
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO notification_task_links(question_id,task_id,role,source,evidence) VALUES(?,?,?,?,?) ON CONFLICT(question_id,task_id) DO NOTHING`, questionID, link.TaskID, link.Role, link.Source, link.Evidence); err != nil {
+		result, err := tx.ExecContext(ctx, `INSERT INTO notification_task_links(question_id,task_id,role,source,evidence) VALUES(?,?,?,?,?) ON CONFLICT(question_id,task_id) DO NOTHING`, questionID, link.TaskID, link.Role, link.Source, link.Evidence)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		changed = changed || n > 0
+
+	}
+	if changed {
+		if _, err = tx.ExecContext(ctx, `UPDATE inbox_questions SET revision=revision+1,updated_at=? WHERE id=?`, s.now().UnixMilli(), questionID); err != nil {
 			return err
 		}
 	}

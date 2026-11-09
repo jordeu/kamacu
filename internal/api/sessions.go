@@ -412,6 +412,8 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if kind == session.KindAgent {
 		h.agentSpawnMu.Lock()
 		defer h.agentSpawnMu.Unlock()
+		unlockTask := h.mgr.LockTaskLifecycle(req.TaskID)
+		defer unlockTask()
 	}
 	opts := session.SpawnOpts{Kind: kind}
 	// csid holds the task's persisted claude session id; ocsid/cxid hold its

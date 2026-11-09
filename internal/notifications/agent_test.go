@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"kamacu/internal/inbox"
+	"kamacu/internal/inboxaction"
 	"kamacu/internal/store"
 	"os"
 	"strings"
@@ -37,7 +38,7 @@ func finalResponse(snapshot AgentSnapshot, feedback bool) AgentTurn {
 		refs := []string{s.Event.Evidence[0].ID}
 		out.Decisions = append(out.Decisions, AgentDecision{EventIDs: s.EventIDs, Outcome: outcome, Reason: "Current source and Inbox history establish this decision", RuleIDs: []string{}, EvidenceRefs: refs})
 		if outcome == "message" {
-			out.Messages = append(out.Messages, AgentMessage{EventIDs: s.EventIDs, Summary: "A concrete issue needs investigation", Context: "A source update requests an investigation: " + s.Event.URL, Question: "Create an investigation task for this issue?", Why: "This is an unresolved request without an existing owner", RuleIDs: []string{}, EvidenceRefs: refs, LinkedTaskIDs: []int64{}, Plan: AgentPlan{Workflow: "route_investigation", ProjectID: s.ProjectID, PRNumbers: []int64{}, TaskName: "Investigate source update", WorkKind: "investigation"}})
+			out.Messages = append(out.Messages, AgentMessage{EventIDs: s.EventIDs, Summary: "A concrete issue needs investigation", Context: "A source update requests an investigation: " + s.Event.URL, Question: "Create an investigation task for this issue?", Why: "This is an unresolved request without an existing owner", RuleIDs: []string{}, EvidenceRefs: refs, LinkedTaskIDs: []int64{}, Options: []AgentOption{{ID: "investigate", Label: "Create investigation task", Mode: "action", Actions: []inboxaction.Action{{ID: "investigate", Kind: "create_investigation", ProjectID: s.ProjectID, TaskName: "Investigate source update", Instructions: "Investigate this source and report findings: " + s.Event.URL}}}}, Plan: AgentPlan{Workflow: "route_investigation", ProjectID: s.ProjectID, PRNumbers: []int64{}, TaskName: "Investigate source update", WorkKind: "investigation"}})
 		}
 	}
 	return out
@@ -128,7 +129,7 @@ func TestNotificationAgentUsesIndependentModelAndOneGlobalDecision(t *testing.T)
 		t.Fatal("notification selection affected monitoring", monitorProfile, err)
 	}
 	cards, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
-	if len(cards.Items) != 1 || cards.Items[0].Options[0].ID != "execute_plan" || cards.Items[0].Options[0].Label != "Create investigation task" {
+	if len(cards.Items) != 1 || cards.Items[0].Options[0].ID != "investigate" || cards.Items[0].Options[0].Label != "Create investigation task" {
 		t.Fatal("actionable proposal missing", cards)
 	}
 	var snapshot, result, config string
@@ -487,13 +488,14 @@ func TestSuggestedRepliesRequireInterpretationRatherThanAutomaticExecution(t *te
 		t.Fatal(err)
 	}
 	out := finalResponse(snapshot, true)
-	out.Messages[0].SuggestedReplies = []string{"Summarize the issue first"}
+	out.Messages[0].Plan.Workflow = "clarify"
+	out.Messages[0].Options = []AgentOption{{ID: "explain", Label: "Explain the missing information", Mode: "reply", Actions: []inboxaction.Action{}}}
 	actions, _, _, err := s.agentActions(ctx, snapshot, out)
 	if err != nil {
 		t.Fatal(err)
 	}
 	options := actions[0].Request.Options
-	if len(options) != 3 || options[0].ID != "execute_plan" || options[1].ID != "suggestion_1" || options[2].ID != "triage_noop" {
+	if len(options) != 2 || options[0].ID != "explain" || options[0].Action != nil || options[1].ID != "triage_noop" {
 		t.Fatal("reply choices were conflated with approval", options)
 	}
 }
@@ -655,6 +657,7 @@ func TestAgentClarificationPreservesKnownTaskWithoutExecution(t *testing.T) {
 		out := finalResponse(inputSnapshot(t, prompt), true)
 		out.Messages[0].Question = "Which part of the feedback should this task address?"
 		out.Messages[0].Plan = AgentPlan{Workflow: "clarify", TaskID: 1, ProjectID: 0, WorkKind: "implementation"}
+		out.Messages[0].Options = nil
 		return out, nil
 	}
 	p := processAgent(t, s)

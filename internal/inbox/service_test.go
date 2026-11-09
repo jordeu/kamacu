@@ -42,7 +42,7 @@ func fixture(t *testing.T) (*Service, Identity) {
 }
 func create(t *testing.T, s *Service, who Identity, key string) Question {
 	t.Helper()
-	r, err := s.Create(context.Background(), who, Create{Key: key, Abstract: "Compact message", Summary: "Task summary", Context: "Tradeoffs and recommendation", Question: "Which option?", Options: []Option{{"a", "Option A"}, {"b", "Option B"}}})
+	r, err := s.Create(context.Background(), who, Create{Key: key, Abstract: "Compact message", Summary: "Task summary", Context: "Tradeoffs and recommendation", Question: "Which option?", Options: []Option{{ID: "a", Label: "Option A"}, {ID: "b", Label: "Option B"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestCreateValidationIdentityAndIdempotency(t *testing.T) {
 			t.Fatalf("identity: %v", err)
 		}
 	}
-	for _, c := range []Create{{Key: "k", Abstract: "Compact message", Summary: "s", Question: "q"}, {Key: "k", Abstract: "Compact message", Summary: "s", Context: "c", Question: "q", Options: []Option{{"a", "A"}, {"a", "B"}}}} {
+	for _, c := range []Create{{Key: "k", Abstract: "Compact message", Summary: "s", Question: "q"}, {Key: "k", Abstract: "Compact message", Summary: "s", Context: "c", Question: "q", Options: []Option{{ID: "a", Label: "A"}, {ID: "a", Label: "B"}}}} {
 		if _, err := s.Create(ctx, who, c); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("validation: %v", err)
 		}

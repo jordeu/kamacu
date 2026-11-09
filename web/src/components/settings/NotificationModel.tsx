@@ -94,8 +94,9 @@ export function NotificationModel() {
     >
       <h3 className="text-sm font-medium">Notification processing model</h3>
       <p className="text-xs text-muted-foreground">
-        Used for notification decisions, Inbox replies and rule suggestions.
-        This selection is independent of terminal monitoring.
+        Used for notification decisions, free-text Inbox replies and rule
+        suggestions. Saved option actions run without extra model calls. This
+        selection is independent of terminal monitoring.
       </p>
       <label className="block text-sm">
         Model

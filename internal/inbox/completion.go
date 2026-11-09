@@ -28,10 +28,10 @@ func CompletionOptions(taskID int64, source, status string, suggested []string) 
 		return options
 	}
 	if (status == "todo" || status == "in_progress") && slices.Contains(suggested, MoveToReview) {
-		options = append(options, Option{MoveToReview, "Move to review and close session"})
+		options = append(options, Option{ID: MoveToReview, Label: "Move to review and close session"})
 	}
 	if (status == "todo" || status == "in_progress" || status == "in_review") && slices.Contains(suggested, MoveToDone) {
-		options = append(options, Option{MoveToDone, "Move to done and close session"})
+		options = append(options, Option{ID: MoveToDone, Label: "Move to done and close session"})
 	}
 	return options
 }

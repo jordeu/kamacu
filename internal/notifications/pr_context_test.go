@@ -77,7 +77,7 @@ func TestNotificationDecorationPreservesWorkOutsideProse(t *testing.T) {
 	if len(fresh.RelatedWork) != 1 || !strings.Contains(string(data), `"role":"implementation"`) {
 		t.Fatalf("lost structured association: %s", data)
 	}
-	if mutation("get_pr_context") || mutation("get_task_pr_context") || !mutation("set_task_pr_link") {
+	if !readOnlyAgentTool("get_pr_context") || !readOnlyAgentTool("get_task_pr_context") || readOnlyAgentTool("set_task_pr_link") {
 		t.Fatal("incorrect triage tool permissions")
 	}
 }

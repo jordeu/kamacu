@@ -32,12 +32,12 @@ func (s *Session) WriteObserved(revision, input uint64, body, submit []byte) err
 	s.mu.Lock()
 	if s.status != StatusRunning || s.stopRequested || s.observer == nil {
 		s.mu.Unlock()
-		return errors.New("session unavailable")
+		return ErrObservedChanged
 	}
 	obs := s.observer.Snapshot()
 	if obs.Revision != revision || obs.Input != input {
 		s.mu.Unlock()
-		return errors.New("terminal changed; review the current question before replying")
+		return ErrObservedChanged
 	}
 	s.observer.Input()
 	s.lastInputSource = "external"

@@ -234,16 +234,26 @@ func (s *Service) PublishNotificationFollowup(ctx context.Context, questionID st
 	}
 	return s.publishFollowupLocked(ctx, previous, c)
 }
-func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, c Create) (Question, error) {
+func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, c Create, attentionRun ...string) (Question, error) {
 	var group string
 	if err := s.db.QueryRowContext(ctx, `SELECT notification_group FROM inbox_questions WHERE id=?`, previous.ID).Scan(&group); err != nil {
 		return Question{}, err
+	}
+	attentionID := ""
+	if len(attentionRun) > 0 {
+		attentionID = attentionRun[0]
+		group = "action-attention:" + attentionID
 	}
 	if group == "" {
 		return s.publishNotificationLocked(ctx, previous.NotificationID, previous.SourceName, previous.SourceURL, c, false)
 	}
 	q, err := scan(s.db.QueryRowContext(ctx, selectQuestion+`WHERE q.notification_group=? AND q.status='pending'`, group))
 	if err == nil {
+		if attentionID != "" {
+			if _, err = s.db.ExecContext(ctx, `UPDATE notification_runs SET attention_pending=0,attention_question_id=? WHERE id=?`, q.ID, attentionID); err != nil {
+				return Question{}, err
+			}
+		}
 		return q, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -278,6 +288,11 @@ func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, 
 	}
 	if err = before(tx); err != nil {
 		return Question{}, err
+	}
+	if attentionID != "" {
+		if _, err = tx.ExecContext(ctx, `UPDATE notification_runs SET attention_pending=0,attention_question_id=? WHERE id=?`, id, attentionID); err != nil {
+			return Question{}, err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_events(question_id,kind,session_id,created_at) VALUES(?,'notification_followup','',?)`, id, now); err != nil {
 		return Question{}, err
