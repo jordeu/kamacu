@@ -2,7 +2,7 @@ import { SnoozeTask } from "@/components/task/SnoozeTask";
 import { useDismissTaskCompletions } from "@/api/inbox";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { ArrowLeft, Ellipsis, Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { useArtifacts, useRenameArtifact, type Artifact } from "@/api/artifacts";
@@ -10,6 +10,7 @@ import { ArtifactTab } from "@/components/task/ArtifactTab";
 import { RemoveArtifactDialog } from "@/components/task/RemoveArtifactDialog";
 import { usePullRequestDetail } from "@/api/pullRequests";
 import { useAgents, useProjects, useTask } from "@/api/queries";
+import type { Task } from "@/api/types";
 import { useUpdateTask } from "@/api/mutations";
 import { useCreateWorktree } from "@/api/worktrees";
 import { useAgentStatuses } from "@/api/agents";
@@ -62,6 +63,52 @@ function isTypingTarget(el: Element | null): boolean {
 export default function TaskPage() {
   const { projectId: projectIdParam, taskId: taskIdParam } = useParams();
   const projectId = Number(projectIdParam);
+  const taskId = Number(taskIdParam);
+  const location = useLocation();
+  const { data: task, isPending, isError } = useTask(taskId);
+  if (isPending) {
+    return (
+      <div className="mx-auto w-full max-w-[860px] space-y-4 p-4">
+        <Skeleton className="h-7 w-2/3" />
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-4 w-3/4" />
+      </div>
+    );
+  }
+
+  if (isError || !task || task.id !== taskId) {
+    return (
+      <div className="mx-auto w-full max-w-[860px] space-y-3 p-4">
+        <p className="text-muted-foreground">Task not found.</p>
+        <Link
+          to={`/projects/${projectId}`}
+          className="text-sm underline underline-offset-4 hover:text-foreground"
+        >
+          Back to board
+        </Link>
+      </div>
+    );
+  }
+
+  // A task id is global, while PR details, agent settings and board links are
+  // project-scoped. Resolve its owner before mounting any of those consumers.
+  if (task.project_id !== projectId) {
+    return (
+      <Navigate
+        to={`/projects/${task.project_id}/tasks/${task.id}${location.search}${location.hash}`}
+        replace
+        state={location.state}
+      />
+    );
+  }
+  return <TaskPageContent task={task} />;
+}
+
+function TaskPageContent({ task }: { task: Task }) {
+  const projectId = task.project_id;
+  const taskId = task.id;
   // M001: resolve the active project's agent engine to hide the Claude-only
   // QuotaIndicator when the project runs a non-claude agent. Both queries are
   // already cached app-wide (sidebar/settings), so this adds no fetches.
@@ -75,7 +122,6 @@ export default function TaskPage() {
   // (loading) — the accepted cosmetic flip; no loading machinery (17-UI-SPEC
   // delta b).
   const isClaudeAgent = projectEngine === "claude";
-  const taskId = Number(taskIdParam);
   const navigate = useNavigate();
   const location = useLocation();
   const startAgent = useSpawnAgent(taskId);
@@ -84,8 +130,6 @@ export default function TaskPage() {
   const feedbackSession = searchParams.get("feedback_session");
   const queryClient = useQueryClient();
 
-  // Fetch by id so deep links work without the board cache (TASK-05).
-  const { data: task, isPending, isError } = useTask(taskId);
   const seenCompletions = useDismissTaskCompletions(task?.id);
   const artifactQuery = useArtifacts(taskId);
   const artifacts = artifactQuery.data;
@@ -99,7 +143,7 @@ export default function TaskPage() {
   useEffect(() => {
     if (!location.state?.startAgent || !task || task.id !== taskId || autoStartAttempt.current === taskId) return;
     autoStartAttempt.current = taskId;
-    navigate(location.pathname + location.search, { replace: true, state: null });
+    navigate(location.pathname + location.search + location.hash, { replace: true, state: null });
     // Provisioning failures are already explained by the worktree banner.
     if (task.worktree_path) startAgent.mutate();
   }, [location, task, taskId, navigate, startAgent]);
@@ -345,32 +389,6 @@ export default function TaskPage() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [navigate, projectId]);
-
-  if (isPending) {
-    return (
-      <div className="mx-auto w-full max-w-[860px] space-y-4 p-4">
-        <Skeleton className="h-7 w-2/3" />
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-5/6" />
-        <Skeleton className="h-4 w-3/4" />
-      </div>
-    );
-  }
-
-  if (isError || !task) {
-    return (
-      <div className="mx-auto w-full max-w-[860px] space-y-3 p-4">
-        <p className="text-muted-foreground">Task not found.</p>
-        <Link
-          to={`/projects/${projectId}`}
-          className="text-sm underline underline-offset-4 hover:text-foreground"
-        >
-          Back to board
-        </Link>
-      </div>
-    );
-  }
 
   // PR review branch (Phase 12): a source='github_pr' task renders the
   // read-only review identity. The live PR detail (title/body/author/url/
