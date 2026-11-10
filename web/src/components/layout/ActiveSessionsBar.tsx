@@ -6,6 +6,7 @@ import { dotMeta } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { PendingDialog } from "./PendingDialog";
 
 /**
  * The Global Active Sessions Bar (SBAR-01..09) — a persistent, collapsible bar
@@ -215,6 +216,7 @@ export function ActiveSessionsBar() {
             )}
           </span>
         </Button>
+        <PendingDialog />
         {loading ? (
           <Skeleton className="h-3 w-24" />
         ) : total === 0 ? (

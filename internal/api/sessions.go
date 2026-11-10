@@ -31,9 +31,15 @@ import (
 // resolve a task's worktree path on a task-scoped spawn (TERM-04) and to
 // reconcile surviving tmux_sessions rows after a restart (TMUX-05). tmuxClient
 // drives the has-session liveness probe that decides which persisted rows are
-// post-restart survivors.
-func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxClient tmux.Client) {
+// post-restart survivors. The optional application context stops background
+// status checks when the server shuts down.
+func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxClient tmux.Client, contexts ...context.Context) {
 	s := &sessionHandlers{mgr: mgr, db: db, globRoot: defaultTranscriptGlobRoot(), tmuxClient: tmuxClient}
+	queueContext := context.Background()
+	if len(contexts) > 0 {
+		queueContext = contexts[0]
+	}
+	registerPendingRoutes(mux, s, queueContext)
 	mux.HandleFunc("GET /api/sessions", s.list)
 	mux.HandleFunc("GET /api/sessions/events", s.events)
 	mux.HandleFunc("POST /api/sessions", s.create)
@@ -339,50 +345,66 @@ func (h *sessionHandlers) reconcileTmux(r *http.Request, taskID int64, infos []s
 // the global Scratchpad root behind the D-28/D-29 gates — plain bash and
 // tmux tabs ("kamacu-global-<n>") with the same shell options as tasks.
 func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		TaskID int64  `json:"task_id"`
-		Kind   string `json:"kind"`
-		Resume bool   `json:"resume"` // RCVR-02: resume the task's stored claude session (agent-only)
-		// Scope is the Phase 15 global discriminator: "" (default — task/dev
-		// behavior unchanged) or "global" — the session spawns in the global
-		// root behind the D-28/D-29 gates. Mutually exclusive with task_id.
-		Scope string `json:"scope"`
-		// ReattachTmuxName, when set, reattaches to an EXISTING persisted tmux
-		// session by name instead of minting a new one (TMUX-05, D-88). The
-		// frontend fires it for a restored orphaned entry; new-session -A is
-		// attach-or-create, so spawning with the surviving name reconnects
-		// losslessly. Bash-only; never mints/inserts a row.
-		ReattachTmuxName string `json:"reattach_tmux_name"`
-	}
+	var req sessionCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	sess, err := h.createSession(req)
+	if err != nil {
+		writeError(w, err.status, err.message)
+		return
+	}
+	writeJSON(w, http.StatusCreated, sess.Info())
+}
+
+type sessionCreateRequest struct {
+	Pending            *pendingFilter `json:"-"`
+	PendingBeforeSpawn func() bool    `json:"-"`
+	TaskID             int64          `json:"task_id"`
+	Kind               string         `json:"kind"`
+	Resume             bool           `json:"resume"` // RCVR-02: resume the task's stored claude session (agent-only)
+	// Scope is the Phase 15 global discriminator: "" (default — task/dev
+	// behavior unchanged) or "global" — the session spawns in the global
+	// root behind the D-28/D-29 gates. Mutually exclusive with task_id.
+	Scope string `json:"scope"`
+	// ReattachTmuxName, when set, reattaches to an EXISTING persisted tmux
+	// session by name instead of minting a new one (TMUX-05, D-88). The
+	// frontend fires it for a restored orphaned entry; new-session -A is
+	// attach-or-create, so spawning with the surviving name reconnects
+	// losslessly. Bash-only; never mints/inserts a row.
+	ReattachTmuxName string `json:"reattach_tmux_name"`
+}
+
+type sessionCreateError struct {
+	status  int
+	message string
+}
+
+// createSession shares the same lifecycle lock, resume validation and persistence
+// between interactive starts and background status checks.
+func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Session, *sessionCreateError) {
 	kind := session.KindBash
 	switch req.Kind {
 	case "", "bash":
 	case "agent":
 		kind = session.KindAgent
 	default:
-		writeError(w, http.StatusBadRequest, "invalid kind")
-		return
+		return nil, &sessionCreateError{http.StatusBadRequest, "invalid kind"}
 	}
 	// Scope is a closed set (T-15-05): "" or "global", anything else is the
 	// invalid-kind family of 400.
 	if req.Scope != "" && req.Scope != "global" {
-		writeError(w, http.StatusBadRequest, "invalid scope")
-		return
+		return nil, &sessionCreateError{http.StatusBadRequest, "invalid scope"}
 	}
 	// Mutual exclusion (the global.go repo/root_path family): the global
 	// scope is task-less by construction — a body carrying both is ambiguous.
 	if req.Scope == "global" && req.TaskID != 0 {
-		writeError(w, http.StatusBadRequest, "supply either scope or task_id, not both")
-		return
+		return nil, &sessionCreateError{http.StatusBadRequest, "supply either scope or task_id, not both"}
 	}
 	// Resume is a variant of the agent spawn only — never a bash session.
 	if req.Resume && kind != session.KindAgent {
-		writeError(w, http.StatusBadRequest, "resume requires kind agent")
-		return
+		return nil, &sessionCreateError{http.StatusBadRequest, "resume requires kind agent"}
 	}
 	// Reattach is a bash-only variant: it reconnects to a surviving tmux
 	// session, which agents never use. Validate eagerly so the error copy is
@@ -390,15 +412,13 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	reattach := req.ReattachTmuxName != ""
 	if reattach {
 		if kind == session.KindAgent {
-			writeError(w, http.StatusBadRequest, "reattach requires a bash session")
-			return
+			return nil, &sessionCreateError{http.StatusBadRequest, "reattach requires a bash session"}
 		}
 		// Global scope is the one task-less context tmux rows exist for
 		// (00018 scope discriminator); every other task-less reattach is the
 		// dev route, which keeps its honest 409.
 		if req.TaskID <= 0 && req.Scope != "global" {
-			writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
-			return
+			return nil, &sessionCreateError{http.StatusConflict, "tmux shells need a task — open a task's terminal"}
 		}
 	}
 	// Agents always run in a task worktree: no task means no worktree — the
@@ -407,14 +427,22 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// global root, resolved + gated inside the scope branch below (D-28/D-29
 	// fire there, before this function ever reaches Spawn).
 	if kind == session.KindAgent && req.TaskID <= 0 && req.Scope != "global" {
-		writeError(w, http.StatusConflict, "task has no worktree")
-		return
+		return nil, &sessionCreateError{http.StatusConflict, "task has no worktree"}
 	}
 	if kind == session.KindAgent {
 		h.agentSpawnMu.Lock()
 		defer h.agentSpawnMu.Unlock()
 		unlockTask := h.mgr.LockTaskLifecycle(req.TaskID)
 		defer unlockTask()
+	}
+	if req.Pending != nil {
+		_, reason, err := h.pendingCandidate(*req.Pending, req.TaskID)
+		if err != nil {
+			return nil, &sessionCreateError{http.StatusInternalServerError, "could not check task eligibility"}
+		}
+		if reason != "" {
+			return nil, &sessionCreateError{http.StatusConflict, reason}
+		}
 	}
 	opts := session.SpawnOpts{Kind: kind}
 	// csid holds the task's persisted claude session id; ocsid/cxid hold its
@@ -436,16 +464,13 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			 WHERE t.id = ?`, req.TaskID,
 		).Scan(&path, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams)
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "task not found")
-			return
+			return nil, &sessionCreateError{http.StatusNotFound, "task not found"}
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+			return nil, &sessionCreateError{http.StatusInternalServerError, err.Error()}
 		}
 		if !path.Valid {
-			writeError(w, http.StatusConflict, "task has no worktree") // D-30 server side
-			return
+			return nil, &sessionCreateError{http.StatusConflict, "task has no worktree"} // D-30 server side
 		}
 		opts.Cwd, opts.TaskID = path.String, req.TaskID
 	} else if req.Scope == "global" {
@@ -462,23 +487,19 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			 WHERE g.id = 1`,
 		).Scan(&rootPath, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams)
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusInternalServerError, "global task row missing")
-			return
+			return nil, &sessionCreateError{http.StatusInternalServerError, "global task row missing"}
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+			return nil, &sessionCreateError{http.StatusInternalServerError, err.Error()}
 		}
 		// One gate block for every kind (D-30), order per D-33: unconfigured
 		// root first (D-28) — never a silent home/cwd fallback; then the
 		// vanished-root stat (D-29) with the stored path verbatim.
 		if rootPath == "" {
-			writeError(w, http.StatusConflict, "global root not configured")
-			return
+			return nil, &sessionCreateError{http.StatusConflict, "global root not configured"}
 		}
 		if fi, serr := os.Stat(rootPath); serr != nil || !fi.IsDir() {
-			writeError(w, http.StatusConflict, "global root no longer exists on disk: "+rootPath)
-			return
+			return nil, &sessionCreateError{http.StatusConflict, "global root no longer exists on disk: " + rootPath}
 		}
 		opts.Cwd, opts.Global = rootPath, true
 	}
@@ -491,15 +512,13 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		if req.Scope == "global" {
 			for _, info := range h.mgr.ListGlobal() {
 				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
-					writeError(w, http.StatusConflict, "global agent already running")
-					return
+					return nil, &sessionCreateError{http.StatusConflict, "global agent already running"}
 				}
 			}
 		} else {
 			for _, info := range h.mgr.ListByTask(req.TaskID) {
 				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
-					writeError(w, http.StatusConflict, "agent session already running")
-					return
+					return nil, &sessionCreateError{http.StatusConflict, "agent session already running"}
 				}
 			}
 		}
@@ -529,12 +548,10 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 					if errors.Is(err, sql.ErrNoRows) {
 						continue
 					}
-					writeError(w, http.StatusInternalServerError, "couldn't check running conversations")
-					return
+					return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't check running conversations"}
 				}
 				if runningID.String == conversation {
-					writeError(w, http.StatusConflict, "this conversation is running in another task; stop that agent before resuming here")
-					return
+					return nil, &sessionCreateError{http.StatusConflict, "this conversation is running in another task; stop that agent before resuming here"}
 				}
 			}
 		}
@@ -557,8 +574,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// against the global root's transcripts.
 			if agentEngine == "opencode" {
 				if !ocsid.Valid {
-					writeError(w, http.StatusConflict, "no global opencode session to resume")
-					return
+					return nil, &sessionCreateError{http.StatusConflict, "no global opencode session to resume"}
 				}
 				// opts.ResumeSessionID stays "" — the `-s <id>` append in the
 				// custom spawn arm below keys off ocsid, which the singleton
@@ -567,15 +583,13 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				// When no ID was captured, Codex selects the latest session in cwd.
 			} else {
 				if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
-					writeError(w, http.StatusConflict, "no global claude session to resume")
-					return
+					return nil, &sessionCreateError{http.StatusConflict, "no global claude session to resume"}
 				}
 				opts.ResumeSessionID = csid.String
 			}
 		} else if agentEngine == "opencode" {
 			if !ocsid.Valid {
-				writeError(w, http.StatusConflict, "no session to resume")
-				return
+				return nil, &sessionCreateError{http.StatusConflict, "no session to resume"}
 			}
 			// opts.ResumeSessionID stays "" — opencode does NOT route through
 			// claude's --resume (MEM027); the `-s <id>` flag is appended to
@@ -584,8 +598,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			// The CLI can resume the most recent conversation in the worktree.
 		} else {
 			if !csid.Valid || !transcriptExists(h.globRoot, csid.String) {
-				writeError(w, http.StatusConflict, "no session to resume")
-				return
+				return nil, &sessionCreateError{http.StatusConflict, "no session to resume"}
 			}
 			opts.ResumeSessionID = csid.String
 		}
@@ -659,12 +672,10 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			err = h.db.QueryRow(`SELECT label FROM tmux_sessions WHERE task_id = ? AND name = ?`, req.TaskID, req.ReattachTmuxName).Scan(&reattachLabel)
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "no session to reattach")
-			return
+			return nil, &sessionCreateError{http.StatusNotFound, "no session to reattach"}
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "couldn't start a session")
-			return
+			return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
 		}
 		opts.TmuxName = req.ReattachTmuxName
 	} else {
@@ -673,8 +684,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		// same settings shell as tasks (GVIEW-03).
 		sh, err := settings.Get(h.db, settings.KeyShell)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "couldn't start a session")
-			return
+			return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
 		}
 		if sh == "tmux" {
 			if req.Scope == "global" {
@@ -689,16 +699,14 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				// posture.
 				var n int64
 				if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE scope = 'global'`).Scan(&n); err != nil {
-					writeError(w, http.StatusInternalServerError, "couldn't start a session")
-					return
+					return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
 				}
 				name := fmt.Sprintf("kamacu-global-%d", n)
 				// D-04 belt-and-braces: persist the default "Bash N" label at
 				// INSERT (same two-writes-agree posture as the task mint).
 				label := fmt.Sprintf("Bash %d", n)
 				if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, scope, n, name, label) VALUES (NULL, 'global', ?, ?, ?)`, n, name, label); err != nil {
-					writeError(w, http.StatusInternalServerError, "couldn't start a session")
-					return
+					return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
 				}
 				opts.TmuxName = name
 			} else {
@@ -707,8 +715,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				// 409 (D-56 posture) — NEVER a bare `tmux` exec, which would open an
 				// unnamed session on the user's DEFAULT socket.
 				if req.TaskID <= 0 {
-					writeError(w, http.StatusConflict, "tmux shells need a task — open a task's terminal")
-					return
+					return nil, &sessionCreateError{http.StatusConflict, "tmux shells need a task — open a task's terminal"}
 				}
 				// n from the DB, NEVER the in-memory counter (it resets on restart; a
 				// collision would make new-session -A silently attach a second tab to a
@@ -717,8 +724,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				// insert race window acceptable, with the constraint as backstop.
 				var n int64
 				if err := h.db.QueryRow(`SELECT COALESCE(MAX(n),0)+1 FROM tmux_sessions WHERE task_id = ?`, req.TaskID).Scan(&n); err != nil {
-					writeError(w, http.StatusInternalServerError, "couldn't start a session")
-					return
+					return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
 				}
 				name := fmt.Sprintf("kamacu-%d-%d", req.TaskID, n)
 				// D-04 belt-and-braces: persist the default "Bash N" label at INSERT so
@@ -727,8 +733,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 				// so the back-fill is idempotent reconciliation, not a conflict.
 				label := fmt.Sprintf("Bash %d", n)
 				if _, err := h.db.Exec(`INSERT INTO tmux_sessions (task_id, n, name, label) VALUES (?, ?, ?, ?)`, req.TaskID, n, name, label); err != nil {
-					writeError(w, http.StatusInternalServerError, "couldn't start a session")
-					return
+					return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
 				}
 				opts.TmuxName = name
 			}
@@ -737,6 +742,18 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Spawn's stat pre-check covers a vanished worktree dir → same 500 path.
+	if req.PendingBeforeSpawn != nil && !req.PendingBeforeSpawn() {
+		return nil, &sessionCreateError{http.StatusConflict, "Status check was cancelled"}
+	}
+	if req.Pending != nil {
+		_, reason, err := h.pendingCandidate(*req.Pending, req.TaskID)
+		if err != nil {
+			return nil, &sessionCreateError{http.StatusInternalServerError, "could not check task eligibility"}
+		}
+		if reason != "" {
+			return nil, &sessionCreateError{http.StatusConflict, reason}
+		}
+	}
 	sess, err := h.mgr.Spawn(opts)
 	if err != nil {
 		// Release the reserved n ONLY on a fresh spawn — the name was never
@@ -751,11 +768,9 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, session.ErrTmuxNotFound) {
 			// D-84: honest error, never a silent bash fallback. 409 (not 500) so
 			// the frontend renders the message verbatim.
-			writeError(w, http.StatusConflict, "tmux not found — change the shell setting or reinstall")
-			return
+			return nil, &sessionCreateError{http.StatusConflict, "tmux not found — change the shell setting or reinstall"}
 		}
-		writeError(w, http.StatusInternalServerError, "couldn't start a session")
-		return
+		return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
 	}
 	// Starting or resuming a board task begins work. The conditional UPDATE
 	// preserves concurrent manual moves and leaves PR/global sessions alone.
@@ -828,7 +843,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("persisting tmux session label", "name", opts.TmuxName, "error", err)
 		}
 	}
-	writeJSON(w, http.StatusCreated, sess.Info())
+	return sess, nil
 }
 
 // stop handles POST /api/sessions/{id}/stop. Stop blocks up to the 5s
