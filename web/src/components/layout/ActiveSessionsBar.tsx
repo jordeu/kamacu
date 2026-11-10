@@ -216,7 +216,6 @@ export function ActiveSessionsBar() {
             )}
           </span>
         </Button>
-        <PendingDialog />
         {loading ? (
           <Skeleton className="h-3 w-24" />
         ) : total === 0 ? (
@@ -254,6 +253,7 @@ export function ActiveSessionsBar() {
             <ChevronDown className="size-3.5 text-muted-foreground" />
           )}
         </Button>
+        <PendingDialog />
       </div>
     </div>
   );

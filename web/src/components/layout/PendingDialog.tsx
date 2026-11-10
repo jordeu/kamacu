@@ -46,8 +46,9 @@ export function PendingDialog() {
   const job = useQuery({
     queryKey: ["pending-check"],
     queryFn: ({ signal }) => get<PendingJob>("/api/pending", { signal }),
-    enabled: open,
-    refetchInterval: open ? 2000 : false,
+    // The bar keeps tracking the run when the dialog is minimized. Idle
+    // polling also discovers checks started in another browser tab.
+    refetchInterval: (query) => open || query.state.data?.state === "running" || query.state.data?.state === "cancelling" ? 2000 : 5000,
   });
   const running = job.data?.state === "running" || job.data?.state === "cancelling";
   const preview = useQuery({
@@ -59,7 +60,10 @@ export function PendingDialog() {
   const start = useMutation({
     mutationFn: () => post<PendingJob>("/api/pending", filter),
     onMutate: () => client.cancelQueries({ queryKey: ["pending-check"] }),
-    onSuccess: (data) => client.setQueryData(["pending-check"], data),
+    onSuccess: (data) => {
+      client.setQueryData(["pending-check"], data);
+      setOpen(false);
+    },
     onSettled: () => client.invalidateQueries({ queryKey: ["pending-check"] }),
   });
   const cancel = useMutation({
@@ -69,19 +73,39 @@ export function PendingDialog() {
   });
   const items = job.data?.items ?? [];
   const finished = items.filter((item) => !["queued", "checking", "running"].includes(item.state)).length;
+  const showProgress = job.data && job.data.state !== "idle" && items.length > 0;
+  const progressState = job.data?.state === "cancelling" ? "Cancelling"
+    : job.data?.state === "running" ? "Checking"
+    : job.data?.state === "cancelled" ? "Cancelled" : "Finished";
+  const progressLabel = `${progressState} · ${finished}/${items.length}`;
+  const progressTitle = job.isError ? "Could not refresh check progress. Open details to retry."
+    : showProgress ? `${progressLabel} · Open details` : "What's pending?";
   const error = start.error ?? cancel.error ?? job.error ?? preview.error;
   return (
     <>
       <Button
         variant="ghost"
-        size="icon-sm"
-        aria-label="What's pending?"
-        title="What's pending?"
-        className="text-muted-foreground"
+        size={showProgress ? "sm" : "icon-sm"}
+        aria-label={showProgress ? `What's pending? ${progressTitle}` : "What's pending?"}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={progressTitle}
+        className="gap-1.5 text-muted-foreground sm:gap-2"
         onClick={(e) => { e.stopPropagation(); setOpen(true); }}
       >
         <CircleHelp className="size-3.5" />
+        {showProgress && (
+          <>
+            <span aria-hidden="true" className="h-1.5 w-8 overflow-hidden rounded-full bg-muted sm:w-20">
+              <span className="block h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${finished / items.length * 100}%` }} />
+            </span>
+            <span className="text-xs tabular-nums">
+              <span className="hidden sm:inline">{progressState} · </span>{finished}/{items.length}
+            </span>
+          </>
+        )}
       </Button>
+      <span role="status" className="sr-only">{showProgress ? progressLabel : ""}</span>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
@@ -120,7 +144,7 @@ export function PendingDialog() {
             Working agents and waiting agents with pending inbox messages are skipped. Closed terminals resume existing conversations and stay open. Scratchpad and snoozed cards are excluded.
           </p>
           <p className="text-xs text-muted-foreground">
-            Two checks at a time, at least five seconds between starts. You can close this dialog while checks run. A server restart stops the queue.
+            Two checks at a time, at least five seconds between starts. This dialog minimizes when checks start; progress appears in the bottom bar. A server restart stops the queue.
           </p>
           {!running && valid && <p aria-live="polite" className="text-sm">{preview.isPending ? "Counting matching cards…" : preview.data ? `${preview.data.eligible} eligible cards · ${preview.data.skipped} skipped` : "Could not count matching cards"}</p>}
           {!valid && <p className="text-sm">Select a scope, at least one card status and at least one terminal state.</p>}

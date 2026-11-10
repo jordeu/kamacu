@@ -24,7 +24,7 @@ whole point is one place to see and drive all your agent work: every task gets i
 isolated git worktree and a persistent agent session you can open, leave, and
 reattach to from any browser tab.
 
-Click the **?** beside Scratchpad in the bottom bar to ask **What's pending?**
+Click the **?** on the right of the bottom sessions bar to ask **What's pending?**
 across the current project, the current workspace, or all workspaces. The dialog
 starts with the current workspace, both In Review and In Progress cards, and
 both active and closed terminals. Working agents, waiting agents with pending
@@ -33,9 +33,10 @@ are skipped. Closed terminals resume only when
 a previous conversation is available, and remain open afterward.
 
 Checks run in the background, two at a time, with at least five seconds between
-starts. The dialog shows progress and lets you cancel queued checks; started
-checks finish normally. Closing the dialog leaves the queue running, while a
-server restart stops it.
+starts. The dialog minimizes when checks start, with progress beside the **?**
+icon. Click it to reopen the details or cancel queued checks; started checks
+finish normally. Closing the dialog leaves the queue running, while a server
+restart stops it.
 
 ## Prerequisites
 
