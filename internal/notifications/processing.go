@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -30,9 +31,12 @@ func (s *Service) processNext(ctx context.Context) error {
 	}
 	err = s.processBatch(ctx, id)
 	if err != nil {
-		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 		defer cancel()
-		_, recordErr := s.DB.ExecContext(recordCtx, `UPDATE notification_batches SET status='failed',error=?,updated_at=? WHERE id=? AND status='running'`, err.Error(), time.Now().UnixMilli(), id)
+		recordErr := s.journalWrite(recordCtx, "batch_failure", func(c context.Context, tx *sql.Tx) error {
+			_, e := tx.ExecContext(c, `UPDATE notification_batches SET status='failed',error=?,updated_at=? WHERE id=? AND status='running'`, err.Error(), time.Now().UnixMilli(), id)
+			return e
+		})
 		return recordErr
 	}
 	return nil
@@ -104,15 +108,30 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	if err != nil {
 		return err
 	}
-	if _, err = s.DB.ExecContext(ctx, `UPDATE notification_batches SET processor_snapshot=? WHERE id=?`, mustJSON(snapshot), id); err != nil {
-		return err
+
+	snapshotJSON := mustJSON(snapshot)
+	if err = s.journalWrite(ctx, "batch_snapshot", func(c context.Context, tx *sql.Tx) error {
+		result, e := tx.ExecContext(c, `UPDATE notification_batches SET processor_snapshot=? WHERE id=?`, snapshotJSON, id)
+		return requireBatchRow(result, e)
+	}); err != nil {
+		return fmt.Errorf("could not save notification input before model processing: %w", err)
 	}
 	turn, trace, err := s.runNotificationAgentWithUpdates(ctx, &snapshot, config, true)
-	recordCtx, recordCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	recordCtx, recordCancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 	defer recordCancel()
-	if _, recordErr := s.DB.ExecContext(recordCtx, `UPDATE notification_batches SET processor_snapshot=?,processor_result=?,processor_trace=? WHERE id=?`, mustJSON(snapshot), mustJSON(turn), mustJSON(trace), id); recordErr != nil {
-		return recordErr
+	// Serialize once and retry persistence of the exact completed response. A
+	// storage retry never repeats model generation or publishes duplicate cards.
+	snapshotJSON, resultJSON, traceJSON := mustJSON(snapshot), mustJSON(turn), mustJSON(trace)
+	if recordErr := s.journalWrite(recordCtx, "batch_result", func(c context.Context, tx *sql.Tx) error {
+		result, e := tx.ExecContext(c, `UPDATE notification_batches SET processor_snapshot=?,processor_result=?,processor_trace=? WHERE id=?`, snapshotJSON, resultJSON, traceJSON, id)
+		return requireBatchRow(result, e)
+	}); recordErr != nil {
+		if err != nil {
+			return errors.Join(fmt.Errorf("notification decision processing failed: %w", err), fmt.Errorf("could not save notification failure diagnostics; notifications remain pending: %w", recordErr))
+		}
+		return fmt.Errorf("could not save notification model results; notifications remain pending: %w", recordErr)
 	}
+
 	if err != nil {
 		return err
 	}
@@ -153,4 +172,19 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	}
 
 	return s.Inbox.ApplyNotificationBatch(ctx, id, actions, refs, decisions...)
+}
+
+// An UPDATE of a missing batch is not a successful durable recording.
+func requireBatchRow(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
