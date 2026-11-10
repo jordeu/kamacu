@@ -216,23 +216,25 @@ export function ActiveSessionsBar() {
             )}
           </span>
         </Button>
-        {loading ? (
-          <Skeleton className="h-3 w-24" />
-        ) : total === 0 ? (
-          <span className="text-xs text-muted-foreground">
-            No active sessions
-          </span>
-        ) : (
-          <>
-            {/* Working count */}
-            <CountGroup status="working" count={working} />
-            {/* Waiting count — amber-emphasized + pulsing ONLY when > 0 */}
-            <CountGroup status="waiting" count={waiting} />
-            {/* Idle count */}
-            <CountGroup status="idle" count={idle} />
-            {errors > 0 && <CountGroup status="error" count={errors} />}
-          </>
-        )}
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [scrollbar-width:none]">
+          {loading ? (
+            <Skeleton className="h-3 w-24" />
+          ) : total === 0 ? (
+            <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+              No active sessions
+            </span>
+          ) : (
+            <>
+              {/* Working count */}
+              <CountGroup status="working" count={working} />
+              {/* Waiting count — amber-emphasized + pulsing ONLY when > 0 */}
+              <CountGroup status="waiting" count={waiting} />
+              {/* Idle count */}
+              <CountGroup status="idle" count={idle} />
+              {errors > 0 && <CountGroup status="error" count={errors} />}
+            </>
+          )}
+        </div>
 
         {/* Chevron — up = will expand (collapsed), down = will collapse. */}
         <Button
@@ -245,7 +247,7 @@ export function ActiveSessionsBar() {
             e.stopPropagation();
             toggle();
           }}
-          className="ml-auto text-muted-foreground"
+          className="text-muted-foreground"
         >
           {collapsed ? (
             <ChevronUp className="size-3.5 text-muted-foreground" />
@@ -282,7 +284,7 @@ function CountGroup({
     <span
       aria-label={`${count} ${tooltip.toLowerCase()}`}
       className={cn(
-        "inline-flex items-center gap-1 text-xs font-medium tabular-nums",
+        "inline-flex shrink-0 items-center gap-1 text-xs font-medium tabular-nums",
         waitingEmphasis ? "text-amber-400" : "text-muted-foreground",
       )}
     >
