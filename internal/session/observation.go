@@ -27,6 +27,10 @@ func (s *Session) SetMonitorStatus(v MonitorStatus) { s.mu.Lock(); s.monitor = v
 // WriteObserved serializes an entire paste/submit with all browser input and
 // checks the observation under the session mutex before the first byte.
 func (s *Session) WriteObserved(revision, input uint64, body, submit []byte) error {
+	return s.writeObserved(revision, input, body, submit, nil)
+}
+
+func (s *Session) writeObserved(revision, input uint64, body, submit []byte, guard func(observation.Snapshot) bool) error {
 	s.inputMu.Lock()
 	defer s.inputMu.Unlock()
 	s.mu.Lock()
@@ -35,7 +39,7 @@ func (s *Session) WriteObserved(revision, input uint64, body, submit []byte) err
 		return ErrObservedChanged
 	}
 	obs := s.observer.Snapshot()
-	if obs.Revision != revision || obs.Input != input {
+	if obs.Revision != revision || obs.Input != input || guard != nil && !guard(obs) {
 		s.mu.Unlock()
 		return ErrObservedChanged
 	}

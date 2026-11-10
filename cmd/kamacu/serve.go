@@ -301,7 +301,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	}()
 	api.ArtifactRoutes(mux, artifactService, hookToken)
 	api.Routes(mux, db, wtSvc, mgr, tmuxClient, collectArtifacts)
-	api.SessionRoutes(mux, mgr, db, tmuxClient)
+	api.SessionRoutes(mux, mgr, db, tmuxClient, ctx)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr, tmuxClient)
 	api.DiffRoutes(mux, db, wtSvc)
 	api.AgentRoutes(mux, mgr, db)
