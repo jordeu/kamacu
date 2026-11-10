@@ -81,10 +81,10 @@ export interface OpenReviewResponse {
 }
 
 /** The query key under which TaskPage reads the live PR detail stashed at open
- *  time (see useOpenReview.onSuccess). Keyed by task id so a deep-link/reattach
- *  routing to /tasks/{id} finds it. */
-export function prDetailKey(taskId: number) {
-  return ["pr-detail", taskId] as const;
+ *  time (see useOpenReview.onSuccess). Include the full source identity so
+ *  a response from another project/PR cannot be reused for the same task. */
+export function prDetailKey(taskId: number, projectId: number, prNumber: number | null | undefined) {
+  return ["pr-detail", taskId, projectId, prNumber] as const;
 }
 
 /** Re-hydrate the live PR detail on a review-view mount (12-07). useOpenReview
@@ -102,7 +102,7 @@ export function usePullRequestDetail(
   enabled: boolean,
 ) {
   return useQuery({
-    queryKey: prDetailKey(taskId), // SAME key useOpenReview seeds → shares the open-time cache
+    queryKey: prDetailKey(taskId, projectId, prNumber), // SAME key useOpenReview seeds → shares the open-time cache
     queryFn: () =>
       get<PRDetailWire>(`/api/projects/${projectId}/pull-requests/${prNumber}`),
     enabled: enabled && prNumber != null,
@@ -125,7 +125,7 @@ export function useOpenReview(projectId: number) {
     onSuccess: (res) => {
       // Stash the live PR detail + the ready task so the review view renders
       // the read-only PR header/body immediately on route, without a refetch.
-      qc.setQueryData(prDetailKey(res.task.id), res.pr);
+      qc.setQueryData(prDetailKey(res.task.id, res.task.project_id, res.task.pr_number ?? res.pr.number), res.pr);
       qc.setQueryData(["task", res.task.id], res.task);
     },
   });
