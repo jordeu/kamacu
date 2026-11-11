@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useAgentStatuses } from "@/api/agents";
 import type { AgentStatusEntry } from "@/api/agents";
 import { StatusDot } from "@/components/StatusDot";
+import { TaskPRLinks } from "@/components/task/TaskPRLinks";
 import { SnoozeTask } from "@/components/task/SnoozeTask";
 import type { Task } from "@/api/types";
 
@@ -44,6 +45,7 @@ function CardShell({ task, className }: { task: Task; className?: string }) {
       )}
     >
       <CardRow task={task} entry={entry} />
+      <TaskPRLinks task={task} className="mt-1" />
     </div>
   );
 }
@@ -89,6 +91,7 @@ export function TaskCard({ task }: { task: Task }) {
       )}
     >
       <CardRow task={task} entry={entry} />
+      <TaskPRLinks task={task} className="mt-1" />
       {task.snoozed_until && <SnoozeTask task={task} compact />}
     </div>
   );

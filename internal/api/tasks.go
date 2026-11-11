@@ -230,6 +230,10 @@ func (h *taskHandlers) list(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := h.attachPRLinks(r.Context(), tasks); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, tasks)
 }
 
@@ -269,7 +273,30 @@ func (h *taskHandlers) listByProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := h.attachPRLinks(r.Context(), tasks); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, tasks)
+}
+
+// attachPRLinks shares the list request's polling cycle without per-card queries.
+func (h *taskHandlers) attachPRLinks(ctx context.Context, tasks []Task) error {
+	ids := make([]int64, len(tasks))
+	indexes := make(map[int64]int, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+		indexes[task.ID] = i
+	}
+	links, err := store.PRLinksForTasks(ctx, h.db, ids)
+	if err != nil {
+		return err
+	}
+	for _, link := range links {
+		i := indexes[link.TaskID]
+		tasks[i].PRLinks = append(tasks[i].PRLinks, link)
+	}
+	return nil
 }
 
 // create handles POST /api/projects/{id}/tasks. Status is ALWAYS "todo" on
