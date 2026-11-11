@@ -319,7 +319,7 @@ func snapshotView(snapshot AgentSnapshot, budget int) (string, error) {
 	}
 	history := []map[string]any{}
 	for _, q := range snapshot.History {
-		history = append(history, map[string]any{"id": q.ID, "summary": q.Summary, "question": q.Question, "status": q.Status, "answer": q.Answer, "delivery_status": q.DeliveryStatus, "execution_result": q.ExecutionResult, "linked_tasks": q.LinkedTasks, "detail_available": true})
+		history = append(history, map[string]any{"id": q.ID, "summary": q.Summary, "question": q.Question, "status": q.Status, "reason": q.Reason, "answer": q.Answer, "delivery_status": q.DeliveryStatus, "execution_result": q.ExecutionResult, "linked_tasks": q.LinkedTasks, "detail_available": true})
 	}
 	tasks := append([]AgentTask(nil), snapshot.Tasks...)
 	for i := range tasks {

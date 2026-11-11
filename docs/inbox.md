@@ -208,3 +208,30 @@ progress failure does not invalidate confirmed work.
 Database diagnostics report connection-pool waits and journal transaction time
 separately. Agent-status polling releases its database cursor before inspecting
 transcripts and scans the transcript tree once per request.
+
+### Pending instruction reconciliation
+
+When an Inbox action cannot establish a safe agent input prompt, Kamacu records
+its exact unsent instruction, task, session, input generation, blocker and terminal
+snapshot separately from the execution journal. Session lifecycle changes wake a
+reconciliation worker; a five-second poll also discovers terminal and work-summary
+changes. Evidence must settle for two seconds. Assessments are at least 30 seconds
+apart per handoff, and the same evidence is assessed at most once, including after
+restart. Redraw counters and summary timestamps alone do not trigger another call.
+The worker uses the notification model, independently of notification collection
+and action execution. Assessment inputs, results and errors are retained for audit.
+
+A read-only assessment distinguishes work already handled, work underway, a
+specific decision, an outstanding instruction and insufficient evidence. Completion
+requires a quote from current terminal/work evidence, rather than task status or
+an input counter. New evidence invalidates a response produced against an older
+snapshot. No assessment submits input, answers an agent question or changes a task.
+
+Work already handled closes the notice as **Reconciled**. Work underway appears in
+history as **Work in progress** and remains tracked. A later relevant decision
+reopens that same notice with its concrete question. Outstanding instructions can
+be offered as an explicit, freshly guarded handoff to the same session (review
+handoffs retain the review workflow and PR checks). Unknown outcomes offer task
+inspection, not a broad retry. Multi-task requests stay visible while any handoff
+needs attention. Answers and dismissed notices remain immutable history.
+Existing pending readiness notices are imported; handled notices are not reopened.

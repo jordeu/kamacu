@@ -21,14 +21,15 @@ type SessionGuard struct {
 	Input  uint64 `json:"input"`
 }
 type Guards struct {
-	ResumeRunID string                  `json:"resume_run_id,omitempty"`
-	Projects    map[int64]string        `json:"projects"`
-	RuleSetID   string                  `json:"rule_set_id"`
-	SourceIDs   []string                `json:"source_ids"`
-	SourceURLs  []string                `json:"source_urls"`
-	ReviewSeed  string                  `json:"review_seed"`
-	TaskStatus  map[int64]string        `json:"task_status"`
-	Sessions    map[string]SessionGuard `json:"sessions"`
+	HandoffSessions map[int64]string        `json:"handoff_sessions,omitempty"`
+	ResumeRunID     string                  `json:"resume_run_id,omitempty"`
+	Projects        map[int64]string        `json:"projects"`
+	RuleSetID       string                  `json:"rule_set_id"`
+	SourceIDs       []string                `json:"source_ids"`
+	SourceURLs      []string                `json:"source_urls"`
+	ReviewSeed      string                  `json:"review_seed"`
+	TaskStatus      map[int64]string        `json:"task_status"`
+	Sessions        map[string]SessionGuard `json:"sessions"`
 }
 type Sequence struct {
 	Version int      `json:"version"`

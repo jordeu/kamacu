@@ -84,6 +84,22 @@ func (ex *actionExecutor) attention(ctx context.Context, state, result string) e
 		copy.context = "The database recording failure persisted beyond the automatic recovery budget. Recorded task/session setup is preserved. No uncertain mutation will be repeated. This is an operational failure, not a request for instructions.\n\n" + details
 	}
 
+	// Readiness failures have a durable pending handoff. Reassess the task before
+	// offering any retry: the user may already have handled its instructions.
+	if _, ok := ex.s.Actions.(handoffObserver); ok && !uncertain && !stale && !operational {
+		var pending int
+		if e := ex.s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_handoffs WHERE run_id=?`, q.ID).Scan(&pending); e != nil {
+			return e
+		}
+		if pending > 0 {
+			canRetry = false
+			replacement = nil
+			copy.summary = fmt.Sprintf("%d instruction(s) paused while the task agent needed attention", pending)
+			copy.question = "Kamacu is checking whether the linked tasks still need these instructions."
+			copy.context = "No pending instruction was sent. Kamacu will compare the saved instruction with the agent's current work and update this notice. Open a linked task to see its current terminal; no retry is needed while this check runs."
+		}
+	}
+
 	if replacement != nil {
 		options = append(options, *replacement)
 	}
