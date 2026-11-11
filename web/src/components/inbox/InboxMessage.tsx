@@ -79,13 +79,17 @@ export function InboxMessage({
     }
   }
   const status =
-    q.reason === "notification_superseded"
-      ? "Superseded"
-      : q.status === "unanswered"
-        ? "Unanswered"
-        : q.status === "dismissed"
-          ? "Dismissed"
-          : "Answered";
+    q.reason === "handoff_resolved"
+      ? "Reconciled"
+      : q.reason === "handoff_tracking"
+        ? "Work in progress"
+        : q.reason === "notification_superseded"
+          ? "Superseded"
+          : q.status === "unanswered"
+            ? "Unanswered"
+            : q.status === "dismissed"
+              ? "Dismissed"
+              : "Answered";
   const timestamp = pending ? q.created_at : q.updated_at;
   const date = new Date(timestamp);
   const shortDate =
@@ -232,6 +236,10 @@ export function InboxMessage({
                 " · Requeued for the new notification processor. Process pending updates after choosing a notification model."}
               {q.reason === "notification_task_routing_changed" &&
                 " · Requeued for task matching. Process pending notifications to refresh this message."}
+              {q.reason === "handoff_resolved" &&
+                " · Requested work was handled in the task"}
+              {q.reason === "handoff_tracking" &&
+                " · Kamacu is tracking the task; no reply is needed"}
               {q.reason === "notification_superseded" &&
                 " · New activity made this question obsolete"}
               {q.reason === "heartbeat_expired" && " · Agent stopped polling"}

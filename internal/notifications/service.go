@@ -33,9 +33,11 @@ type Service struct {
 	TaskSession    func(int64) string
 	Providers      map[string]Provider
 	// workMu serializes ticks; source CRUD has its own short lock.
-	workMu   sync.Mutex
-	actionMu sync.Mutex
-	sourceMu sync.Mutex
+	workMu         sync.Mutex
+	handoffMu      sync.Mutex
+	SessionChanges func() <-chan struct{}
+	actionMu       sync.Mutex
+	sourceMu       sync.Mutex
 }
 
 func New(db *sql.DB, box *inbox.Service, model Model, tools Tools) *Service {
@@ -125,6 +127,9 @@ func (s *Service) Recover(ctx context.Context) error {
 }
 
 func (s *Service) Run(ctx context.Context) {
+	reconcileDone := make(chan struct{})
+	go func() { defer close(reconcileDone); s.runHandoffReconciliation(ctx) }()
+	defer func() { <-reconcileDone }()
 	actionDone := make(chan struct{})
 	defer func() { <-actionDone }()
 	go func() {

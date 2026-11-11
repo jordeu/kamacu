@@ -262,6 +262,33 @@ func (ex *actionExecutor) finish(cause error) error {
 			result += " Completed steps and task links are preserved. Inspect them before taking further action; no action will be automatically resent."
 		}
 	}
+	// A fresh handoff can become stale before reaching wait_ready (for example,
+	// the user answered the agent meanwhile). Preserve it for the same read-only
+	// reconciliation instead of creating another generic input-change retry.
+	if errors.Is(cause, ErrActionBlocked) && !errors.Is(cause, errActionUncertain) && len(ex.seq.Actions) == 1 {
+		if _, ok := ex.s.Actions.(handoffObserver); ok {
+			for _, op := range ex.seq.Actions {
+				if op.TaskID <= 0 || op.Instructions == "" || !slices.Contains([]string{"send_to_session", "continue_task", "run_recurring_task"}, op.Kind) {
+					continue
+				}
+				var completed int
+				if e := ex.s.DB.QueryRowContext(ctx, `SELECT count(*) FROM notification_action_steps WHERE run_id=? AND step_key=? AND state='succeeded'`, ex.q.ID, op.ID+"/complete").Scan(&completed); e != nil {
+					slog.Warn("cannot prepare handoff reconciliation", "run", ex.q.ID, "error", e)
+					continue
+				}
+				if completed > 0 {
+					continue
+				}
+				for sid, guard := range ex.seq.Guards.Sessions {
+					if guard.TaskID == op.TaskID && (op.SessionID == "" || op.SessionID == sid) {
+						if e := ex.s.recordHandoff(ctx, ex.q.ID, op.ID, op.TaskID, sid, op.Instructions, cause.Error()); e != nil {
+							slog.Warn("cannot record handoff reconciliation", "run", ex.q.ID, "error", e)
+						}
+					}
+				}
+			}
+		}
+	}
 	if err := ex.s.finishRun(ctx, ex.q.ID, state, result, ex.history, ex.retrySafe); err != nil {
 		return err
 	}
@@ -777,6 +804,13 @@ func (ex *actionExecutor) handoff(ctx context.Context, a inboxaction.Action, key
 			sid = sess.ID
 		}
 	}
+	if len(ex.seq.Guards.HandoffSessions) > 0 {
+		expected, ok := ex.seq.Guards.HandoffSessions[a.TaskID]
+		if !ok || expected == "" || sid != expected {
+			return fmt.Errorf("%w: the confirmed handoff session is no longer the task's live agent", ErrActionBlocked)
+		}
+	}
+
 	if sid == "" {
 		var resume bool
 		if err = ex.s.DB.QueryRowContext(ctx, `SELECT CASE a.engine WHEN 'codex' THEN COALESCE(t.codex_session_id,'')!='' WHEN 'opencode' THEN COALESCE(t.opencode_session_id,'')!='' WHEN 'custom' THEN 0 ELSE COALESCE(t.claude_session_id,'')!='' END FROM tasks t JOIN projects p ON p.id=t.project_id JOIN agents a ON a.id=p.agent_id WHERE t.id=?`, a.TaskID).Scan(&resume); err != nil {
@@ -849,6 +883,13 @@ func (ex *actionExecutor) submit(ctx context.Context, a inboxaction.Action, key,
 		return mustJSON(ready), e
 	})
 	if err != nil {
+		if errors.Is(err, ErrActionBlocked) {
+			recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			if e := ex.s.recordHandoff(recordCtx, ex.q.ID, key, a.TaskID, sid, message, err.Error()); e != nil {
+				return errors.Join(err, e)
+			}
+		}
 		return err
 	}
 	_, err = ex.step(ctx, a, key+"/submit", "send_session_message", map[string]any{"session_id": sid, "task_id": a.TaskID, "message": message}, true, func() (string, error) {
@@ -908,6 +949,13 @@ func (ex *actionExecutor) submit(ctx context.Context, a inboxaction.Action, key,
 		}
 		return mustJSON(map[string]any{"taskId": a.TaskID, "id": sid, "submitted": true, "input_after": ready.Input + 1}), nil
 	})
+	if errors.Is(err, ErrActionBlocked) {
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if e := ex.s.recordHandoff(recordCtx, ex.q.ID, key, a.TaskID, sid, message, err.Error()); e != nil {
+			return errors.Join(err, e)
+		}
+	}
 	return err
 }
 func (ex *actionExecutor) review(ctx context.Context, a inboxaction.Action, n int64) error {

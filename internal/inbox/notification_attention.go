@@ -66,3 +66,36 @@ func (s *Service) PublishNotificationAttention(ctx context.Context, runID string
 	}
 	return s.publishFollowupLocked(ctx, previous, c, runID)
 }
+
+// ReconcileNotificationAttention replaces only an unanswered notice. Answers and
+// their execution records are immutable; reconciliation never reopens them.
+func (s *Service) ReconcileNotificationAttention(ctx context.Context, id string, revision int64, c Create, outcome string) error {
+	c.Key = "handoff:" + id
+	if err := validate(c); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status, reason := "pending", "handoff_attention"
+	if outcome == "resolved" {
+		status, reason = "unanswered", "handoff_resolved"
+	}
+	if outcome == "being_handled" {
+		status, reason = "unanswered", "handoff_tracking"
+	}
+	opts, err := json.Marshal(c.Options)
+	if err != nil {
+		return err
+	}
+	return s.transitionWith(ctx, func(tx *sql.Tx) error {
+		var current int64
+		var status, reason string
+		if err := tx.QueryRowContext(ctx, `SELECT revision,status,reason FROM inbox_questions WHERE id=?`, id).Scan(&current, &status, &reason); err != nil {
+			return err
+		}
+		if current != revision || (status != "pending" && !(status == "unanswered" && (reason == "handoff_resolved" || reason == "handoff_tracking"))) {
+			return ErrConflict
+		}
+		return nil
+	}, id, "notification_handoff_reconciled", "", `UPDATE inbox_questions SET status=?,reason=?,abstract=?,summary=?,context=?,question=?,options=?,revision=revision+1,updated_at=? WHERE id=? AND (status='pending' OR (status='unanswered' AND reason IN ('handoff_resolved','handoff_tracking'))) AND revision=?`, status, reason, c.Abstract, c.Summary, c.Context, c.Question, string(opts), s.now().UnixMilli(), id, revision)
+}

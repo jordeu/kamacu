@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"kamacu/internal/notifications"
 	"kamacu/internal/session"
@@ -21,6 +22,7 @@ type inboxActionRuntime struct {
 // transactional board/recurrence primitives with the normal UI paths.
 func ConfigureNotificationActions(s *notifications.Service, db *sql.DB, mgr *session.Manager, wt *worktree.Service) {
 	s.Actions = &inboxActionRuntime{db: db, mgr: mgr, wt: wt}
+	s.SessionChanges = mgr.Changes
 }
 func (r *inboxActionRuntime) Session(ctx context.Context, id string) (notifications.ActionSession, error) {
 	sess, ok := r.mgr.Get(id)
@@ -106,4 +108,20 @@ func (r *inboxActionRuntime) Move(ctx context.Context, id int64, expected, statu
 		after()
 	}
 	return nil
+}
+
+func (r *inboxActionRuntime) ObserveHandoff(ctx context.Context, id string) (notifications.HandoffObservation, error) {
+	sess, ok := r.mgr.Get(id)
+	if !ok {
+		return notifications.HandoffObservation{}, errors.New("handoff session is no longer registered")
+	}
+	info, obs := sess.Info(), sess.Observation()
+	if info.Kind != session.KindAgent {
+		return notifications.HandoffObservation{}, errors.New("handoff target is not an agent")
+	}
+	history := obs.History
+	if len(history) > 100 {
+		history = history[len(history)-100:]
+	}
+	return notifications.HandoffObservation{ActionSession: notifications.ActionSession{ID: id, TaskID: info.TaskID, Input: obs.Input, Revision: obs.Revision}, Live: info.Status == session.StatusRunning && !info.StopRequested, Status: info.AgentStatus, Terminal: strings.Join(history, "\n") + "\n" + obs.Screen}, nil
 }
