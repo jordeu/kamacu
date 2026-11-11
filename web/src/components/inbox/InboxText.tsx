@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { cn } from "@/lib/utils";
 
 export function InboxText({ text, paragraphs = false }: { text: string; paragraphs?: boolean }) {
   return <ReactMarkdown skipHtml remarkPlugins={[remarkGfm]} components={{
@@ -16,8 +17,8 @@ export function InboxText({ text, paragraphs = false }: { text: string; paragrap
 // Keep links and the action button as siblings so following a link never submits
 // an answer or opens the message dialog.
 export function InboxTextAction({ text, className, ...props }: { text: string } & ComponentProps<"button">) {
-  return <div className={`relative ${className ?? ""} ${props.disabled ? "opacity-50" : ""}`}>
+  return <div className={cn("relative", className, props.disabled && "opacity-50")}>
     <button {...props} type="button" aria-label={props["aria-label"] ?? text} className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default" />
-    <div className="pointer-events-none relative min-w-0"><InboxText text={text} /></div>
+    <div className="pointer-events-none relative min-w-0 [overflow-wrap:anywhere] [&_pre]:whitespace-pre-wrap"><InboxText text={text} /></div>
   </div>;
 }
