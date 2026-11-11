@@ -74,7 +74,16 @@ export interface Agent {
   updated_at: string;
 }
 
+export interface TaskPRLink {
+  task_id: number;
+  repository: string;
+  number: number;
+  url: string;
+  role: "implementation" | "review" | "incidental";
+}
+
 export interface Task {
+  pr_links?: TaskPRLink[];
   issue_repo?: string | null;
   issue_number?: number | null;
   issue_url?: string | null;

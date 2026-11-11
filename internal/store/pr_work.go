@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -80,6 +81,22 @@ func PRLinks(ctx context.Context, db *sql.DB, taskID int64, repository string, n
 		query += "repository=? AND number=?"
 		args = []any{repository, number}
 	}
+	return queryPRLinks(ctx, db, query, args...)
+}
+
+// PRLinksForTasks loads board associations in one query, independent of card count.
+func PRLinksForTasks(ctx context.Context, db *sql.DB, taskIDs []int64) ([]PRLink, error) {
+	if len(taskIDs) == 0 {
+		return []PRLink{}, nil
+	}
+	ids, err := json.Marshal(taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	return queryPRLinks(ctx, db, `SELECT task_id,repository,number,role,source,evidence,uncertainty,observed_at,corrected FROM task_pr_links WHERE task_id IN (SELECT value FROM json_each(?))`, string(ids))
+}
+
+func queryPRLinks(ctx context.Context, db *sql.DB, query string, args ...any) ([]PRLink, error) {
 	rows, err := db.QueryContext(ctx, query+" ORDER BY task_id,repository,number", args...)
 	if err != nil {
 		return nil, err

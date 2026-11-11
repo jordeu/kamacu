@@ -48,6 +48,7 @@ import { DeleteTaskDialog } from "@/components/task/DeleteTaskDialog";
 import { DescriptionTab } from "@/components/task/DescriptionTab";
 import { DiffTab } from "@/components/task/DiffTab";
 import { TaskTabs, type TabDef } from "@/components/task/TaskTabs";
+import { TaskPRLinks } from "@/components/task/TaskPRLinks";
 import { WorktreeMetaLine } from "@/components/task/WorktreeMetaLine";
 import { hasViewedAgentExited, type ViewedAgent } from "@/components/task/agentExit";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
@@ -809,11 +810,14 @@ function TaskPageContent({ task }: { task: Task }) {
             )}
           </>
         ) : (
-          <WorktreeMetaLine
-            task={task}
-            onCreate={() => createWorktree.mutate()}
-            creating={createWorktree.isPending}
-          />
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <WorktreeMetaLine
+              task={task}
+              onCreate={() => createWorktree.mutate()}
+              creating={createWorktree.isPending}
+            />
+            <TaskPRLinks task={task} />
+          </div>
         )}
       </div>
 

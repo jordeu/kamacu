@@ -1262,3 +1262,53 @@ func TestTaskList_EmptyReturnsEmptyArray(t *testing.T) {
 		t.Errorf("GET /api/tasks empty body = %q, want %q", strings.TrimSpace(string(raw)), "[]")
 	}
 }
+
+// Board and detail responses must expose the same associations without leaking
+// links from another task or project into a card.
+func TestTaskListPRLinks(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	pid := createProject(t, srv, gitRepo(t))
+	otherPID := createProject(t, srv, gitRepo(t))
+	id := taskID(t, createTask(t, srv, pid, "Linked implementation"))
+	unlinked := taskID(t, createTask(t, srv, pid, "No PR"))
+	other := taskID(t, createTask(t, srv, otherPID, "Other project"))
+	for _, entry := range []struct {
+		id, number int64
+		role       string
+	}{{id, 12, "implementation"}, {id, 13, "review"}, {id, 14, "incidental"}, {other, 99, "implementation"}} {
+		err := store.PutPRLink(t.Context(), db, store.PRLink{TaskID: entry.id, Repository: "acme/app", Number: entry.number, Role: entry.role, Source: "explicit", Evidence: "Test association", ObservedAt: time.Now(), Corrected: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, detail := doJSON(t, "GET", fmt.Sprintf("%s/api/tasks/%d", srv.URL, id), nil)
+	for _, path := range []string{fmt.Sprintf("/api/projects/%d/tasks", pid), "/api/tasks"} {
+		status, list := doJSONList(t, srv.URL+path)
+		if status != http.StatusOK {
+			t.Fatalf("%s: status %d", path, status)
+		}
+		found := false
+		for _, row := range list {
+			if row["id"] == float64(unlinked) && row["pr_links"] != nil {
+				t.Fatalf("unlinked task has PRs: %v", row)
+			}
+			if row["id"] != float64(id) {
+				continue
+			}
+			found = true
+			if fmt.Sprint(row["pr_links"]) != fmt.Sprint(detail["pr_links"]) {
+				t.Fatalf("%s: links %v differ from detail %v", path, row["pr_links"], detail["pr_links"])
+			}
+			links, ok := row["pr_links"].([]any)
+			if !ok || len(links) != 3 {
+				t.Fatalf("expected three associations: %v", row["pr_links"])
+			}
+			if links[0].(map[string]any)["url"] != "https://github.com/acme/app/pull/12" {
+				t.Fatalf("unexpected URL: %v", links[0])
+			}
+		}
+		if !found {
+			t.Fatalf("%s: missing linked task", path)
+		}
+	}
+}
