@@ -2108,7 +2108,9 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 	// Write BEFORE subscribing — this lands in the ring (the replay that
 	// include_history absent should drain).
 	const preMarker = "PRE-ATTACH-MARKER"
-	if err := sess.WriteInput([]byte("echo " + preMarker + "\n")); err != nil {
+	// Quote-split the marker so input echo cannot satisfy waitForOutput
+	// before Bash has actually run the command and produced the replay.
+	if err := sess.WriteInput([]byte("echo PRE-ATTACH-''MARKER\n")); err != nil {
 		t.Fatalf("write pre: %v", err)
 	}
 	waitForOutput(t, sess, []byte(preMarker))
@@ -2131,7 +2133,8 @@ func TestSubscribe_DrainsReplayByDefault(t *testing.T) {
 	// MUST appear (the handler streams it after draining the replay).
 	time.Sleep(100 * time.Millisecond) // let Attach register
 	const postMarker = "POST-ATTACH-MARKER"
-	if err := sess.WriteInput([]byte("echo " + postMarker + "\n")); err != nil {
+	// As above, require executed output rather than just echoed input.
+	if err := sess.WriteInput([]byte("echo POST-ATTACH-''MARKER\n")); err != nil {
 		t.Fatalf("write post: %v", err)
 	}
 

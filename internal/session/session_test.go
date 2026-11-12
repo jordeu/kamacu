@@ -156,6 +156,61 @@ func TestSpawnPumpFillsRing(t *testing.T) {
 	})
 }
 
+func TestBashEchoAndOutputLineEndings(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not installed")
+	}
+	// Hold Bash startup until Spawn returns so any parent-side terminal
+	// configuration happens before readline saves the terminal settings.
+	// Ignore user startup files to make echo and output deterministic.
+	dir := t.TempDir()
+	shell := filepath.Join(dir, "shell")
+	script := "#!/bin/sh\nread -r start\nexport PS1='bash-ready> '\nexec \"" + bash + "\" --noprofile --norc -i\n"
+	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s := spawnForTestOpts(t, NewManager(), SpawnOpts{Shell: shell, Cwd: dir})
+	if err := s.WriteInput([]byte("\n")); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 5*time.Second, "Bash prompt", func() bool {
+		return bytes.Contains(s.Snapshot(), []byte("bash-ready> "))
+	})
+
+	// Type a command without Enter: the console must display it immediately.
+	command := "printf 'line-one\\nline-two\\n'"
+	if err := s.WriteInput([]byte(command)); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("echo_before_enter", func(t *testing.T) {
+		eventually(t, 5*time.Second, "typed characters before Enter", func() bool {
+			return bytes.Contains(s.Snapshot(), []byte(command))
+		})
+	})
+	if err := s.WriteInput([]byte("\r")); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("output_line_endings", func(t *testing.T) {
+		eventually(t, 5*time.Second, "output lines with carriage returns", func() bool {
+			return bytes.Contains(s.Snapshot(), []byte("line-one\r\nline-two\r\n"))
+		})
+	})
+	// Readline restores terminal settings around command execution. Echo
+	// must still work after it prepares the terminal for the next prompt.
+	eventually(t, 5*time.Second, "next Bash prompt", func() bool {
+		return bytes.Count(s.Snapshot(), []byte("bash-ready> ")) >= 2
+	})
+	if err := s.WriteInput([]byte("second-command")); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("echo_after_command", func(t *testing.T) {
+		eventually(t, 5*time.Second, "typed characters after a command", func() bool {
+			return bytes.Contains(s.Snapshot(), []byte("second-command"))
+		})
+	})
+}
+
 func TestAttachReplayFirstThenLive(t *testing.T) {
 	m := NewManager()
 	s := spawnForTest(t, m)

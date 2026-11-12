@@ -18,7 +18,6 @@ import (
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
 	"github.com/google/uuid"
-	"golang.org/x/term"
 
 	"kamacu/internal/tmux"
 )
@@ -409,15 +408,9 @@ func (m *Manager) Spawn(opts SpawnOpts) (result *Session, resultErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("start pty: %w", err)
 	}
-	// Put the PTY into raw mode so the kernel line discipline doesn't echo
-	// DA/DSR responses (xterm.js sends ESC[?1;2c etc. back as stdin when apps
-	// probe terminal capabilities) back into the visible output. Without this,
-	// every capability query produces garbage like "1;2c0;276;0c" in the
-	// terminal.
-	if _, err := term.MakeRaw(int(ptmx.Fd())); err != nil {
-		_ = ptmx.Close()
-		return nil, fmt.Errorf("set pty raw mode: %w", err)
-	}
+	// Leave terminal modes to the child. Changing them here races with shell
+	// startup and can disable readline echo and output newline conversion.
+	// Full-screen applications configure raw mode themselves when needed.
 
 	ring, err := circbuf.NewBuffer(1 << 20) // 1 MiB replay ring
 	if err != nil {
