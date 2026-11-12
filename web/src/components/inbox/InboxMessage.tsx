@@ -52,7 +52,7 @@ export function InboxMessage({
     navigate(feedbackTaskURL(q));
   }
   async function submit(
-    kind: "answer" | "dismiss",
+    kind: "answer" | "dismiss" | "requeue",
     option_id?: string,
     openTask = false,
   ) {
@@ -442,6 +442,13 @@ export function InboxMessage({
                 Dismiss
               </Button>
             )}
+            <Button
+              variant="ghost"
+              disabled={action.isPending}
+              onClick={() => submit("requeue")}
+            >
+              Move to end
+            </Button>
             {action.isError && (
               <p role="alert" className="text-sm text-destructive">
                 {action.error.message}{" "}

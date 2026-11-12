@@ -17,7 +17,7 @@ OpenAI-compatible endpoints must support Chat Completions with JSON-schema respo
 
 ## Notifications and replies
 
-- The inbox sidebar lists messages from oldest to newest. New messages join the end, and monitoring updates preserve a message's original position.
+- The inbox sidebar and Pending tab list messages in queue order, oldest first. New messages join the end, and monitoring updates preserve a message's position. **Move to end** puts a pending message at the back of the queue without answering or dismissing it. Queue order survives refreshes and restarts. Archived messages remain newest first.
 - Watching a terminal suppresses its notifications, while status continues updating. Viewing means that exact terminal is selected in a visible, focused browser window. Any fresh window viewing it counts.
 - An unanswered question appears after leaving, without requiring more terminal output. Returning hides its card and attention count; leaving restores the same card. Dismissal is permanent for that episode.
 - A completion produced while watching is considered seen, even if inference finishes after leaving. Unrelated screen repaints preserve the evidence's original time.

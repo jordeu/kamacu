@@ -69,6 +69,7 @@ func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliv
 	mux.HandleFunc("GET /api/inbox/{id}", h.get)
 	mux.HandleFunc("POST /api/inbox/{id}/answer", h.answer)
 	mux.HandleFunc("POST /api/inbox/{id}/dismiss", h.dismiss)
+	mux.HandleFunc("POST /api/inbox/{id}/requeue", h.requeue)
 	mux.HandleFunc("POST /api/agent-feedback/{action}", h.agent)
 }
 func inboxError(w http.ResponseWriter, err error) {
@@ -123,7 +124,7 @@ func (h *inboxHandlers) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	page, err := h.service.ListWithOrder(r.Context(), nil, view == "archived", offset, order == "oldest")
+	page, err := h.service.ListWithOrder(r.Context(), nil, view == "archived", offset, order == "oldest" || (order == "" && view != "archived"))
 	if err != nil {
 		inboxError(w, err)
 		return
@@ -203,6 +204,21 @@ func (h *inboxHandlers) dismiss(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, out)
 }
+func (h *inboxHandlers) requeue(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Revision int64 `json:"revision"`
+	}
+	if !inboxDecode(w, r, &body) {
+		return
+	}
+	out, err := h.service.Requeue(r.Context(), r.PathValue("id"), body.Revision)
+	if err != nil {
+		inboxError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (h *inboxHandlers) agent(w http.ResponseWriter, r *http.Request) {
 	if h.token == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Kamacu-Token")), []byte(h.token)) != 1 {
 		writeError(w, 401, "unauthorized")

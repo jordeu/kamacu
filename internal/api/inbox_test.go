@@ -96,6 +96,40 @@ func TestInboxHTTPIdentityAndBrowserResolution(t *testing.T) {
 		t.Fatalf("pending message: %+v", q)
 	}
 	readMessage("missing", http.StatusNotFound)
+	readPending := func() inbox.Page {
+		t.Helper()
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/inbox", nil))
+		var page inbox.Page
+		if w.Code != http.StatusOK {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	pageBefore := readPending()
+	if len(pageBefore.Items) != 2 || pageBefore.Items[0].SessionID != "scratch" {
+		t.Fatalf("pending must default to arrival order: %+v", pageBefore)
+	}
+	requeuePath := "/api/inbox/" + pageBefore.Items[0].ID + "/requeue"
+	for _, tc := range []struct {
+		body any
+		want int
+	}{
+		{map[string]any{"revision": 1, "answer": "unexpected"}, 400},
+		{map[string]any{"revision": 1}, 200},
+	} {
+		w := call(requeuePath, "", "", "", tc.body)
+		if w.Code != tc.want {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	pageAfter := readPending()
+	if len(pageAfter.Items) != 2 || pageAfter.PendingCount != pageBefore.PendingCount || pageAfter.Items[0].ID != created.Question.ID {
+		t.Fatalf("requeue must move to end without resolving: %+v", pageAfter)
+	}
 	path := "/api/inbox/" + created.Question.ID + "/answer"
 	req := httptest.NewRequest("POST", path, bytes.NewBufferString(`{"revision":1,"option_id":"yes"}`))
 	req.Header.Set("Origin", "https://evil.invalid")

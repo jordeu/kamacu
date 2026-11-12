@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -85,6 +86,116 @@ func TestOldestFirstPaginationKeepsNewMessagesAtEnd(t *testing.T) {
 	page, err := s.List(ctx, nil, false, 0)
 	if err != nil || page.Items[0].ID != ids[0] {
 		t.Fatalf("default order changed: %+v %v", page, err)
+	}
+	first, err := s.Get(ctx, ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		out, err := s.Requeue(ctx, first.ID, first.Revision)
+		if err != nil || out.Outcome != "requeued" || !reflect.DeepEqual(out.Question, first) {
+			t.Fatalf("requeue changed message: %+v %v", out, err)
+		}
+	}
+	ids = append(ids[1:], ids[0])
+	check(0, ids[:50], true)
+	check(50, ids[50:], false)
+	// Even with identical timestamps, a subsequent arrival follows the requeue.
+	last := create(t, s, Identity{1, "last-session"}, "question")
+	ids = append(ids, last.ID)
+	// A fresh service reads the same durable queue order.
+	restarted := New(s.db, s.lookup)
+	defer restarted.Close()
+	page, err = restarted.ListWithOrder(ctx, nil, false, 50, true)
+	if err != nil || page.PendingCount != len(ids) || len(page.Items) != 3 {
+		t.Fatalf("restarted queue: %+v %v", page, err)
+	}
+	for i, q := range page.Items {
+		if q.ID != ids[50+i] {
+			t.Fatalf("restarted queue item %d: %s != %s", i, q.ID, ids[50+i])
+		}
+	}
+}
+
+func TestRequeueRejectsStaleAndResolvedMessages(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	q := create(t, s, who, "question")
+	out, err := s.Requeue(ctx, q.ID, q.Revision+1)
+	if err != nil || out.Outcome != "stale_revision" {
+		t.Fatalf("stale requeue: %+v %v", out, err)
+	}
+	if _, err = s.Dismiss(ctx, q.ID, q.Revision); err != nil {
+		t.Fatal(err)
+	}
+	out, err = s.Requeue(ctx, q.ID, q.Revision)
+	if err != nil || out.Outcome != "already_resolved" || out.Question.Status != "dismissed" {
+		t.Fatalf("resolved requeue: %+v %v", out, err)
+	}
+	if _, err = s.Requeue(ctx, "missing", 1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing requeue: %v", err)
+	}
+	var events int
+	if err = s.db.QueryRow(`SELECT count(*) FROM inbox_events WHERE kind='requeued'`).Scan(&events); err != nil || events != 0 {
+		t.Fatalf("rejected requeue recorded an event: %d %v", events, err)
+	}
+}
+
+func TestRequeueConcurrentArrivalAndMessageKinds(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	s.now = func() time.Time { return time.UnixMilli(1000) }
+	question := create(t, s, who, "question")
+	completion, err := s.Complete(ctx, Identity{2, "other"}, Create{Key: "done", Abstract: "Done", Summary: "Done", Context: "Verified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`INSERT INTO notification_sources(id,provider,name,config,checkpoint,created_at) VALUES('source','github','GitHub','{}','',1); INSERT INTO notification_events(id,source_id,external_id,version,payload,created_at) VALUES(1,'source','event','v1','{}',1)`); err != nil {
+		t.Fatal(err)
+	}
+	notification, err := s.PublishNotification(ctx, 1, "GitHub", "https://github.com/acme/repo/pull/1", Create{Abstract: "Update", Summary: "Update", Context: "Details", Question: "Review?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reordering two different message kinds races with a new arrival.
+	start := make(chan struct{})
+	errors := make(chan error, 3)
+	for _, q := range []Question{question, completion.Question} {
+		go func() {
+			<-start
+			_, err := s.Requeue(ctx, q.ID, q.Revision)
+			errors <- err
+		}()
+	}
+	go func() {
+		<-start
+		_, err := s.Create(ctx, Identity{1, "two"}, Create{Key: "arrival", Abstract: "New", Summary: "New", Context: "Details", Question: "Next?"})
+		errors <- err
+	}()
+	close(start)
+	for i := 0; i < 3; i++ {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := s.ListWithOrder(ctx, nil, false, 0, true)
+	if err != nil || len(page.Items) != 4 || page.Items[0].ID != notification.ID {
+		t.Fatalf("concurrent queue: %+v %v", page, err)
+	}
+	var distinct, count int
+	if err = s.db.QueryRow(`SELECT count(DISTINCT queue_position),count(*) FROM inbox_questions WHERE queue_position>3`).Scan(&distinct, &count); err != nil || distinct != 3 || count != 3 {
+		t.Fatalf("concurrent queue positions: %d distinct / %d total: %v", distinct, count, err)
+	}
+	if out, err := s.Requeue(ctx, notification.ID, notification.Revision); err != nil || out.Outcome != "requeued" {
+		t.Fatalf("notification requeue: %+v %v", out, err)
+	}
+	// Source refreshes must preserve the position chosen by the user.
+	if _, err = s.PublishNotification(ctx, 1, "GitHub", "https://github.com/acme/repo/pull/1", Create{Abstract: "Updated", Summary: "Updated", Context: "Details", Question: "Review update?"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err = s.ListWithOrder(ctx, nil, false, 0, true)
+	if err != nil || page.Items[3].ID != notification.ID {
+		t.Fatalf("notification refresh changed queue: %+v %v", page, err)
 	}
 }
 

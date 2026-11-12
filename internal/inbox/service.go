@@ -578,6 +578,29 @@ func (s *Service) Dismiss(ctx context.Context, id string, revision int64) (Resul
 	q, err = s.get(ctx, id)
 	return result(q), err
 }
+
+// Requeue changes only queue order. Content revisions and timestamps remain
+// intact so moving a card does not invalidate replies or notification snapshots.
+func (s *Service) Requeue(ctx context.Context, id string, revision int64) (Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.reconcile(ctx); err != nil {
+		return Result{}, err
+	}
+	q, err := s.get(ctx, id)
+	if err != nil {
+		return Result{}, err
+	}
+	if revision != q.Revision {
+		return Result{"stale_revision", q}, nil
+	}
+	if q.Status != "pending" {
+		return Result{"already_resolved", q}, nil
+	}
+	err = s.transition(ctx, id, "requeued", q.SessionID, `UPDATE inbox_questions SET queue_position=(SELECT MAX(queue_position)+1 FROM inbox_questions) WHERE id=?`, id)
+	return Result{"requeued", q}, err
+}
+
 func (s *Service) Reopen(ctx context.Context, who Identity, id string, revision int64, userRequested bool) (Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -671,8 +694,8 @@ func (s *Service) List(ctx context.Context, who *Identity, archived bool, offset
 	return s.ListWithOrder(ctx, who, archived, offset, false)
 }
 
-// ListWithOrder sorts before pagination. Chronological messages keep their
-// original position when monitoring refreshes their contents.
+// ListWithOrder sorts before pagination. Pending messages keep their queue
+// position when monitoring refreshes their contents.
 func (s *Service) ListWithOrder(ctx context.Context, who *Identity, archived bool, offset int, oldestFirst bool) (Page, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -706,6 +729,9 @@ func (s *Service) ListWithOrder(ctx context.Context, who *Identity, archived boo
 	if oldestFirst {
 		// rowid preserves insertion order for messages created in the same millisecond.
 		order = `q.created_at ASC,q.rowid ASC`
+		if !archived {
+			order = `q.queue_position ASC,q.rowid ASC`
+		}
 	}
 	rows, err := s.db.QueryContext(ctx, selectQuestion+where+` ORDER BY `+order+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
