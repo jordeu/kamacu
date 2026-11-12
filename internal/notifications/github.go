@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ type GitHubConfig struct {
 	Hostname string `json:"hostname"`
 }
 type GitHub struct {
+	DB *sql.DB
 	// Run is injectable; production always executes argv directly, never a shell.
 	Run func(context.Context, ...string) ([]byte, error)
 	Now func() time.Time
@@ -118,6 +120,9 @@ func (g GitHub) api(ctx context.Context, host, path string) (data []byte, header
 }
 
 func (g GitHub) apiRequest(ctx context.Context, host, path string) ([]byte, http.Header, error) {
+	if run, ok := ctx.Value(notificationRunKey{}).(*notificationRun); ok {
+		run.requests.Add(1)
+	}
 	args := []string{"api", "--hostname", host, "--method", "GET", "--include", "-H", "Accept: application/vnd.github+json", path}
 	var raw []byte
 	var err error
@@ -278,6 +283,7 @@ func githubPath(host, raw string) (string, error) {
 	return strings.TrimPrefix(u.RequestURI(), prefix), nil
 }
 func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error) {
+	event.ActivityDelta = nil
 	event.PRFacts = nil
 	event.Context = ""
 	event.SubjectState = ""
@@ -291,12 +297,17 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 	if g.Now != nil {
 		event.EvidenceObservedAt = g.Now()
 	}
+	scope, err := g.activityScope(ctx, s, event)
+	if err != nil {
+		return event, err
+	}
 	host := g.config(s).Hostname
 	path, err := githubPath(host, event.SubjectURL)
 	if err != nil {
 		return event, err
 	}
 	paths := []string{path}
+	optionalPointer := ""
 	if event.LatestCommentURL != "" {
 		p, e := githubPath(host, event.LatestCommentURL)
 		if e != nil {
@@ -304,25 +315,36 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 		}
 		if p != path {
 			paths = append(paths, p)
+			optionalPointer = p
 		}
 	}
 	issuePath := strings.Replace(path, "/pulls/", "/issues/", 1)
-	if event.SubjectType == "PullRequest" || event.SubjectType == "Issue" {
-		paths = append(paths, issuePath+"/comments?per_page=100")
+	commentQuery := "?per_page=100"
+	if scope != nil && scope.since != "" {
+		commentQuery += "&since=" + url.QueryEscape(scope.since)
 	}
-	if event.SubjectType == "PullRequest" {
-		paths = append(paths, path+"/comments?per_page=100", path+"/reviews?per_page=100")
+	if scope != nil && event.SubjectType == "PullRequest" {
+		paths = append(paths, path+"/reviews?per_page=100", path+"/comments"+commentQuery, issuePath+"/comments"+commentQuery)
+	} else {
+		if event.SubjectType == "PullRequest" || event.SubjectType == "Issue" {
+			paths = append(paths, issuePath+"/comments"+commentQuery)
+		}
+		if event.SubjectType == "PullRequest" {
+			paths = append(paths, path+"/comments"+commentQuery, path+"/reviews?per_page=100")
+		}
 	}
 	var prose strings.Builder
 	seen := map[string]bool{}
 	evidenceBytes := 0
-	for _, first := range paths {
+	for pathIndex := 0; pathIndex < len(paths); pathIndex++ {
+		first := paths[pathIndex]
+		streamBytes := 0
 		next := first
 		for page := 0; next != ""; page++ {
-			if page >= 10 || evidenceBytes >= 96000 {
+			if page >= 100 || streamBytes >= 4<<20 {
 				event.EvidenceComplete = false
 				event.MentionScanComplete = false
-				event.ContextWarnings = append(event.ContextWarnings, "Thread evidence exceeded its bounded retrieval budget; absence of a mention is unknown.")
+				event.ContextWarnings = append(event.ContextWarnings, "A GitHub activity stream exceeded its independent page/byte limit; activity and mention completeness are unknown.")
 				break
 			}
 			currentPath := next
@@ -330,6 +352,12 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 			if e != nil {
 				if !errors.Is(e, ErrContextUnavailable) {
 					return event, e
+				}
+				// Deleted latest-comment pointers are redundant when authoritative
+				// comment/review streams are loaded. Pending cached comments are
+				// independently verified below (including deletion tombstones).
+				if scope != nil && currentPath == optionalPointer && (event.SubjectType == "PullRequest" || event.SubjectType == "Issue") {
+					break
 				}
 				event.EvidenceComplete = false
 				event.MentionScanComplete = false
@@ -368,6 +396,16 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 					link = "https://" + host + "/" + strings.TrimPrefix(currentPath, "repos/")
 				}
 				if seen[link] {
+					// A latest-comment pointer can precede its submitted
+					// review in the response order. Upgrade its membership;
+					// draft comment timestamps must not make it historical.
+					if scope != nil && strings.HasPrefix(currentPath, path+"/reviews/") && strings.Contains(currentPath, "/comments") {
+						for i := range event.Evidence {
+							if event.Evidence[i].URL == link {
+								event.Evidence[i].Current = true
+							}
+						}
+					}
 					continue
 				}
 				seen[link] = true
@@ -409,7 +447,51 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 					break
 				}
 				evidenceBytes += len(body)
-				event.Evidence = append(event.Evidence, SubjectEvidence{ReviewState: reviewState, ReviewBodyEmpty: reviewBodyEmpty, MentionViewer: s.Account, ViewerMention: &mentioned, ID: link, URL: link, Actor: actor, Text: body, CreatedAt: created, UpdatedAt: updated, Complete: complete})
+				streamBytes += len(body)
+				kind := "comment"
+				if currentPath == path {
+					kind = "subject"
+				} else if reviewState != "" {
+					kind = "review"
+				} else if strings.Contains(currentPath, "/pulls/") {
+					kind = "review_comment"
+				}
+				reviewID, _ := v["pull_request_review_id"].(float64)
+				parentID, _ := v["in_reply_to_id"].(float64)
+				pathName, _ := v["path"].(string)
+				commitID, _ := v["commit_id"].(string)
+				var line, originalLine *int
+				if n, ok := v["line"].(float64); ok {
+					value := int(n)
+					line = &value
+				}
+				if n, ok := v["original_line"].(float64); ok {
+					value := int(n)
+					originalLine = &value
+				}
+				ev := SubjectEvidence{Path: pathName, CommitID: commitID, Line: line, OriginalLine: originalLine, Kind: kind, ReviewID: int64(reviewID), ParentID: int64(parentID), ReviewState: reviewState, ReviewBodyEmpty: reviewBodyEmpty, MentionViewer: s.Account, ViewerMention: &mentioned, ID: link, URL: link, Actor: actor, Text: body, CreatedAt: created, UpdatedAt: updated, Complete: complete}
+				if scope != nil && reviewState == "PENDING" {
+					continue
+				}
+				if scope != nil && kind == "review" {
+					isNew, e := g.reviewIsNew(ctx, s, event, scope, ev)
+					if e != nil {
+						return event, e
+					}
+					ev.Current = isNew
+					if isNew {
+						id, _ := v["id"].(float64)
+						if id > 0 {
+							paths = append(paths, "")
+							copy(paths[pathIndex+2:], paths[pathIndex+1:])
+							paths[pathIndex+1] = fmt.Sprintf("%s/reviews/%.0f/comments?per_page=100", path, id)
+						}
+					}
+				}
+				if scope != nil && strings.Contains(currentPath, "/reviews/") && strings.Contains(currentPath, "/comments") {
+					ev.Current = true
+				}
+				event.Evidence = append(event.Evidence, ev)
 			}
 			clipped, _ := json.Marshal(compactGitHub(data))
 			if prose.Len()+len(clipped) < 48000 {
@@ -431,11 +513,19 @@ func (g GitHub) Enrich(ctx context.Context, s Source, event Event) (Event, error
 			}
 		}
 	}
-	event.Context = prose.String()
-	for i := range event.Evidence {
-		event.Evidence[i].Current = scopeEvidence([]RawNotification{{Event: event}}, event, event.Evidence[i]) == evidenceCurrent
+	if scope != nil && event.EvidenceComplete {
+		event, err = g.verifyPendingActivity(ctx, s, event, scope)
+		if err != nil {
+			return event, err
+		}
 	}
-	return event, nil
+	event.Context = prose.String()
+	if scope == nil {
+		for i := range event.Evidence {
+			event.Evidence[i].Current = scopeEvidence([]RawNotification{{Event: event}}, event, event.Evidence[i]) == evidenceCurrent
+		}
+	}
+	return g.finishActivityScan(ctx, s, event, scope)
 }
 
 // SubjectVersion is a lightweight publication-time check for both issues and

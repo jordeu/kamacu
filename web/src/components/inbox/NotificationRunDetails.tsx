@@ -20,6 +20,16 @@ function Details({ id }: { id: string }) {
     queryFn: () =>
       get<{
         status: string;
+        activity_metrics?: {
+          new_versions?: number;
+          fetched?: number;
+          changed?: number;
+          unchanged?: number;
+          fetched_bytes?: number;
+          evidence_bytes?: number;
+          github_requests?: number;
+          decision_rounds?: number;
+        };
         config: {
           profile?: { name: string; model: string };
           settings?: { revision: number };
@@ -49,6 +59,18 @@ function Details({ id }: { id: string }) {
         {q.data.reads.length} read-only lookups. Rule IDs and source references
         are recorded with each decision.
       </p>
+      {q.data.activity_metrics?.decision_rounds !== undefined && (
+        <p>
+          {q.data.activity_metrics.new_versions ?? 0} activity versions ·{" "}
+          {q.data.activity_metrics.unchanged ?? 0} unchanged items ·{" "}
+          {q.data.activity_metrics.github_requests ?? 0} GitHub requests ·{" "}
+          {q.data.activity_metrics.decision_rounds} decision rounds.{" "}
+          {Math.round((q.data.activity_metrics.evidence_bytes ?? 0) / 1024)} KB
+          of current evidence, from{" "}
+          {Math.round((q.data.activity_metrics.fetched_bytes ?? 0) / 1024)} KB
+          of retrieved text.
+        </p>
+      )}
       <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words">
         {JSON.stringify(q.data.result, null, 2)}
       </pre>

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"kamacu/internal/inbox"
 	"kamacu/internal/notifications"
@@ -173,5 +174,67 @@ func TestRawNotificationRoutesAndManualProcessingRequest(t *testing.T) {
 	cards, err := box.ListWithOrder(context.Background(), nil, false, 0, true)
 	if err != nil || len(cards.Items) != 0 {
 		t.Fatal("manual request performed inference synchronously")
+	}
+}
+
+func TestNotificationRepairRoutesPreviewAndStaleSelection(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "repair.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	box := inbox.New(db, func(string) inbox.Session { return inbox.Session{} })
+	defer box.Close()
+	svc := notifications.New(db, box, nil, nil)
+	mux := http.NewServeMux()
+	NotificationRoutes(mux, svc)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)))
+		return w
+	}
+	source, err := svc.AddSource(context.Background(), "github", "GitHub", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"url":"https://github.com/acme/repo/pull/7","title":"Review feedback","subject_type":"PullRequest"}`
+	if _, err = db.Exec(`INSERT INTO notification_events(id,source_id,external_id,version,payload,created_at,raw_status,state) VALUES(1,?,'thread','v1',?,0,'archived','ignored')`, source.ID, payload); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := `{"subjects":[{"source":{"url":"https://github.com/acme/repo/pull/7","evidence_complete":false}}]}`
+	if _, err = db.Exec(`INSERT INTO notification_batches(id,status,created_at,updated_at,processor_snapshot) VALUES('old','completed',?,?,?)`, time.Now().UnixMilli(), time.Now().UnixMilli(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO notification_batch_events VALUES('old',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	w := call("GET", "/api/notifications/repair", "")
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var items []notifications.NotificationRepair
+	if err = json.Unmarshal(w.Body.Bytes(), &items); err != nil || len(items) != 1 {
+		t.Fatal(items, err)
+	}
+	body, _ := json.Marshal(map[string]any{"items": items})
+	w = call("POST", "/api/notifications/repair", string(body))
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = call("POST", "/api/notifications/repair", string(body))
+	if w.Code != 409 {
+		t.Fatal("stale repair accepted", w.Code, w.Body.String())
+	}
+	w = call("POST", "/api/notifications/repair", `{"items":[]}`)
+	if w.Code != 400 {
+		t.Fatal(w.Code)
+	}
+	var runs int
+	db.QueryRow(`SELECT count(*) FROM notification_runs`).Scan(&runs)
+	if runs != 0 {
+		t.Fatal("repair started work")
 	}
 }

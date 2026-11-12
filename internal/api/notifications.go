@@ -13,6 +13,32 @@ import (
 
 func NotificationRoutes(mux *http.ServeMux, service *notifications.Service) {
 	notificationRuleRoutes(mux, service)
+	mux.HandleFunc("GET /api/notifications/repair", func(w http.ResponseWriter, r *http.Request) {
+		items, err := service.NotificationRepairPreview(r.Context())
+		if err != nil {
+			writeError(w, 500, "cannot inspect notification history")
+			return
+		}
+		writeJSON(w, 200, items)
+	})
+	mux.HandleFunc("POST /api/notifications/repair", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Items []notifications.NotificationRepair `json:"items"`
+		}
+		if !inboxDecode(w, r, &body) {
+			return
+		}
+		if len(body.Items) == 0 || len(body.Items) > 100 {
+			writeError(w, 400, "select between 1 and 100 repair candidates")
+			return
+		}
+		if err := service.RepairNotifications(r.Context(), body.Items); err != nil {
+			writeError(w, 409, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]int{"queued": len(body.Items)})
+	})
+
 	mux.HandleFunc("GET /api/notifications/actions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		run, err := service.ActionRun(r.Context(), r.PathValue("id"))
 		if err != nil {

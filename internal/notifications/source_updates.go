@@ -41,7 +41,7 @@ func (s *Service) refreshChangedAgentSubjects(ctx context.Context, snapshot *Age
 		reader, ok := s.Providers[source.Provider].(interface {
 			SubjectVersion(context.Context, Source, Event) (string, error)
 		})
-		if !ok || sub.Event.SubjectUpdatedAt == "" {
+		if !ok || (sub.Event.SubjectUpdatedAt == "" && sub.Event.ActivityDelta == nil) {
 			return nil
 		}
 		freshCtx := freshGitHubReadCache(ctx)
@@ -49,12 +49,15 @@ func (s *Service) refreshChangedAgentSubjects(ctx context.Context, snapshot *Age
 		if err != nil {
 			return err
 		}
-		if version == sub.Event.SubjectUpdatedAt {
+		if version == sub.Event.SubjectUpdatedAt && sub.Event.ActivityDelta == nil {
 			return nil
 		}
 		fresh, err := s.enrichSubject(freshCtx, source, sub.Event)
 		if err != nil {
 			return err
+		}
+		if sub.Event.ActivityDelta != nil && activityFingerprint(fresh) == activityFingerprint(sub.Event) {
+			return nil
 		}
 		// Stable subject/event identities preserve grouping and notification revisions.
 		updateAgentSubject(sub, fresh)
@@ -84,6 +87,9 @@ func supersedeSourceReads(trace []AgentReadResult, updates []AgentSubject) {
 	}
 	for i := range trace {
 		r := &trace[i]
+		if (r.Name == "read_activity" || r.Name == "read_thread") && ids[r.SubjectID] {
+			r.Superseded = true
+		}
 		if r.Name == "read_subject" {
 			var args struct {
 				ID string `json:"id"`

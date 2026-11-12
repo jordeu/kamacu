@@ -1,3 +1,4 @@
+import { NotificationRepair } from "@/components/inbox/NotificationRepair";
 import { useState } from "react";
 import { ArrowUpRight, Bell, Check, Clock } from "lucide-react";
 import { useArchiveNotification, useNotificationStatus, useRawNotifications } from "@/api/notifications";
@@ -16,6 +17,7 @@ export default function NotificationsPage() {
      <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
      <p className="mt-1 text-sm text-muted-foreground">Collected source notifications. Nothing is sent to the model until you choose Process pending.</p>
      <div className="mt-5 max-w-md overflow-hidden rounded border border-border"><NotificationProcessing /></div>
+     <NotificationRepair />
      {status.data?.processing && <NotificationRunDetails id={status.data.processing.id} />}
      <div className="mt-6 flex gap-2 border-b border-border pb-3" role="group" aria-label="Notification view">
        {(["pending", "archived"] as const).map(tab => <Button key={tab} variant={view === tab ? "secondary" : "ghost"} aria-pressed={view === tab} onClick={() => { setView(tab); setOffset(0); }}>

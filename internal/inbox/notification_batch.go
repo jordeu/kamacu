@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"kamacu/internal/store"
 
 	"github.com/google/uuid"
 )
@@ -143,7 +144,10 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET raw_status='archived',state='ignored',raw_revision=raw_revision+1,last_error='' WHERE id IN (SELECT event_id FROM notification_batch_events WHERE batch_id=?)`, batchID); err != nil {
+	if err = store.CommitNotificationActivitySnapshot(ctx, tx, batchID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE notification_events SET raw_status='archived',state='ignored',force_replay=0,raw_revision=raw_revision+1,last_error='' WHERE id IN (SELECT event_id FROM notification_batch_events WHERE batch_id=?)`, batchID); err != nil {
 		return err
 	}
 

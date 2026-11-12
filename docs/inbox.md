@@ -235,3 +235,82 @@ handoffs retain the review workflow and PR checks). Unknown outcomes offer task
 inspection, not a broad retry. Multi-task requests stay visible while any handoff
 needs attention. Answers and dismissed notices remain immutable history.
 Existing pending readiness notices are imported; handled notices are not reopened.
+
+### Incremental GitHub notification evidence
+
+Notification collection still polls GitHub threads and durably saves their raw
+versions before advancing the collection checkpoint. Processing now keeps a
+separate activity cache per registered source/account and PR or issue. The cache
+stores immutable, monotonically numbered versions of comments and reviews. Body
+or review-state changes create a version; a timestamp-only update does not.
+Restoring an older body after another edit creates a new version too.
+
+Ordinary comments and inline review comments use `since` with a five-minute
+overlap after a complete fetch. The review catalog is compared against saved
+versions because GitHub's REST review-list endpoint has no `since` parameter.
+That same catalog supplies current approval facts within the read scope. Every
+newly submitted review brings in its inline comments, including comments drafted
+before the checkpoint. Current PR state, head, reviewers and approval facts stay
+in every processing input. Complete reconciliation scans occur when processing a
+subject whose last full scan is at least 24 hours old.
+
+Fetched and processed checkpoints are independent. Complete fetches may advance
+the retrieval cursor before inference succeeds because all undecided versions
+remain in the durable cache. Cached undecided entries absent from a later delta
+are revalidated using their individual GitHub resource endpoints. Deleted or
+inaccessible entries are represented as availability metadata; their old text is
+not replayed as a current request. Deleted latest-comment pointers do not block
+processing when the authoritative comment and review streams are complete.
+First scans use the source registration time as the unseen-activity boundary,
+not the latest notification timestamp. Existing descriptions and activity before
+that boundary remain context. Legacy snapshots seed only each resource's latest
+acknowledged content; restoring an earlier body remains new activity.
+
+The model receives new activity, the current description, parent context when
+cached, related work and Inbox history. Large generated coverage tables from
+`github-actions[bot]` are represented by their coverage header and all text outside
+the table. Reports with a direct mention are kept in full. All original versions
+remain available through the read-only `read_activity` tool. No bot category is
+automatically ignored: the numbered text rules still determine relevance.
+
+Review streams and ordinary comment streams have independent retrieval limits,
+instead of competing for one 96 KB allowance. Missing required pages, resources
+or exceeded retrieval limits leave notifications pending with a processing error.
+A manifest lists every new activity version. Each must be assigned exactly once
+to a model decision. If the input uses a compact index, required activity text
+must be supplied through complete read pages before a final response is accepted.
+Current evidence membership comes from the durable delta, not proximity to the
+GitHub notification timestamp.
+
+Inbox publication, raw-notification archiving and acknowledgement of the exact
+activity versions share one transaction. Newer fetched versions are not marked
+processed by an older result. The bounded final freshness pass merges additional
+activity even if the PR metadata timestamp did not change. Processing details
+record new/unchanged items, retrieved text bytes, current evidence bytes, actual
+GitHub requests, decision rounds and read-only lookups. Decision rounds count
+application-level model requests, not retries internal to a model provider.
+
+**Check for missed notifications** previews the latest ignored decisions made
+with incomplete evidence in the last seven days. Nothing is changed by that
+preview. Select specific entries and choose **Move selected to pending**, then
+use **Process pending** to reassess them. Repair revalidates the preview revisions,
+forces a complete retrieval, preserves past messages/decisions, and widens the
+activity window so older missed feedback is not treated as baseline history.
+No task, terminal action or model call starts merely by queuing a repair.
+The corresponding endpoints are `GET /api/notifications/repair` and
+`POST /api/notifications/repair` with the selected preview objects in `items`.
+
+Explicitly moving an archived notification back to pending and running a rule
+preview deliberately replays the selected activity window, including handled
+versions. These inputs are labelled `activity_delta.replay`; prior receipts and
+Inbox history are preserved. New issue bodies and release announcements remain
+activity, so direct mentions in their primary content are not lost as historical
+description context. Bootstrap widens its window when recent legacy decisions
+have recorded retrieval gaps; explicit repair can promote previously unseen
+context without replaying versions already acknowledged by completed decisions.
+
+`read_thread` provides older cached discussion, optionally limited to one review.
+Its pages and full `read_activity` lookups are restricted to batch subjects and
+versions present at the scan receipt; a concurrent later edit cannot enter an
+earlier decision through a history lookup. Historical results are explicitly
+labelled, and source refresh invalidates older thread/activity read results.

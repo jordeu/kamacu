@@ -106,7 +106,7 @@ func (s *Service) processRulePreview(ctx context.Context) error {
 			}
 			events = append(events, e)
 		}
-		snapshot, err := s.agentSnapshot(run, events, rules)
+		snapshot, err := s.agentSnapshot(context.WithValue(run, activityReplayKey{}, true), events, rules)
 		if err != nil {
 			return AgentTurn{}, err
 		}

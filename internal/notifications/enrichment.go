@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +25,9 @@ func (s *Service) enrichSubject(ctx context.Context, source Source, event Event)
 	defer cancel()
 	fresh, err := provider.Enrich(callCtx, source, event)
 	if err == nil {
+		if fresh.ActivityDelta != nil && !fresh.ActivityDelta.Complete {
+			return fresh, fmt.Errorf("notification activity retrieval incomplete for %s: %s; notification remains pending", event.URL, strings.Join(fresh.ContextWarnings, "; "))
+		}
 		if event.SubjectType == "PullRequest" {
 			if repo, n, e := store.PRIdentity(event.URL, 0); e == nil {
 				if reader, ok := provider.(interface {

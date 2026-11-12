@@ -113,17 +113,17 @@ func notificationRuleRoutes(mux *http.ServeMux, s *notifications.Service) {
 		writeJSON(w, 200, out)
 	})
 	mux.HandleFunc("GET /api/notifications/batches/{id}", func(w http.ResponseWriter, r *http.Request) {
-		var snapshot, result, config, trace, status string
+		var snapshot, result, config, trace, status, activityMetrics string
 		input := `'{}'`
 		if r.URL.Query().Get("input") == "1" {
 			input = "processor_snapshot"
 		}
-		err := s.DB.QueryRowContext(r.Context(), `SELECT `+input+`,processor_result,processor_config,processor_trace,status FROM notification_batches WHERE id=?`, r.PathValue("id")).Scan(&snapshot, &result, &config, &trace, &status)
+		err := s.DB.QueryRowContext(r.Context(), `SELECT `+input+`,processor_result,processor_config,processor_trace,status,activity_metrics FROM notification_batches WHERE id=?`, r.PathValue("id")).Scan(&snapshot, &result, &config, &trace, &status, &activityMetrics)
 		if err != nil {
 			writeError(w, 404, "batch not found")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"status": status, "snapshot": json.RawMessage(snapshot), "result": json.RawMessage(result), "config": json.RawMessage(config), "reads": json.RawMessage(trace)})
+		writeJSON(w, 200, map[string]any{"status": status, "snapshot": json.RawMessage(snapshot), "result": json.RawMessage(result), "config": json.RawMessage(config), "reads": json.RawMessage(trace), "activity_metrics": json.RawMessage(activityMetrics)})
 	})
 }
 func ruleDecode(w http.ResponseWriter, r *http.Request, target any) bool {

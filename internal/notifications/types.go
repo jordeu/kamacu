@@ -31,6 +31,9 @@ type Source struct {
 	CreatedAt       int64           `json:"created_at"`
 }
 type Event struct {
+	ActivityReplay bool                     `json:"-"`
+	ActivityFloor  string                   `json:"-"`
+	ActivityDelta  *store.NotificationDelta `json:"activity_delta,omitempty"`
 	// MentionScanComplete excludes missing pages/resources, but not prose clipping.
 	MentionScanComplete  bool                `json:"mention_scan_complete,omitempty"`
 	SubjectUpdatedAt     string              `json:"subject_updated_at,omitempty"`
@@ -60,6 +63,17 @@ type Event struct {
 // SubjectEvidence preserves source identity and author outside prose. Complete
 // means the text was not clipped; it does not imply a complete thread history.
 type SubjectEvidence struct {
+	Path         string `json:"path,omitempty"`
+	CommitID     string `json:"commit_id,omitempty"`
+	Line         *int   `json:"line,omitempty"`
+	OriginalLine *int   `json:"original_line,omitempty"`
+	Unavailable  bool   `json:"unavailable,omitempty"`
+	ActivityRef  string `json:"activity_ref,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	ReviewID     int64  `json:"review_id,omitempty"`
+	ParentID     int64  `json:"parent_id,omitempty"`
+	ContextOnly  bool   `json:"context_only,omitempty"`
+	Summarized   bool   `json:"summarized,omitempty"`
 	// ReviewState preserves GitHub's formal review result independently of prose.
 	ReviewState string `json:"review_state,omitempty"`
 	// ReviewBodyEmpty distinguishes citable state text from a reviewer quotation.
