@@ -42,7 +42,7 @@ func (s *Service) processNext(ctx context.Context) error {
 	return nil
 }
 func (s *Service) batchEvents(ctx context.Context, id string) ([]RawNotification, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.source_id,s.name,e.raw_status,e.raw_revision,e.created_at,e.payload FROM notification_batch_events b JOIN notification_events e ON e.id=b.event_id JOIN notification_sources s ON s.id=e.source_id WHERE b.batch_id=? ORDER BY e.id`, id)
+	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.source_id,s.name,e.raw_status,e.raw_revision,e.created_at,e.payload,e.force_replay FROM notification_batch_events b JOIN notification_events e ON e.id=b.event_id JOIN notification_sources s ON s.id=e.source_id WHERE b.batch_id=? ORDER BY e.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (s *Service) batchEvents(ctx context.Context, id string) ([]RawNotification
 	for rows.Next() {
 		var r RawNotification
 		var payload string
-		if err = rows.Scan(&r.ID, &r.SourceID, &r.SourceName, &r.Status, &r.Revision, &r.CreatedAt, &payload); err != nil {
+		if err = rows.Scan(&r.ID, &r.SourceID, &r.SourceName, &r.Status, &r.Revision, &r.CreatedAt, &payload, &r.ForceReplay); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal([]byte(payload), &r.Event); err != nil {
@@ -122,8 +122,9 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	// Serialize once and retry persistence of the exact completed response. A
 	// storage retry never repeats model generation or publishes duplicate cards.
 	snapshotJSON, resultJSON, traceJSON := mustJSON(snapshot), mustJSON(turn), mustJSON(trace)
+	activityMetrics := notificationActivityMetrics(ctx, snapshot, trace)
 	if recordErr := s.journalWrite(recordCtx, "batch_result", func(c context.Context, tx *sql.Tx) error {
-		result, e := tx.ExecContext(c, `UPDATE notification_batches SET processor_snapshot=?,processor_result=?,processor_trace=? WHERE id=?`, snapshotJSON, resultJSON, traceJSON, id)
+		result, e := tx.ExecContext(c, `UPDATE notification_batches SET processor_snapshot=?,processor_result=?,processor_trace=?,activity_metrics=? WHERE id=?`, snapshotJSON, resultJSON, traceJSON, mustJSON(activityMetrics), id)
 		return requireBatchRow(result, e)
 	}); recordErr != nil {
 		if err != nil {

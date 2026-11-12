@@ -19,9 +19,15 @@ type notificationRunKey struct{}
 type notificationProjectKey struct{}
 
 type notificationRun struct {
-	batchID  string
-	subjects chan struct{}
-	github   chan struct{}
+	requests     atomic.Int64
+	rounds       atomic.Int64
+	fetched      atomic.Int64
+	changed      atomic.Int64
+	unchanged    atomic.Int64
+	fetchedBytes atomic.Int64
+	batchID      string
+	subjects     chan struct{}
+	github       chan struct{}
 }
 
 func withNotificationRun(ctx context.Context, batchID string) context.Context {

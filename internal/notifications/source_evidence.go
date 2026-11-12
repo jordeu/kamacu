@@ -30,6 +30,15 @@ func evidenceSince(events []RawNotification) (time.Time, bool) {
 }
 
 func scopeEvidence(events []RawNotification, subject Event, item SubjectEvidence) evidenceRecency {
+	if subject.ActivityDelta != nil {
+		if item.ContextOnly {
+			return evidenceHistorical
+		}
+		if item.ActivityRef != "" && item.Current {
+			return evidenceCurrent
+		}
+		return evidenceUnknown
+	}
 	since, ok := evidenceSince(events)
 	if !ok {
 		return evidenceUnknown

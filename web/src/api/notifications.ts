@@ -65,3 +65,19 @@ export function useArchiveNotification() {
  const qc = useQueryClient();
  return useMutation({ mutationFn: ({ id, status }: { id: number; status: "pending" | "archived" }) => patch(`/api/notifications/${id}`, { status }), onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["raw-notifications"] }), qc.invalidateQueries({ queryKey: ["notification-status"] }), qc.invalidateQueries({ queryKey: ["notification-sources"] })]) });
 }
+
+export interface NotificationRepairCandidate {
+ event_id: number;
+ revision: number;
+ batch_id: string;
+ url: string;
+ title: string;
+ reason: string;
+}
+export function useNotificationRepairPreview() {
+ return useMutation({mutationFn: () => get<NotificationRepairCandidate[]>("/api/notifications/repair")});
+}
+export function useRepairNotifications() {
+ const qc = useQueryClient();
+ return useMutation({mutationFn: (items: NotificationRepairCandidate[]) => post<{queued:number}>("/api/notifications/repair", {items}),onSuccess: () => Promise.all([qc.invalidateQueries({queryKey:["raw-notifications"]}),qc.invalidateQueries({queryKey:["notification-status"]}),qc.invalidateQueries({queryKey:["notification-sources"]})])});
+}

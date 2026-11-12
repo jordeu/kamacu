@@ -41,7 +41,7 @@ type Service struct {
 }
 
 func New(db *sql.DB, box *inbox.Service, model Model, tools Tools) *Service {
-	return &Service{DB: db, Inbox: box, Model: model, Tools: tools, Providers: map[string]Provider{"github": GitHub{}}}
+	return &Service{DB: db, Inbox: box, Model: model, Tools: tools, Providers: map[string]Provider{"github": GitHub{DB: db}}}
 }
 
 const sourceColumns = `id,provider,name,config,enabled,account,checkpoint,next_poll,last_success,last_error,created_at,(SELECT count(*) FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending'),COALESCE((SELECT last_error FROM notification_events e WHERE e.source_id=notification_sources.id AND e.raw_status='pending' AND e.last_error!='' ORDER BY e.id DESC LIMIT 1),'')`

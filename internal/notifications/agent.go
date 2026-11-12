@@ -19,6 +19,7 @@ const agentPrompt = `You are the notification decision-making agent. Read the en
 Do not invent acknowledgements or follow-up work for resolved events. A merged PR usually resolves requests to merge and awaited approvals; preserve genuinely unresolved or post-merge requests. Apply repository exclusions and their actual mention exceptions; a team assignment is not a personal mention. Routine bot reports with no new findings need no feedback. Do not repeat material already covered by an answered, dismissed, or pending Inbox message. A dismissal is evidence of handling that material, not a permanent new preference. An answer requesting clarification, or a successfully delivered follow-up question, does not establish completion of the underlying work. Prefer a concrete task proposal over repeating an unhelpful earlier question. An answered message with failed or uncertain delivery is not proof that its requested work completed; check task/session state and never automatically resend it.
 Choose an existing active or closed implementation task when evidence links it to the work. If no task owns an actionable issue, propose creating a new investigation task instead of asking the user to name a nonexistent owner. Reviews use route_review and PR review workspaces, never ordinary todo tasks; an explicit rule can group reviews in an existing recurring task via route_recurring. Missing metadata alone does not justify an Inbox question: use the available read-only tools first, and ask only when the answer materially changes a useful next step. Preserve known task links independently of action choices.
 The initial bundle includes full details when they fit. Otherwise it contains a complete index with detail_available=true. read_subject, read_task and read_history retrieve exact frozen detail pages; offset is a byte cursor and next_offset=-1 means complete. More read-only Kamacu tools may be listed. Never call tools outside this supplied catalog. No mutation tools are available. Source failures and unread pages must not be treated as verified negative facts.
+When activity_delta.replay=true, the manifest intentionally includes previously handled versions selected for reevaluation; use current state and Inbox history to avoid duplicate messages. The activity manifest represents unacknowledged source versions or explicit replays. On first scans and repairs, newly discovered does not necessarily mean recently authored: use timestamps, the current head, task work and previous Inbox decisions to recognize already handled feedback. New activity is identified by activity_delta.activities and stable A.../V... references. Context-only items are history, not new requests. Use read_thread for older discussion needed to interpret new feedback; cite its recorded read ID, and use read_activity for full saved versions. Every new activity version must be assigned exactly once to a decision through activity_refs, including ignored activity. activity_refs uses A.../V... manifest references; evidence_refs uses source citation IDs such as S1/E1 or read:1. Neither field replaces the other. Fetch read_activity pages when its full evidence is absent from the compact index. Summarized generated tables are explicitly marked and their full saved version is available through read_activity. Unavailable activity entries are verified retrieval metadata, not words written by their former authors or current instructions to act. The notification reason author identifies a subscription, not the person who caused the latest update.
 Return one JSON turn: action=read with reads [{tool_name,arguments (JSON string)}], or action=finish with messages, decisions and supersede_ids. Populate unused arrays with []. A finish decision must cover every event ID exactly once, as outcome=ignore or message, with a concise reason, relevant enabled rule_ids, and evidence_refs drawn from the subject evidence IDs or recorded read IDs. Messages may group related events, but must refer only to events marked message; every such event must have a message. Every message needs a self-contained summary, context, question, why_it_matters, rule_ids, evidence_refs, linked_task_ids, options (one to four typed options), and plan {workflow,project_id,task_id,pr_numbers,task_name,work_kind}. workflow must be one of route_review, route_implementation, route_investigation, route_recurring, clarify; continuing an existing implementation task uses route_implementation (continue_task is an option action kind, not a workflow). work_kind must be review, implementation or investigation. Use full source URLs. Each message must cite at least one evidence ID from its own subjects, alongside any successful lookup IDs used for additional context. Unavailable lookups are not evidence. Refer to applicable rule IDs; use [] when no specific rule applies. Avoid generic 'inspect this activity' or repeated 'nothing has been done' disclaimers. For genuinely necessary clarification, workflow=clarify and the question itself asks for the missing information. Supersede only pending questions whose entire outstanding request is now resolved or replaced; never discard unrelated items in a grouped card. No work is started by this response. Only a later Inbox reply can authorize actions.
 Each actionable option must contain a distinct saved sequence: {id,label,mode:"action",actions:[...]}. An operation has busy_policy,id,kind,project_id,task_id,task_ref,session_id,pr_numbers,task_name,instructions,status,title,description,link_role; unused values are 0, "", or []. Supported kinds: start_reviews, run_recurring_task, continue_task, create_investigation, send_to_session, close_session, complete_task, update_task, associate_pr, ignore, open_task. No arbitrary tools, shell commands, or loops. busy_policy defaults to ""/wait_idle. An explicit alternative can use send_now to submit while a task is working; Kamacu labels it accordingly. Permission/choice dialogs are never automatically answered. Task_ref refers to an earlier task-producing operation's id instead of task_id. Write the complete handoff instructions now, using full source URLs, so buttons need no extra model call. start_reviews uses the configured application review prompt; its optional instructions are follow-up context, never a replacement initial prompt. Reviews cannot use continue_task/create_investigation. Different options such as Review all, Review only one, or Ignore must have different operation targets. Ignore/open_task must be standalone. complete_task uses status done/in_review, the known task and explicit live session_id when present. Closing/moving a task is only offered when the source evidence supports completion. For clarification-only choices use mode:"reply",actions:[]; all other buttons use mode:"action". Always allow free-text replies. Kamacu validates/snapshots targets, sessions and prompts, then performs startup, readiness, paste+Enter and progress without further model decisions.`
 
@@ -84,6 +85,7 @@ type AgentMessage struct {
 	Plan          AgentPlan     `json:"plan"`
 }
 type AgentDecision struct {
+	ActivityRefs []string `json:"activity_refs"`
 	EventIDs     []int64  `json:"event_ids"`
 	Outcome      string   `json:"outcome"`
 	Reason       string   `json:"reason"`
@@ -102,6 +104,7 @@ type AgentTurn struct {
 	SupersedeIDs []string        `json:"supersede_ids"`
 }
 type AgentReadResult struct {
+	SubjectID   string `json:"subject_id,omitempty"`
 	Superseded  bool   `json:"superseded,omitempty"`
 	DurationMS  int64  `json:"duration_ms"`
 	Unavailable bool   `json:"unavailable"`
@@ -150,7 +153,14 @@ func (s *Service) agentSnapshot(ctx context.Context, events []RawNotification, r
 		if err := s.DB.QueryRowContext(ctx, `SELECT source_id FROM notification_events WHERE id=?`, sub.EventIDs[0]).Scan(&sourceID); err != nil {
 			return err
 		}
-		fresh, err := s.enrichSubject(ctx, sourceMap[sourceID], sub.Event)
+		base := sub.Event
+		for _, raw := range sub.Notifications {
+			base.ActivityReplay = base.ActivityReplay || raw.ForceReplay
+		}
+		if since, ok := evidenceSince(sub.Notifications); ok {
+			base.ActivityFloor = since.Format(time.RFC3339)
+		}
+		fresh, err := s.enrichSubject(ctx, sourceMap[sourceID], base)
 		if err != nil {
 			return err
 		}
@@ -315,7 +325,7 @@ func snapshotView(snapshot AgentSnapshot, budget int) (string, error) {
 		for _, e := range sub.Event.Evidence {
 			evidenceIDs = append(evidenceIDs, e.ID)
 		}
-		subjects = append(subjects, map[string]any{"evidence_ids": evidenceIDs, "id": sub.ID, "event_ids": sub.EventIDs, "project_id": sub.ProjectID, "viewer": sub.Viewer, "viewer_mentioned": sub.ViewerMentioned, "subject_author": sub.Author, "source_name": sub.SourceName, "repository": sub.Event.Repository, "url": sub.Event.URL, "title": sub.Event.Title, "reason": sub.Event.Reason, "pr_facts": facts, "context_warnings": sub.Event.ContextWarnings, "detail_available": true, "detail_bytes": len(mustJSON(sub))})
+		subjects = append(subjects, map[string]any{"evidence_ids": evidenceIDs, "id": sub.ID, "event_ids": sub.EventIDs, "project_id": sub.ProjectID, "viewer": sub.Viewer, "viewer_mentioned": sub.ViewerMentioned, "subject_author": sub.Author, "source_name": sub.SourceName, "repository": sub.Event.Repository, "url": sub.Event.URL, "title": sub.Event.Title, "reason": sub.Event.Reason, "pr_facts": facts, "context_warnings": sub.Event.ContextWarnings, "activity_delta": sub.Event.ActivityDelta, "activity_evidence": compactActivityIndex(sub, budget/max(1, len(snapshot.Subjects))/4), "detail_available": true, "detail_bytes": len(mustJSON(sub))})
 	}
 	history := []map[string]any{}
 	for _, q := range snapshot.History {
@@ -358,7 +368,8 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 	if err != nil {
 		return final, trace, err
 	}
-	tools := []Tool{{Name: "read_task", Description: "Read frozen task details including description and recent saved session work; arguments {id: the task read_id string,offset:0}. Pages include next_offset."}, {Name: "read_subject", Description: "Read frozen full source details; arguments {id,offset}. Returns a data page and next_offset."}, {Name: "read_history", Description: "Read a frozen Inbox message including its context and outcome; arguments {id,offset}."}}
+	receipts := newActivityReceipts(snapshot, initial)
+	tools := []Tool{{Name: "read_thread", Description: "Read frozen older discussion for a batch subject: {id:S1,offset:0,review_id:0}. Offset counts entries. Optional review_id restricts to a review and its comments. Historical context is not new activity; read_activity retrieves full cached versions."}, {Name: "read_activity", Description: "Read one frozen new activity by its A.../V... id and byte offset, with next_offset. Required when the compact index omits its full text."}, {Name: "read_task", Description: "Read frozen task details including description and recent saved session work; arguments {id: the task read_id string,offset:0}. Pages include next_offset."}, {Name: "read_subject", Description: "Read frozen full source details; arguments {id,offset}. Returns a data page and next_offset."}, {Name: "read_history", Description: "Read a frozen Inbox message including its context and outcome; arguments {id,offset}."}}
 	if s.Tools != nil {
 		catalog, err := s.Tools.List(ctx)
 		if err != nil {
@@ -401,6 +412,9 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 		}
 		var turn AgentTurn
 		var rejected []byte
+		if run, ok := ctx.Value(notificationRunKey{}).(*notificationRun); ok {
+			run.rounds.Add(1)
+		}
 		_, err = s.Model.GenerateValidatedJSON(ctx, profile, prompt, agentSchema, func(raw []byte) error {
 			rejected = append([]byte(nil), raw...)
 			turn = AgentTurn{}
@@ -423,6 +437,9 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 			}
 			if turn.Action != "finish" || len(turn.Reads) > 0 {
 				return errors.New("invalid final notification response")
+			}
+			if err := receipts.validate(snapshot); err != nil {
+				return err
 			}
 			if err := validateAgentResponse(snapshot, turn, evidence); err != nil {
 				return err
@@ -461,6 +478,14 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 						initial = view
 					}
 					supersedeSourceReads(trace, updates)
+					// Each decision call receives a rebuilt prompt. Recompute
+					// receipts from the current bundle and nonobsolete reads.
+					receipts = newActivityReceipts(snapshot, initial)
+					for _, read := range trace {
+						if !read.Superseded && !read.Unavailable {
+							receipts.addRead(snapshot, AgentRead{Name: read.Name, Arguments: read.Arguments}, read.Result)
+						}
+					}
 					evidence = map[string]bool{}
 					for _, sub := range snapshot.Subjects {
 						for _, e := range sub.Event.Evidence {
@@ -487,15 +512,39 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 			if err != nil {
 				result = mustJSON(map[string]any{"error": err.Error(), "unavailable": true})
 			}
+			if err == nil {
+				receipts.addRead(snapshot, read, result)
+			}
+			subjectID := ""
+			if err == nil {
+				var args struct {
+					ID string `json:"id"`
+				}
+				_ = json.Unmarshal([]byte(read.Arguments), &args)
+				if read.Name == "read_activity" {
+					var page struct {
+						Owner string `json:"subject_id"`
+					}
+					if json.Unmarshal([]byte(result), &page) == nil {
+						subjectID = page.Owner
+					}
+				}
+				if read.Name == "read_thread" {
+					subjectID = args.ID
+				}
+			}
 			id := fmt.Sprintf("read:%d", len(trace)+1)
-			trace = append(trace, AgentReadResult{DurationMS: time.Since(readStarted).Milliseconds(), Unavailable: err != nil, ID: id, Name: read.Name, Arguments: read.Arguments, Result: result})
+			trace = append(trace, AgentReadResult{SubjectID: subjectID, DurationMS: time.Since(readStarted).Milliseconds(), Unavailable: err != nil, ID: id, Name: read.Name, Arguments: read.Arguments, Result: result})
 			evidence[id] = err == nil
 		}
 	}
 	return final, trace, errors.New("notification agent did not finish within its read budget")
 }
 func (s *Service) agentRead(ctx context.Context, snapshot AgentSnapshot, r AgentRead, c Config) (string, error) {
-	if r.Name == "read_subject" || r.Name == "read_history" || r.Name == "read_task" {
+	if r.Name == "read_thread" {
+		return s.readThread(ctx, snapshot, r.Arguments)
+	}
+	if r.Name == "read_activity" || r.Name == "read_subject" || r.Name == "read_history" || r.Name == "read_task" {
 		var a struct {
 			ID     string `json:"id"`
 			Offset int    `json:"offset"`
@@ -504,7 +553,15 @@ func (s *Service) agentRead(ctx context.Context, snapshot AgentSnapshot, r Agent
 			return "", err
 		}
 		raw := ""
-		if r.Name == "read_subject" {
+		activityOwner := ""
+		if r.Name == "read_activity" {
+			item, owner, err := s.lookupActivity(ctx, snapshot, a.ID)
+			if err != nil {
+				return "", err
+			}
+			raw = item.Text
+			activityOwner = owner
+		} else if r.Name == "read_subject" {
 			for _, sub := range snapshot.Subjects {
 				if sub.ID == a.ID {
 					raw = mustJSON(sub)
@@ -523,7 +580,7 @@ func (s *Service) agentRead(ctx context.Context, snapshot AgentSnapshot, r Agent
 				}
 			}
 		}
-		if raw == "" || a.Offset < 0 || a.Offset >= len(raw) {
+		if raw == "" || a.Offset < 0 || a.Offset >= len(raw) || (a.Offset > 0 && raw[a.Offset]&0xc0 == 0x80) {
 			return "", errors.New("unknown snapshot item or offset")
 		}
 		end := min(len(raw), a.Offset+max(16000, c.ContextBytes/(c.MaxReads+3)))
@@ -534,7 +591,20 @@ func (s *Service) agentRead(ctx context.Context, snapshot AgentSnapshot, r Agent
 		if end < len(raw) {
 			next = end
 		}
-		return mustJSON(map[string]any{"id": a.ID, "offset": a.Offset, "next_offset": next, "data": raw[a.Offset:end]}), nil
+		page := map[string]any{"id": a.ID, "offset": a.Offset, "next_offset": next, "data": raw[a.Offset:end]}
+		if r.Name == "read_activity" {
+			current := false
+			for _, sub := range snapshot.Subjects {
+				if sub.Event.ActivityDelta != nil {
+					for _, ref := range sub.Event.ActivityDelta.Activities {
+						current = current || ref.Ref == a.ID
+					}
+				}
+			}
+			page["historical_context"] = !current
+			page["subject_id"] = activityOwner
+		}
+		return mustJSON(page), nil
 	}
 	if !readOnlyAgentTool(r.Name) || s.Tools == nil {
 		return "", errors.New("tool is not available for notification processing")
@@ -560,6 +630,9 @@ func (s *Service) agentRead(ctx context.Context, snapshot AgentSnapshot, r Agent
 }
 
 func validateAgentResponse(snapshot AgentSnapshot, t AgentTurn, evidence map[string]bool) error {
+	if err := validateActivityDecisions(snapshot, t); err != nil {
+		return err
+	}
 	allowed := map[int64]bool{}
 	for _, sub := range snapshot.Subjects {
 		for _, id := range sub.EventIDs {
@@ -902,6 +975,6 @@ var agentSchema = func() map[string]any {
 	enum := func(values ...string) map[string]any { return map[string]any{"type": "string", "enum": values} }
 	plan := object(map[string]any{"workflow": enum("route_review", "route_implementation", "route_investigation", "route_recurring", "clarify"), "project_id": integer, "task_id": integer, "pr_numbers": array(integer), "task_name": str, "work_kind": enum("review", "implementation", "investigation")})
 	message := object(map[string]any{"event_ids": array(integer), "summary": str, "context": str, "question": str, "why_it_matters": str, "rule_ids": array(str), "evidence_refs": array(str), "linked_task_ids": array(integer), "options": array(agentOptionSchema()), "plan": plan})
-	decision := object(map[string]any{"event_ids": array(integer), "outcome": enum("ignore", "message"), "reason": str, "rule_ids": array(str), "evidence_refs": array(str)})
+	decision := object(map[string]any{"activity_refs": array(str), "event_ids": array(integer), "outcome": enum("ignore", "message"), "reason": str, "rule_ids": array(str), "evidence_refs": array(str)})
 	return object(map[string]any{"action": enum("read", "finish"), "reads": array(object(map[string]any{"tool_name": str, "arguments": str})), "messages": array(message), "decisions": array(decision), "supersede_ids": array(str)})
 }()

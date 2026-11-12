@@ -15,15 +15,16 @@ var ErrNoPending = errors.New("no pending notifications to process")
 var ErrProcessing = errors.New("notifications are being processed; try again when processing finishes")
 
 type RawNotification struct {
-	Processing bool               `json:"processing,omitempty"`
-	ID         int64              `json:"id"`
-	SourceID   string             `json:"source_id"`
-	SourceName string             `json:"source_name"`
-	Status     string             `json:"status"`
-	Revision   int64              `json:"revision"`
-	CreatedAt  int64              `json:"created_at"`
-	Decisions  []ActivityDecision `json:"decisions,omitempty"`
-	Event      Event              `json:"event"`
+	ForceReplay bool               `json:"replay,omitempty"`
+	Processing  bool               `json:"processing,omitempty"`
+	ID          int64              `json:"id"`
+	SourceID    string             `json:"source_id"`
+	SourceName  string             `json:"source_name"`
+	Status      string             `json:"status"`
+	Revision    int64              `json:"revision"`
+	CreatedAt   int64              `json:"created_at"`
+	Decisions   []ActivityDecision `json:"decisions,omitempty"`
+	Event       Event              `json:"event"`
 }
 type RawPage struct {
 	Items        []RawNotification `json:"items"`
@@ -123,7 +124,7 @@ func (s *Service) SetRawStatus(ctx context.Context, id int64, status string) err
 	if active > 0 {
 		return ErrProcessing
 	}
-	r, err := tx.ExecContext(ctx, `UPDATE notification_events SET raw_status=?,raw_revision=raw_revision+1 WHERE id=? AND raw_status!=?`, status, id, status)
+	r, err := tx.ExecContext(ctx, `UPDATE notification_events SET raw_status=?,force_replay=CASE WHEN ?='pending' THEN 1 ELSE force_replay END,raw_revision=raw_revision+1 WHERE id=? AND raw_status!=?`, status, status, id, status)
 	if err != nil {
 		return err
 	}
