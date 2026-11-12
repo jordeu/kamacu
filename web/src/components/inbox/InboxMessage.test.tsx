@@ -82,6 +82,8 @@ it("renders new-tab links throughout pending and answered message dialogs", () =
     );
   }
   const pending = render("pending");
+  expect(pending).toContain(">Move to end</button>");
+  expect(render("answered")).not.toContain(">Move to end</button>");
   for (const label of ["title#1", "summary#2", "context#3", "option#4"]) {
     expect(pending).toContain(`>${label}</a>`);
   }

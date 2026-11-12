@@ -80,7 +80,7 @@ export interface FeedbackResult {
 export function useInbox(
   view: "pending" | "archived" = "pending",
   offset = 0,
-  order: "newest" | "oldest" = "newest",
+  order: "newest" | "oldest" = view === "pending" ? "oldest" : "newest",
 ) {
   return useQuery({
     queryKey: ["inbox", view, offset, order],
@@ -109,7 +109,7 @@ export function useFeedbackAction() {
       option_id,
     }: {
       question: FeedbackQuestion;
-      action: "answer" | "dismiss";
+      action: "answer" | "dismiss" | "requeue";
       answer?: string;
       option_id?: string;
     }) =>
@@ -166,6 +166,8 @@ export function feedbackTaskURL(q: FeedbackQuestion) {
   return `${path}?feedback_session=${encodeURIComponent(q.session_id)}`;
 }
 export function feedbackOutcomeMessage(result: FeedbackResult) {
+  if (result.outcome === "requeued")
+    return "Message moved to the end of the queue.";
   if (result.outcome === "stale_revision")
     return "This question was reopened. Review its current version before answering.";
   if (result.outcome === "already_resolved") {

@@ -110,7 +110,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
   const navigate = useNavigate();
   const notification = q.origin === "notification";
   const completion = q.kind === "completion";
-  async function submit(kind: "answer" | "dismiss", option_id?: string, openTask = false) {
+  async function submit(kind: "answer" | "dismiss" | "requeue", option_id?: string, openTask = false) {
     try {
       // Await the mutation directly: polling can unmount this card before it finishes.
       const result = await action.mutateAsync({ question: q, action: kind, option_id });
@@ -140,6 +140,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
       {notification ? <a href={q.source_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-400">Open notification <ArrowUpRight className="size-3" /></a> : <Button variant="outline" size="sm" disabled={action.isPending} title={q.origin === "observer" && !completion ? "Open its agent terminal" : "Archive this message and open its agent terminal"} onClick={() => { if(q.origin==="observer" && !completion){onOpenTask();navigate(feedbackTaskURL(q));}else void submit("dismiss", undefined, true); }}>{q.task_id === 0 ? "Open Scratchpad" : "Open task"}<ArrowUpRight className="size-3" /></Button>}
       {completion && completionActions(q).map(option => <InboxTextAction text={option.label} key={option.id} className={`${buttonVariants({ variant: "outline", size: "sm" })} h-auto min-h-7 max-w-full whitespace-normal text-left`} disabled={action.isPending} onClick={() => submit("answer", option.id)} />)}
       <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => submit("dismiss")}>Dismiss</Button>
+      <Button variant="ghost" size="sm" disabled={action.isPending} onClick={() => submit("requeue")}>Move to end</Button>
     </div>
     {!completion && <Link to={`/inbox?message=${encodeURIComponent(q.id)}#message-${q.id}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">{q.delivery_mode === "claude_question" ? "Full context / choices" : "Full context / custom reply"}<ArrowUpRight className="size-3" /></Link>}
     {action.isPending && <p role="status" className="text-xs text-muted-foreground">Updating message…</p>}

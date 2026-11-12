@@ -103,4 +103,7 @@ describe("notification messages", () => {
     expect(feedbackOutcomeMessage({ outcome: "accepted", question: notification })).toContain("action queued");
     expect(feedbackOutcomeMessage({ outcome: "dismissed", question: { ...notification, status: "dismissed" } })).toContain("GitHub read state is unchanged");
   });
+  it("reports requeueing independently of message origin", () => {
+    expect(feedbackOutcomeMessage({ outcome: "requeued", question: { ...notification, status: "pending" } })).toBe("Message moved to the end of the queue.");
+  });
 });
