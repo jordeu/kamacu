@@ -39,3 +39,20 @@ it("shows an empty-body completed review without calling it an older commit or n
   expect(html).not.toContain("Older commit");
   expect(html).not.toContain("Completed · no new findings");
 });
+
+it.each([
+  ["pass", "All checks passing", "text-green-400"],
+  ["fail", "Checks failing", "text-red-400"],
+  ["pending", "Checks pending", "text-amber-400"],
+  ["none", "No checks", "text-zinc-400"],
+  ["unknown", "CI unavailable", "text-zinc-400"],
+])("summarizes %s CI in one line without listing jobs", (state, label, color) => {
+  const snapshot = data();
+  snapshot.ci = { state, jobs: Array.from({ length: 100 }, (_, index) => ({ name: `Job ${index}`, state })) };
+  const html = renderToStaticMarkup(<PRStatusDetails repository="acme/app" number={12} snapshot={snapshot} />);
+  const ci = html.match(/<section aria-label="CI checks"[^>]*>(.*?)<\/section>/)?.[1];
+  expect(ci).toContain(label);
+  expect(ci).toContain(color);
+  expect(ci).not.toContain("Job ");
+  expect(ci).not.toContain("<ul");
+});

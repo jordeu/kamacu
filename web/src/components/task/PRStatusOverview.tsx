@@ -56,6 +56,10 @@ export function PRStatusDetails({ snapshot, repository, number }: {
 }) {
   const primary = primaryPRStatus(snapshot);
   const Mark = icons[primary.icon];
+  const ciState = snapshot?.ci.state ?? "unknown";
+  const CIMark = icons[ciState === "pass" || ciState === "fail" || ciState === "none" ? ciState : ciState === "pending" ? "waiting" : "unknown"];
+  const ciLabel = ciState === "pass" ? "All checks passing" : ciState === "fail" ? "Checks failing"
+    : ciState === "pending" ? "Checks pending" : ciState === "none" ? "No checks" : "CI unavailable";
   return <div className="space-y-3">
     <header className="space-y-1.5">
       <h3 className={cn("flex items-center gap-2 text-xs font-semibold", colors[primary.tone])}>
@@ -65,17 +69,11 @@ export function PRStatusDetails({ snapshot, repository, number }: {
         {snapshot && <> · {snapshot.lifecycle}{snapshot.head && <> · <span className="font-mono">{snapshot.head.slice(0, 7)}</span></>}</>}
       </p>
     </header>
-    <section aria-label="CI checks" className="border-t border-zinc-700/80 pt-3">
-      <div className="mb-2 flex justify-between gap-2 text-[10px] uppercase tracking-wide">
-        <h4 className="text-zinc-400">CI checks</h4>
-        <span className={colors[statusTone(snapshot?.ci.state ?? "unknown")]}>{prStatusLabels[snapshot?.ci.state ?? "unknown"]}</span>
-      </div>
-      {!snapshot?.ci.jobs.length ? <p className="text-xs text-zinc-400">{snapshot?.ci.state === "none" ? "No check runs or commit statuses reported." : "CI information unavailable."}</p>
-        : <ul className="space-y-1.5">{snapshot.ci.jobs.map((job, index) => <li key={`${job.name}/${index}`} className="flex items-start justify-between gap-3 text-xs">
-          <span className="min-w-0 break-words text-zinc-200">{job.name}</span>
-          <span className={cn("shrink-0 text-[11px]", colors[statusTone(job.state)])}>{job.detail && ["skipped", "neutral", "stale"].includes(job.detail)
-            ? job.detail : prStatusLabels[job.state] ?? "Unknown"}</span>
-        </li>)}</ul>}
+    <section aria-label="CI checks" className="flex items-center justify-between gap-2 border-t border-zinc-700/80 pt-3">
+      <h4 className="text-[10px] uppercase tracking-wide text-zinc-400">CI checks</h4>
+      <span className={cn("inline-flex items-center gap-1.5 text-xs", colors[statusTone(ciState)])}>
+        <CIMark aria-hidden="true" className="size-3.5 shrink-0" />{ciLabel}
+      </span>
     </section>
     <ReviewGroup group={snapshot?.humans} />
     <ReviewGroup group={snapshot?.bots} bots />
