@@ -38,6 +38,8 @@ func TestPRStatusHumanDecisions(t *testing.T) {
 		{"current approval", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "head", 1)}, false, "approved"},
 		{"old approval", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "old", 1)}, false, "waiting"},
 		{"re-request", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "head", 1)}, true, "waiting"},
+		{"re-request after changes on older commit", []statusReview{statusReviewFor("alice", "User", "CHANGES_REQUESTED", "", "old", 1)}, true, "waiting"},
+		{"re-request after changes on current commit", []statusReview{statusReviewFor("alice", "User", "CHANGES_REQUESTED", "", "head", 1)}, true, "waiting"},
 		{"dismissed", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "head", 1), statusReviewFor("alice", "User", "DISMISSED", "", "head", 2)}, false, "waiting"},
 		{"comment does not erase approval", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "head", 1), statusReviewFor("alice", "User", "COMMENTED", "Looks fine", "head", 2)}, false, "approved"},
 		{"comment does not erase changes", []statusReview{statusReviewFor("alice", "User", "CHANGES_REQUESTED", "", "old", 1), statusReviewFor("alice", "User", "COMMENTED", "Thanks", "head", 2)}, false, "changes"},
@@ -65,6 +67,31 @@ func TestPRStatusHumanDecisions(t *testing.T) {
 		t.Fatal(got.Humans)
 	}
 }
+func TestPRStatusHumanReReviewDoesNotHideOtherChangeRequests(t *testing.T) {
+	p := statusFixture(t)
+	p.Reviews.Nodes = []statusReview{
+		statusReviewFor("alice", "User", "CHANGES_REQUESTED", "", "old", 1),
+		statusReviewFor("bob", "User", "CHANGES_REQUESTED", "", "head", 2),
+	}
+	p.Requests.Nodes = []statusRequest{{Reviewer: statusActor{Login: "alice", Kind: "User"}}}
+	out := reducePRStatus(p, statusComplete())
+	if out.Humans.State != "changes" || len(out.Humans.Reviewers) != 2 {
+		t.Fatal(out.Humans)
+	}
+	alice, bob := out.Humans.Reviewers[0], out.Humans.Reviewers[1]
+	if alice.Login != "alice" || alice.State != "waiting" || alice.Detail != "Re-review requested · previously requested changes" {
+		t.Fatal(alice)
+	}
+	if bob.Login != "bob" || bob.State != "changes" {
+		t.Fatal(bob)
+	}
+	p.Reviews.Nodes = p.Reviews.Nodes[:1]
+	out = reducePRStatus(p, statusComplete())
+	if out.Humans.State != "waiting" || out.CI.State != "pass" {
+		t.Fatalf("re-requested changes with passing CI must wait for review: %+v", out)
+	}
+}
+
 func TestPRStatusBotOutcomes(t *testing.T) {
 	for _, tt := range []struct{ name, state, body, head, want string }{
 		{"comment-only clean", "COMMENTED", "No new findings", "head", "clean"},
