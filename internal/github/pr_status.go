@@ -461,11 +461,14 @@ func reducePRStatus(p statusPRRaw, complete map[string]bool) PRStatus {
 				humansKnown = false
 				r.State = "unknown"
 				r.Detail = "Reviewer identity unavailable"
-			case e.decision != nil && e.decision.State == "CHANGES_REQUESTED":
-				r.State = "changes"
 			case e.requested:
 				r.State = "waiting"
 				r.Detail = "Review requested"
+				if e.decision != nil && e.decision.State == "CHANGES_REQUESTED" {
+					r.Detail = "Re-review requested · previously requested changes"
+				}
+			case e.decision != nil && e.decision.State == "CHANGES_REQUESTED":
+				r.State = "changes"
 			case e.decision != nil && e.decision.State == "APPROVED" && e.decision.Commit.OID == p.Head:
 				r.State = "approved"
 			case e.decision != nil && e.decision.State == "APPROVED":
