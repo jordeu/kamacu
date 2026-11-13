@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import type { Task, TaskPRLink } from "@/api/types";
@@ -8,7 +9,7 @@ const link: TaskPRLink = {
   url: "https://github.com/acme/app/pull/12", role: "implementation",
 };
 const render = (links?: TaskPRLink[]) => renderToStaticMarkup(
-  <TaskPRLinks task={{ pr_links: links } as Task} />,
+  <QueryClientProvider client={new QueryClient()}><TaskPRLinks task={{ project_id: 1, pr_links: links } as Task} /></QueryClientProvider>,
 );
 
 it("renders a GitHub link with an accessible new-tab announcement", () => {

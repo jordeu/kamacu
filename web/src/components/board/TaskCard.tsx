@@ -81,6 +81,7 @@ export function TaskCard({ task }: { task: Task }) {
       style={style}
       {...attributes}
       {...listeners}
+      aria-label={task.title}
       onClick={() =>
         navigate(`/projects/${task.project_id}/tasks/${task.id}`)
       }

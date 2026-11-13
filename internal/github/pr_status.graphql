@@ -1,0 +1,8 @@
+query($owner:String!,$name:String!,$number:Int!,$reviewsCursor:String,$threadsCursor:String,$requestsCursor:String,$commentsCursor:String,$checksCursor:String,$readReviews:Boolean!,$readThreads:Boolean!,$readRequests:Boolean!,$readComments:Boolean!,$readChecks:Boolean!){
+repository(owner:$owner,name:$name){pullRequest(number:$number){state isDraft headRefOid author{login __typename}
+commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100,after:$checksCursor) @include(if:$readChecks){nodes{__typename ... on CheckRun{name databaseId status conclusion startedAt completedAt checkSuite{app{slug}}} ... on StatusContext{context state createdAt}}pageInfo{hasNextPage endCursor}}}}}}
+reviews(first:100,after:$reviewsCursor) @include(if:$readReviews){nodes{author{login __typename} state body submittedAt createdAt commit{oid}}pageInfo{hasNextPage endCursor}}
+reviewRequests(first:100,after:$requestsCursor) @include(if:$readRequests){nodes{requestedReviewer{__typename ... on User{login} ... on Bot{login} ... on Team{slug}}}pageInfo{hasNextPage endCursor}}
+reviewThreads(first:100,after:$threadsCursor) @include(if:$readThreads){nodes{isResolved comments(first:1){nodes{author{login __typename}}}}pageInfo{hasNextPage endCursor}}
+comments(first:100,after:$commentsCursor) @include(if:$readComments){nodes{author{login __typename} body createdAt updatedAt}pageInfo{hasNextPage endCursor}}
+}}}
