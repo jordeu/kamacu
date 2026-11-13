@@ -407,7 +407,7 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 		if readsUsed >= c.MaxReads {
 			availableTools = []Tool{}
 		}
-		prompt := agentPrompt + "\nBATCH:\n" + initial + "\nREAD-ONLY TOOLS:\n" + mustJSON(availableTools) + "\nREAD_BUDGET_REMAINING:\n" + fmt.Sprint(c.MaxReads-readsUsed) + "\nREAD RESULTS:\n" + mustJSON(agentTraceForPrompt(trace, updatesInBatch)) + finalNotes + correction
+		prompt := agentPrompt + "\nBATCH:\n" + initial + "\nREAD-ONLY TOOLS:\n" + mustJSON(availableTools) + "\nREAD_BUDGET_REMAINING:\n" + fmt.Sprint(c.MaxReads-readsUsed) + "\nREQUIRED ACTIVITY READS:\n" + mustJSON(receipts.requiredReads(snapshot)) + "\nRead these activities before finishing; follow continuation pages until next_offset=-1. This list tracks evidence not yet fully supplied and is updated after each read turn. If the read budget is insufficient, processing must keep the notifications pending.\nREAD RESULTS:\n" + mustJSON(agentTraceForPrompt(trace, updatesInBatch)) + finalNotes + correction
 		if len(prompt) > c.ContextBytes {
 			return final, trace, errors.New("notification context budget exhausted; increase the budget and retry")
 		}

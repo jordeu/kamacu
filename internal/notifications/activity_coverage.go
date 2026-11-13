@@ -18,6 +18,33 @@ type activityReceipts struct {
 	lengths map[string]int
 }
 
+// requiredReads points at the first unread byte, including gaps left by
+// out-of-order pages. It is a work list, never a receipt for unseen content.
+func (r *activityReceipts) requiredReads(snapshot AgentSnapshot) []AgentRead {
+	reads := []AgentRead{}
+	for _, sub := range snapshot.Subjects {
+		if sub.Event.ActivityDelta == nil {
+			continue
+		}
+		for _, ref := range sub.Event.ActivityDelta.Activities {
+			if r.visible[ref.Ref] {
+				continue
+			}
+			pages := append([]activityPage(nil), r.pages["read_activity:"+ref.Ref]...)
+			sort.Slice(pages, func(i, j int) bool { return pages[i].start < pages[j].start })
+			offset := 0
+			for _, page := range pages {
+				if page.start > offset {
+					break
+				}
+				offset = max(offset, page.end)
+			}
+			reads = append(reads, AgentRead{Name: "read_activity", Arguments: mustJSON(map[string]any{"id": ref.Ref, "offset": offset})})
+		}
+	}
+	return reads
+}
+
 func newActivityReceipts(snapshot AgentSnapshot, initial string) *activityReceipts {
 	r := &activityReceipts{visible: map[string]bool{}, pages: map[string][]activityPage{}, lengths: map[string]int{}}
 	r.addVisible(snapshot, initial)
@@ -209,9 +236,24 @@ func compactActivityIndex(sub AgentSubject, budget int) []SubjectEvidence {
 	if len(mustJSON(entries)) <= budget {
 		return entries
 	}
-	for i := range entries {
+	// Remove the largest bodies first, retaining short approvals and comments
+	// even when another activity makes the subject exceed its share of space.
+	order := make([]int, len(entries))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return len(mustJSON(entries[order[i]].Text)) > len(mustJSON(entries[order[j]].Text))
+	})
+	size := len(mustJSON(entries))
+	for _, i := range order {
+		before := len(mustJSON(entries[i]))
 		entries[i].Text = ""
 		entries[i].Complete = false
+		size += len(mustJSON(entries[i])) - before
+		if size <= budget {
+			break
+		}
 	}
 	return entries
 }
