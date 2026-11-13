@@ -282,6 +282,12 @@ the table. Reports with a direct mention are kept in full. All original versions
 remain available through the read-only `read_activity` tool. No bot category is
 automatically ignored: the numbered text rules still determine relevance.
 
+When a subject exceeds its evidence budget, the compact index removes the
+largest activity bodies first, preserving short approvals and comments where
+they fit. Each model turn lists required activity reads with the first unread
+byte offset, so continuation pages can be resumed. Finishing with unread new
+activity still fails processing and keeps the notifications pending.
+
 Review streams and ordinary comment streams have independent retrieval limits,
 instead of competing for one 96 KB allowance. Missing required pages, resources
 or exceeded retrieval limits leave notifications pending with a processing error.

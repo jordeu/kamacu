@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"kamacu/internal/store"
 	"strings"
 	"testing"
 	"time"
@@ -337,6 +338,101 @@ func TestNewActivityPagesRequireCompleteReadCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCompactActivityIndexKeepsShortApprovalBesideLargeReview(t *testing.T) {
+	large := SubjectEvidence{ID: "S1/E1", ActivityRef: "A1/V1", Text: strings.Repeat("Review finding. ", 5000), Complete: true}
+	approval := SubjectEvidence{ID: "S1/E2", ActivityRef: "A2/V1", Kind: "review", ReviewState: "APPROVED", Text: "Looks good; a few style comments.", Complete: true}
+	sub := AgentSubject{ID: "S1", Event: Event{Evidence: []SubjectEvidence{large, approval}, ActivityDelta: &store.NotificationDelta{Complete: true, Activities: []store.NotificationActivityRef{{Ref: large.ActivityRef}, {Ref: approval.ActivityRef}}}}}
+	snapshot := AgentSnapshot{Subjects: []AgentSubject{sub}}
+	entries := compactActivityIndex(sub, 2000)
+	if len(mustJSON(entries)) > 2000 || entries[0].Text != "" || entries[0].Complete || entries[1] != approval {
+		t.Fatal("small approval lost while compacting large review", entries)
+	}
+	if sub.Event.Evidence[0].Text != large.Text {
+		t.Fatal("compaction mutated frozen evidence")
+	}
+	initial := mustJSON(map[string]any{"subjects": []any{map[string]any{"activity_evidence": entries}}})
+	receipts := newActivityReceipts(snapshot, initial)
+	reads := receipts.requiredReads(snapshot)
+	if len(reads) != 1 || reads[0].Arguments != `{"id":"A1/V1","offset":0}` || !receipts.visible[approval.ActivityRef] {
+		t.Fatal("approval incorrectly requires a lookup", reads)
+	}
+	if receipts.validate(snapshot) == nil {
+		t.Fatal("large unread review was accepted")
+	}
+}
+
+func TestRequiredActivityReadsResumeAtFirstMissingPage(t *testing.T) {
+	snapshot := AgentSnapshot{Subjects: []AgentSubject{{Event: Event{ActivityDelta: &store.NotificationDelta{Complete: true, Activities: []store.NotificationActivityRef{{Ref: "A1/V1"}}}}}}}
+	receipts := newActivityReceipts(snapshot, `{}`)
+	read := AgentRead{Name: "read_activity"}
+	add := func(start, next int, data string) {
+		receipts.addRead(snapshot, read, mustJSON(map[string]any{"id": "A1/V1", "offset": start, "next_offset": next, "data": data}))
+	}
+	add(6, -1, "last")
+	if got := receipts.requiredReads(snapshot); len(got) != 1 || got[0].Arguments != `{"id":"A1/V1","offset":0}` {
+		t.Fatal("last page hid earlier unread bytes", got)
+	}
+	add(0, 3, "one")
+	if got := receipts.requiredReads(snapshot); len(got) != 1 || got[0].Arguments != `{"id":"A1/V1","offset":3}` {
+		t.Fatal("required read did not resume at the gap", got)
+	}
+	if receipts.validate(snapshot) == nil {
+		t.Fatal("gap was accepted as fully supplied evidence")
+	}
+	add(3, 6, "two")
+	if got := receipts.requiredReads(snapshot); len(got) != 0 {
+		t.Fatal("fully supplied activity still requires reads", got)
+	}
+	if err := receipts.validate(snapshot); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAgentRequiredReadsCompletePaginatedFrozenActivity(t *testing.T) {
+	f := newActivityFixture(t)
+	f.addReview()
+	f.inline[0]["body"] = strings.Repeat("Review finding 🔎. ", 5000)
+	fresh, err := f.github.Enrich(context.Background(), f.source, f.event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := AgentSubject{ID: "S1", EventIDs: []int64{1}, Event: fresh}
+	updateAgentSubject(&sub, fresh)
+	snapshot := AgentSnapshot{Subjects: []AgentSubject{sub}}
+	f.model.respond = func(prompt string) (any, error) {
+		_, raw, ok := strings.Cut(prompt, "\nREQUIRED ACTIVITY READS:\n")
+		if !ok {
+			t.Fatal("missing required activity reads")
+		}
+		raw, _, _ = strings.Cut(raw, "\nRead these activities")
+		var reads []AgentRead
+		if err := json.Unmarshal([]byte(raw), &reads); err != nil {
+			t.Fatal(err)
+		}
+		if len(reads) > 0 {
+			return AgentTurn{Action: "read", Reads: reads[:1]}, nil
+		}
+		turn := finalResponse(snapshot, false)
+		for _, ref := range fresh.ActivityDelta.Activities {
+			turn.Decisions[0].ActivityRefs = append(turn.Decisions[0].ActivityRefs, ref.Ref)
+		}
+		return turn, nil
+	}
+	_, trace, err := f.s.runNotificationAgent(context.Background(), snapshot, Config{ContextBytes: 128000, MaxReads: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trace) < 2 {
+		t.Fatal("large frozen activity did not require continuation reads", trace)
+	}
+	for _, read := range trace {
+		if read.Unavailable || read.Name != "read_activity" {
+			t.Fatal("frozen activity lookup failed", read)
+		}
+	}
+}
+
 func TestActivityVersionRestoredToOldTextIsANewRevision(t *testing.T) {
 	f := newActivityFixture(t)
 	f.addReview()
