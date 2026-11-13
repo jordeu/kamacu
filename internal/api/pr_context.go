@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"kamacu/internal/github"
 	"kamacu/internal/notifications"
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
@@ -19,8 +20,9 @@ var readPRFacts = func(ctx context.Context, repo string, n int64) notifications.
 }
 
 type prContextHandlers struct {
-	db  *sql.DB
-	mgr *session.Manager
+	db       *sql.DB
+	mgr      *session.Manager
+	statuses *github.PRStatusService
 }
 
 func (h prContextHandlers) task(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +108,8 @@ func (h prContextHandlers) pr(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"github": facts, "related_work": related, "related_sessions": observedSessions, "live_sessions": live, "observation_warning": "Terminal observations are unverified. A running process alone does not imply active work; inspect its monitor state, observation time and terminal evidence. Historical sessions may have ended."})
 }
 func prContextRoutes(mux *http.ServeMux, db *sql.DB, mgr *session.Manager) {
-	h := prContextHandlers{db, mgr}
+	h := prContextHandlers{db: db, mgr: mgr, statuses: github.NewPRStatusService(nil, nil)}
+	mux.HandleFunc("GET /api/projects/{id}/task-pr-statuses", h.projectStatuses)
 	mux.HandleFunc("GET /api/pr-context", h.pr)
 	mux.HandleFunc("GET /api/tasks/{id}/pr-context", h.task)
 	mux.HandleFunc("PUT /api/tasks/{id}/pr-links", h.correct)
