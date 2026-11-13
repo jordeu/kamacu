@@ -81,3 +81,66 @@ func TestSessionEventsReturnsOnFlushFailure(t *testing.T) {
 		t.Fatal("stream writes need a deadline")
 	}
 }
+
+// Inbox actions run without an attached terminal. After an idle interval they
+// must still reach every browser over the original stream, without waiting for
+// the heartbeat/reconnect or the five-second status poll.
+func TestSessionEventsInboxLifecycleAfterIdle(t *testing.T) {
+	mgr := session.NewManager()
+	h := &sessionHandlers{mgr: mgr}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(h.events))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/sessions/events", nil)
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.ProtoMajor != 2 {
+		t.Fatalf("expected HTTP/2 stream, got %s", res.Proto)
+	}
+	reader := bufio.NewReader(res.Body)
+	readEvent := func() {
+		t.Helper()
+		for _, want := range []string{"data: changed\n", "\n"} {
+			got, err := reader.ReadString('\n')
+			if err != nil || got != want {
+				t.Fatalf("event after idle = %q, %v; want %q", got, err, want)
+			}
+		}
+	}
+	readEvent()
+	// Cross the former write deadline while staying before the heartbeat.
+	timer := time.NewTimer(11 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	sess, err := mgr.Spawn(session.SpawnOpts{
+		Kind: session.KindAgent, TaskID: 123, Cwd: t.TempDir(),
+		AgentEngine: "custom", AgentArgs: []string{"/bin/bash", "-c", "read -r line"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Stop()
+	readEvent()
+	runtime := &inboxActionRuntime{mgr: mgr}
+	expected, err := runtime.Session(ctx, sess.Info().ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Stop(ctx, expected); err != nil {
+		t.Fatal(err)
+	}
+	readEvent()
+	if sess.Info().Status != session.StatusExited {
+		t.Fatal("inbox stop event preceded session exit")
+	}
+}
