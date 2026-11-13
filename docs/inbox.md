@@ -81,6 +81,15 @@ in one workflow. Rules have stable IDs and save directly; there is no compiler,
 held category, or automatic uncertainty-rule bypass. Preview runs the same agent
 without publishing messages or starting work.
 
+A new approval from another reviewer on the user's open, non-draft PR can
+require a merge decision even when it contains no requested fixes. Subject to
+explicit exclusion rules, the agent asks whether to merge and proposes a task
+handoff to check prerequisites before merging. Earlier findings already routed
+to that task do not cover the later approval; an existing Inbox decision about
+the same approval or merge request does. Own replies in the discussion are
+evaluated separately. Approval does not by itself establish passing CI or
+mergeability, and notification processing never performs the merge.
+
 Before publishing, Kamacu checks whether any source discussion changed during
 processing. It refreshes only changed discussions and supplies them as final
 notes alongside the previous proposal and existing read results. The agent can
