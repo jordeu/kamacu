@@ -27,7 +27,16 @@ func (h *sessionHandlers) events(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.WriteString(w, message); err != nil {
 			return err
 		}
-		return controller.Flush()
+		if err := controller.Flush(); err != nil {
+			return err
+		}
+		// Limit only the write, not the idle interval before the next event.
+		// Once an HTTP response deadline expires it cannot be extended; leaving
+		// it armed here breaks delivery after 10s of inactivity (heartbeat: 20s).
+		if err := controller.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+		return nil
 	}
 	changed := h.mgr.Changes()
 	// Also refresh on reconnect: transitions while disconnected are coalesced.
