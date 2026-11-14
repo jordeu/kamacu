@@ -416,7 +416,8 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 		if run, ok := ctx.Value(notificationRunKey{}).(*notificationRun); ok {
 			run.rounds.Add(1)
 		}
-		_, err = s.Model.GenerateValidatedJSON(ctx, profile, prompt, agentSchema, func(raw []byte) error {
+		callCtx, callCancel := notificationCallContext(ctx, c)
+		_, err = s.Model.GenerateValidatedJSON(callCtx, profile, prompt, agentSchema, func(raw []byte) error {
 			rejected = append([]byte(nil), raw...)
 			turn = AgentTurn{}
 			if err := strictRuleJSON(raw, &turn); err != nil {
@@ -445,10 +446,20 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 			if err := validateAgentResponse(snapshot, turn, evidence); err != nil {
 				return err
 			}
-			_, _, _, err := s.agentActions(ctx, snapshot, turn)
+			_, _, _, err := s.agentActions(callCtx, snapshot, turn)
 			return err
 		})
+		if callCtx.Err() != nil {
+			err = callCtx.Err()
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				err = fmt.Errorf("notification model call exceeded its %d-second deadline: %w", c.TimeoutSeconds, err)
+			}
+		}
+		callCancel()
 		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return final, trace, err
+			}
 			if !repaired && len(rejected) > 0 {
 				repaired = true
 				correction = "\nPrevious reply was rejected. Correct this contract error using the same rules and source facts: " + err.Error() + "\nREJECTED REPLY:\n" + string(rejected)
@@ -509,7 +520,12 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 		for _, read := range turn.Reads {
 			readsUsed++
 			readStarted := time.Now()
-			result, err := s.agentRead(ctx, snapshot, read, c)
+			readCtx, readCancel := notificationCallContext(ctx, c)
+			result, err := s.agentRead(readCtx, snapshot, read, c)
+			if readCtx.Err() != nil {
+				err = readCtx.Err()
+			}
+			readCancel()
 			if err != nil {
 				result = mustJSON(map[string]any{"error": err.Error(), "unavailable": true})
 			}
@@ -537,6 +553,9 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 			id := fmt.Sprintf("read:%d", len(trace)+1)
 			trace = append(trace, AgentReadResult{SubjectID: subjectID, DurationMS: time.Since(readStarted).Milliseconds(), Unavailable: err != nil, ID: id, Name: read.Name, Arguments: read.Arguments, Result: result})
 			evidence[id] = err == nil
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return final, trace, fmt.Errorf("notification lookup %s did not complete: %w", read.Name, err)
+			}
 		}
 	}
 	return final, trace, errors.New("notification agent did not finish within its read budget")

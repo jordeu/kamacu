@@ -81,7 +81,7 @@ func (s *Service) processRulePreview(ctx context.Context) error {
 	ctx = diagnostics.WithGroup(ctx, diagnostics.Group{Kind: "preview", ID: id, StartedAt: time.Now()})
 	ctx = withNotificationRun(ctx, "preview:"+id)
 	result, runErr := func() (AgentTurn, error) {
-		run, cancel, config, err := s.modelContext(ctx)
+		run, cancel, config, err := s.decisionContext(ctx)
 		if err != nil {
 			return AgentTurn{}, err
 		}

@@ -278,14 +278,16 @@ export function NotificationModel() {
         <summary className="cursor-pointer text-xs">Processing limits</summary>
         <p className="text-xs">
           CLI providers use the installed model’s output limits. The context
-          budget and run deadline apply to every backend.
+          budget and model call deadline apply to every backend. Each model call
+          and read-only lookup has its own deadline; multi-step processing can
+          take longer. The read limit also bounds the overall processing time.
         </p>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           {(
             [
               ["context_bytes", "Context budget (bytes)", 64000, 8000000],
               ["output_tokens", "API output token limit", 1024, 64000],
-              ["timeout_seconds", "Run deadline (seconds)", 30, 900],
+              ["timeout_seconds", "Model call deadline (seconds)", 30, 900],
               ["max_reads", "Read-only lookups", 0, 40],
             ] as const
           ).map(([key, label, min, max]) => (
