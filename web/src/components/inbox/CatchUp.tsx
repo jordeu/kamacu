@@ -102,7 +102,7 @@ function CatchUpMessage({ initial, draft, onDraft, notice, onNotice, onClose, on
         {selected.isError && <p role="alert" className="mb-5 text-sm">Couldn’t refresh this message. Actions are paused. <Button variant="outline" size="sm" onClick={() => void selected.refetch()}>Retry message</Button></p>}
         <div className="grid items-start gap-7 border-b border-border pb-7 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:gap-10">
           <section className="min-w-0" aria-label="Current message">
-            <CatchUpReferences names={context.projectNames} prs={context.prs} scratchpad={q.task_id === 0 && q.origin !== "notification"} />
+            <CatchUpReferences projects={context.projects.data ?? []} names={context.projectNames} prs={context.prs} scratchpad={q.task_id === 0 && q.origin !== "notification"} />
             <p className="mb-4 text-xs text-muted-foreground">{completion ? "Completed work" : operational ? "Operational issue" : "Needs your decision"} · <time dateTime={new Date(q.created_at).toISOString()}>{new Date(q.created_at).toLocaleString()}</time></p>
             <h1 className="break-words text-2xl font-semibold leading-snug tracking-tight sm:text-3xl"><InboxText text={completion && q.task_title ? q.task_title : q.question} /></h1>
             <div className="mt-5 whitespace-pre-wrap break-words text-sm leading-7 text-muted-foreground"><InboxText text={q.abstract || q.summary} /></div>

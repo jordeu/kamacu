@@ -34,6 +34,9 @@ const assert = require('node:assert/strict');
   await overview().hover();assert.equal(await overview().isVisible(),true);
   if(process.env.KAMACU_BROWSER_SCREENSHOTS)await page.screenshot({path:process.env.KAMACU_BROWSER_SCREENSHOTS+'-board.png'});
   await page.keyboard.press('Escape');await overview().waitFor({state:'hidden'});
+  // Escape while reading the portal must not suppress the next real hover.
+  await status().hover();await overview().waitFor();
+  await page.keyboard.press('Escape');await overview().waitFor({state:'hidden'});
   await status().focus();await overview().waitFor();await page.keyboard.press('Escape');await overview().waitFor({state:'hidden'});
   await status().click();await page.mouse.move(1380,20);assert.equal(await overview().isVisible(),true,'Click pins the overview');
   await status().click();await overview().waitFor({state:'hidden'});

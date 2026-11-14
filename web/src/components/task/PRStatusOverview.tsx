@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Popover } from "radix-ui";
 import {
   Bot, Check, CircleCheck, CircleHelp, CircleMinus, CircleX, Clock,
@@ -94,10 +94,18 @@ export function PRStatusDetails({ snapshot, repository, number, showJobs = false
 
 /** Hover/focus previews the overview; clicking pins it for touch and keyboard.
  * The anchor and portal stop all three board drag sensors independently. */
-export function PRStatusOverview({ snapshot, repository, number }: {
+export function PRStatusOverview({ snapshot, repository, number, reference, title, previewContent, onPreviewChange }: {
   snapshot?: PRStatusSnapshot; repository: string; number: number;
+  reference?: { url: string; label: string };
+  title?: string;
+  previewContent?: ReactNode;
+  onPreviewChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = useCallback((value: boolean) => {
+    setOpenState(value);
+    onPreviewChange?.(value);
+  }, [onPreviewChange]);
   const pinned = useRef(false);
   const restoreFocus = useRef(false);
   const skipFocusPreview = useRef(false);
@@ -105,11 +113,12 @@ export function PRStatusOverview({ snapshot, repository, number }: {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const trigger = useRef<HTMLButtonElement>(null);
+  const referenceTrigger = useRef<HTMLAnchorElement>(null);
   const content = useRef<HTMLDivElement>(null);
   // Drag isolation stops bubbling pointer events. Use capture for outside
   // dismissal so an earlier pointer event inside the portal cannot swallow it.
   useEffect(() => {
-    if (!open) return;
+    if (!open || reference) return;
     const dismiss = (event: PointerEvent) => {
       if (!(event.target instanceof Node) || trigger.current?.contains(event.target) || content.current?.contains(event.target)) return;
       clearTimeout(timer.current);
@@ -119,7 +128,7 @@ export function PRStatusOverview({ snapshot, repository, number }: {
     };
     document.addEventListener("pointerdown", dismiss, true);
     return () => document.removeEventListener("pointerdown", dismiss, true);
-  }, [open]);
+  }, [open, reference, setOpen]);
   const id = useId();
   const primary = primaryPRStatus(snapshot);
   const Mark = icons[primary.icon];
@@ -129,26 +138,38 @@ export function PRStatusOverview({ snapshot, repository, number }: {
   const showBot = !!snapshot?.fetched_at && bots !== "clean" && bots !== "complete" && bots !== "none";
   const clear = () => clearTimeout(timer.current);
   const show = () => { clear(); if (!suppressed.current) setOpen(true); };
+  const showFromPointer = (event: { pointerType: string }) => {
+    if (event.pointerType === "touch") return;
+    // A real re-entry is a new preview request, even after Escape dismissed it.
+    suppressed.current = false;
+    show();
+  };
+  const showReference = (event: { pointerType: string }) => {
+    if (event.pointerType === "touch") return;
+    clear();
+    suppressed.current = false;
+    // Ignore incidental pointer crossings before loading the preview.
+    timer.current = setTimeout(() => setOpen(true), 120);
+  };
   const hideLater = () => {
     clear();
     timer.current = setTimeout(() => {
-      if (!pinned.current && document.activeElement !== trigger.current && !content.current?.contains(document.activeElement)) setOpen(false);
+      if (!pinned.current && document.activeElement !== trigger.current && document.activeElement !== referenceTrigger.current && !content.current?.contains(document.activeElement)) setOpen(false);
     }, 180);
   };
-  return <span
-    className="inline-flex shrink-0"
-    onClick={(event) => event.stopPropagation()}
-    onPointerDown={(event) => event.stopPropagation()}
-    onMouseDown={(event) => event.stopPropagation()}
-    onTouchStart={(event) => event.stopPropagation()}
-    onKeyDown={(event) => event.stopPropagation()}
-  >
-    <Popover.Root open={open} onOpenChange={(value) => { clear(); pinned.current = false; suppressed.current = !value; setOpen(value); }}>
+  const controls = <>
+      {reference && <a ref={referenceTrigger} href={reference.url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex min-w-0 items-center gap-1 rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onFocus={(event) => { if (event.currentTarget.matches(":focus-visible")) { suppressed.current = false; show(); } }} onBlur={hideLater}
+          onClick={clear}>
+          <GitPullRequest aria-hidden="true" className="size-3 shrink-0" />
+          <span className="break-all">{reference.label}</span>
+        </a>}
       <Popover.Trigger asChild>
         <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls={id}
-          aria-label={`${primary.label}. Bots: ${prStatusLabels[bots ?? "unknown"]}. Show PR status overview.`}
+          aria-label={`${reference ? `${repository} PR ${number}. ` : ""}${primary.label}. Bots: ${prStatusLabels[bots ?? "unknown"]}. Show PR status overview.`}
           className="inline-flex size-7 cursor-pointer items-center justify-center rounded-sm hover:bg-zinc-700/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onPointerEnter={show} onPointerLeave={() => { suppressed.current = false; hideLater(); }}
+          onPointerEnter={showFromPointer} onPointerLeave={() => { suppressed.current = false; hideLater(); }}
           onFocus={() => { if (skipFocusPreview.current) { skipFocusPreview.current = false; return; } suppressed.current = false; show(); }} onBlur={hideLater}
           onKeyDown={(event) => {
             if (event.key === "Tab" && !event.shiftKey && open) {
@@ -171,11 +192,31 @@ export function PRStatusOverview({ snapshot, repository, number }: {
           </span>
         </button>
       </Popover.Trigger>
+  </>;
+  return <span
+    className={reference ? "inline-flex min-w-0 items-center gap-1 rounded-md border border-orange-300/20 bg-orange-300/5 px-2 py-1 text-xs text-orange-200" : "inline-flex shrink-0"}
+    onPointerEnter={reference ? showReference : undefined}
+    onPointerLeave={reference ? () => { suppressed.current = false; hideLater(); } : undefined}
+    onClick={(event) => event.stopPropagation()}
+    onPointerDown={(event) => event.stopPropagation()}
+    onMouseDown={(event) => event.stopPropagation()}
+    onTouchStart={(event) => event.stopPropagation()}
+    onKeyDown={(event) => event.stopPropagation()}
+  >
+    <Popover.Root open={open} onOpenChange={(value) => { clear(); pinned.current = false; suppressed.current = !value; setOpen(value); }}>
+      {/* Anchor both controls so positioning stays attached to a mounted node
+          when the trigger removes its initial fallback anchor. */}
+      {reference ? <Popover.Anchor asChild><span className="inline-flex min-w-0 items-center gap-1">{controls}</span></Popover.Anchor> : controls}
       <Popover.Portal>
         <Popover.Content ref={content} id={id} tabIndex={0} aria-label={`${repository} PR ${number} status overview`}
           sideOffset={6} collisionPadding={12} align="start"
           onPointerEnter={clear} onPointerLeave={hideLater}
           onFocus={() => { pinned.current = true; restoreFocus.current = true; }}
+          onInteractOutside={(event) => {
+            // The reference belongs to the preview's controls; preserve its
+            // native link action when it receives focus or pointer input.
+            if (event.target instanceof Node && referenceTrigger.current?.contains(event.target)) event.preventDefault();
+          }}
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
@@ -186,6 +227,8 @@ export function PRStatusOverview({ snapshot, repository, number }: {
             restoreFocus.current = false;
           }}
           className="z-50 max-h-[min(600px,var(--radix-popover-content-available-height))] w-[330px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-lg border border-zinc-600 bg-zinc-800 p-4 text-zinc-100 shadow-xl outline-none">
+          {title && <h3 className="mb-3 break-words text-sm font-semibold">{title}</h3>}
+          {previewContent}
           <PRStatusDetails snapshot={snapshot} repository={repository} number={number} />
         </Popover.Content>
       </Popover.Portal>
