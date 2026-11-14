@@ -316,7 +316,11 @@ func TestNewActivityPagesRequireCompleteReadCoverage(t *testing.T) {
 	updateAgentSubject(&sub, fresh)
 	snapshot := AgentSnapshot{Subjects: []AgentSubject{sub}}
 	// Empty text in the index is a manifest, not a receipt for a full activity.
-	entries := compactActivityIndex(sub, 1)
+	entries := activityIndex(sub, false)
+	for i := range entries {
+		entries[i].Text = ""
+		entries[i].Complete = false
+	}
 	initial := mustJSON(map[string]any{"subjects": []any{map[string]any{"activity_evidence": entries}}})
 	receipts := newActivityReceipts(snapshot, initial)
 	if receipts.validate(snapshot) == nil {
@@ -339,14 +343,14 @@ func TestNewActivityPagesRequireCompleteReadCoverage(t *testing.T) {
 	}
 }
 
-func TestCompactActivityIndexKeepsShortApprovalBesideLargeReview(t *testing.T) {
+func TestRequiredActivityIndexKeepsLargeReviewAndShortApproval(t *testing.T) {
 	large := SubjectEvidence{ID: "S1/E1", ActivityRef: "A1/V1", Text: strings.Repeat("Review finding. ", 5000), Complete: true}
 	approval := SubjectEvidence{ID: "S1/E2", ActivityRef: "A2/V1", Kind: "review", ReviewState: "APPROVED", Text: "Looks good; a few style comments.", Complete: true}
 	sub := AgentSubject{ID: "S1", Event: Event{Evidence: []SubjectEvidence{large, approval}, ActivityDelta: &store.NotificationDelta{Complete: true, Activities: []store.NotificationActivityRef{{Ref: large.ActivityRef}, {Ref: approval.ActivityRef}}}}}
 	snapshot := AgentSnapshot{Subjects: []AgentSubject{sub}}
-	entries := compactActivityIndex(sub, 2000)
-	if len(mustJSON(entries)) > 2000 || entries[0].Text != "" || entries[0].Complete || entries[1] != approval {
-		t.Fatal("small approval lost while compacting large review", entries)
+	entries := activityIndex(sub, true)
+	if len(entries) != 2 || entries[0] != large || entries[1] != approval {
+		t.Fatal("required activity was omitted", entries)
 	}
 	if sub.Event.Evidence[0].Text != large.Text {
 		t.Fatal("compaction mutated frozen evidence")
@@ -354,11 +358,11 @@ func TestCompactActivityIndexKeepsShortApprovalBesideLargeReview(t *testing.T) {
 	initial := mustJSON(map[string]any{"subjects": []any{map[string]any{"activity_evidence": entries}}})
 	receipts := newActivityReceipts(snapshot, initial)
 	reads := receipts.requiredReads(snapshot)
-	if len(reads) != 1 || reads[0].Arguments != `{"id":"A1/V1","offset":0}` || !receipts.visible[approval.ActivityRef] {
-		t.Fatal("approval incorrectly requires a lookup", reads)
+	if len(reads) != 0 || !receipts.visible[approval.ActivityRef] {
+		t.Fatal("supplied evidence incorrectly requires a lookup", reads)
 	}
-	if receipts.validate(snapshot) == nil {
-		t.Fatal("large unread review was accepted")
+	if err := receipts.validate(snapshot); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -389,7 +393,7 @@ func TestRequiredActivityReadsResumeAtFirstMissingPage(t *testing.T) {
 	}
 }
 
-func TestAgentRequiredReadsCompletePaginatedFrozenActivity(t *testing.T) {
+func TestAgentCanReadPaginatedFrozenHistoricalActivity(t *testing.T) {
 	f := newActivityFixture(t)
 	f.addReview()
 	f.inline[0]["body"] = strings.Repeat("Review finding 🔎. ", 5000)
@@ -397,21 +401,45 @@ func TestAgentRequiredReadsCompletePaginatedFrozenActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var historicalRef string
+	for i := range fresh.Evidence {
+		if len(fresh.Evidence[i].Text) > 10000 {
+			historicalRef = fresh.Evidence[i].ActivityRef
+			fresh.Evidence[i].ContextOnly = true
+			fresh.Evidence[i].Current = false
+		}
+	}
+	refs := []store.NotificationActivityRef{}
+	for _, ref := range fresh.ActivityDelta.Activities {
+		if ref.Ref != historicalRef {
+			refs = append(refs, ref)
+		}
+	}
+	fresh.ActivityDelta.Activities = refs
 	sub := AgentSubject{ID: "S1", EventIDs: []int64{1}, Event: fresh}
 	updateAgentSubject(&sub, fresh)
 	snapshot := AgentSnapshot{Subjects: []AgentSubject{sub}}
 	f.model.respond = func(prompt string) (any, error) {
-		_, raw, ok := strings.Cut(prompt, "\nREQUIRED ACTIVITY READS:\n")
+		_, raw, ok := strings.Cut(prompt, "\nREAD RESULTS:\n")
 		if !ok {
-			t.Fatal("missing required activity reads")
+			t.Fatal("missing read results")
 		}
-		raw, _, _ = strings.Cut(raw, "\nRead these activities")
-		var reads []AgentRead
+		var reads []AgentReadResult
 		if err := json.Unmarshal([]byte(raw), &reads); err != nil {
 			t.Fatal(err)
 		}
+		next := 0
 		if len(reads) > 0 {
-			return AgentTurn{Action: "read", Reads: reads[:1]}, nil
+			var page struct {
+				Next int `json:"next_offset"`
+			}
+			if err := json.Unmarshal([]byte(reads[len(reads)-1].Result), &page); err != nil {
+				t.Fatal(err)
+			}
+			next = page.Next
+		}
+		if next != -1 {
+			return AgentTurn{Action: "read", Reads: []AgentRead{{Name: "read_activity", Arguments: mustJSON(map[string]any{"id": historicalRef, "offset": next})}}}, nil
 		}
 		turn := finalResponse(snapshot, false)
 		for _, ref := range fresh.ActivityDelta.Activities {

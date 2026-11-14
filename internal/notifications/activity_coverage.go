@@ -226,33 +226,17 @@ func activityFingerprint(e Event) string {
 	return strings.Join(refs, ",") + "\n" + e.SubjectState + "\n" + state
 }
 
-func compactActivityIndex(sub AgentSubject, budget int) []SubjectEvidence {
+func activityIndex(sub AgentSubject, requiredOnly bool) []SubjectEvidence {
 	entries := []SubjectEvidence{}
-	for _, e := range sub.Event.Evidence {
-		if e.ActivityRef != "" {
-			entries = append(entries, e)
+	required := map[string]bool{}
+	if sub.Event.ActivityDelta != nil {
+		for _, ref := range sub.Event.ActivityDelta.Activities {
+			required[ref.Ref] = true
 		}
 	}
-	if len(mustJSON(entries)) <= budget {
-		return entries
-	}
-	// Remove the largest bodies first, retaining short approvals and comments
-	// even when another activity makes the subject exceed its share of space.
-	order := make([]int, len(entries))
-	for i := range order {
-		order[i] = i
-	}
-	sort.SliceStable(order, func(i, j int) bool {
-		return len(mustJSON(entries[order[i]].Text)) > len(mustJSON(entries[order[j]].Text))
-	})
-	size := len(mustJSON(entries))
-	for _, i := range order {
-		before := len(mustJSON(entries[i]))
-		entries[i].Text = ""
-		entries[i].Complete = false
-		size += len(mustJSON(entries[i])) - before
-		if size <= budget {
-			break
+	for _, e := range sub.Event.Evidence {
+		if e.ActivityRef != "" && (!requiredOnly || required[e.ActivityRef]) {
+			entries = append(entries, e)
 		}
 	}
 	return entries

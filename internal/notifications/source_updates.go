@@ -123,7 +123,7 @@ func agentTraceForPrompt(trace []AgentReadResult, updatesInBatch bool) []AgentRe
 				for _, sub := range update.Subjects {
 					ids = append(ids, sub.ID)
 				}
-				r.Result = mustJSON(map[string]any{"subject_ids": ids, "previous_proposal": update.Proposal, "source_details": "Latest source details are in BATCH."})
+				r.Result = mustJSON(map[string]any{"subject_ids": ids, "previous_proposal": update.Proposal, "source_details": "Refreshed activity and subject metadata are in BATCH. When BATCH is compact, use read_subject for full frozen source details."})
 			}
 		}
 	}
