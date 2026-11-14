@@ -1,22 +1,37 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { ArrowUpRight, GitPullRequest } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { useCatchUpContext, useCatchUpPRDetail, useCatchUpPRStatus, useMessageHistory, type CatchUpPR } from "@/api/catchUp";
 import type { FeedbackQuestion } from "@/api/inbox";
 import type { Project } from "@/api/types";
 import { STATUS_LABELS } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { ReadOnlyDescription } from "@/components/task/DescriptionTab";
-import { PRLifecycleIcon, PRStatusDetails } from "@/components/task/PRStatusOverview";
+import { PRLifecycleIcon, PRStatusDetails, PRStatusOverview } from "@/components/task/PRStatusOverview";
 import { InboxText } from "./InboxText";
 
 export const contextProse = "prose prose-invert prose-sm max-w-none min-w-0 break-words prose-headings:text-sm prose-a:text-blue-400 prose-pre:max-w-full prose-pre:overflow-x-auto [overflow-wrap:anywhere]";
 export const contextCard = "min-w-0 rounded-xl border border-border bg-card/50 p-4 sm:p-5";
-export function CatchUpReferences({ names, prs, scratchpad }: { names: string[]; prs: CatchUpPR[]; scratchpad: boolean }) {
+export function CatchUpReferences({ names, prs, scratchpad, projects }: { names: string[]; prs: CatchUpPR[]; scratchpad: boolean; projects: Project[] }) {
   return <nav aria-label="Message project and PR references" className="mb-5 flex flex-wrap gap-2 text-xs">
     {(names.length ? names : scratchpad ? ["Scratchpad"] : ["Notification"]).map(name => <span key={name} className="rounded-md border border-emerald-400/20 bg-emerald-400/5 px-2 py-1 text-emerald-200">{name}</span>)}
-    {prs.map(pr => <a key={pr.url} href={pr.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 items-center gap-1 rounded-md border border-orange-300/20 bg-orange-300/5 px-2 py-1 text-orange-200 hover:underline"><GitPullRequest className="size-3 shrink-0" /><span className="break-all">{pr.repository} · PR {pr.number}</span></a>)}
+    {prs.map(pr => <CatchUpPRReference key={pr.url} pr={pr} project={projects.find(project => project.github_repo?.toLowerCase() === pr.repository.toLowerCase())} />)}
   </nav>;
+}
+function CatchUpPRReference({ pr, project }: { pr: CatchUpPR; project?: Project }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const detail = useCatchUpPRDetail(project?.id ?? 0, pr, previewOpen && !!project);
+  const status = useCatchUpPRStatus(project?.id ?? 0, pr, previewOpen && !!project);
+  const snapshot = status.data && status.isError ? { ...status.data, stale: true, error: "Could not refresh PR status" } : status.data;
+  return <PRStatusOverview repository={pr.repository} number={pr.number}
+    reference={{ url: pr.url, label: `${pr.repository} · PR ${pr.number}` }}
+    title={detail.data?.title} snapshot={snapshot} onPreviewChange={setPreviewOpen}
+    previewContent={<>
+      {!project && <p className="mb-3 text-xs text-zinc-400">No Kamacu project is linked to this repository. Open the PR on GitHub for its details.</p>}
+      {project && (detail.isFetching || status.isFetching) && <p role="status" className="mb-3 text-xs text-zinc-400">Loading PR preview…</p>}
+      {project && detail.isError && <p role="alert" className="mb-3 text-xs">Couldn’t refresh the PR title. <Button variant="ghost" size="sm" onClick={() => void detail.refetch()}>Retry title</Button></p>}
+      {project && (status.isError || snapshot?.error) && <p role="alert" className="mb-3 text-xs">Couldn’t refresh PR status. <Button variant="ghost" size="sm" disabled={status.isFetching} onClick={() => void status.refetch()}>Retry status</Button></p>}
+    </>} />;
 }
 function HistoryEvent({ question: q, current = false }: { question: FeedbackQuestion; current?: boolean }) {
   return <article className={`relative min-w-0 border-l pb-6 pl-5 ${current ? "border-orange-300/50" : "border-border"}`}>

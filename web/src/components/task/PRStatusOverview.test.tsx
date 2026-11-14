@@ -56,3 +56,12 @@ it.each([
   expect(ci).not.toContain("Job ");
   expect(ci).not.toContain("<ul");
 });
+
+it("keeps a reference link and the touch/keyboard preview button as separate actions", () => {
+  const html = renderToStaticMarkup(<PRStatusOverview repository="acme/app" number={12} snapshot={data()} title="PR title" reference={{ url: "https://github.com/acme/app/pull/12", label: "acme/app · PR 12" }} />);
+  expect(html).toContain('href="https://github.com/acme/app/pull/12"');
+  expect(html).toContain('target="_blank"');
+  expect(html).toContain('rel="noopener noreferrer"');
+  expect(html).toContain('acme/app · PR 12');
+  for (const button of html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)) expect(button[0]).not.toContain("<a ");
+});

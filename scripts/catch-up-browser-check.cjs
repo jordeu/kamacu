@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 (async () => {
  const browser = await chromium.launch({ headless:true, executablePath:process.env.KAMACU_BROWSER_EXECUTABLE, args:['--no-sandbox'] });
  try {
-  const page = await browser.newPage({viewport:{width:1440,height:1000}});
+  const page = await browser.newPage({viewport:{width:1440,height:1000},hasTouch:true});
   const errors=[]; page.on('pageerror',error=>{errors.push(error.message);console.error('Browser error:',error.message)});
   const base={task_id:1,project_id:1,task_title:'Improve task context',project_name:'Kamacu',session_id:'s',abstract:'The fix is ready. Review the release constraints before continuing.',summary:'Detailed summary',context:'Context for https://github.com/acme/repo/pull/7',question:'Which release should contain this fix?',options:[{id:'yes',label:'Keep the release on hold'}],status:'pending',reason:'',answer:'',revision:1,created_at:3000,updated_at:3000,kind:'question',origin:'observer',delivery_mode:'text'};
   let messages=[{...base,id:'first'},{...base,id:'second',kind:'completion',question:'Work completed',options:[{id:'move_to_review',label:'Move to review and close session'}]}];
@@ -25,7 +25,7 @@ const assert = require('node:assert/strict');
    else if(path==='/api/inbox/tasks/1/completions'){data=messages.filter(m=>m.task_id===1&&m.kind==='completion'&&m.status==='pending').map(m=>({...m}));if(holdCompletions)await new Promise(resolve=>{releaseCompletions=resolve});}
    else if(messages.some(m=>path==='/api/inbox/'+m.id))data={...messages.find(m=>path==='/api/inbox/'+m.id)};
    else if(path==='/api/tasks/1')data={id:1,project_id:1,title:base.task_title,description:'Task **brief**',status:'in_review',branch:'task/context',pr_links:[{repository:project.github_repo,number:7,url:'https://github.com/'+project.github_repo+'/pull/7',role:'implementation'}]};
-   else if(/^\/api\/projects\/1\/pull-requests\/(7|8)$/.test(path)){const number=+path.split('/').at(-1);prReads.push({repo:project.github_repo,number,kind:'detail'});data={number,url:'https://github.com/'+project.github_repo+'/pull/'+number,title:project.github_repo==='acme/repo'?'Improve the task context':'Other repository PR',body:number===8?'Details for PR 8.':project.github_repo==='acme/repo'?'## PR description\n\nFull description from GitHub.':'Description from the other repository.',author:'author',state:'OPEN',commits:3,headRefName:'task/context',baseRefName:'main'};}
+   else if(/^\/api\/projects\/1\/pull-requests\/(7|8)$/.test(path)){const number=+path.split('/').at(-1);prReads.push({repo:project.github_repo,number,kind:'detail'});data={number,url:'https://github.com/'+project.github_repo+'/pull/'+number,title:project.github_repo==='acme/repo'?(number===8?'Second PR context':'Improve the task context'):'Other repository PR',body:number===8?'Details for PR 8.':project.github_repo==='acme/repo'?'## PR description\n\nFull description from GitHub.':'Description from the other repository.',author:'author',state:'OPEN',commits:3,headRefName:'task/context',baseRefName:'main'};}
    else if(/^\/api\/projects\/1\/pull-requests\/(7|8)\/status$/.test(path)){const number=+path.split('/').at(-2);prReads.push({repo:project.github_repo,number,kind:'status'});data={repository:project.github_repo,number,lifecycle:'open',head:'abcdef0123',ci:{state:'pass',jobs:[{name:'Unit tests',state:'pass',detail:'success'}]},humans:{state:'waiting',reviewers:[{login:project.github_repo==='acme/repo'?'reviewer':'other-reviewer',state:'waiting',detail:'Review requested'}]},bots:{state:'clean',reviewers:[{login:'bot',state:'clean',detail:'Completed on the current commit · no new findings'}]},fetched_at:'2026-11-14T09:00:00Z',stale:false};}
    else if(path === '/api/notifications/rules') data=[{id:'rules',revision:1,status:'active',rules:[]}];
    else if(path==='/api/projects')data=[project];
@@ -163,8 +163,63 @@ const assert = require('node:assert/strict');
   const extraPR=prs.locator('details').filter({has:page.getByRole('link',{name:'acme/repo · PR 8',exact:true})});
   await extraPR.locator('summary').first().waitFor();
   assert.equal(prReads.some(r=>r.number===8),false,'collapsed PR makes no detail/status request');
+  const reference=view.getByRole('navigation',{name:'Message project and PR references'}).getByRole('link',{name:'acme/repo · PR 8',exact:true});
+  await reference.hover();
+  const preview=page.getByRole('dialog',{name:'acme/repo PR 8 status overview',exact:true});
+  await preview.getByRole('heading',{name:'Second PR context',exact:true}).waitFor();
+  const linkBounds=await reference.boundingBox(),previewBounds=await preview.boundingBox();
+  assert(previewBounds.y>=linkBounds.y+linkBounds.height || previewBounds.y+previewBounds.height<=linkBounds.y,'preview is anchored clear of its reference link');
+  await preview.getByText('All checks passing',{exact:true}).waitFor();
+  await preview.getByRole('heading',{name:'Human reviews',exact:true}).waitFor();
+  await preview.getByText('@reviewer',{exact:true}).hover();
+  await page.waitForTimeout(220);
+  assert.equal(await preview.isVisible(),true,'preview stays open while reading it');
+  await page.keyboard.press('Escape');await preview.waitFor({state:'detached'});
+  await view.waitFor();
+  await reference.focus();
+  await preview.getByRole('heading',{name:'Second PR context',exact:true}).waitFor();
+  await page.keyboard.press('Escape');await preview.waitFor({state:'detached'});
+  assert.equal(await reference.evaluate(el=>el===document.activeElement),true,'preview preserves link focus');
+  const previewButton=reference.locator('..').getByRole('button',{name:/Show PR status overview/});
+  await previewButton.tap();
+  await page.mouse.move(1430,20);
+  await preview.getByRole('heading',{name:'Second PR context',exact:true}).waitFor();
+  await page.keyboard.press('Escape');await preview.waitFor({state:'detached'});
+  await view.waitFor();
+  // Holding a touch on a native link is not a hover and must not open a preview.
+  await page.mouse.move(1430,20);
+  const referenceBox=await reference.boundingBox();
+  const touch=await page.context().newCDPSession(page);
+  await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:referenceBox.x+referenceBox.width/2,y:referenceBox.y+referenceBox.height/2}]});
+  await page.waitForTimeout(220);
+  const previewDuringTouch=await preview.count();
+  await touch.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await touch.detach();
+  assert.equal(previewDuringTouch,0,'touch-and-hold on the link does not trigger a hover preview');
+  await page.context().route('https://github.com/**',route=>route.fulfill({body:'Mock GitHub PR destination'}));
+  const openedLink=page.waitForEvent('popup');await reference.click();
+  const github=await openedLink;await github.waitForLoadState();
+  assert.equal(github.url(),'https://github.com/acme/repo/pull/8');await github.close();
+  // A link must also activate after the user has read its already-open preview.
+  await page.mouse.move(1430,20);await reference.hover();
+  await preview.getByRole('heading',{name:'Second PR context',exact:true}).waitFor();
+  const hoveredPopup=page.waitForEvent('popup');await reference.click();
+  const hoveredGithub=await hoveredPopup;await hoveredGithub.waitForLoadState();
+  assert.equal(hoveredGithub.url(),'https://github.com/acme/repo/pull/8');await hoveredGithub.close();
+  // Keyboard activation still follows the link rather than pinning the preview.
+  await reference.focus();
+  const keyboardPopup=page.waitForEvent('popup');await page.keyboard.press('Enter');
+  const keyboardGithub=await keyboardPopup;await keyboardGithub.waitForLoadState();
+  assert.equal(keyboardGithub.url(),'https://github.com/acme/repo/pull/8');await keyboardGithub.close();
+  // The first click on another control must both dismiss the preview and act.
+  await page.mouse.move(1430,20);await reference.hover();
+  await preview.getByRole('heading',{name:'Second PR context',exact:true}).waitFor();
+  const responseChoice=view.getByRole('button',{name:'Keep the release on hold',exact:true});
+  await responseChoice.click();await preview.waitFor({state:'detached'});
+  assert.equal(await responseChoice.getAttribute('aria-pressed'),'true','an outside click reaches the intended control');
+  const previewReads=prReads.filter(r=>r.number===8).length;
   await extraPR.locator('summary').first().click();
   await extraPR.getByText('Details for PR 8.',{exact:true}).waitFor();
+  assert.equal(prReads.filter(r=>r.number===8).length,previewReads,'expanded PR reuses the preview cache');
   assert(prReads.some(r=>r.number===8&&r.kind==='status'));
   await page.keyboard.press('Escape');
   // The same project and PR number in a different repository is a new cache identity.

@@ -33,7 +33,11 @@ New arrivals wait for the next pass. Successful answers and dismissals advance;
 failed or stale requests keep the message visible. A changed message revision
 requires reviewing the updated context before submitting a retained draft.
 
-The message header shows compact project and repository/PR references. Response
+The message header shows compact project and repository/PR references. Hover or
+focus a PR reference to preview its title, CI, human reviews and bot feedback.
+The adjacent status button pins the preview for touch or keyboard use; the link
+still opens GitHub. Previews load on demand and share the full PR section’s cache.
+Response
 choices sit beside it on desktop and below it on mobile; choices require an
 explicit confirmation, and a written reply takes precedence. Completion actions
 retain their task-move/session-close behavior. Terminal-only prompts link back
