@@ -75,6 +75,8 @@ export interface Agent {
 }
 
 export interface TaskPRLink {
+  observed_at?: string;
+  linked_at?: string;
   task_id: number;
   repository: string;
   number: number;

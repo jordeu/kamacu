@@ -45,7 +45,7 @@ function CardShell({ task, className }: { task: Task; className?: string }) {
       )}
     >
       <CardRow task={task} entry={entry} />
-      <TaskPRLinks task={task} className="mt-1" />
+      <TaskPRLinks task={task} className="mt-1" compact />
     </div>
   );
 }
@@ -92,7 +92,7 @@ export function TaskCard({ task }: { task: Task }) {
       )}
     >
       <CardRow task={task} entry={entry} />
-      <TaskPRLinks task={task} className="mt-1" />
+      <TaskPRLinks task={task} className="mt-1" compact />
       {task.snoozed_until && <SnoozeTask task={task} compact />}
     </div>
   );

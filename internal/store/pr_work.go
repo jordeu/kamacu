@@ -41,16 +41,17 @@ func PRIdentity(repository string, number int64) (string, int64, error) {
 }
 
 type PRLink struct {
-	TaskID      int64     `json:"task_id"`
-	Repository  string    `json:"repository"`
-	Number      int64     `json:"number"`
-	URL         string    `json:"url"`
-	Role        string    `json:"role"`
-	Source      string    `json:"source"`
-	Evidence    string    `json:"evidence"`
-	Uncertainty string    `json:"uncertainty"`
-	ObservedAt  time.Time `json:"observed_at"`
-	Corrected   bool      `json:"corrected"`
+	TaskID      int64      `json:"task_id"`
+	Repository  string     `json:"repository"`
+	Number      int64      `json:"number"`
+	URL         string     `json:"url"`
+	Role        string     `json:"role"`
+	Source      string     `json:"source"`
+	Evidence    string     `json:"evidence"`
+	Uncertainty string     `json:"uncertainty"`
+	ObservedAt  time.Time  `json:"observed_at"`
+	LinkedAt    *time.Time `json:"linked_at,omitempty"`
+	Corrected   bool       `json:"corrected"`
 }
 
 // User corrections are sticky, including incidental (a rejected association).
@@ -63,11 +64,11 @@ func PutPRLink(ctx context.Context, db *sql.DB, l PRLink) error {
 	if l.TaskID <= 0 || (l.Role != "implementation" && l.Role != "review" && l.Role != "incidental") || l.Source == "" || strings.TrimSpace(l.Evidence) == "" || l.ObservedAt.IsZero() || len(l.Evidence) > 8000 || len(l.Uncertainty) > 2000 {
 		return errors.New("invalid PR link evidence")
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO task_pr_links(task_id,repository,number,role,source,evidence,uncertainty,observed_at,corrected) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id,repository,number) DO UPDATE SET role=excluded.role,source=excluded.source,evidence=excluded.evidence,uncertainty=excluded.uncertainty,observed_at=excluded.observed_at,corrected=excluded.corrected WHERE excluded.observed_at>task_pr_links.observed_at AND (task_pr_links.corrected=0 OR excluded.corrected=1)`, l.TaskID, repo, n, l.Role, l.Source, l.Evidence, l.Uncertainty, l.ObservedAt.UTC().Format("2006-01-02T15:04:05.000000000Z"), l.Corrected)
+	_, err = db.ExecContext(ctx, `INSERT INTO task_pr_links(task_id,repository,number,role,source,evidence,uncertainty,observed_at,corrected,linked_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id,repository,number) DO UPDATE SET linked_at=CASE WHEN task_pr_links.role='incidental' AND excluded.role!='incidental' THEN excluded.linked_at ELSE task_pr_links.linked_at END,role=excluded.role,source=excluded.source,evidence=excluded.evidence,uncertainty=excluded.uncertainty,observed_at=excluded.observed_at,corrected=excluded.corrected WHERE excluded.observed_at>task_pr_links.observed_at AND (task_pr_links.corrected=0 OR excluded.corrected=1)`, l.TaskID, repo, n, l.Role, l.Source, l.Evidence, l.Uncertainty, l.ObservedAt.UTC().Format("2006-01-02T15:04:05.000000000Z"), l.Corrected, l.ObservedAt.UTC().Format("2006-01-02T15:04:05.000000000Z"))
 	return err
 }
 func PRLinks(ctx context.Context, db *sql.DB, taskID int64, repository string, number int64) ([]PRLink, error) {
-	query := `SELECT task_id,repository,number,role,source,evidence,uncertainty,observed_at,corrected FROM task_pr_links WHERE `
+	query := `SELECT task_id,repository,number,role,source,evidence,uncertainty,observed_at,corrected,COALESCE(NULLIF(linked_at,''),observed_at) FROM task_pr_links WHERE `
 	var args []any
 	if taskID > 0 {
 		query += "task_id=?"
@@ -93,7 +94,7 @@ func PRLinksForTasks(ctx context.Context, db *sql.DB, taskIDs []int64) ([]PRLink
 	if err != nil {
 		return nil, err
 	}
-	return queryPRLinks(ctx, db, `SELECT task_id,repository,number,role,source,evidence,uncertainty,observed_at,corrected FROM task_pr_links WHERE task_id IN (SELECT value FROM json_each(?))`, string(ids))
+	return queryPRLinks(ctx, db, `SELECT task_id,repository,number,role,source,evidence,uncertainty,observed_at,corrected,COALESCE(NULLIF(linked_at,''),observed_at) FROM task_pr_links WHERE task_id IN (SELECT value FROM json_each(?))`, string(ids))
 }
 
 func queryPRLinks(ctx context.Context, db *sql.DB, query string, args ...any) ([]PRLink, error) {
@@ -105,11 +106,14 @@ func queryPRLinks(ctx context.Context, db *sql.DB, query string, args ...any) ([
 	out := []PRLink{}
 	for rows.Next() {
 		var l PRLink
-		var at string
-		if err = rows.Scan(&l.TaskID, &l.Repository, &l.Number, &l.Role, &l.Source, &l.Evidence, &l.Uncertainty, &at, &l.Corrected); err != nil {
+		var at, linkedAt string
+		if err = rows.Scan(&l.TaskID, &l.Repository, &l.Number, &l.Role, &l.Source, &l.Evidence, &l.Uncertainty, &at, &l.Corrected, &linkedAt); err != nil {
 			return nil, err
 		}
 		l.ObservedAt, _ = time.Parse(time.RFC3339Nano, at)
+		if linked, err := time.Parse(time.RFC3339Nano, linkedAt); err == nil {
+			l.LinkedAt = &linked
+		}
 		l.URL = fmt.Sprintf("https://github.com/%s/pull/%d", l.Repository, l.Number)
 		out = append(out, l)
 	}
