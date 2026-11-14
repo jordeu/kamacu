@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Keyboard, Maximize, Minimize } from "lucide-react";
 import type { ReactNode } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -14,6 +15,8 @@ import {
 import { useTerminalSocket, type ConnState } from "./useTerminalSocket";
 import { isBrowserSwitchShortcut } from "./keyboard";
 import { attachTwoFingerScroll } from "./touchScroll";
+import { HelperKeyboard } from "./HelperKeyboard";
+import { followVisualViewport, isolateFullscreenPane } from "./fullscreenViewport";
 
 export interface TerminalPaneProps {
   sessionId: string;
@@ -58,11 +61,25 @@ export function TerminalPane({
   onConnect,
   autoFocus = false,
 }: TerminalPaneProps) {
+  const paneRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [showKeyboard, setShowKeyboard] = useState(false);
+  const keyboardId = useId();
   const [term, setTerm] = useState<Terminal | null>(null);
   const [conn, setConn] = useState<ConnState>({ kind: "connecting" });
   const [showConnecting, setShowConnecting] = useState(false);
   const [stopping, setStopping] = useState(false);
+
+  useEffect(() => {
+    if (!fullscreen || !paneRef.current) return;
+    const detachViewport = followVisualViewport(paneRef.current);
+    const restoreBackground = isolateFullscreenPane(paneRef.current);
+    return () => {
+      detachViewport();
+      restoreBackground();
+    };
+  }, [fullscreen]);
 
   const focusedSession = useRef<string | null>(null);
   useEffect(() => {
@@ -261,7 +278,7 @@ export function TerminalPane({
     );
   } else if (conn.kind === "lost") {
     banner = (
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
         <span className="text-sm font-medium">Couldn't reconnect.</span>
         <span className="text-sm text-muted-foreground">
           The session may still be running on the server.
@@ -275,9 +292,9 @@ export function TerminalPane({
     );
   } else if (conn.kind === "not-found") {
     banner = (
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
         <span className="text-sm font-medium">Session not found.</span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {exitedActions ?? (
             <>
               <Button size="sm" onClick={() => onNewTerminal?.()}>
@@ -295,13 +312,13 @@ export function TerminalPane({
     );
   } else if (conn.kind === "exited") {
     banner = (
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
         {/* Bash default: render the server's code as-is (no signal special-casing).
             Agent panes override with code-free copy (checkpoint revision). */}
         <span className="text-sm font-medium">
           {exitedMessage ?? `Session exited (code ${conn.code})`}
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {exitedActions ?? (
             <>
               <Button size="sm" onClick={() => onNewTerminal?.()}>
@@ -320,17 +337,45 @@ export function TerminalPane({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border has-[.xterm-helper-textarea:focus-visible]:ring-2 has-[.xterm-helper-textarea:focus-visible]:ring-blue-500">
-      {/* Header bar — 36px: label left, status + Stop right, 1px separator below */}
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-        <span className="text-sm font-medium">{label}</span>
-        <div className="ml-auto flex items-center gap-2">
+    <div
+      ref={paneRef}
+      className={`flex min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-background has-[.xterm-helper-textarea:focus-visible]:ring-2 has-[.xterm-helper-textarea:focus-visible]:ring-blue-500 ${fullscreen ? "fixed inset-0 z-50 h-dvh pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]" : "h-full rounded-lg"}`}
+    >
+      {/* Compact header on desktop, with 44px touch targets on phones. */}
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-x-2 border-b border-border px-2 md:min-h-9">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
+        <div className="ml-auto flex max-w-full items-center gap-1">
           {headerStatus && (
             <span className="text-xs text-muted-foreground">
               {headerStatus}
             </span>
           )}
           {headerActions}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={showKeyboard ? "Hide helper keyboard" : "Show helper keyboard"}
+            title={showKeyboard ? "Hide helper keyboard" : "Show helper keyboard"}
+            aria-expanded={showKeyboard}
+            aria-controls={showKeyboard ? keyboardId : undefined}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => setShowKeyboard((shown) => !shown)}
+          >
+            <Keyboard />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={fullscreen ? "Exit full screen" : "Full screen terminal"}
+            title={fullscreen ? "Exit full screen" : "Full screen terminal"}
+            aria-pressed={fullscreen}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => setFullscreen((expanded) => !expanded)}
+          >
+            {fullscreen ? <Minimize /> : <Maximize />}
+          </Button>
           {/* D-07: an agent-only headerMenu (⋯) SUPERSEDES the inline Stop
               button — its own Stop item lives in AgentTab. Bash panes pass no
               headerMenu, so their inline Stop stays exactly as-is. */}
@@ -373,6 +418,18 @@ export function TerminalPane({
           </div>
         )}
       </div>
+      {showKeyboard && (
+        <HelperKeyboard
+          id={keyboardId}
+          disabled={conn.kind !== "connected"}
+          applicationCursorKeys={() => term?.modes.applicationCursorKeysMode ?? false}
+          onInput={(data) => {
+            if (conn.kind !== "connected" || !term) return;
+            term.input(data, true);
+            term.focus();
+          }}
+        />
+      )}
     </div>
   );
 }
