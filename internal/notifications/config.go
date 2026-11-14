@@ -61,7 +61,28 @@ func (s *Service) notificationProfile(ctx context.Context) (monitor.Profile, err
 
 type notificationProfileKey struct{}
 
+func notificationCallContext(ctx context.Context, c Config) (context.Context, context.CancelFunc) {
+	if c.TimeoutSeconds <= 0 {
+		// Internal callers may supply only context/read limits. Their parent
+		// context still controls cancellation; persisted settings are positive.
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, time.Duration(c.TimeoutSeconds)*time.Second)
+}
+
 func (s *Service) modelContext(ctx context.Context) (context.Context, context.CancelFunc, Config, error) {
+	return s.notificationContext(ctx, false)
+}
+
+// Decision workflows include source collection, bounded tool/model rounds and
+// one freshness pass. Each model call gets its own configured timeout; this
+// outer limit bounds the entire workflow without spending later calls' time
+// during earlier work. Single-call operations retain their original limit.
+func (s *Service) decisionContext(ctx context.Context) (context.Context, context.CancelFunc, Config, error) {
+	return s.notificationContext(ctx, true)
+}
+
+func (s *Service) notificationContext(ctx context.Context, decision bool) (context.Context, context.CancelFunc, Config, error) {
 	c, err := s.Config(ctx)
 	if err != nil {
 		return nil, nil, c, err
@@ -72,7 +93,12 @@ func (s *Service) modelContext(ctx context.Context) (context.Context, context.Ca
 	}
 	ctx = context.WithValue(ctx, notificationProfileKey{}, p)
 	ctx = monitor.WithGenerationOptions(ctx, monitor.GenerationOptions{OutputTokens: c.OutputTokens, Timeout: time.Duration(c.TimeoutSeconds) * time.Second})
-	out, cancel := context.WithTimeout(ctx, time.Duration(c.TimeoutSeconds)*time.Second)
+	limit := time.Duration(c.TimeoutSeconds) * time.Second
+	if decision {
+		// MaxReads+4 model turns, MaxReads lookups, and setup/freshness.
+		limit *= time.Duration(2*c.MaxReads + 6)
+	}
+	out, cancel := context.WithTimeout(ctx, limit)
 	return out, cancel, c, nil
 }
 

@@ -81,6 +81,16 @@ in one workflow. Rules have stable IDs and save directly; there is no compiler,
 held category, or automatic uncertainty-rule bypass. Preview runs the same agent
 without publishing messages or starting work.
 
+The configured model call deadline applies separately to each model response
+and read-only lookup. Source retrieval and earlier responses do not consume a
+later response's allowance. Processing and previews also have an overall
+deadline of `(2 × max_reads + 6) × timeout_seconds`, covering the bounded model
+turns, lookups, setup and freshness check. Parent cancellation still stops the
+workflow. A model or lookup timeout leaves notifications pending and does not
+trigger another model call. Failed lookups remain in the diagnostic trace.
+Single-call operations such as model connection tests
+retain a single configured deadline.
+
 A new approval from another reviewer on the user's open, non-draft PR can
 require a merge decision even when it contains no requested fixes. Subject to
 explicit exclusion rules, the agent asks whether to merge and proposes a task

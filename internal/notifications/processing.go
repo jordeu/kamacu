@@ -69,7 +69,7 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	defer func() {
 		slog.Info("notification batch finished", "batch", id, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)
 	}()
-	run, cancel, config, err := s.modelContext(ctx)
+	run, cancel, config, err := s.decisionContext(ctx)
 	if err != nil {
 		return err
 	}
