@@ -13,6 +13,7 @@ import (
 // The final model pass is bounded: a busy discussion cannot restart the batch
 // indefinitely. Execution-time guards still protect any later user action.
 func (s *Service) refreshChangedAgentSubjects(ctx context.Context, snapshot *AgentSnapshot) ([]AgentSubject, error) {
+	s.setProcessingStage(ctx, "checking_updates", len(snapshot.Subjects))
 	sources := map[string]Source{}
 	for _, sub := range snapshot.Subjects {
 		if len(sub.Notifications) == 0 {
@@ -35,7 +36,12 @@ func (s *Service) refreshChangedAgentSubjects(ctx context.Context, snapshot *Age
 		sources[id] = source
 	}
 	changed := make([]bool, len(snapshot.Subjects))
-	if err := parallelNotifications(ctx, len(snapshot.Subjects), notificationSubjectConcurrency, func(ctx context.Context, i int) error {
+	if err := parallelNotifications(ctx, len(snapshot.Subjects), notificationSubjectConcurrency, func(ctx context.Context, i int) (err error) {
+		defer func() {
+			if err == nil {
+				s.advanceProcessing(ctx)
+			}
+		}()
 		sub := &snapshot.Subjects[i]
 		source := sources[sub.Notifications[0].SourceID]
 		reader, ok := s.Providers[source.Provider].(interface {

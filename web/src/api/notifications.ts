@@ -41,6 +41,15 @@ export interface RawNotification {
  event: { external_id: string; version: string; repository: string; url: string; title: string; reason: string; subject_type: string; context: string };
 }
 export interface NotificationProcessing {
+	progress?: {
+	 stage: string;
+	 completed: number;
+	 total: number;
+	 stage_started_at: number;
+	 github_requests: number;
+	 model_passes: number;
+	 lookups: number;
+	};
  id: string;
  status: "queued" | "running" | "completed" | "failed";
  created_at: number;

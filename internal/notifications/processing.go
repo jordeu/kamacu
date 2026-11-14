@@ -66,6 +66,7 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 	start := time.Now()
 	ctx = diagnostics.WithGroup(ctx, diagnostics.Group{Kind: "batch", ID: id, StartedAt: start})
 	ctx = withNotificationRun(ctx, id)
+	s.setProcessingStage(ctx, "preparing", 0)
 	defer func() {
 		slog.Info("notification batch finished", "batch", id, "duration_ms", time.Since(start).Milliseconds(), "error", resultErr)
 	}()
@@ -109,6 +110,7 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 		return err
 	}
 
+	s.setProcessingStage(ctx, "building_context", 0)
 	snapshotJSON := mustJSON(snapshot)
 	if err = s.journalWrite(ctx, "batch_snapshot", func(c context.Context, tx *sql.Tx) error {
 		result, e := tx.ExecContext(c, `UPDATE notification_batches SET processor_snapshot=? WHERE id=?`, snapshotJSON, id)
@@ -117,6 +119,7 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 		return fmt.Errorf("could not save notification input before model processing: %w", err)
 	}
 	turn, trace, err := s.runNotificationAgentWithUpdates(ctx, &snapshot, config, true)
+	s.setProcessingStage(ctx, "saving", 0)
 	recordCtx, recordCancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 	defer recordCancel()
 	// Serialize once and retry persistence of the exact completed response. A
@@ -172,6 +175,7 @@ func (s *Service) processBatch(ctx context.Context, id string) (resultErr error)
 		}
 	}
 
+	s.setProcessingStage(ctx, "publishing", 0)
 	return s.Inbox.ApplyNotificationBatch(ctx, id, actions, refs, decisions...)
 }
 
