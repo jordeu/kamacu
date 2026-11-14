@@ -170,3 +170,53 @@ func TestProjectPRStatusesRotateAfterEntirelyFailedPolls(t *testing.T) {
 		clock = clock.Add(61 * time.Second)
 	}
 }
+
+func TestSinglePRStatusBeforeTaskExists(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "single.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO projects(id,name,repo_path,github_repo) VALUES(1,'P','/p','acme/repo'),(2,'Unlinked','/u',NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = settings.Set(db, settings.KeyGithubIntegration, "on"); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	h := prContextHandlers{db: db, statuses: github.NewPRStatusService(func(_ context.Context, repo string, n int64) (github.PRStatus, error) {
+		calls.Add(1)
+		return github.UnknownPRStatus(repo, n, "test"), nil
+	}, nil)}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{id}/pull-requests/{n}/status", h.pullRequestStatus)
+	for _, test := range []struct {
+		path string
+		want int
+	}{{"/api/projects/1/pull-requests/7/status", 200}, {"/api/projects/2/pull-requests/7/status", 409}, {"/api/projects/99/pull-requests/7/status", 404}, {"/api/projects/1/pull-requests/0/status", 400}, {"/api/projects/1/pull-requests/bad/status", 400}} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("GET", test.path, nil))
+		if w.Code != test.want {
+			t.Fatal(test, w.Code, w.Body.String())
+		}
+	}
+	if err = settings.Set(db, settings.KeyGithubIntegration, "off"); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/projects/1/pull-requests/8/status", nil))
+	var status github.PRStatus
+	if err = json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Error != "GitHub integration disabled" || status.Number != 8 {
+		t.Fatal(status)
+	}
+	// No tasks or task-to-PR links were needed; disabling integration never reads GitHub.
+	if calls.Load() != 1 {
+		t.Fatal(calls.Load())
+	}
+}

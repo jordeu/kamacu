@@ -9,6 +9,7 @@ import { usePresenceBeacon } from "@/presence/usePresenceBeacon";
 import { useSessionEvents } from "@/api/sessionEvents";
 
 import { MobileNavigation } from "@/components/layout/MobileNavigation";
+import { CatchUpProvider } from "@/components/inbox/CatchUp";
 import { InboxSidebar } from "@/components/layout/InboxSidebar";
 
 const SIDEBAR_STORAGE_KEY = "kamacu.sidebar";
@@ -51,23 +52,25 @@ export function AppLayout() {
             (main.tsx) so it can read useWorkspaces(). WSBAR-01: ActiveSessionsBar
             receives NO workspace prop — it stays cross-workspace. */}
         <ActiveWorkspaceProvider>
-          <ProjectSidebar />
-          {/* The collapsed sidebar is now a 3rem icon rail (collapsible="icon")
-              that occupies layout space, so <main> needs no collapsed padding and
-              the floating re-expand trigger is retired — the rail's header
-              SidebarTrigger is the re-expand entry point (D-02). */}
-          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(2.75rem+env(safe-area-inset-bottom))] md:pb-9">
-            <MobileNavigation />
-            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-              <Outlet />
-            </div>
-          </main>
-          {/* D-13: mounted once outside <main>/<Outlet/> so the bar is present on
-              every route. It is `fixed inset-x-0 bottom-0` (overlay) — a single
-              mount renders it over every route without changing <main>'s layout
-              or height, so the xterm terminals never reflow (D-03). */}
-          <InboxSidebar />
-          <ActiveSessionsBar />
+          <CatchUpProvider>
+            <ProjectSidebar />
+            {/* The collapsed sidebar is now a 3rem icon rail (collapsible="icon")
+                that occupies layout space, so <main> needs no collapsed padding and
+                the floating re-expand trigger is retired — the rail's header
+                SidebarTrigger is the re-expand entry point (D-02). */}
+            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(2.75rem+env(safe-area-inset-bottom))] md:pb-9">
+              <MobileNavigation />
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                <Outlet />
+              </div>
+            </main>
+            {/* D-13: mounted once outside <main>/<Outlet/> so the bar is present on
+                every route. It is `fixed inset-x-0 bottom-0` (overlay) — a single
+                mount renders it over every route without changing <main>'s layout
+                or height, so the xterm terminals never reflow (D-03). */}
+            <InboxSidebar />
+            <ActiveSessionsBar />
+          </CatchUpProvider>
         </ActiveWorkspaceProvider>
       </SidebarProvider>
     </TooltipProvider>

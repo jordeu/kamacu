@@ -1,3 +1,4 @@
+import { useIsCatchUpOpen } from "@/lib/useCatchUp";
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
@@ -219,6 +220,10 @@ export async function dismissTaskCompletions(
 }
 
 export function useDismissTaskCompletions(taskId: number | undefined) {
+  // A mounted task underneath Catch up is not a visit to its completion reports.
+  // Abort its in-flight scan, then start a fresh visit when the overlay closes.
+  const catchUpOpen = useIsCatchUpOpen();
+  const visibleTaskId = catchUpOpen ? undefined : taskId;
   const client = useQueryClient();
   const visit = useRef<AbortController | null>(null);
   const action = useMutation({
@@ -232,19 +237,19 @@ export function useDismissTaskCompletions(taskId: number | undefined) {
   useEffect(() => {
     const controller = new AbortController();
     visit.current = controller;
-    if (taskId !== undefined) mutate({ taskId, signal: controller.signal });
+    if (visibleTaskId !== undefined) mutate({ taskId: visibleTaskId, signal: controller.signal });
     // A delayed snapshot must never dismiss reports after leaving this task.
     return () => controller.abort();
-  }, [taskId, mutate]);
+  }, [visibleTaskId, mutate]);
   return {
     ...action,
     retry: () => {
       if (
-        taskId !== undefined &&
+        visibleTaskId !== undefined &&
         visit.current &&
         !visit.current.signal.aborted
       ) {
-        mutate({ taskId, signal: visit.current.signal });
+        mutate({ taskId: visibleTaskId, signal: visit.current.signal });
       }
     },
   };

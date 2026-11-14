@@ -91,3 +91,43 @@ func (h prContextHandlers) projectStatuses(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, 200, map[string]any{"statuses": statuses})
 }
+
+// Catch-up can reference PRs before a manual task exists. Use the same status
+// service/cache as task cards without creating tasks or PR associations.
+func (h prContextHandlers) pullRequestStatus(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	n, err := strconv.ParseInt(r.PathValue("n"), 10, 64)
+	if err != nil || n <= 0 {
+		writeError(w, 400, "invalid PR number")
+		return
+	}
+	var repo sql.NullString
+	err = h.db.QueryRowContext(r.Context(), `SELECT github_repo FROM projects WHERE id=?`, id).Scan(&repo)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, 404, "project not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	if !repo.Valid || repo.String == "" {
+		writeError(w, 409, "project is not linked to a GitHub repo")
+		return
+	}
+	enabled, err := settings.Get(h.db, settings.KeyGithubIntegration)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	if enabled != "on" {
+		writeJSON(w, 200, github.UnknownPRStatus(repo.String, n, "GitHub integration disabled"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	writeJSON(w, 200, h.statuses.Get(ctx, repo.String, n))
+}

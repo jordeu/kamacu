@@ -21,7 +21,7 @@ const markdownComponents: Components = {
  * must not drift. Split into its own component so the editable variant's hooks
  * are never conditionally skipped (rules-of-hooks).
  */
-function ReadOnlyDescription({ source }: { source: string }) {
+export function ReadOnlyDescription({ source }: { source: string }) {
   if (!source) {
     return <span className="text-muted-foreground">No description.</span>;
   }
