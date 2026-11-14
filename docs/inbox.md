@@ -292,18 +292,21 @@ the table. Reports with a direct mention are kept in full. All original versions
 remain available through the read-only `read_activity` tool. No bot category is
 automatically ignored: the numbered text rules still determine relevance.
 
-When a subject exceeds its evidence budget, the compact index removes the
-largest activity bodies first, preserving short approvals and comments where
-they fit. Each model turn lists required activity reads with the first unread
-byte offset, so continuation pages can be resumed. Finishing with unread new
-activity still fails processing and keeps the notifications pending.
+The compact index budgets evidence across the whole batch and includes all new
+activity inline before asking the model for a decision. When needed, it omits
+older discussion context, which remains available through read-only lookups.
+Mandatory evidence does not compete for the optional lookup allowance. If the
+new activity and index cannot fit the input budget (half the context budget,
+reserving space for prompts and later lookups), processing fails before a model
+call and keeps notifications pending. The same preflight runs after a source
+refresh. Use a larger context budget or a smaller selection for oversized inputs.
 
 Review streams and ordinary comment streams have independent retrieval limits,
 instead of competing for one 96 KB allowance. Missing required pages, resources
 or exceeded retrieval limits leave notifications pending with a processing error.
 A manifest lists every new activity version. Each must be assigned exactly once
-to a model decision. If the input uses a compact index, required activity text
-must be supplied through complete read pages before a final response is accepted.
+to a model decision. A compact index preserves required activity text; older
+context can be retrieved through complete read pages when needed.
 Current evidence membership comes from the durable delta, not proximity to the
 GitHub notification timestamp.
 
