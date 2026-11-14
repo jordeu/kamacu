@@ -57,7 +57,7 @@ export default function TerminalPage() {
     <div className="flex h-full flex-col">
       {/* Page header — board page chrome (24px horizontal padding); the New
           terminal button is the ONLY inverted high-contrast element here. */}
-      <header className="flex items-center justify-between px-6 py-4">
+      <header className="flex items-center justify-between px-3 py-4 md:px-6">
         <h1 className="text-base font-medium">Terminal</h1>
         <div className="flex items-center gap-3">
           {spawn.isError && (
@@ -73,8 +73,8 @@ export default function TerminalPage() {
 
       {/* Body — session rail (fixed 220px) + terminal pane filling the rest;
           pane height fills the viewport below the header. */}
-      <div className="flex min-h-0 flex-1 gap-4 px-6 pb-6">
-        <div className="flex w-[220px] shrink-0 flex-col gap-px overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3 md:flex-row md:gap-4 md:px-6 md:pb-6">
+        <div className="flex shrink-0 gap-px overflow-x-auto md:w-[220px] md:flex-col md:overflow-y-auto">
           {isLoading ? (
             <>
               <Skeleton className="h-12 w-full" />
@@ -86,7 +86,7 @@ export default function TerminalPage() {
                 key={s.id}
                 type="button"
                 onClick={() => setSelectedId(s.id)}
-                className={`flex flex-col items-start rounded-md px-3 py-2 text-left ${
+                className={`flex shrink-0 flex-col items-start rounded-md px-3 py-2 text-left ${
                   s.id === selectedId
                     ? "bg-[#27272a] text-zinc-50"
                     : "hover:bg-[#18181b]"
