@@ -13,10 +13,10 @@ export default function NotificationsPage() {
  const status = useNotificationStatus();
  const change = useArchiveNotification();
  return <main className="h-full overflow-y-auto p-4 sm:p-6">
-   <div className="mx-auto max-w-5xl">
+   <div className="w-full">
      <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
      <p className="mt-1 text-sm text-muted-foreground">Collected source notifications. Nothing is sent to the model until you choose Process pending.</p>
-     <div className="mt-5 max-w-md overflow-hidden rounded border border-border"><NotificationProcessing /></div>
+     <div className="mt-5 w-full overflow-hidden rounded border border-border"><NotificationProcessing layout="page" /></div>
      <NotificationRepair />
      {status.data?.processing && <NotificationRunDetails id={status.data.processing.id} />}
      <div className="mt-6 flex gap-2 border-b border-border pb-3" role="group" aria-label="Notification view">

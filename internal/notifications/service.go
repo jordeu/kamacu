@@ -34,6 +34,9 @@ type Service struct {
 	Providers      map[string]Provider
 	// workMu serializes ticks; source CRUD has its own short lock.
 	workMu         sync.Mutex
+	progressMu     sync.RWMutex
+	progressRun    *notificationRun
+	progress       Progress
 	handoffMu      sync.Mutex
 	SessionChanges func() <-chan struct{}
 	actionMu       sync.Mutex

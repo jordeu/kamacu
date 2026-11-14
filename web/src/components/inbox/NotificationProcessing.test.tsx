@@ -6,15 +6,30 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { NotificationProcessing } from "./NotificationProcessing";
 
 vi.mock("@/api/notifications", () => ({ useNotificationStatus: vi.fn(), useProcessNotifications: vi.fn() }));
-function show(data: NotificationStatus, collapsed = false) {
+function show(data: NotificationStatus, collapsed = false, page = false) {
  vi.mocked(useNotificationStatus).mockReturnValue({ data, isError: false } as ReturnType<typeof useNotificationStatus>);
- return renderToStaticMarkup(<MemoryRouter><TooltipProvider><NotificationProcessing collapsed={collapsed} /></TooltipProvider></MemoryRouter>);
+ return renderToStaticMarkup(<MemoryRouter><TooltipProvider><NotificationProcessing collapsed={collapsed} layout={page ? "page" : "sidebar"} /></TooltipProvider></MemoryRouter>);
 }
 beforeEach(() => {
  vi.resetAllMocks();
  vi.mocked(useProcessNotifications).mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false } as unknown as ReturnType<typeof useProcessNotifications>);
 });
 describe("manual notification processing control", () => {
+ it("shows discussion counts and stages while fetching on the notifications page", () => {
+  const html = show({ pending_count: 42, processing: { id: "run", status: "running", notification_count: 42, action_count: 0, created_at: Date.now(), updated_at: Date.now(), error: "", progress: { stage: "fetching", completed: 17, total: 42, stage_started_at: Date.now(), github_requests: 62, model_passes: 0, lookups: 0 } } }, false, true);
+  expect(html).toContain("Fetching activity from GitHub");
+  expect(html).toContain('aria-valuenow="17"');
+  expect(html).toContain('aria-valuemax="42"');
+  expect(html).toContain("62");
+  expect(html).toContain("GitHub requests");
+  expect(html).toContain("Processing stages");
+ });
+ it("shows analysis passes without inventing a percentage for model work", () => {
+  const html = show({ pending_count: 42, processing: { id: "run", status: "running", notification_count: 42, action_count: 0, created_at: Date.now(), updated_at: Date.now(), error: "", progress: { stage: "revising", completed: 0, total: 0, stage_started_at: Date.now(), github_requests: 412, model_passes: 2, lookups: 1 } } }, false, true);
+  expect(html).toContain("Updating decisions with the latest activity");
+  expect(html).toContain("Analysis pass");
+  expect(html).not.toContain('role="progressbar"');
+ });
  it("shows a raw counter and an explicit processing button in both sidebar layouts", () => {
   for (const collapsed of [false, true]) {
    const html = show({ pending_count: 7, processing: null }, collapsed);

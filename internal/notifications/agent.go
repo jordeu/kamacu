@@ -148,6 +148,7 @@ func (s *Service) agentSnapshot(ctx context.Context, events []RawNotification, r
 			out.Subjects[i].Event = raw.Event
 		}
 	}
+	s.setProcessingStage(ctx, "fetching", len(out.Subjects))
 	if err := parallelNotifications(ctx, len(out.Subjects), notificationSubjectConcurrency, func(ctx context.Context, i int) error {
 		sub := &out.Subjects[i]
 		var sourceID string
@@ -169,10 +170,12 @@ func (s *Service) agentSnapshot(ctx context.Context, events []RawNotification, r
 		if err = s.DB.QueryRowContext(ctx, `SELECT id FROM projects WHERE lower(github_repo)=lower(?)`, fresh.Repository).Scan(&sub.ProjectID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		s.advanceProcessing(ctx)
 		return nil
 	}); err != nil {
 		return out, err
 	}
+	s.setProcessingStage(ctx, "gathering_context", 0)
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,COALESCE(github_repo,'') FROM projects ORDER BY id`)
 	if err != nil {
 		return out, err
@@ -430,6 +433,11 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 			run.rounds.Add(1)
 		}
 		callCtx, callCancel := notificationCallContext(ctx, c)
+		stage := "analyzing"
+		if finalNotes != "" {
+			stage = "revising"
+		}
+		s.setProcessingStage(ctx, stage, 0)
 		_, err = s.Model.GenerateValidatedJSON(callCtx, profile, prompt, agentSchema, func(raw []byte) error {
 			rejected = append([]byte(nil), raw...)
 			turn = AgentTurn{}
@@ -537,6 +545,8 @@ func (s *Service) runNotificationAgentWithUpdates(ctx context.Context, current *
 		}
 		for _, read := range turn.Reads {
 			readsUsed++
+			s.setProcessingStage(ctx, "reading_context", 0)
+			s.processingLookup(ctx)
 			readStarted := time.Now()
 			readCtx, readCancel := notificationCallContext(ctx, c)
 			result, err := s.agentRead(readCtx, snapshot, read, c)

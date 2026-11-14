@@ -81,6 +81,14 @@ in one workflow. Rules have stable IDs and save directly; there is no compiler,
 held category, or automatic uncertainty-rule bypass. Preview runs the same agent
 without publishing messages or starting work.
 
+The Notifications page uses the full available width for its processing panel.
+While a batch runs, it shows the current stage, completed discussion counts for
+retrieval and freshness checks, GitHub requests, analysis passes, context lookups,
+and elapsed time. Model work has an activity indicator rather than an estimated
+percentage. Progress is live telemetry exposed by the regular status poll; it
+does not add database writes or authorize actions. Saved batch status and audit
+records remain the authority for completion and failures.
+
 The configured model call deadline applies separately to each model response
 and read-only lookup. Source retrieval and earlier responses do not consume a
 later response's allowance. Processing and previews also have an overall

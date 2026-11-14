@@ -32,13 +32,14 @@ type RawPage struct {
 	HasMore      bool              `json:"has_more"`
 }
 type Processing struct {
-	ID                string `json:"id"`
-	Status            string `json:"status"`
-	CreatedAt         int64  `json:"created_at"`
-	UpdatedAt         int64  `json:"updated_at"`
-	Error             string `json:"error"`
-	ActionCount       int    `json:"action_count"`
-	NotificationCount int    `json:"notification_count"`
+	Progress          *Progress `json:"progress,omitempty"`
+	ID                string    `json:"id"`
+	Status            string    `json:"status"`
+	CreatedAt         int64     `json:"created_at"`
+	UpdatedAt         int64     `json:"updated_at"`
+	Error             string    `json:"error"`
+	ActionCount       int       `json:"action_count"`
+	NotificationCount int       `json:"notification_count"`
 }
 type Status struct {
 	ModelConfigured bool        `json:"model_configured"`
@@ -70,6 +71,7 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return status, err
 	}
+	p.Progress = s.processingProgress(p)
 	status.Processing = &p
 	return status, nil
 }
