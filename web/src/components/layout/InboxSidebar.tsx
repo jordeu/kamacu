@@ -1,37 +1,24 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { ArrowUpRight, CheckCheck, ChevronLeft, ChevronRight, Inbox } from "lucide-react";
+import { ArrowUpRight, CheckCheck, ChevronLeft, ChevronRight, CirclePlay, Inbox } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { completionActions, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
+import { completionActions, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInbox, type FeedbackQuestion } from "@/api/inbox";
 import { useInboxFavicon } from "@/lib/useInboxFavicon";
 
 import { NotificationProcessing } from "@/components/inbox/NotificationProcessing";
-import { InboxMessage } from "@/components/inbox/InboxMessage";
+import { useOpenCatchUp } from "@/lib/useCatchUp";
 import { InboxText, InboxTextAction } from "@/components/inbox/InboxText";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-
-function MessageDialog({ question, onOpenChange, onResult, onRestoreFocus }: { question: FeedbackQuestion; onRestoreFocus: () => void; onOpenChange: (open: boolean) => void; onResult: (message: string) => void }) {
-  const selected = useInboxMessage(question.id);
-  const [notice, setNotice] = useState("");
-  return <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl" aria-describedby={undefined} onCloseAutoFocus={(event) => { event.preventDefault(); onRestoreFocus(); }}>
-    <DialogTitle className="pr-8">Inbox message</DialogTitle>
-    {selected.isError && <p role="alert">Couldn’t refresh this message. <Button variant="ghost" onClick={() => void selected.refetch()}>Retry</Button></p>}
-    {notice && <p role="status">{notice}</p>}
-    <InboxMessage onNavigate={() => onOpenChange(false)} key={selected.data?.revision ?? question.revision} question={selected.data ?? question} dialog onResult={(message, keepOpen) => { if (keepOpen) setNotice(message); else onOpenChange(false); onResult(message); }} />
-  </DialogContent>;
-}
 
 export function InboxSidebar() {
   const isMobile = useIsMobile();
   const isCompact = useIsMobile(1280);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("kamacu:inbox-collapsed") !== "0");
   const drawerRef = useRef<HTMLDivElement>(null);
-  const opener = useRef<HTMLButtonElement | null>(null);
+  const openCatchUp = useOpenCatchUp();
   const toggleButton = useRef<HTMLButtonElement | null>(null);
-  const [selected, setSelected] = useState<FeedbackQuestion | null>(null);
   const [offset, setOffset] = useState(0);
   const [notice, setNotice] = useState("");
   const inbox = useInbox("pending", offset, "oldest");
@@ -56,20 +43,22 @@ export function InboxSidebar() {
         </Button></TooltipTrigger><TooltipContent side="left">{collapsed ? "Expand inbox" : "Collapse inbox"}</TooltipContent></Tooltip>
         {!collapsed && <Link to="/inbox" onClick={collapse} className="min-w-0 flex-1 text-sm font-semibold hover:underline">Inbox</Link>}
         <span aria-label={count === undefined ? "Loading pending messages" : `${count} pending messages`} aria-live="polite" className={`${collapsed ? "pointer-events-none absolute -right-1.5 -top-1.5 min-w-4 px-1 text-[10px] ring-2 ring-sidebar" : "px-2 text-xs"} rounded-full py-0.5 text-center font-semibold tabular-nums ${(count ?? 0) > 0 ? "bg-orange-500/20 text-orange-400" : "text-muted-foreground"}`}>{count === undefined ? "…" : collapsed && count > 99 ? "99+" : count}</span>
+        {!collapsed && <Button size="sm" variant="outline" onClick={openCatchUp}><CirclePlay className="size-3.5" />Catch up</Button>}
         {!collapsed && <Button asChild size="icon-sm" variant="ghost"><Link to="/inbox" onClick={collapse} aria-label="Open full inbox"><ArrowUpRight className="size-4" /></Link></Button>}
       </div>
+      {collapsed && <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={openCatchUp} aria-label="Catch up"><CirclePlay className="size-4" /></Button></TooltipTrigger><TooltipContent side="left">Catch up</TooltipContent></Tooltip>}
       {!collapsed && <div id="inbox-sidebar-messages" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="flex items-center justify-between px-4 pb-2 pt-4 text-xs text-muted-foreground"><span className="font-medium">Waiting for you</span><span>Oldest first</span></div>
         {notice && <p role="status" className="border-b border-border p-3 text-xs">{notice}</p>}
         {inbox.isError && <div role="alert" className="p-3 text-sm">Couldn’t refresh inbox.<Button variant="ghost" size="sm" onClick={() => void inbox.refetch()}>Retry</Button></div>}
         {inbox.isPending && <p className="p-4 text-sm text-muted-foreground">Loading messages…</p>}
         {inbox.data?.items.length === 0 && <div className="flex flex-col items-center gap-2 px-6 py-10 text-center"><CheckCheck className="size-7 text-muted-foreground" aria-hidden="true" /><p className="text-sm font-medium">{offset ? "No more pending messages." : "You’re all caught up"}</p><p className="text-xs text-muted-foreground">New requests and completed tasks will appear here.</p></div>}
-        {inbox.data?.items.map((q) => <CompactMessage key={`${q.id}:${q.revision}`} question={q} onOpenTask={collapse} onOpenMessage={(button) => { opener.current = button; setSelected(q); }} onResult={setNotice} />)}
+        {inbox.data?.items.map((q) => <CompactMessage key={`${q.id}:${q.revision}`} question={q} onOpenTask={collapse} onResult={setNotice} />)}
         {(offset > 0 || inbox.data?.has_more) && <nav aria-label="Sidebar inbox pages" className="flex justify-between p-3"><Button variant="ghost" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}><ChevronLeft className="size-4" />Previous</Button><Button variant="ghost" size="sm" disabled={!inbox.data?.has_more} onClick={() => setOffset(offset + 50)}>Next</Button></nav>}
       </div>}
       <NotificationProcessing collapsed={collapsed} onNavigate={collapse} />
     </div>;
-  return <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null); }}><aside aria-label="Inbox sidebar" className={`relative hidden min-h-0 shrink-0 md:flex flex-col border-l border-border bg-sidebar pb-9 ${collapsed ? "w-12" : "w-12 xl:w-96"}`}>
+  return <aside aria-label="Inbox sidebar" className={`relative hidden min-h-0 shrink-0 md:flex flex-col border-l border-border bg-sidebar pb-9 ${collapsed ? "w-12" : "w-12 xl:w-96"}`}>
     {isCompact && !isMobile && !collapsed ? <>
       <Button ref={toggleButton} size="icon-sm" variant="ghost" className="mx-auto mt-4" onClick={toggle} aria-label="Collapse inbox sidebar" aria-expanded aria-controls="inbox-sidebar-messages"><Inbox className="size-4" /></Button>
       <Sheet open onOpenChange={(open) => { if (!open) collapse(); }}>
@@ -79,8 +68,7 @@ export function InboxSidebar() {
         </SheetContent>
       </Sheet>
     </> : panel}
-    {selected && <MessageDialog onRestoreFocus={() => { (opener.current?.isConnected ? opener.current : toggleButton.current)?.focus(); }} question={selected} onOpenChange={() => setSelected(null)} onResult={setNotice} />}
-  </aside></Dialog>;
+  </aside>;
 }
 
 function MessagePreview({ text }: { text: string }) {
@@ -105,7 +93,7 @@ function MessagePreview({ text }: { text: string }) {
   </div>;
 }
 
-function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { question: FeedbackQuestion; onOpenTask: () => void; onOpenMessage: (button: HTMLButtonElement) => void; onResult: (message: string) => void }) {
+function CompactMessage({ question: q, onOpenTask, onResult }: { question: FeedbackQuestion; onOpenTask: () => void; onResult: (message: string) => void }) {
   const action = useFeedbackAction();
   const navigate = useNavigate();
   const notification = q.origin === "notification";
@@ -131,7 +119,7 @@ function CompactMessage({ question: q, onOpenTask, onOpenMessage, onResult }: { 
       </div>
       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${completion ? "bg-emerald-500/10 text-emerald-400" : "bg-orange-500/10 text-orange-400"}`}>{completion ? "Completed" : "Needs reply"}</span>
     </div>
-    <InboxTextAction text={q.question} aria-haspopup="dialog" onClick={(event) => onOpenMessage(event.currentTarget)} className="block w-full whitespace-pre-wrap break-words rounded-sm text-left text-sm font-semibold leading-snug hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+    <h3 className="whitespace-pre-wrap break-words text-sm font-semibold leading-snug"><InboxText text={q.question} /></h3>
     <MessagePreview text={q.abstract || q.summary} />
     {!completion && q.options.length > 0 && <div className="flex flex-col gap-2" role="group" aria-label="Choose an answer to send immediately">
       {q.options.map((option) => <InboxTextAction text={option.label} key={option.id} className={`${buttonVariants({ variant: "outline", size: "sm" })} h-auto min-h-9 max-w-full justify-start whitespace-normal break-words text-left`} disabled={action.isPending} onClick={() => submit("answer", option.id)} />)}

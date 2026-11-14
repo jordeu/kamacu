@@ -66,6 +66,8 @@ func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliv
 	}
 	mux.HandleFunc("GET /api/inbox", h.list)
 	mux.HandleFunc("GET /api/inbox/tasks/{taskID}/completions", h.pendingCompletions)
+	mux.HandleFunc("GET /api/inbox/catch-up", h.catchUp)
+	mux.HandleFunc("GET /api/inbox/{id}/history", h.history)
 	mux.HandleFunc("GET /api/inbox/{id}", h.get)
 	mux.HandleFunc("POST /api/inbox/{id}/answer", h.answer)
 	mux.HandleFunc("POST /api/inbox/{id}/dismiss", h.dismiss)
@@ -299,4 +301,30 @@ func (h *inboxHandlers) pendingCompletions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+func (h *inboxHandlers) catchUp(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.CatchUp(r.Context())
+	if err != nil {
+		inboxError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+func (h *inboxHandlers) history(w http.ResponseWriter, r *http.Request) {
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		var err error
+		offset, err = strconv.Atoi(raw)
+		if err != nil || offset < 0 {
+			writeError(w, 400, "invalid offset")
+			return
+		}
+	}
+	page, err := h.service.History(r.Context(), r.PathValue("id"), offset)
+	if err != nil {
+		inboxError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
 }

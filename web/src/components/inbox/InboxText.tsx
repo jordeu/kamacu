@@ -15,7 +15,7 @@ export function InboxText({ text, paragraphs = false }: { text: string; paragrap
 }
 
 // Keep links and the action button as siblings so following a link never submits
-// an answer or opens the message dialog.
+// an answer or triggers the surrounding action.
 export function InboxTextAction({ text, className, ...props }: { text: string } & ComponentProps<"button">) {
   return <div className={cn("relative", className, props.disabled && "opacity-50")}>
     <button {...props} type="button" aria-label={props["aria-label"] ?? text} className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default" />

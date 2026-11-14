@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useInbox, useInboxMessage } from "@/api/inbox";
 
+import { useOpenCatchUp } from "@/lib/useCatchUp";
 import { InboxMessage } from "@/components/inbox/InboxMessage";
 
 export default function InboxPage() {
+  const openCatchUp = useOpenCatchUp();
   const [params, setParams] = useSearchParams();
   const messageID = params.get("message");
   const selected = useInboxMessage(messageID);
@@ -18,7 +20,7 @@ export default function InboxPage() {
   const activeView = messageID && selected.data ? (selected.data.status === "pending" ? "pending" : "archived") : view;
   return <main className="h-full overflow-y-auto p-4 sm:p-6">
     <div className="w-full">
-      <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
+      <div className="flex items-center justify-between gap-3"><h1 className="text-2xl font-semibold tracking-tight">Inbox</h1><Button variant="outline" onClick={openCatchUp}>Catch up</Button></div>
       <p className="mt-1 text-sm text-muted-foreground">Questions and completed work, across all your tasks.</p>
       <div className="mt-6 flex gap-2 border-b border-border pb-3" role="group" aria-label="Inbox view">
         {(["pending", "archived"] as const).map((tab) => <Button key={tab} variant={activeView === tab ? "secondary" : "ghost"} aria-pressed={activeView === tab} onClick={() => { setParams({}); setView(tab); setOffset(0); setNotice(""); }}>

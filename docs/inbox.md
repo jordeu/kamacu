@@ -2,7 +2,7 @@
 
 Kamacu observes each running agent's terminal, including custom agents and Scratchpad. Terminal activity drives the working indicator. A configured LLM detects questions, permission dialogs, blocking errors, and completed responses. No status hook or feedback tool call is required. Process exit is still determined directly from the process.
 
-Messages relay the agent’s response directly in its own voice. The compact preview highlights the concrete result or decision; opening the message shows the relevant description, rationale, links, verification, and limitations needed to respond. PR descriptions are preserved as message content, including details available in recent terminal history, instead of being replaced with narration about what the agent is doing.
+Messages relay the agent’s response directly in its own voice. The compact preview highlights the concrete result or decision; Catch up shows the relevant description, rationale, links, verification, and limitations needed to respond. PR descriptions are preserved as message content, including details available in recent terminal history, instead of being replaced with narration about what the agent is doing.
 
 ## Setup
 
@@ -14,6 +14,41 @@ Messages relay the agent’s response directly in its own voice. The compact pre
 A model must be configured before starting new agents. A workspace without an override inherits the global default. A failing explicit override stays unavailable; Kamacu never silently sends its terminal text to another provider. Changes apply to running sessions. The selected model receives rendered terminal text, so choose its endpoint accordingly.
 
 OpenAI-compatible endpoints must support Chat Completions with JSON-schema response formatting. Compatibility varies by server/model; test the actual endpoint. Monitoring is independent of the coding agent's provider.
+
+## Catch up
+
+Choose **Catch up** in the inbox sidebar (including its collapsed rail) or on the
+Inbox page. It opens a full-page overlay without navigating or remounting the
+current page. Close it or press Escape to return to the same page, scroll
+position and draft, with focus restored to the opening button. Sidebar message
+titles no longer open the old message dialog. While Catch up covers a terminal,
+that terminal is not reported as being viewed, so new questions are not suppressed.
+Task-page completion scans are paused and cancelled while covered; returning to
+the task starts a fresh scan.
+
+Each pass captures the entire pending queue in its current order. **Skip for
+now** advances within that pass without dismissing, answering or reordering the
+message. **Previous** restores the message's reply draft and selected choice.
+New arrivals wait for the next pass. Successful answers and dismissals advance;
+failed or stale requests keep the message visible. A changed message revision
+requires reviewing the updated context before submitting a retained draft.
+
+The message header shows compact project and repository/PR references. Response
+choices sit beside it on desktop and below it on mobile; choices require an
+explicit confirmation, and a written reply takes precedence. Completion actions
+retain their task-move/session-close behavior. Terminal-only prompts link back
+to the originating task or Scratchpad.
+
+**How we got here** starts with the selected message, then shows earlier messages
+from newest to oldest. History follows explicit task/notification associations,
+excludes hidden and later messages, and loads older records on request. Related
+task briefs show current state separately. The PR section uses the task view's
+read-only description and shared status details: lifecycle, author, branches,
+commit count, CI checks, human review requests/decisions, bot feedback, and status
+freshness. The first PR starts expanded; other PRs load only when expanded,
+and their caches are scoped to the repository as well as the project/PR number.
+PRs can load before a task exists; unavailable information has separate
+retry states. These are read-only lookups and never create workspaces or PR links.
 
 ## Notifications and replies
 
@@ -59,6 +94,9 @@ npm ci --prefix web
 npm run build --prefix web
 npm test --prefix web
 go test ./...
+# Against a local Vite preview, using isolated API fixtures:
+KAMACU_PLAYWRIGHT_PACKAGE=/absolute/path/to/playwright \
+  node scripts/catch-up-browser-check.cjs http://127.0.0.1:4173
 KAMACU_MONITOR_CORPUS=1 go test ./internal/monitor -run TestInstalledLoginCorpus -v
 KAMACU_BROWSER_TEST=1 KAMACU_PLAYWRIGHT_PACKAGE=/absolute/path/to/playwright \
   go test ./internal/api -run '^TestInboxBrowser$' -count=1

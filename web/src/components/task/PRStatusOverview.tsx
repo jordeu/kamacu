@@ -51,8 +51,8 @@ function ReviewGroup({ group, bots = false }: { group?: PRStatusGroup; bots?: bo
   </section>;
 }
 
-export function PRStatusDetails({ snapshot, repository, number }: {
-  snapshot?: PRStatusSnapshot; repository: string; number: number;
+export function PRStatusDetails({ snapshot, repository, number, showJobs = false }: {
+  snapshot?: PRStatusSnapshot; repository: string; number: number; showJobs?: boolean;
 }) {
   const primary = primaryPRStatus(snapshot);
   const Mark = icons[primary.icon];
@@ -75,6 +75,13 @@ export function PRStatusDetails({ snapshot, repository, number }: {
         <CIMark aria-hidden="true" className="size-3.5 shrink-0" />{ciLabel}
       </span>
     </section>
+    {showJobs && !!snapshot?.ci.jobs.length && <details className="border-t border-zinc-700/80 pt-3">
+      <summary className="cursor-pointer text-xs">All {snapshot.ci.jobs.length} checks</summary>
+      <ul className="mt-3 space-y-2">{snapshot.ci.jobs.map((job, index) => <li key={`${job.name}:${index}`} className="text-xs">
+        <div className="flex justify-between gap-3"><span className="min-w-0 break-words">{job.name}</span><span className={colors[statusTone(job.state)]}>{prStatusLabels[job.state] ?? job.state}</span></div>
+        {job.detail && <p className="text-[10px] text-zinc-400">{job.detail}</p>}
+      </li>)}</ul>
+    </details>}
     <ReviewGroup group={snapshot?.humans} />
     <ReviewGroup group={snapshot?.bots} bots />
     <footer className="space-y-1 border-t border-zinc-700/80 pt-2 text-[10px] text-zinc-400">
