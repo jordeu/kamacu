@@ -33,6 +33,7 @@ export interface FeedbackQuestion {
   abstract: string;
   summary: string;
   context: string;
+  explanation?: string;
   question: string;
   options: {
     id: string;

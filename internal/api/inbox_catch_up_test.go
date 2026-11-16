@@ -25,6 +25,7 @@ func TestInboxCatchUpRoutes(t *testing.T) {
 		`INSERT INTO projects(id,name,repo_path) VALUES(1,'P','/p')`,
 		`INSERT INTO tasks(id,project_id,title,position) VALUES(1,1,'Task',0)`,
 		`INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,queue_position) VALUES('old',1,'old','old','old','S','C','Q','[]','answered',1,1,1,1),('selected',1,'live','live','current','S','C','Q','[]','pending',2,2,2,2)`,
+		`UPDATE inbox_questions SET explanation='CI passed, but the artifact version still needs checking.' WHERE id='selected'`,
 	} {
 		if _, err = db.Exec(sql); err != nil {
 			t.Fatal(err)
@@ -44,11 +45,11 @@ func TestInboxCatchUpRoutes(t *testing.T) {
 		return w
 	}
 	var queue []inbox.Question
-	if err = json.Unmarshal(get("/api/inbox/catch-up", 200).Body.Bytes(), &queue); err != nil || len(queue) != 1 || queue[0].ID != "selected" {
+	if err = json.Unmarshal(get("/api/inbox/catch-up", 200).Body.Bytes(), &queue); err != nil || len(queue) != 1 || queue[0].ID != "selected" || queue[0].Explanation != "CI passed, but the artifact version still needs checking." {
 		t.Fatal(queue, err)
 	}
 	var history inbox.Page
-	if err = json.Unmarshal(get("/api/inbox/selected/history", 200).Body.Bytes(), &history); err != nil || len(history.Items) != 1 || history.Items[0].ID != "old" {
+	if err = json.Unmarshal(get("/api/inbox/selected/history", 200).Body.Bytes(), &history); err != nil || len(history.Items) != 1 || history.Items[0].ID != "old" || history.Items[0].Explanation != "" {
 		t.Fatal(history, err)
 	}
 	get("/api/inbox/selected/history?offset=-1", 400)

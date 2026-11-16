@@ -2,7 +2,7 @@
 
 Kamacu observes each running agent's terminal, including custom agents and Scratchpad. Terminal activity drives the working indicator. A configured LLM detects questions, permission dialogs, blocking errors, and completed responses. No status hook or feedback tool call is required. Process exit is still determined directly from the process.
 
-Messages relay the agent’s response directly in its own voice. The compact preview highlights the concrete result or decision; Catch up shows the relevant description, rationale, links, verification, and limitations needed to respond. PR descriptions are preserved as message content, including details available in recent terminal history, instead of being replaced with narration about what the agent is doing.
+Messages relay the agent’s response directly in its own voice. The existing monitoring and notification model calls also write a separate decision explanation: short, plain sentences with every fact that could change the answer, including risks, tradeoffs, limits and open checks. A brief example is included only when it helps explain the choice. Full context is kept separately; no extra model call runs when opening Catch up. The compact preview highlights the concrete result or decision; Catch up shows the relevant description, rationale, links, verification, and limitations needed to respond. PR descriptions are preserved as message content, including details available in recent terminal history, instead of being replaced with narration about what the agent is doing.
 
 ## Setup
 
@@ -37,14 +37,13 @@ The message header shows compact project and repository/PR references. Hover or
 focus a PR reference to preview its title, CI, human reviews and bot feedback.
 The adjacent status button pins the preview for touch or keyboard use; the link
 still opens GitHub. Previews load on demand and share the full PR section’s cache.
-Response
+Catch up shows the decision explanation as its main text, with **Read full context** for the fuller response. Older messages without an explanation show their existing context. The current message is not repeated in history; earlier messages remain newest first. Response
 choices sit beside it on desktop and below it on mobile; choices require an
 explicit confirmation, and a written reply takes precedence. Completion actions
 retain their task-move/session-close behavior. Terminal-only prompts link back
 to the originating task or Scratchpad.
 
-**How we got here** starts with the selected message, then shows earlier messages
-from newest to oldest. History follows explicit task/notification associations,
+**How we got here** shows earlier messages from newest to oldest. History follows explicit task/notification associations,
 excludes hidden and later messages, and loads older records on request. Related
 task briefs show current state separately. The PR section uses the task view's
 read-only description and shared status details: lifecycle, author, branches,

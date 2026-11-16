@@ -38,7 +38,7 @@ func finalResponse(snapshot AgentSnapshot, feedback bool) AgentTurn {
 		refs := []string{s.Event.Evidence[0].ID}
 		out.Decisions = append(out.Decisions, AgentDecision{EventIDs: s.EventIDs, Outcome: outcome, Reason: "Current source and Inbox history establish this decision", RuleIDs: []string{}, EvidenceRefs: refs})
 		if outcome == "message" {
-			out.Messages = append(out.Messages, AgentMessage{EventIDs: s.EventIDs, Summary: "A concrete issue needs investigation", Context: "A source update requests an investigation: " + s.Event.URL, Question: "Create an investigation task for this issue?", Why: "This is an unresolved request without an existing owner", RuleIDs: []string{}, EvidenceRefs: refs, LinkedTaskIDs: []int64{}, Options: []AgentOption{{ID: "investigate", Label: "Create investigation task", Mode: "action", Actions: []inboxaction.Action{{ID: "investigate", Kind: "create_investigation", ProjectID: s.ProjectID, TaskName: "Investigate source update", Instructions: "Investigate this source and report findings: " + s.Event.URL}}}}, Plan: AgentPlan{Workflow: "route_investigation", ProjectID: s.ProjectID, PRNumbers: []int64{}, TaskName: "Investigate source update", WorkKind: "investigation"}})
+			out.Messages = append(out.Messages, AgentMessage{EventIDs: s.EventIDs, Summary: "A concrete issue needs investigation", Explanation: "The source asks for work that has no task owner. A new task can look into it; it will not merge or publish changes.", Context: "A source update requests an investigation: " + s.Event.URL, Question: "Create an investigation task for this issue?", Why: "This is an unresolved request without an existing owner", RuleIDs: []string{}, EvidenceRefs: refs, LinkedTaskIDs: []int64{}, Options: []AgentOption{{ID: "investigate", Label: "Create investigation task", Mode: "action", Actions: []inboxaction.Action{{ID: "investigate", Kind: "create_investigation", ProjectID: s.ProjectID, TaskName: "Investigate source update", Instructions: "Investigate this source and report findings: " + s.Event.URL}}}}, Plan: AgentPlan{Workflow: "route_investigation", ProjectID: s.ProjectID, PRNumbers: []int64{}, TaskName: "Investigate source update", WorkKind: "investigation"}})
 		}
 	}
 	return out
@@ -129,7 +129,7 @@ func TestNotificationAgentUsesIndependentModelAndOneGlobalDecision(t *testing.T)
 		t.Fatal("notification selection affected monitoring", monitorProfile, err)
 	}
 	cards, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
-	if len(cards.Items) != 1 || cards.Items[0].Options[0].ID != "investigate" || cards.Items[0].Options[0].Label != "Create investigation task" {
+	if len(cards.Items) != 1 || cards.Items[0].Options[0].ID != "investigate" || cards.Items[0].Options[0].Label != "Create investigation task" || cards.Items[0].Explanation != "The source asks for work that has no task owner. A new task can look into it; it will not merge or publish changes." {
 		t.Fatal("actionable proposal missing", cards)
 	}
 	var snapshot, result, config string
@@ -920,5 +920,25 @@ func TestFinalRevisionFailureKeepsTheValidProposalForDiagnosis(t *testing.T) {
 	cards, err := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
 	if p.Status != "failed" || status.PendingCount != 1 || calls != 2 || len(proposal.Messages) != 1 || err != nil || len(cards.Items) != 0 {
 		t.Fatal(p, status, calls, proposal, cards, err)
+	}
+}
+
+func TestAgentRejectsEmptyExplanationWithoutPublishing(t *testing.T) {
+	for _, explanation := range []string{"", " \n\t"} {
+		t.Run(explanation, func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			seed(t, s, source, event())
+			model.respond = func(prompt string) (any, error) {
+				out := finalResponse(inputSnapshot(t, prompt), true)
+				out.Messages[0].Explanation = explanation
+				return out, nil
+			}
+			p := processAgent(t, s)
+			status, err := s.Status(context.Background())
+			cards, readErr := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
+			if err != nil || readErr != nil || p.Status != "failed" || !strings.Contains(p.Error, "explanation") || status.PendingCount != 1 || len(cards.Items) != 0 || len(tools.calls) != 0 {
+				t.Fatal(p, status, cards, err, readErr)
+			}
+		})
 	}
 }

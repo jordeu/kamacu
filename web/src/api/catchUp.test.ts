@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { catchUpPRs, catchUpActionSucceeded, latestCatchUpMessage } from "./catchUp";
+import { catchUpPRs, catchUpSourceText, catchUpActionSucceeded, latestCatchUpMessage } from "./catchUp";
 import type { FeedbackQuestion } from "./inbox";
 import type { Project, Task } from "./types";
 
@@ -34,4 +34,27 @@ it("keeps a newer polled message when an older mutation response arrives late", 
   expect(latestCatchUpMessage(latest, { ...latest, updated_at: 9 })).toBe(latest);
   expect(latestCatchUpMessage(delayed, latest)).toBe(latest);
   expect(latestCatchUpMessage(undefined, latest)).toBe(latest);
+});
+
+it("includes PRs from the decision explanation while respecting rejected links", () => {
+  const q = { explanation: "Check https://github.com/acme/repo/pull/17 before merging. <!-- https://github.com/acme/hidden/pull/1 --> https://github.com/acme/rejected/pull/2", options: [] } as unknown as FeedbackQuestion;
+  const tasks = [{ pr_links: [{ repository: "acme/rejected", number: 2, role: "incidental" }] }] as Task[];
+  expect(catchUpPRs(q, tasks, []).map(pr => pr.url)).toEqual(["https://github.com/acme/repo/pull/17"]);
+});
+
+
+it("keeps source facts that occur only in the summary, including for legacy messages", () => {
+  const q = { summary: "Merged, but still needs Terraform apply.", context: "The next nightly run must confirm the fix." } as FeedbackQuestion;
+  expect(catchUpSourceText(q)).toBe("Merged, but still needs Terraform apply.\n\nThe next nightly run must confirm the fix.");
+  expect(catchUpSourceText({ ...q, context: "  " })).toBe(q.summary);
+});
+it("does not repeat a source summary already present in the full context", () => {
+  const q = { summary: "The fix is merged.", context: "The fix is merged.\n\nIt still needs to be deployed." } as FeedbackQuestion;
+  expect(catchUpSourceText(q)).toBe(q.context);
+  expect(catchUpSourceText({ ...q, summary: q.context, context: q.summary })).toBe(q.context);
+});
+
+it("keeps conflicting source text instead of treating a negated substring as a repeat", () => {
+  const q = { summary: "Not approved.", context: "approved." } as FeedbackQuestion;
+  expect(catchUpSourceText(q)).toBe("Not approved.\n\napproved.");
 });

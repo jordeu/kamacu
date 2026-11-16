@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { ArrowUpRight } from "lucide-react";
-import { useCatchUpContext, useCatchUpPRDetail, useCatchUpPRStatus, useMessageHistory, type CatchUpPR } from "@/api/catchUp";
+import { useCatchUpContext, catchUpSourceText, useCatchUpPRDetail, useCatchUpPRStatus, useMessageHistory, type CatchUpPR } from "@/api/catchUp";
 import type { FeedbackQuestion } from "@/api/inbox";
 import type { Project } from "@/api/types";
 import { STATUS_LABELS } from "@/api/types";
@@ -33,16 +33,16 @@ function CatchUpPRReference({ pr, project }: { pr: CatchUpPR; project?: Project 
       {project && (status.isError || snapshot?.error) && <p role="alert" className="mb-3 text-xs">Couldn’t refresh PR status. <Button variant="ghost" size="sm" disabled={status.isFetching} onClick={() => void status.refetch()}>Retry status</Button></p>}
     </>} />;
 }
-function HistoryEvent({ question: q, current = false }: { question: FeedbackQuestion; current?: boolean }) {
-  return <article className={`relative min-w-0 border-l pb-6 pl-5 ${current ? "border-orange-300/50" : "border-border"}`}>
-    <span aria-hidden="true" className={`absolute -left-1 top-1.5 size-2 rounded-full ${current ? "bg-orange-300" : "bg-muted-foreground"}`} />
-    <p className="mb-3 text-[11px] text-muted-foreground"><time dateTime={new Date(q.created_at).toISOString()}>{new Date(q.created_at).toLocaleString()}</time> · {q.origin === "notification" ? "Notification" : "Agent report"}{current && " · This message"}</p>
-    <div className={current ? "rounded-xl border border-orange-300/30 bg-orange-300/5 p-4 sm:p-5" : "space-y-3"}>
+function HistoryEvent({ question: q }: { question: FeedbackQuestion }) {
+  return <article className="relative min-w-0 border-l border-border pb-6 pl-5">
+    <span aria-hidden="true" className="absolute -left-1 top-1.5 size-2 rounded-full bg-muted-foreground" />
+    <p className="mb-3 text-[11px] text-muted-foreground"><time dateTime={new Date(q.created_at).toISOString()}>{new Date(q.created_at).toLocaleString()}</time> · {q.origin === "notification" ? "Notification" : "Agent report"}</p>
+    <div className="space-y-3">
       <p className="mb-3 text-xs font-medium text-muted-foreground">{q.kind === "completion" ? "Work reported complete" : "Decision requested"}{q.task_id > 0 && ` · Task ${q.task_id}`}</p>
-      {!current && q.kind !== "completion" && <h3 className="mb-2 text-sm font-medium"><InboxText text={q.question} /></h3>}
-      <div className="whitespace-pre-wrap break-words text-sm leading-relaxed"><InboxText text={q.abstract || q.summary} /></div>
-      <details className="mt-4"><summary className="cursor-pointer text-xs text-muted-foreground">Read original context</summary><div className={`mt-4 ${contextProse}`}><InboxText text={q.context} paragraphs /></div>
-        {!current && q.answer && <div className="mt-4 border-t border-border pt-3 text-xs"><p className="mb-2 text-muted-foreground">Recorded answer · {q.status}</p><InboxText text={q.answer} /></div>}
+      {q.kind !== "completion" && <h3 className="mb-2 text-sm font-medium"><InboxText text={q.question} /></h3>}
+      <div className="whitespace-pre-wrap break-words text-sm leading-relaxed"><InboxText text={q.explanation?.trim() || q.abstract || q.summary} /></div>
+      <details className="mt-4"><summary className="cursor-pointer text-xs text-muted-foreground">Read original context</summary><div className={`mt-4 ${contextProse}`}><InboxText text={catchUpSourceText(q)} paragraphs /></div>
+        {q.answer && <div className="mt-4 border-t border-border pt-3 text-xs"><p className="mb-2 text-muted-foreground">Recorded answer · {q.status}</p><InboxText text={q.answer} /></div>}
       </details>
     </div>
   </article>;
@@ -52,7 +52,7 @@ export function CatchUpHistory({ question }: { question: FeedbackQuestion }) {
   const messages = history.data?.pages.flatMap(page => page.items) ?? [];
   return <section aria-labelledby="catch-up-history-title" className="min-w-0">
     <div className="mb-5 flex flex-wrap items-center justify-between gap-2"><h2 id="catch-up-history-title" className="text-lg font-semibold">How we got here</h2><span className="text-xs text-muted-foreground">Newest first</span></div>
-    <div className="ml-2"><HistoryEvent question={question} current />
+    <div className="ml-2">
       {messages.slice(0, 3).map(q => <HistoryEvent key={q.id} question={q} />)}
       {messages.length > 3 && <details><summary className="mb-5 cursor-pointer rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">Show {messages.length - 3} earlier messages</summary>{messages.slice(3).map(q => <HistoryEvent key={q.id} question={q} />)}</details>}
     </div>

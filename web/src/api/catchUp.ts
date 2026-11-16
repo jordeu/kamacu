@@ -59,6 +59,20 @@ export function latestCatchUpMessage(current: FeedbackQuestion | undefined, inco
 export function catchUpActionSucceeded(result: FeedbackResult, action: "answer" | "dismiss") {
   return action === "dismiss" ? result.outcome === "dismissed" && result.question.status === "dismissed" : result.outcome === "accepted";
 }
+// Older producers may put a decisive fact only in summary. Keep both source
+// fields unless one is already a full paragraph in the other. Substring
+// matches can be quotes or negations, so they must not hide conflicting facts.
+export function catchUpSourceText(q: FeedbackQuestion) {
+  const summary = (q.summary || q.abstract || "").trim();
+  const context = (q.context || "").trim();
+  if (!context) return summary;
+  if (!summary) return context;
+  const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+  const full = normalize(context), short = normalize(summary);
+  if (full === short || context.split(/\n\s*\n/).some(paragraph => normalize(paragraph) === short)) return context;
+  if (summary.split(/\n\s*\n/).some(paragraph => normalize(paragraph) === full)) return summary;
+  return `${summary}\n\n${context}`;
+}
 export interface CatchUpPR { repository: string; number: number; url: string }
 
 // Only explicit PR URLs and saved direct-action identities are references.
@@ -72,7 +86,7 @@ export function catchUpPRs(q: FeedbackQuestion, tasks: Task[], projects: Project
     if (number > 0 && Number.isSafeInteger(number) && (!rejected.has(key) || linked.has(key))) found.set(key, { repository, number, url: `https://github.com/${repository}/pull/${number}` });
   }
   for (const task of tasks) for (const link of task.pr_links ?? []) if (link.role !== "incidental") add(link.repository, link.number);
-  const visible = [q.source_url, q.question, q.abstract, q.summary, q.context].join("\n").replace(/<!--[\s\S]*?-->/g, "");
+  const visible = [q.source_url, q.question, q.abstract, q.summary, q.context, q.explanation].join("\n").replace(/<!--[\s\S]*?-->/g, "");
   for (const match of visible.matchAll(/https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?=$|[\s/?#)\]}>.,;'"`])/gi)) add(match[1], Number(match[2]));
   for (const option of q.options) for (const action of option.action?.actions ?? []) {
     const repo = projects.find(p => p.id === action.project_id)?.github_repo;

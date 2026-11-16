@@ -26,7 +26,7 @@ func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mod
 	if out.Outcome == "existing_pending" || q.Status != "pending" {
 		return out, nil
 	}
-	changed := q.CompletionTaskStatus != c.completionTaskStatus || q.Question != c.Question || q.Summary != c.Summary || q.Abstract != c.Abstract || q.Context != c.Context || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input || !slices.Equal(q.Options, c.Options)
+	changed := q.CompletionTaskStatus != c.completionTaskStatus || q.Question != c.Question || q.Summary != c.Summary || q.Abstract != c.Abstract || q.Context != c.Context || q.Explanation != c.Explanation || q.DeliveryMode != mode || q.EvidenceRevision != revision || q.InputGeneration != input || !slices.Equal(q.Options, c.Options)
 	if q.Origin == "observer" && !changed {
 		return out, nil
 	}
@@ -38,7 +38,7 @@ func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mod
 		c.Options = []Option{}
 	}
 	options, _ := json.Marshal(c.Options)
-	_, err = s.db.ExecContext(ctx, `UPDATE inbox_questions SET revision=revision+?,origin='observer',delivery_mode=?,evidence_revision=?,input_generation=?,summary=?,abstract=?,context=?,question=?,options=?,completion_task_status=?,updated_at=? WHERE id=?`, bump, mode, revision, input, c.Summary, c.Abstract, c.Context, c.Question, string(options), c.completionTaskStatus, s.now().UnixMilli(), q.ID)
+	_, err = s.db.ExecContext(ctx, `UPDATE inbox_questions SET revision=revision+?,origin='observer',delivery_mode=?,evidence_revision=?,input_generation=?,summary=?,abstract=?,context=?,explanation=?,question=?,options=?,completion_task_status=?,updated_at=? WHERE id=?`, bump, mode, revision, input, c.Summary, c.Abstract, c.Context, c.Explanation, c.Question, string(options), c.completionTaskStatus, s.now().UnixMilli(), q.ID)
 	if err != nil {
 		return out, err
 	}

@@ -81,6 +81,7 @@ type Question struct {
 	Abstract             string     `json:"abstract"`
 	Summary              string     `json:"summary"`
 	Context              string     `json:"context"`
+	Explanation          string     `json:"explanation"`
 	Question             string     `json:"question"`
 	Options              []Option   `json:"options"`
 	Status               string     `json:"status"`
@@ -102,6 +103,7 @@ type Create struct {
 	Abstract                          string   `json:"abstract"`
 	Summary                           string   `json:"summary"`
 	Context                           string   `json:"context"`
+	Explanation                       string   `json:"explanation"`
 	Question                          string   `json:"question"`
 	Options                           []Option `json:"options"`
 }
@@ -160,12 +162,12 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status,COALESCE(q.notification_id,0),q.source_name,q.source_url,q.execution_result,COALESCE((SELECT json_group_array(json_object('task_id',lt.id,'project_id',lt.project_id,'title',lt.title,'status',lt.status,'role',link.role,'source',link.source,'evidence',link.evidence)) FROM notification_task_links link JOIN tasks lt ON lt.id=link.task_id WHERE link.question_id=q.id),'[]'),COALESCE((SELECT r.id FROM notification_runs r WHERE r.attention_question_id=q.id),'') FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.explanation,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status,COALESCE(q.notification_id,0),q.source_name,q.source_url,q.execution_result,COALESCE((SELECT json_group_array(json_object('task_id',lt.id,'project_id',lt.project_id,'title',lt.title,'status',lt.status,'role',link.role,'source',link.source,'evidence',link.evidence)) FROM notification_task_links link JOIN tasks lt ON lt.id=link.task_id WHERE link.question_id=q.id),'[]'),COALESCE((SELECT r.id FROM notification_runs r WHERE r.attention_question_id=q.id),'') FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var opts, links string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus, &q.NotificationID, &q.SourceName, &q.SourceURL, &q.ExecutionResult, &links, &q.AttentionSourceID)
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Explanation, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus, &q.NotificationID, &q.SourceName, &q.SourceURL, &q.ExecutionResult, &links, &q.AttentionSourceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
@@ -278,6 +280,9 @@ func (s *Service) watch(sid string) {
 	}()
 }
 func validate(c Create) error {
+	if !utf8.ValidString(c.Explanation) || len(c.Explanation) > MaxExplanationBytes {
+		return fmt.Errorf("%w: explanation must be valid text and at most %d bytes", ErrInvalid, MaxExplanationBytes)
+	}
 	if strings.TrimSpace(c.Abstract) == "" || !utf8.ValidString(c.Abstract) || utf8.RuneCountInString(c.Abstract) > 480 {
 		return fmt.Errorf("%w: abstract is required and must be at most 480 characters", ErrInvalid)
 	}
@@ -367,7 +372,7 @@ func (s *Service) createLocked(ctx context.Context, who Identity, c Create, kind
 	opts, _ := json.Marshal(c.Options)
 	id := uuid.NewString()
 	now := s.now().UnixMilli()
-	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract,origin,delivery_mode,evidence_revision,input_generation,completion_task_status) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract, c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration, c.completionTaskStatus)
+	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract,origin,delivery_mode,evidence_revision,input_generation,completion_task_status,explanation) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract, c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration, c.completionTaskStatus, c.Explanation)
 	if err != nil {
 		return Result{}, err
 	}

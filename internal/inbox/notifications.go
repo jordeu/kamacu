@@ -39,10 +39,10 @@ func (s *Service) publishNotificationLocked(ctx context.Context, eventID int64, 
 		return e
 	}
 	if err == nil {
-		err = s.transitionWith(ctx, markPublished, q.ID, "notification_updated", "", `UPDATE inbox_questions SET notification_id=?,source_name=?,source_url=?,abstract=?,summary=?,context=?,question=?,options=?,revision=revision+1,updated_at=? WHERE id=?`, eventID, source, url, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, q.ID)
+		err = s.transitionWith(ctx, markPublished, q.ID, "notification_updated", "", `UPDATE inbox_questions SET notification_id=?,source_name=?,source_url=?,abstract=?,summary=?,context=?,explanation=?,question=?,options=?,revision=revision+1,updated_at=? WHERE id=?`, eventID, source, url, c.Abstract, c.Summary, c.Context, c.Explanation, c.Question, string(opts), now, q.ID)
 	} else {
 		q.ID = uuid.NewString()
-		err = s.transitionWith(ctx, markPublished, q.ID, "notification_created", "", `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?)`, q.ID, "notification:"+q.ID, q.ID, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, eventID, source, url)
+		err = s.transitionWith(ctx, markPublished, q.ID, "notification_created", "", `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,explanation) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?)`, q.ID, "notification:"+q.ID, q.ID, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, eventID, source, url, c.Explanation)
 	}
 	if err != nil {
 		return Question{}, err
