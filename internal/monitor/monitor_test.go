@@ -59,7 +59,7 @@ func TestProfileInheritance(t *testing.T) {
 	}
 }
 func TestClassifierEvidenceAndHTTP(t *testing.T) {
-	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Summary: "Continue?", Question: "Continue?", InputMode: "text", Options: []string{"1. Yes", "2. No"}, Context: "I finished the change. All checks passed.\n\nShould I continue?"}
+	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Explanation: "The change is ready and all checks passed. Choose whether to continue.", Summary: "Continue?", Question: "Continue?", InputMode: "text", Options: []string{"1. Yes", "2. No"}, Context: "I finished the change. All checks passed.\n\nShould I continue?"}
 	obs := observation.Snapshot{Screen: "Continue?\n1. Yes\n2. No\n>"}
 	if e := validateDecision(d, obs); e != nil {
 		t.Fatal(e)
@@ -287,7 +287,7 @@ func TestSuggestedRepliesValidation(t *testing.T) {
 }
 
 func TestClassifierSuggestedRepliesHTTP(t *testing.T) {
-	response := Decision{State: "waiting", Kind: "question", Evidence: "Start the review?", Question: "Start the review?", Summary: "The implementation is ready for review.", Context: "I finished the implementation.", InputMode: "text", OptionsSuggested: true, Options: []string{"Yes, start the review", "Explain the changes first"}}
+	response := Decision{State: "waiting", Kind: "question", Evidence: "Start the review?", Question: "Start the review?", Summary: "The implementation is ready for review.", Context: "I finished the implementation.", Explanation: "The implementation is done. You can start review or ask for an explanation first.", InputMode: "text", OptionsSuggested: true, Options: []string{"Yes, start the review", "Explain the changes first"}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := json.Marshal(response)
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(raw)}}}})
@@ -365,7 +365,7 @@ func TestInstalledLoginAuthoredMessages(t *testing.T) {
 }
 
 func TestBackendOptionalWorkDoesNotRejectAttention(t *testing.T) {
-	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", InputMode: "text", WorkSummary: "Unsupported", WorkEvidence: "invented", PRLinks: []WorkLink{{Repository: "acme/repo", Number: 1, Role: "implementation", Evidence: "invented"}}}
+	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Explanation: "Choose whether to continue.", InputMode: "text", WorkSummary: "Unsupported", WorkEvidence: "invented", PRLinks: []WorkLink{{Repository: "acme/repo", Number: 1, Role: "implementation", Evidence: "invented"}}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := json.Marshal(d)
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(raw)}}}})

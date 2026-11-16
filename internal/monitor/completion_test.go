@@ -122,7 +122,7 @@ func TestCompletionTaskContextAndReclassification(t *testing.T) {
 		}
 		contexts <- task
 		// Omit recommendations initially; controls must remain available.
-		d := Decision{State: "idle", Kind: "completion", Evidence: "All done", Summary: "All done", InputMode: "none"}
+		d := Decision{State: "idle", Kind: "completion", Evidence: "All done", Summary: "All done", Explanation: "The work is complete. Choose the next task state.", InputMode: "none"}
 		if task.Status == "in_review" {
 			d.CompletionActions = []string{inbox.MoveToDone}
 		}

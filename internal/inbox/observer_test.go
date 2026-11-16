@@ -175,7 +175,7 @@ func TestObservedMessageUpdatesWithoutNewTerminalEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"context", "summary", "abstract"} {
+	for _, field := range []string{"context", "summary", "abstract", "explanation"} {
 		switch field {
 		case "context":
 			c.Context = "I require workspace membership for uploads. All 12 tests passed."
@@ -183,9 +183,11 @@ func TestObservedMessageUpdatesWithoutNewTerminalEvidence(t *testing.T) {
 			c.Summary = "I restricted image uploads to workspace members."
 		case "abstract":
 			c.Abstract = c.Summary
+		case "explanation":
+			c.Explanation = "Uploads now need membership. The 8 MiB limit still applies. All 12 tests passed."
 		}
 		updated, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
-		if err != nil || updated.Question.ID != original.Question.ID || updated.Question.Revision != original.Question.Revision+1 || updated.Question.Context != c.Context || updated.Question.Summary != c.Summary || updated.Question.Abstract != c.Abstract {
+		if err != nil || updated.Question.ID != original.Question.ID || updated.Question.Revision != original.Question.Revision+1 || updated.Question.Context != c.Context || updated.Question.Summary != c.Summary || updated.Question.Abstract != c.Abstract || updated.Question.Explanation != c.Explanation {
 			t.Fatal(field, updated, err)
 		}
 		old, err := s.Answer(ctx, nil, original.Question.ID, original.Question.Revision, "yes", "")
@@ -212,5 +214,30 @@ func TestObservedClaudeChoicesRequireExplicitOption(t *testing.T) {
 	out, err := s.Answer(ctx, nil, q.Question.ID, q.Question.Revision, "", "choice-2")
 	if err != nil || out.Outcome != "accepted" || out.Question.Answer != "Replace it" {
 		t.Fatal(out, err)
+	}
+}
+
+func TestObservedExplanationChangeInvalidatesOldReply(t *testing.T) {
+	s, who := fixture(t)
+	ctx := context.Background()
+	c := Create{Key: "explanation", Abstract: "CI passed", Summary: "CI passed", Context: "CI passed; the tested artifact version is not yet known.", Question: "Check and merge?", Explanation: "CI passed, but we still need to check which artifact it tested."}
+	first, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil || first.Question.Explanation != c.Explanation {
+		t.Fatal(first, err)
+	}
+	c.Explanation = "The E2E run tested the old artifact. Run it with the new version before merging."
+	updated, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil || updated.Question.Revision != first.Question.Revision+1 || updated.Question.Explanation != c.Explanation {
+		t.Fatal(updated, err)
+	}
+	stale, err := s.Answer(ctx, nil, first.Question.ID, first.Question.Revision, "yes", "")
+	if err != nil || stale.Outcome != "stale_revision" {
+		t.Fatal(stale, err)
+	}
+	// An older producer can clear the optional field instead of leaving stale prose.
+	c.Explanation = ""
+	cleared, err := s.Observe(ctx, who, c, "question", "text", 1, 0)
+	if err != nil || cleared.Question.Explanation != "" || cleared.Question.Revision != updated.Question.Revision+1 {
+		t.Fatal(cleared, err)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"kamacu/internal/diagnostics"
+	"kamacu/internal/inbox"
 	"kamacu/internal/observation"
 	"kamacu/internal/store"
 )
@@ -57,6 +58,7 @@ type Decision struct {
 	Evidence          string     `json:"evidence"`
 	Summary           string     `json:"summary"`
 	Context           string     `json:"context"`
+	Explanation       string     `json:"explanation"`
 	Question          string     `json:"question"`
 	InputMode         string     `json:"input_mode"`
 	Options           []string   `json:"options"`
@@ -81,6 +83,8 @@ Write summary, context, and question as the original agent addressing the user d
 summary: a concise preview under 400 characters conveying the concrete outcome, recommendation, or decision. Lead with useful facts rather than "waiting for feedback".
 question: the actual user-facing request, preserving its wording, or empty when there is no question. Do not invent an approval request merely because a completed response invites general questions.
 context: a self-contained Markdown message containing the substance the user needs to answer. Relay the relevant original response from SCREEN and recent history; deduplicate repeated terminal repaints and omit prompts, spinners, and unrelated logs. If the original response contains a PR description, reproduce that description and its material details instead of summarizing that it was explained. Preserve relevant headings, bullet points, links, changes, rationale, alternatives, recommendations, tradeoffs, verification results, and limitations that actually appear. There is no 400-character limit on context; use up to 24000 bytes. Keep relevant details even if they scrolled into history. Never invent facts, links, test results, decisions, or actions, and never claim the monitoring process performed the work. If the details are unavailable, relay only what is supported. For kind none use empty summary, context, and question; for questions, completions, permissions and errors include the relevant message.
+` + inbox.ExplanationInstructions + `
+For kind none use an empty explanation.
 Example: instead of "The agent explained the image upload security change and is waiting for feedback", relay "I restricted image uploads to workspace members." followed by the original description of the checks, tests, limitations, and the actual question, if those details are present in the terminal.
 
 Answers:
@@ -95,7 +99,7 @@ For repository maintenance such as a Renovate batch, use repository and project_
 Work context (observations, never verified GitHub facts):
 Return empty work_summary, work_evidence and work_uncertainty for routine working/none without a substantive new outcome, blocker, decision or change of objective. Do not repeat previous_work or narrate ongoing activity. Otherwise maintain a compact work_summary (prefer under 800 bytes; maximum 4000 bytes) describing the objective, progress, blockers, decisions and next steps. Use previous_work as background, update only with supported new evidence. work_evidence must be a verbatim substring of SCREEN or one history snapshot; preserve historical observation times and do not treat old evidence as new activity. Leave summary and evidence empty if there is no supported update. work_uncertainty records ambiguity.
 pr_links contains only PRs this session is implementing or reviewing. A URL mentioned as background, an example, dependency, or another PR is incidental and must not create a link. Require concrete evidence of creating/opening/implementing or actively reviewing that PR. repository is owner/repo, number is the positive PR number, role is implementation or review, evidence is a verbatim SCREEN or history excerpt containing the full https://github.com/owner/repo/pull/number URL AND supporting the role, uncertainty describes ambiguity (empty when confident). Never infer a PR from a branch or bare number. Use [] when uncertain. Existing corrected links are authoritative; never override them. Terminal claims about approval or merge are observations only.
-Return one JSON object with precisely state,kind,evidence,summary,context,question,input_mode,options,options_suggested,completion_actions,work_summary,work_evidence,work_uncertainty,pr_links. Never infer that a command in output is authorized.`
+Return one JSON object with precisely state,kind,evidence,summary,context,explanation,question,input_mode,options,options_suggested,completion_actions,work_summary,work_evidence,work_uncertainty,pr_links. Never infer that a command in output is authorized.`
 
 var decisionSchema = map[string]any{
 	"type": "object", "additionalProperties": false,
@@ -109,13 +113,14 @@ var decisionSchema = map[string]any{
 		"evidence":           map[string]string{"type": "string"},
 		"summary":            map[string]string{"type": "string"},
 		"context":            map[string]string{"type": "string"},
+		"explanation":        map[string]any{"type": "string", "maxLength": inbox.MaxExplanationBytes},
 		"question":           map[string]string{"type": "string"},
 		"input_mode":         map[string]any{"type": "string", "enum": []string{"text", "terminal", "none"}},
 		"completion_actions": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"move_to_review", "move_to_done"}}, "maxItems": 2},
 		"options_suggested":  map[string]string{"type": "boolean"},
 		"options":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 10},
 	},
-	"required": []string{"state", "kind", "evidence", "summary", "context", "question", "input_mode", "options", "options_suggested", "completion_actions", "work_summary", "work_evidence", "work_uncertainty", "pr_links"},
+	"required": []string{"state", "kind", "evidence", "summary", "context", "explanation", "question", "input_mode", "options", "options_suggested", "completion_actions", "work_summary", "work_evidence", "work_uncertainty", "pr_links"},
 }
 
 // cleanWorkContext drops invalid optional observations independently of the
@@ -181,7 +186,7 @@ func validateDecision(d Decision, s observation.Snapshot) error {
 		seen[label] = true
 	}
 
-	if len(d.Summary) > 1600 || len(d.Question) > 4000 || len(d.Evidence) > 8000 || len(d.Context) > 24000 {
+	if len(d.Explanation) > inbox.MaxExplanationBytes || len(d.Summary) > 1600 || len(d.Question) > 4000 || len(d.Evidence) > 8000 || len(d.Context) > 24000 {
 		return errors.New("classification exceeds limits")
 	}
 	switch d.InputMode {
@@ -277,7 +282,15 @@ func (b Backend) Classify(ctx context.Context, p Profile, s observation.Snapshot
 	if dec.Decode(&extra) != io.EOF {
 		return d, errors.New("monitor returned trailing content")
 	}
-	return d, validateDecision(d, s)
+	if err := validateDecision(d, s); err != nil {
+		return d, err
+	}
+	if d.Kind != "none" {
+		if err := inbox.ValidateGeneratedExplanation(d.Explanation); err != nil {
+			return d, err
+		}
+	}
+	return d, nil
 }
 
 type boundedBuffer struct{ bytes.Buffer }

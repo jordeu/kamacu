@@ -5,7 +5,7 @@ import { CheckCheck, ChevronLeft, Inbox, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { setTerminalViewObscured } from "@/presence/activeSessionStore";
 import { CatchUpContext, CatchUpOpenContext } from "@/lib/useCatchUp";
-import { useCatchUpQueue, useCatchUpContext, catchUpActionSucceeded, latestCatchUpMessage } from "@/api/catchUp";
+import { useCatchUpQueue, useCatchUpContext, catchUpSourceText, catchUpActionSucceeded, latestCatchUpMessage } from "@/api/catchUp";
 import { completionActions, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -105,12 +105,13 @@ function CatchUpMessage({ initial, draft, onDraft, notice, onNotice, onClose, on
             <CatchUpReferences projects={context.projects.data ?? []} names={context.projectNames} prs={context.prs} scratchpad={q.task_id === 0 && q.origin !== "notification"} />
             <p className="mb-4 text-xs text-muted-foreground">{completion ? "Completed work" : operational ? "Operational issue" : "Needs your decision"} · <time dateTime={new Date(q.created_at).toISOString()}>{new Date(q.created_at).toLocaleString()}</time></p>
             <h1 className="break-words text-2xl font-semibold leading-snug tracking-tight sm:text-3xl"><InboxText text={completion && q.task_title ? q.task_title : q.question} /></h1>
-            <div className="mt-5 whitespace-pre-wrap break-words text-sm leading-7 text-muted-foreground"><InboxText text={q.abstract || q.summary} /></div>
+            <div className={`mt-5 ${contextProse}`} data-testid="catch-up-explanation"><InboxText text={q.explanation?.trim() || catchUpSourceText(q)} paragraphs /></div>
+            {!!q.explanation?.trim() && <details className="mt-5 border-t border-border pt-3"><summary className="cursor-pointer text-xs text-muted-foreground">Read full context</summary><div className={`mt-4 ${contextProse}`}><InboxText text={catchUpSourceText(q)} paragraphs /></div></details>}
             <Button variant="outline" size="sm" className="mt-5" onClick={() => history.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>How we got here ↓</Button>
           </section>
           <section className={`${contextCard} space-y-4`} aria-label="Your response">
             <h2 className="text-base font-semibold">{completion ? "What should happen next?" : operational ? "Recovery actions" : "Your response"}</h2>
-            {completion ? <p className="text-xs text-muted-foreground">Choose what happens next.</p> : <div className="break-words text-sm"><InboxText text={q.question} /></div>}
+            {completion && <p className="text-xs text-muted-foreground">Choose what happens next.</p>}
             {!pending && <p role="status" className="rounded-lg border border-border p-3 text-sm">This message is {q.status}. {q.delivery_status && `Delivery: ${q.delivery_status}.`} {q.answer && <InboxText text={q.answer} />}Skip to continue.</p>}
             {pending && <>
               {choices.length > 0 && <div role="group" aria-label="Choose a response" className="space-y-2">{choices.map(option => <div key={option.id}>
@@ -130,10 +131,10 @@ function CatchUpMessage({ initial, draft, onDraft, notice, onNotice, onClose, on
           <CatchUpHistory question={q} /><CatchUpTasks context={context} onNavigate={onClose} />
         </div>
         <CatchUpPRs context={context} />
-        <details className={`mt-7 ${contextCard}`}><summary className="cursor-pointer text-sm text-muted-foreground">Original message & source</summary><div className={`mt-4 ${contextProse}`}><InboxText text={q.summary} paragraphs /><InboxText text={q.context} paragraphs /></div>
+        {(q.source_url || q.origin === "notification") && <details className={`mt-7 ${contextCard}`}><summary className="cursor-pointer text-sm text-muted-foreground">Source & execution details</summary>
           {q.source_url && <a href={q.source_url} target="_blank" rel="noopener noreferrer" className="mt-4 inline-block text-xs text-blue-400 hover:underline">Open notification source ↗</a>}
           {q.origin === "notification" && <div className="mt-5 space-y-4">{q.attention_source_id && <ActionRunDetails id={q.attention_source_id} label="Original execution steps" />}{!operational && <RuleImprovement questionID={q.id} />}{q.status === "answered" && <ActionRunDetails id={q.id} />}{q.execution_result && <div className={contextProse}><InboxText text={q.execution_result} paragraphs /></div>}</div>}
-        </details>
+        </details>}
       </div>
     </div>
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-card/60 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">

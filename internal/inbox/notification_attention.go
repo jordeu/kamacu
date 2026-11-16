@@ -40,7 +40,7 @@ func (s *Service) PublishNotificationAttention(ctx context.Context, runID string
 				}
 				_, e := tx.ExecContext(ctx, `UPDATE notification_runs SET attention_pending=0 WHERE id=?`, runID)
 				return e
-			}, existing, "notification_recovery_stopped", "", `UPDATE inbox_questions SET status='pending',reason=?,abstract=?,summary=?,context=?,question=?,options=?,revision=revision+1,updated_at=? WHERE id=?`, reason, c.Abstract, c.Summary, c.Context, c.Question, string(opts), s.now().UnixMilli(), existing)
+			}, existing, "notification_recovery_stopped", "", `UPDATE inbox_questions SET status='pending',reason=?,abstract=?,summary=?,context=?,explanation=?,question=?,options=?,revision=revision+1,updated_at=? WHERE id=?`, reason, c.Abstract, c.Summary, c.Context, c.Explanation, c.Question, string(opts), s.now().UnixMilli(), existing)
 			if err != nil {
 				return Question{}, err
 			}
@@ -97,5 +97,5 @@ func (s *Service) ReconcileNotificationAttention(ctx context.Context, id string,
 			return ErrConflict
 		}
 		return nil
-	}, id, "notification_handoff_reconciled", "", `UPDATE inbox_questions SET status=?,reason=?,abstract=?,summary=?,context=?,question=?,options=?,revision=revision+1,updated_at=? WHERE id=? AND (status='pending' OR (status='unanswered' AND reason IN ('handoff_resolved','handoff_tracking'))) AND revision=?`, status, reason, c.Abstract, c.Summary, c.Context, c.Question, string(opts), s.now().UnixMilli(), id, revision)
+	}, id, "notification_handoff_reconciled", "", `UPDATE inbox_questions SET status=?,reason=?,abstract=?,summary=?,context=?,explanation=?,question=?,options=?,revision=revision+1,updated_at=? WHERE id=? AND (status='pending' OR (status='unanswered' AND reason IN ('handoff_resolved','handoff_tracking'))) AND revision=?`, status, reason, c.Abstract, c.Summary, c.Context, c.Explanation, c.Question, string(opts), s.now().UnixMilli(), id, revision)
 }

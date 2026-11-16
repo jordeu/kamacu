@@ -161,7 +161,7 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 			c.Options = []Option{}
 		}
 		opts, _ := json.Marshal(c.Options)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?)`, id, "notification:"+id, c.Key, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, a.EventIDs[0], a.SourceName, a.SourceURL, id); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group,explanation) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?,?)`, id, "notification:"+id, c.Key, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, a.EventIDs[0], a.SourceName, a.SourceURL, id, c.Explanation); err != nil {
 			return err
 		}
 		if a.Plan == "" {
@@ -287,7 +287,7 @@ func (s *Service) publishFollowupLocked(ctx context.Context, previous Question, 
 		return Question{}, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?)`, id, "notification:"+id, id, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, previous.NotificationID, previous.SourceName, previous.SourceURL, group); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group,explanation) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?,?)`, id, "notification:"+id, id, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, previous.NotificationID, previous.SourceName, previous.SourceURL, group, c.Explanation); err != nil {
 		return Question{}, err
 	}
 	if c.Informational {

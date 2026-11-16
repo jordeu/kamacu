@@ -543,7 +543,7 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 		abstract = abstract[:480]
 	}
 	err = s.Presence.WhileAway(info.ID, func() error {
-		_, err := s.Inbox.Observe(ctx, inbox.Identity{TaskID: info.TaskID, SessionID: info.ID}, inbox.Create{Key: "observer:" + w.episode, Abstract: string(abstract), Summary: summary, Question: question, Context: message, Options: options}, kind, mode, w.revision, w.input)
+		_, err := s.Inbox.Observe(ctx, inbox.Identity{TaskID: info.TaskID, SessionID: info.ID}, inbox.Create{Key: "observer:" + w.episode, Abstract: string(abstract), Summary: summary, Question: question, Context: message, Explanation: d.Explanation, Options: options}, kind, mode, w.revision, w.input)
 		return err
 	})
 	if err != nil {

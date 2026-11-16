@@ -383,7 +383,7 @@ func TestFreeTextReplyPlansOnceThenExecutesWithoutModelLoop(t *testing.T) {
 func TestUnsupportedFreeTextBecomesOneClarificationWithoutMutation(t *testing.T) {
 	s, m, r, tools, source := directFixture(t)
 	q := directCard(t, s, source, inboxaction.Action{ID: "ignore", Kind: "ignore"})
-	m.responses = []any{map[string]any{"actions": []inboxaction.Action{}, "question": "Which task should receive the investigation?", "context": "Two tasks cover different parts of this request. Choose the target.", "authorization_quote": ""}}
+	m.responses = []any{map[string]any{"actions": []inboxaction.Action{}, "question": "Which task should receive the investigation?", "context": "Two tasks cover different parts of this request. Choose the target.", "explanation": "This work spans two tasks. Pick which task should look into it.", "authorization_quote": ""}}
 	ctx := context.Background()
 	if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Look into the two related issues", ""); err != nil {
 		t.Fatal(err)
@@ -393,7 +393,7 @@ func TestUnsupportedFreeTextBecomesOneClarificationWithoutMutation(t *testing.T)
 	}
 	out, _ := s.Inbox.Get(ctx, q.ID)
 	cards, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
-	if out.DeliveryStatus != "succeeded" || len(m.prompts) != 1 || len(r.submitted) > 0 || len(tools.calls) > 0 || len(cards.Items) != 1 {
+	if out.DeliveryStatus != "succeeded" || len(m.prompts) != 1 || len(r.submitted) > 0 || len(tools.calls) > 0 || len(cards.Items) != 1 || cards.Items[0].Explanation != "This work spans two tasks. Pick which task should look into it." {
 		t.Fatal(out, cards)
 	}
 }
@@ -416,7 +416,7 @@ func TestOptionSpecificTargetsAreSavedAndOnlySelectedSubsetRuns(t *testing.T) {
 	for i := range out.Decisions {
 		out.Decisions[i].Outcome = "message"
 	}
-	msg := AgentMessage{EventIDs: []int64{id, id2}, Summary: "Two reviews await feedback", Context: "Review requests for two PRs", Question: "Review both or only the second?", Why: "Both requested review", EvidenceRefs: []string{snapshot.Subjects[0].Event.Evidence[0].ID, snapshot.Subjects[1].Event.Evidence[0].ID}, Plan: AgentPlan{Workflow: "route_review", ProjectID: 1, PRNumbers: []int64{7, 8}, WorkKind: "review"}, Options: []AgentOption{
+	msg := AgentMessage{EventIDs: []int64{id, id2}, Summary: "Two reviews await feedback", Explanation: "Two PRs need review. Choose both or just the second.", Context: "Review requests for two PRs", Question: "Review both or only the second?", Why: "Both requested review", EvidenceRefs: []string{snapshot.Subjects[0].Event.Evidence[0].ID, snapshot.Subjects[1].Event.Evidence[0].ID}, Plan: AgentPlan{Workflow: "route_review", ProjectID: 1, PRNumbers: []int64{7, 8}, WorkKind: "review"}, Options: []AgentOption{
 		{ID: "all", Label: "Review both", Mode: "action", Actions: []inboxaction.Action{{ID: "reviews", Kind: "start_reviews", ProjectID: 1, PRNumbers: []int64{7, 8}}}},
 		{ID: "second", Label: "Review only the second", Mode: "action", Actions: []inboxaction.Action{{ID: "reviews", Kind: "start_reviews", ProjectID: 1, PRNumbers: []int64{8}}}},
 	}}
