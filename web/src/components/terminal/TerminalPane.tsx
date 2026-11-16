@@ -15,6 +15,7 @@ import {
 import { useTerminalSocket, type ConnState } from "./useTerminalSocket";
 import { isBrowserSwitchShortcut } from "./keyboard";
 import { attachTwoFingerScroll } from "./touchScroll";
+import { scrollTerminal } from "./scrollTerminal";
 import { HelperKeyboard } from "./HelperKeyboard";
 import { followVisualViewport, isolateFullscreenPane } from "./fullscreenViewport";
 
@@ -147,7 +148,7 @@ export function TerminalPane({
     term.open(el);
     const detachTouchScroll = attachTwoFingerScroll(
       el,
-      (lines) => term.scrollLines(lines),
+      (lines, position) => scrollTerminal(term, lines, position),
       () => (el.querySelector(".xterm-screen")?.getBoundingClientRect().height ?? 0) / term.rows || terminalFontSize,
     );
     const fit = new FitAddon();

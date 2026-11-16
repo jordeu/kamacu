@@ -10,6 +10,7 @@ const assert = require('node:assert/strict');
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const errors = [];
     const input = [];
+    const inputBytes = [];
     const sizes = [];
     let attachments = 0;
     let socket;
@@ -30,7 +31,10 @@ const assert = require('node:assert/strict');
       socket = ws;
       ws.onMessage(message => {
         const data = Buffer.from(message);
-        if (data[0] === 0x30) input.push(data.subarray(1).toString());
+        if (data[0] === 0x30) {
+          input.push(data.subarray(1).toString());
+          inputBytes.push(Array.from(data.subarray(1)));
+        }
         if (data[0] === 0x31) sizes.push(JSON.parse(data.subarray(1).toString()));
       });
       ws.send(Buffer.concat([Buffer.from([0x30]), Buffer.from('Mobile terminal ready\r\n$ ')]));
@@ -131,6 +135,23 @@ const assert = require('node:assert/strict');
     const desktop = await page.getByRole('button', { name: 'Exit full screen' }).locator('xpath=../../..').boundingBox();
     assert.equal(desktop.width, 1440);
     assert.equal(desktop.height, 1000);
+    // Exercise legacy mouse reporting through the real pane/socket path.
+    // Wide coordinates must remain single bytes, rather than UTF-8 pairs.
+    socket.send(Buffer.concat([Buffer.from([0x30]), Buffer.from('\x1b[?1049h\x1b[?1000h\x1b[?1006l')]));
+    await page.waitForTimeout(200);
+    inputBytes.length = 0;
+    const terminalTouch = await page.context().newCDPSession(page);
+    const points = y => [{ id: 1, x: 1100, y }, { id: 2, x: 1150, y }];
+    await terminalTouch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(150) });
+    for (let step = 1; step <= 8; step++) {
+      await terminalTouch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(150 + step * 15) });
+      await page.waitForTimeout(20);
+    }
+    await terminalTouch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(100);
+    assert.ok(inputBytes.length > 1, 'Legacy mouse wheel reports reach the socket');
+    assert.ok(inputBytes.every(bytes => bytes.length === 6 && bytes[0] === 27 && bytes[1] === 91 && bytes[2] === 77 && bytes[3] === 96 && bytes[4] > 127), 'Legacy wheel reports retain raw coordinate bytes');
+    await terminalTouch.detach();
     await page.setViewportSize({ width: 320, height: 568 });
     socket.send(Buffer.concat([Buffer.from([0x78]), Buffer.from('{"code":0}')]));
     await page.waitForFunction(() => document.querySelector('[aria-label="Ctrl+C: interrupt"]')?.disabled);

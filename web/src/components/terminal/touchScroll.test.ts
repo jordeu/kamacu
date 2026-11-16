@@ -8,21 +8,31 @@ function setup() {
     contains: (target: unknown) => target === inside,
   });
   const scroll = vi.fn();
-  const detach = attachTwoFingerScroll(element as HTMLElement, scroll, () => 20);
+  const positions = vi.fn();
+  const detach = attachTwoFingerScroll(element as HTMLElement, (lines, position) => {
+    scroll(lines);
+    positions(position);
+  }, () => 20);
   const touch = (type: string, points: [number, number, ("inside" | "outside")?][]) => {
     const event = new Event(type, { cancelable: true });
     Object.defineProperty(event, "touches", {
       value: points.map(([identifier, clientY, location]) => ({
-        identifier, clientY, target: location === "outside" ? outside : inside,
+        identifier, clientX: 100, clientY, target: location === "outside" ? outside : inside,
       })),
     });
     element.dispatchEvent(event);
     return event;
   };
-  return { element, scroll, detach, touch };
+  return { element, scroll, positions, detach, touch };
 }
 
 describe("two-finger terminal scrolling", () => {
+  it("passes the gesture position for application mouse-wheel reporting", () => {
+    const { touch, positions } = setup();
+    touch("touchstart", [[1, 100], [2, 120]]);
+    touch("touchmove", [[1, 140], [2, 160]]);
+    expect(positions).toHaveBeenLastCalledWith({ clientX: 100, clientY: 150 });
+  });
   it("scrolls in both directions using the average finger movement", () => {
     const { touch, scroll } = setup();
     expect(touch("touchstart", [[1, 100], [2, 120]]).defaultPrevented).toBe(true);
