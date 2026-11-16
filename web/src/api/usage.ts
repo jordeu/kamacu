@@ -8,7 +8,25 @@ export interface UsageWindow {
   resetsAt: string | null;
 }
 
+export interface CreditPeriod {
+  spentCredits: number;
+  startedAt: string;
+  baselineKnown: boolean;
+}
+
+export interface ExtraUsage {
+  creditPeriod: CreditPeriod | null;
+  enabled: boolean;
+  usedCredits: number | null;
+  monthlyLimit: number | null;
+  utilization: number | null;
+  currency: string;
+  historyAvailable: boolean;
+  daily: { date: string; spent: number; partial: boolean }[] | null;
+}
+
 export interface UsageResponse {
+  extraUsage: ExtraUsage | null;
   state: "ok" | "no_credentials" | "auth_expired" | "error";
   stale: boolean;
   fetchedAt: string | null;
