@@ -1,5 +1,5 @@
 // Package quota proxies Anthropic's undocumented OAuth usage endpoint as a
-// strictly best-effort, demand-driven quota indicator. Kamacu is a read-only
+// strictly best-effort quota and extra-credit usage indicator. Kamacu is a read-only
 // passenger on ~/.claude/.credentials.json: the file is re-read on every poll,
 // never written, and the token never outlives a single request, never appears
 // in logs, and never crosses the Kamacu API (the browser receives digested
@@ -9,6 +9,7 @@ package quota
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -38,10 +39,11 @@ type Window struct {
 
 // Result is the full /api/usage payload: a state enum plus last-good windows.
 type Result struct {
-	State     string     `json:"state"` // "ok" | "no_credentials" | "auth_expired" | "error"
-	Stale     bool       `json:"stale"`
-	FetchedAt *time.Time `json:"fetchedAt"` // last SUCCESSFUL fetch; null until first success
-	Windows   []Window   `json:"windows"`   // null when no data to show
+	State      string      `json:"state"` // "ok" | "no_credentials" | "auth_expired" | "error"
+	Stale      bool        `json:"stale"`
+	FetchedAt  *time.Time  `json:"fetchedAt"` // last SUCCESSFUL fetch; null until first success
+	ExtraUsage *ExtraUsage `json:"extraUsage"`
+	Windows    []Window    `json:"windows"` // null when no data to show
 }
 
 // credsFile decodes ONLY the two fields Kamacu needs. The file also carries
@@ -97,8 +99,7 @@ var windowLabels = map[string]string{
 // normalizeWindows decodes the upstream usage body into ordered windows:
 // known keys first in preference order, then remaining keys alphabetically
 // with raw-key labels (D-74 passthrough). Whole-null windows, keys whose
-// shape lacks utilization, and the literal "extra_usage" block (deferred
-// QUOTA-FUT-01 — its shape may grow a utilization field someday) are skipped.
+// shape lacks utilization, and the separately decoded extra_usage block are skipped.
 func normalizeWindows(body []byte) ([]Window, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
@@ -151,19 +152,23 @@ type Config struct {
 	BaseURL         string           // default: "https://api.anthropic.com"
 	UserAgent       string           // if "" → probe via DetectVersion(ClaudeBin)
 	ClaudeBin       string           // -claude-bin flag value; "" → exec.LookPath("claude")
+	DB              *sql.DB          // optional persistent daily usage history
+	AccountPath     string           // default: ~/.claude.json (stable OAuth account identity)
 	Now             func() time.Time // default: time.Now; test seam for TTL/floor control
 }
 
-// Service is the demand-driven, token-keyed quota cache. There is no ticker
-// goroutine: the browser's poll is the only trigger, so an idle server makes
-// zero upstream requests.
+// Service shares a token-keyed cache between browser requests and the
+// server sampler, preserving a single upstream polling budget.
 type Service struct {
-	mu        sync.Mutex
-	credsPath string
-	baseURL   string
-	userAgent string
-	client    *http.Client
-	now       func() time.Time // time.Now; override in tests
+	db          *sql.DB
+	accountPath string
+	extra       *ExtraUsage
+	mu          sync.Mutex
+	credsPath   string
+	baseURL     string
+	userAgent   string
+	client      *http.Client
+	now         func() time.Time // time.Now; override in tests
 
 	// cache state (all guarded by mu)
 	cached       []Window
@@ -199,12 +204,20 @@ func New(cfg Config) *Service {
 	if now == nil {
 		now = time.Now
 	}
+	accountPath := cfg.AccountPath
+	if accountPath == "" && cfg.CredentialsPath == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			accountPath = filepath.Join(home, ".claude.json")
+		}
+	}
 	return &Service{
-		credsPath: credsPath,
-		baseURL:   baseURL,
-		userAgent: userAgent,
-		client:    &http.Client{Timeout: 10 * time.Second},
-		now:       now,
+		db:          cfg.DB,
+		accountPath: accountPath,
+		credsPath:   credsPath,
+		baseURL:     baseURL,
+		userAgent:   userAgent,
+		client:      &http.Client{Timeout: 10 * time.Second},
+		now:         now,
 	}
 }
 
@@ -237,6 +250,7 @@ func (s *Service) Get(ctx context.Context, force bool) Result {
 	fp := sha256Hex(token)
 	if fp != s.tokenFP {
 		s.cached = nil
+		s.extra = nil
 		s.fetchedAt = time.Time{}
 		s.failures = 0
 		s.lastErr = ""
@@ -256,7 +270,7 @@ func (s *Service) Get(ctx context.Context, force bool) Result {
 	// floor binds lastAttempt (attempts); the 60s TTL binds fetchedAt
 	// (successes) — separate fields, or a failing upstream gets hammered
 	// by the 60s poll (Pitfall 3).
-	if (!force && s.cached != nil && now.Sub(s.fetchedAt) < cacheTTL) ||
+	if (!force && !s.fetchedAt.IsZero() && now.Sub(s.fetchedAt) < cacheTTL) ||
 		now.Before(s.backoffUntil) ||
 		now.Sub(s.lastAttempt) < attemptFloor ||
 		s.inflight {
@@ -271,11 +285,15 @@ func (s *Service) Get(ctx context.Context, force bool) Result {
 	s.lastAttempt = now
 	s.mu.Unlock()
 
+	account := s.accountID()
 	status, body, retryAfter, fetchErr := s.fetchUpstream(ctx, token)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inflight = false
+	if s.tokenFP != fp {
+		return s.resultLocked()
+	}
 
 	switch {
 	case fetchErr != nil:
@@ -285,6 +303,15 @@ func (s *Service) Get(ctx context.Context, force bool) Result {
 		if err != nil {
 			s.recordFailureLocked("error")
 			break
+		}
+		s.extra = normalizeExtraUsage(body)
+		if s.extra != nil && s.db != nil && account != "" && account == s.accountID() {
+			history, err := s.recordExtraUsage(ctx, account, s.extra, windows, s.now())
+			s.extra.HistoryAvailable = err == nil
+			s.extra.Daily = history
+			if err != nil {
+				slog.Warn("saving extra usage history failed")
+			}
 		}
 		s.cached = windows
 		s.fetchedAt = s.now()
@@ -360,6 +387,7 @@ func (s *Service) recordFailureLocked(state string) {
 	slog.Debug("quota fetch degraded", "state", state, "failures", s.failures)
 	if s.failures >= maxFailures {
 		s.cached = nil
+		s.extra = nil
 	}
 }
 
@@ -370,8 +398,9 @@ func (s *Service) resultLocked() Result {
 	if s.lastErr != "" {
 		state = s.lastErr
 	}
-	res := Result{State: state, Stale: s.lastErr != "" && s.cached != nil}
-	if s.cached != nil {
+	res := Result{State: state, Stale: s.lastErr != "" && (s.cached != nil || s.extra != nil)}
+	if s.cached != nil || s.extra != nil {
+		res.ExtraUsage = s.extra
 		res.Windows = s.cached
 		ft := s.fetchedAt
 		res.FetchedAt = &ft

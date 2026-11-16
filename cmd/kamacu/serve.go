@@ -400,7 +400,11 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		api.IntegrationRoutes(mux, integrationManager)
 	}
 
-	quotaSvc := quota.New(quota.Config{ClaudeBin: c.claudeBin})
+	quotaSvc := quota.New(quota.Config{ClaudeBin: c.claudeBin, DB: db})
+	quotaCtx, cancelQuota := context.WithCancel(ctx)
+	quotaDone := make(chan struct{})
+	go func() { defer close(quotaDone); quotaSvc.Run(quotaCtx) }()
+	defer func() { cancelQuota(); <-quotaDone }()
 	api.UsageRoutes(mux, quotaSvc)
 	ghSvc := github.New(github.Config{})
 	api.PullRequestRoutes(mux, db, ghSvc, wtSvc)
