@@ -4,7 +4,7 @@ import { PRStatusDetails, PRStatusOverview } from "./PRStatusOverview";
 import type { PRStatusSnapshot } from "@/api/prStatus";
 
 function data(bot = "comments"): PRStatusSnapshot {
-  return { repository: "acme/app", number: 12, lifecycle: "open", head: "a84c190",
+  return { repository: "acme/app", number: 12, lifecycle: "open", head: "a84c190", author: "authorname",
     humans: { state: "approved", reviewers: [{ login: "maria", state: "approved" }] },
     bots: { state: bot, reviewers: [{ login: "reviewbot", state: bot, detail: "Current head" }] },
     ci: { state: "pass", jobs: [{ name: "Unit tests", state: "pass" }] },
@@ -28,9 +28,17 @@ it("keeps CI, humans and comment-only bot outcomes separate in the overview", ()
   expect(html).toContain('aria-label="Human reviews"');
   expect(html).toContain('aria-label="Bot feedback"');
   expect(html).toContain("@maria");
+  expect(html).toContain("Author: ");
+  expect(html).toContain("@authorname");
   expect(html).toContain("@reviewbot");
   expect(html).toContain("Completed · no new findings");
   expect(html).toContain("not a human approval");
+});
+
+it("omits the author line when the author is unavailable", () => {
+  const snapshot = { ...data(), author: undefined };
+  const html = renderToStaticMarkup(<PRStatusDetails repository="acme/app" number={12} snapshot={snapshot} />);
+  expect(html).not.toContain("Author:");
 });
 
 it("shows an empty-body completed review without calling it an older commit or no-new-findings report", () => {

@@ -45,6 +45,7 @@ type PRStatus struct {
 	Number     int64        `json:"number"`
 	Lifecycle  string       `json:"lifecycle"`
 	Head       string       `json:"head"`
+	Author     string       `json:"author,omitempty"`
 	Humans     StatusGroup  `json:"humans"`
 	Bots       StatusGroup  `json:"bots"`
 	CI         StatusChecks `json:"ci"`
@@ -301,6 +302,7 @@ var noFindings = regexp.MustCompile(`(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?no new find
 func reducePRStatus(p statusPRRaw, complete map[string]bool) PRStatus {
 	out := UnknownPRStatus("", 0, "")
 	out.Head = p.Head
+	out.Author = p.Author.Login
 	out.Lifecycle = strings.ToLower(p.State)
 	if p.IsDraft && out.Lifecycle == "open" {
 		out.Lifecycle = "draft"
