@@ -1,7 +1,7 @@
 /** Capture two-finger drags before xterm or the browser handles the gesture. */
 export function attachTwoFingerScroll(
   element: HTMLElement,
-  scrollLines: (lines: number) => void,
+  scrollLines: (lines: number, position: { clientX: number; clientY: number }) => void,
   getLineHeight: () => number,
 ): () => void {
   let active = false;
@@ -42,7 +42,7 @@ export function attachTwoFingerScroll(
       remainder += (previous.y - y) / Math.max(1, getLineHeight());
       const lines = Math.trunc(remainder);
       if (lines !== 0) {
-        scrollLines(lines);
+        scrollLines(lines, { clientX: (first.clientX + second.clientX) / 2, clientY: y });
         remainder -= lines;
       }
     } else {

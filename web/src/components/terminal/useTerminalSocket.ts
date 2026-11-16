@@ -126,13 +126,18 @@ export function useTerminalSocket(opts: {
     // stdin: 0x30-framed; gated off while not OPEN or after exit.
     // Bracketed-paste wrappers (\x1b[200~..\x1b[201~) arrive inside onData
     // strings and pass through UNTOUCHED (D-17).
-    const dataDisposable = term.onData((s) => {
+    const sendInput = (bytes: Uint8Array) => {
       if (!ws || ws.readyState !== WebSocket.OPEN || exited) return;
-      const bytes = encoder.encode(s);
       const frame = new Uint8Array(bytes.length + 1);
       frame[0] = FRAME_STDIN;
       frame.set(bytes, 1);
       ws.send(frame);
+    };
+    const dataDisposable = term.onData((s) => sendInput(encoder.encode(s)));
+    // Legacy mouse reports arrive via onBinary. Each character is already
+    // one byte; UTF-8 encoding would corrupt coordinates above 127.
+    const binaryDisposable = term.onBinary((s) => {
+      sendInput(Uint8Array.from(s, (character) => character.charCodeAt(0)));
     });
 
     sendResizeRef.current = (cols: number, rows: number) => {
@@ -165,6 +170,7 @@ export function useTerminalSocket(opts: {
       disposed = true;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       dataDisposable.dispose();
+      binaryDisposable.dispose();
       ws?.close(); // safe even in CONNECTING state
       sendResizeRef.current = () => {};
       retryRef.current = () => {};
