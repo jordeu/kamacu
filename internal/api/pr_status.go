@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,6 +13,49 @@ import (
 	"kamacu/internal/github"
 	"kamacu/internal/settings"
 )
+
+func (h prContextHandlers) refreshStatus(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Repository string `json:"repository"`
+		Number     int64  `json:"number"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+		writeError(w, 400, "invalid PR identity")
+		return
+	}
+	repo, err := github.ParseRepoRef(input.Repository)
+	if err != nil || input.Number <= 0 {
+		writeError(w, 400, "invalid PR identity")
+		return
+	}
+	// Permit project-repository previews and explicit links to other repositories.
+	var allowed bool
+	err = h.db.QueryRowContext(r.Context(), `SELECT lower(COALESCE(github_repo,''))=lower(?) OR EXISTS(SELECT 1 FROM task_pr_links l JOIN tasks t ON t.id=l.task_id WHERE t.project_id=projects.id AND lower(l.repository)=lower(?) AND l.number=? AND l.role!='incidental') FROM projects WHERE id=?`, repo, repo, input.Number, id).Scan(&allowed)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !allowed) {
+		writeError(w, 404, "project PR not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	enabled, err := settings.Get(h.db, settings.KeyGithubIntegration)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	if enabled != "on" {
+		writeJSON(w, 200, github.UnknownPRStatus(repo, input.Number, "GitHub integration disabled"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	writeJSON(w, 200, h.statuses.Refresh(ctx, repo, input.Number))
+}
 
 // Project-wide status polling keeps all card hooks on one shared query. Only
 // explicit, non-rejected links belonging to this project's board are read.

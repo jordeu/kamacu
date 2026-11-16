@@ -660,6 +660,15 @@ func (s *PRStatusService) NextBatchStart(scope string, count, workers int) int {
 }
 
 func (s *PRStatusService) Get(ctx context.Context, repo string, number int64) PRStatus {
+	return s.get(ctx, repo, number, false)
+}
+
+// Refresh bypasses the cache while sharing any lookup already in progress.
+func (s *PRStatusService) Refresh(ctx context.Context, repo string, number int64) PRStatus {
+	return s.get(ctx, repo, number, true)
+}
+
+func (s *PRStatusService) get(ctx context.Context, repo string, number int64, force bool) PRStatus {
 	key := fmt.Sprintf("%s/%d", strings.ToLower(repo), number)
 	for {
 		s.mu.Lock()
@@ -672,6 +681,7 @@ func (s *PRStatusService) Get(ctx context.Context, repo string, number int64) PR
 			case <-ctx.Done():
 				return UnknownPRStatus(repo, number, "PR lookup timed out")
 			case <-done:
+				force = false
 				continue
 			}
 		}
@@ -683,7 +693,7 @@ func (s *PRStatusService) Get(ctx context.Context, repo string, number int64) PR
 			if e.snapshot.Stale || e.snapshot.FetchedAt == nil {
 				ttl = 10 * time.Second
 			}
-			if now.Sub(e.attempted) < ttl {
+			if !force && now.Sub(e.attempted) < ttl {
 				result := e.snapshot
 				s.mu.Unlock()
 				return result

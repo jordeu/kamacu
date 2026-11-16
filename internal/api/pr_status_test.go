@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -53,6 +55,7 @@ func TestProjectPRStatusesScopeDedupAndDisabled(t *testing.T) {
 	h := prContextHandlers{db: db, statuses: svc}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/projects/{id}/task-pr-statuses", h.projectStatuses)
+	mux.HandleFunc("POST /api/projects/{id}/task-pr-statuses/refresh", h.refreshStatus)
 	get := func(path string) (int, []github.PRStatus) {
 		t.Helper()
 		w := httptest.NewRecorder()
@@ -84,6 +87,47 @@ func TestProjectPRStatusesScopeDedupAndDisabled(t *testing.T) {
 	}
 	if code, _ := get("/api/projects/404/task-pr-statuses"); code != 404 {
 		t.Fatal(code)
+	}
+	if err = settings.Set(db, settings.KeyGithubIntegration, "on"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		project, repo string
+		number        int
+		code          int
+	}{
+		{"1", "ACME/REPO", 7, 200},
+		{"1", "acme/repo", 7, 200},
+		{"1", "acme/repo", 9, 404},  // Rejected association.
+		{"1", "acme/repo", 10, 404}, // Other project's PR.
+		{"404", "acme/repo", 7, 404},
+		{"1", "invalid", 7, 400},
+		{"1", "acme/repo", 0, 400},
+	} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/projects/"+tc.project+"/task-pr-statuses/refresh", strings.NewReader(fmt.Sprintf(`{"repository":%q,"number":%d}`, tc.repo, tc.number))))
+		if w.Code != tc.code {
+			t.Fatalf("refresh %+v: %d %s", tc, w.Code, w.Body.String())
+		}
+	}
+	if calls.Load() != 4 {
+		t.Fatal("refresh must bypass cached status and scope invalid requests", calls.Load())
+	}
+	if _, err = db.Exec(`UPDATE projects SET github_repo='acme/preview' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/projects/1/task-pr-statuses/refresh", strings.NewReader(`{"repository":"acme/preview","number":123}`)))
+	if w.Code != 200 || calls.Load() != 5 {
+		t.Fatal("project-repository previews should refresh without a task", w.Code, calls.Load())
+	}
+	if err = settings.Set(db, settings.KeyGithubIntegration, "off"); err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/projects/1/task-pr-statuses/refresh", strings.NewReader(`{"repository":"acme/repo","number":7}`)))
+	if w.Code != 200 || calls.Load() != 5 || !strings.Contains(w.Body.String(), "GitHub integration disabled") {
+		t.Fatal("disabled integration must not fetch", w.Code, w.Body.String(), calls.Load())
 	}
 }
 
