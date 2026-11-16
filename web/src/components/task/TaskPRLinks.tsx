@@ -45,7 +45,7 @@ function LinkedTaskPRLinks({ task, links, className, compact }: {
           <span className="truncate">{multipleRepos ? `${link.repository} ` : ""}PR #{link.number}</span>
           <ExternalLink aria-hidden="true" className="size-3 shrink-0" />
         </a>
-        <PRStatusOverview snapshot={snapshot} repository={link.repository} number={link.number} />
+        <PRStatusOverview snapshot={snapshot} repository={link.repository} number={link.number} projectId={task.project_id} />
       </span>
     );
   };

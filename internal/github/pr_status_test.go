@@ -267,6 +267,42 @@ func TestPRStatusCacheDedupAndStale(t *testing.T) {
 	}
 }
 
+func TestPRStatusRefreshBypassesCacheAndRetainsFailedSnapshot(t *testing.T) {
+	var calls int
+	now := time.Now()
+	svc := NewPRStatusService(func(context.Context, string, int64) (PRStatus, error) {
+		calls++
+		if calls == 3 {
+			return PRStatus{}, errors.New("offline")
+		}
+		out := UnknownPRStatus("acme/repo", 7, "")
+		out.Lifecycle = "merged" // Even the longer terminal-state TTL is bypassed.
+		out.Head = fmt.Sprintf("head-%d", calls)
+		out.FetchedAt = &now
+		return out, nil
+	}, nil)
+	svc.Get(t.Context(), "acme/repo", 7)
+	svc.Get(t.Context(), "acme/repo", 7)
+	if calls != 1 {
+		t.Fatal("ordinary reads should be cached", calls)
+	}
+	result := svc.Refresh(t.Context(), "ACME/REPO", 7)
+	if calls != 2 || result.Head != "head-2" || result.Stale {
+		t.Fatal("forced refresh used cache", calls, result)
+	}
+	if cached := svc.Get(t.Context(), "acme/repo", 7); calls != 2 || cached.Head != "head-2" {
+		t.Fatal("refresh did not update shared cache", calls, cached)
+	}
+	result = svc.Refresh(t.Context(), "acme/repo", 7)
+	if calls != 3 || !result.Stale || result.Head != "head-2" || result.Error != "offline" {
+		t.Fatal("failed refresh lost prior snapshot", calls, result)
+	}
+	result = svc.Refresh(t.Context(), "acme/repo", 7)
+	if calls != 4 || result.Stale || result.Head != "head-4" {
+		t.Fatal("retry must bypass failure cache", calls, result)
+	}
+}
+
 func TestPRStatusBotChecksUseLatestRunAndStickyComment(t *testing.T) {
 	p := statusFixture(t)
 	p.Reviews.Nodes = []statusReview{statusReviewFor("robot", "Bot", "COMMENTED", "No new findings", "old", 1)}

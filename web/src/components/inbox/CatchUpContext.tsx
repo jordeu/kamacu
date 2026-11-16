@@ -23,7 +23,7 @@ function CatchUpPRReference({ pr, project }: { pr: CatchUpPR; project?: Project 
   const detail = useCatchUpPRDetail(project?.id ?? 0, pr, previewOpen && !!project);
   const status = useCatchUpPRStatus(project?.id ?? 0, pr, previewOpen && !!project);
   const snapshot = status.data && status.isError ? { ...status.data, stale: true, error: "Could not refresh PR status" } : status.data;
-  return <PRStatusOverview repository={pr.repository} number={pr.number}
+  return <PRStatusOverview repository={pr.repository} number={pr.number} projectId={project?.id}
     reference={{ url: pr.url, label: `${pr.repository} · PR ${pr.number}` }}
     title={detail.data?.title} snapshot={snapshot} onPreviewChange={setPreviewOpen}
     previewContent={<>

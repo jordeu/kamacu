@@ -6,14 +6,23 @@ const assert = require('node:assert/strict');
  const browser=await chromium.launch({headless:true,executablePath:process.env.KAMACU_BROWSER_EXECUTABLE,args:['--no-sandbox']});
  try {
   const page=await browser.newPage({viewport:{width:1440,height:1000},hasTouch:true});page.setDefaultTimeout(10000);
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));let statusReads=0;
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));let statusReads=0,refreshReads=0;
+  let releaseRefresh;
+  const refreshGate=new Promise(resolve=>{releaseRefresh=resolve});
   const link={task_id:1,repository:'acme/app',number:12,url:'https://github.com/acme/app/pull/12',role:'implementation'};
   const task={id:1,project_id:1,title:'Show implementation PR links',description:'Task description',status:'in_progress',source:'manual',position:0,recurrent:false,branch:'task/pr-links',worktree_path:'/tmp/worktree',worktree_error:null,pr_number:null,pr_links:[link]};
   let snapshot={repository:'acme/app',number:12,lifecycle:'open',head:'a84c190',humans:{state:'approved',reviewers:[{login:'maria',state:'approved'}]},bots:{state:'comments',reviewers:[{login:'reviewbot',state:'comments',findings:2,detail:'Unresolved bot review threads'}]},ci:{state:'pass',jobs:[{name:'Unit tests',state:'pass'}]},fetched_at:'2026-11-13T10:00:00Z',stale:false};
-  await page.route('**/api/**',route=>{
+  await page.route('**/api/**',async route=>{
    const p=new URL(route.request().url()).pathname;if(!p.startsWith('/api/'))return route.continue();
    if(p==='/api/events'||p==='/api/pending')return route.fulfill({contentType:'text/event-stream',body:': mock stream\n\n'});
    if(p==='/api/projects/1/task-pr-statuses'){statusReads++;return route.fulfill({json:{statuses:[snapshot]}})}
+   if(p==='/api/projects/1/task-pr-statuses/refresh'){
+    assert.equal(route.request().method(),'POST');assert.deepEqual(route.request().postDataJSON(),{repository:'acme/app',number:12});
+    refreshReads++;if(refreshReads===1)await refreshGate;
+    if(refreshReads===2)return route.fulfill({status:503,json:{error:'Offline'}});
+    snapshot={...snapshot,head:'fresh-'+refreshReads,ci:{state:refreshReads===1?'fail':'pass',jobs:[]},fetched_at:new Date().toISOString()};
+    return route.fulfill({json:snapshot});
+   }
    const data=p==='/api/projects'?[{id:1,name:'Kamacu',workspace_id:1,icon_letters:'KA',icon_color:'blue',agent_id:1}]
     :p==='/api/workspaces'?[{id:1,name:'Work'}]:p==='/api/agents'?[{id:1,name:'Custom',engine:'custom'}]
     :p==='/api/projects/1/tasks'?[task,{...task,id:2,title:'Another linked task'}]
@@ -32,11 +41,27 @@ const assert = require('node:assert/strict');
   for(const name of ['CI checks','Human reviews','Bot feedback'])await overview().getByRole('region',{name}).waitFor();
   assert.match(await overview().innerText(),/@maria/);assert.match(await overview().innerText(),/@reviewbot/);assert.match(await overview().innerText(),/2 open findings/);
   await overview().hover();assert.equal(await overview().isVisible(),true);
+  const refresh=()=>overview().getByRole('button',{name:'Refresh PR status'});
+  await refresh().click();
+  await page.waitForFunction(()=>document.querySelector('button[aria-label="Refresh PR status"]')?.disabled);
+  assert.equal(await refresh().isDisabled(),true,'Refresh is disabled while fetching');
+  releaseRefresh();
+  await page.waitForFunction(()=>document.querySelectorAll('button[aria-label^="CI failing."]').length===2);
+  assert.match(await overview().innerText(),/Checks failing/);
+  assert.equal(new URL(page.url()).pathname,'/projects/1','Refreshing does not navigate or close the popup');
+  assert.equal(refreshReads,1);assert.equal(statusReads,1,'Refresh updates the shared cache without fetching every PR');
+  await refresh().click();await overview().getByText('Could not refresh PR status',{exact:true}).waitFor();
+  assert.match(await overview().innerText(),/Last known snapshot/);
+  assert.match(await status().getAttribute('aria-label'),/CI failing/,'A failed refresh retains the prior snapshot');
+  await refresh().click();await page.waitForFunction(()=>document.querySelectorAll('button[aria-label^="Human approved · CI passing."]').length===2);
+  assert.equal(await overview().getByRole('alert').count(),0,'Successful retry clears the error');
+  assert.equal(await overview().getByText('Could not refresh PR status',{exact:true}).count(),0);
   if(process.env.KAMACU_BROWSER_SCREENSHOTS)await page.screenshot({path:process.env.KAMACU_BROWSER_SCREENSHOTS+'-board.png'});
   await page.keyboard.press('Escape');await overview().waitFor({state:'hidden'});
   // Escape while reading the portal must not suppress the next real hover.
   await status().hover();await overview().waitFor();
   await page.keyboard.press('Escape');await overview().waitFor({state:'hidden'});
+  await status().evaluate(el=>el.blur());
   await status().focus();await overview().waitFor();await page.keyboard.press('Escape');await overview().waitFor({state:'hidden'});
   await status().click();await page.mouse.move(1380,20);assert.equal(await overview().isVisible(),true,'Click pins the overview');
   await status().click();await overview().waitFor({state:'hidden'});

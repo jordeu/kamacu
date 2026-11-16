@@ -3,9 +3,10 @@ import { Popover } from "radix-ui";
 import {
   Bot, Check, CircleCheck, CircleHelp, CircleMinus, CircleX, Clock,
   GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft,
-  History, MessageSquare, TriangleAlert, UserRound,
+  History, MessageSquare, RefreshCw, TriangleAlert, UserRound,
 } from "lucide-react";
 import type { PRStatusGroup, PRStatusSnapshot } from "@/api/prStatus";
+import { useRefreshPRStatus } from "@/api/prStatus";
 import { primaryPRStatus, prStatusLabels, statusTone, type StatusTone } from "@/lib/prStatus";
 import { cn } from "@/lib/utils";
 
@@ -51,8 +52,24 @@ function ReviewGroup({ group, bots = false }: { group?: PRStatusGroup; bots?: bo
   </section>;
 }
 
-export function PRStatusDetails({ snapshot, repository, number, showJobs = false }: {
-  snapshot?: PRStatusSnapshot; repository: string; number: number; showJobs?: boolean;
+function PRStatusRefresh({ projectId, repository, number, snapshot }: { projectId: number; repository: string; number: number; snapshot?: PRStatusSnapshot }) {
+  const refresh = useRefreshPRStatus(projectId, repository, number);
+  // Once a later poll succeeds, discard the mutation's historical error.
+  // Snapshot errors are already displayed in the overview footer.
+  const error = refresh.isError && (!snapshot || snapshot.stale) && !snapshot?.error ? "Couldn’t refresh PR status. Try again." : undefined;
+  return <div className="space-y-1">
+    <button type="button" disabled={refresh.isPending} onClick={() => refresh.mutate()}
+      className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 text-[11px] text-zinc-300 hover:bg-zinc-700/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
+      aria-label="Refresh PR status" aria-busy={refresh.isPending}>
+      <RefreshCw aria-hidden="true" className={cn("size-3", refresh.isPending && "animate-spin motion-reduce:animate-none")} />
+      {refresh.isPending ? "Refreshing…" : "Refresh"}
+    </button>
+    {error && <p role="alert" className="text-[10px] text-red-400">{error}</p>}
+  </div>;
+}
+
+export function PRStatusDetails({ snapshot, repository, number, showJobs = false, projectId }: {
+  snapshot?: PRStatusSnapshot; repository: string; number: number; showJobs?: boolean; projectId?: number;
 }) {
   const primary = primaryPRStatus(snapshot);
   const Mark = icons[primary.icon];
@@ -86,6 +103,7 @@ export function PRStatusDetails({ snapshot, repository, number, showJobs = false
     <ReviewGroup group={snapshot?.humans} />
     <ReviewGroup group={snapshot?.bots} bots />
     <footer className="space-y-1 border-t border-zinc-700/80 pt-2 text-[10px] text-zinc-400">
+      {!!projectId && <PRStatusRefresh projectId={projectId} repository={repository} number={number} snapshot={snapshot} />}
       {snapshot?.fetched_at && <p>{snapshot.stale ? "Last known snapshot" : "Updated"}: <time dateTime={snapshot.fetched_at}>{new Date(snapshot.fetched_at).toLocaleString()}</time></p>}
       {snapshot?.error && <p role="status">{snapshot.error}</p>}
       <p>Green describes human approval and CI, not merge eligibility.</p>
@@ -95,12 +113,13 @@ export function PRStatusDetails({ snapshot, repository, number, showJobs = false
 
 /** Hover/focus previews the overview; clicking pins it for touch and keyboard.
  * The anchor and portal stop all three board drag sensors independently. */
-export function PRStatusOverview({ snapshot, repository, number, reference, title, previewContent, onPreviewChange }: {
+export function PRStatusOverview({ snapshot, repository, number, reference, title, previewContent, onPreviewChange, projectId }: {
   snapshot?: PRStatusSnapshot; repository: string; number: number;
   reference?: { url: string; label: string };
   title?: string;
   previewContent?: ReactNode;
   onPreviewChange?: (open: boolean) => void;
+  projectId?: number;
 }) {
   const [open, setOpenState] = useState(false);
   const setOpen = useCallback((value: boolean) => {
@@ -230,7 +249,7 @@ export function PRStatusOverview({ snapshot, repository, number, reference, titl
           className="z-50 max-h-[min(600px,var(--radix-popover-content-available-height))] w-[330px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-lg border border-zinc-600 bg-zinc-800 p-4 text-zinc-100 shadow-xl outline-none">
           {title && <h3 className="mb-3 break-words text-sm font-semibold">{title}</h3>}
           {previewContent}
-          <PRStatusDetails snapshot={snapshot} repository={repository} number={number} />
+          <PRStatusDetails snapshot={snapshot} repository={repository} number={number} projectId={projectId} />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

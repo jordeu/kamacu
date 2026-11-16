@@ -110,6 +110,7 @@ func (h prContextHandlers) pr(w http.ResponseWriter, r *http.Request) {
 func prContextRoutes(mux *http.ServeMux, db *sql.DB, mgr *session.Manager) {
 	h := prContextHandlers{db: db, mgr: mgr, statuses: github.NewPRStatusService(nil, nil)}
 	mux.HandleFunc("GET /api/projects/{id}/task-pr-statuses", h.projectStatuses)
+	mux.HandleFunc("POST /api/projects/{id}/task-pr-statuses/refresh", h.refreshStatus)
 	mux.HandleFunc("GET /api/projects/{id}/pull-requests/{n}/status", h.pullRequestStatus)
 	mux.HandleFunc("GET /api/pr-context", h.pr)
 	mux.HandleFunc("GET /api/tasks/{id}/pr-context", h.task)
