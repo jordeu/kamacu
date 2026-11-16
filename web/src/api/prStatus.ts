@@ -16,6 +16,7 @@ export interface PRStatusSnapshot {
   number: number;
   lifecycle: string;
   head: string;
+  author?: string;
   humans: PRStatusGroup;
   bots: PRStatusGroup;
   ci: { state: string; jobs: { name: string; state: string; detail?: string }[] };

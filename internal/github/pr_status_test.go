@@ -55,6 +55,9 @@ func TestPRStatusHumanDecisions(t *testing.T) {
 				p.Requests.Nodes = []statusRequest{{Reviewer: statusActor{Login: "alice", Kind: "User"}}}
 			}
 			got := reducePRStatus(p, statusComplete())
+			if got.Author != p.Author.Login {
+				t.Fatalf("PR author missing: got %q want %q", got.Author, p.Author.Login)
+			}
 			if got.Humans.State != tt.want {
 				t.Fatalf("humans=%+v want %s", got.Humans, tt.want)
 			}

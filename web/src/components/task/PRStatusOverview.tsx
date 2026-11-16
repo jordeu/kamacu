@@ -68,6 +68,7 @@ export function PRStatusDetails({ snapshot, repository, number, showJobs = false
       <p className="break-words text-[11px] text-zinc-400">{repository} · PR #{number}
         {snapshot && <> · {snapshot.lifecycle}{snapshot.head && <> · <span className="font-mono">{snapshot.head.slice(0, 7)}</span></>}</>}
       </p>
+      {snapshot?.author && <p className="break-all text-[11px] text-zinc-400">Author: <span className="text-zinc-200">@{snapshot.author}</span></p>}
     </header>
     <section aria-label="CI checks" className="flex items-center justify-between gap-2 border-t border-zinc-700/80 pt-3">
       <h4 className="text-[10px] uppercase tracking-wide text-zinc-400">CI checks</h4>
