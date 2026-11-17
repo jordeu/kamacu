@@ -36,7 +36,8 @@ func TestPRStatusHumanDecisions(t *testing.T) {
 		want      string
 	}{
 		{"current approval", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "head", 1)}, false, "approved"},
-		{"old approval", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "old", 1)}, false, "waiting"},
+		{"old approval", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "old", 1)}, false, "approved"},
+		{"re-request old approval", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "old", 1)}, true, "waiting"},
 		{"re-request", []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "head", 1)}, true, "waiting"},
 		{"re-request after changes on older commit", []statusReview{statusReviewFor("alice", "User", "CHANGES_REQUESTED", "", "old", 1)}, true, "waiting"},
 		{"re-request after changes on current commit", []statusReview{statusReviewFor("alice", "User", "CHANGES_REQUESTED", "", "head", 1)}, true, "waiting"},
@@ -92,6 +93,18 @@ func TestPRStatusHumanReReviewDoesNotHideOtherChangeRequests(t *testing.T) {
 	out = reducePRStatus(p, statusComplete())
 	if out.Humans.State != "waiting" || out.CI.State != "pass" {
 		t.Fatalf("re-requested changes with passing CI must wait for review: %+v", out)
+	}
+}
+
+func TestPRStatusOlderHumanApprovalRetainsCommitNote(t *testing.T) {
+	p := statusFixture(t)
+	p.Reviews.Nodes = []statusReview{statusReviewFor("alice", "User", "APPROVED", "", "old", 1)}
+	out := reducePRStatus(p, statusComplete())
+	if out.Humans.State != "approved" || out.CI.State != "pass" || len(out.Humans.Reviewers) != 1 {
+		t.Fatal(out)
+	}
+	if reviewer := out.Humans.Reviewers[0]; reviewer.State != "approved" || reviewer.Detail != "Approval is for an older commit" {
+		t.Fatal(reviewer)
 	}
 }
 

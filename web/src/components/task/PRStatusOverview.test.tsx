@@ -41,6 +41,15 @@ it("omits the author line when the author is unavailable", () => {
   expect(html).not.toContain("Author:");
 });
 
+it("shows older human approval as approved while retaining the commit note", () => {
+  const snapshot = data();
+  snapshot.humans.reviewers[0].detail = "Approval is for an older commit";
+  const html = renderToStaticMarkup(<PRStatusDetails repository="acme/app" number={12} snapshot={snapshot} />);
+  expect(html).toContain("Human approved · CI passing");
+  expect(html).toContain("Approval is for an older commit");
+  expect(html).not.toContain("Review requested");
+});
+
 it("shows an empty-body completed review without calling it an older commit or no-new-findings report", () => {
   const html = renderToStaticMarkup(<PRStatusDetails repository="acme/app" number={12} snapshot={data("complete")} />);
   expect(html).toContain("Completed");
