@@ -471,11 +471,11 @@ func reducePRStatus(p statusPRRaw, complete map[string]bool) PRStatus {
 				}
 			case e.decision != nil && e.decision.State == "CHANGES_REQUESTED":
 				r.State = "changes"
-			case e.decision != nil && e.decision.State == "APPROVED" && e.decision.Commit.OID == p.Head:
-				r.State = "approved"
 			case e.decision != nil && e.decision.State == "APPROVED":
-				r.State = "waiting"
-				r.Detail = "Approval is for an older commit"
+				r.State = "approved"
+				if e.decision.Commit.OID != p.Head {
+					r.Detail = "Approval is for an older commit"
+				}
 			case e.decision != nil && e.decision.State == "DISMISSED":
 				r.State = "waiting"
 				r.Detail = "Prior decision was dismissed"
