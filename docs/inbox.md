@@ -74,7 +74,17 @@ Presence updates on terminal selection, navigation, focus, and visibility, with 
 
 The Go server renders terminal bytes continuously, independently of browser attachment. Input and screen revisions guard delayed model results and replies. The renderer uses bounded screen/history storage and preserves split UTF-8/ANSI sequences. It matches terminal dimensions down to a single cell; terminals larger than 300 columns or 100 rows show monitoring unavailable rather than trusting clipped output. Resize invalidates pending replies. Rendering is synchronous to avoid dropped bytes; model inference runs outside the PTY/session locks.
 
-The scheduler checks once a second, debounces stable output for two seconds, and limits calls to at most one per session every five seconds. Continuously changing output is reconsidered after ten seconds. Four workers prioritize the oldest attempt. User input or model configuration changes cancel obsolete calls; changed screens reject old results. Each call has a thirty-second timeout, bounded input/output, and provider failures back off. Stable unchanged screens require no repeated calls. There is no spending cutoff.
+The scheduler checks once a second, debounces stable output for two seconds, and limits attempts to at most one per session every five seconds. Continuously changing output is reconsidered after ten seconds. Four workers prioritize the oldest attempt. User input or model configuration changes cancel obsolete calls; changed screens reject old results. Each attempt has a thirty-second timeout, bounded input/output, and provider failures back off. Stable unchanged screens require no repeated calls. There is no spending cutoff.
+
+Conversational approval requests such as whether to publish a review accept text
+replies. They are distinct from native terminal permission dialogs. For a known
+ready Claude text prompt with an unanswered question and explicit numbered
+replies, classification must preserve all displayed choices in text mode. An
+inconsistent result gets at most one correction call on the same frozen screen
+and within the same thirty-second deadline. Both calls retain their own usage
+and diagnostic records. A second failure does not publish an empty-choice card.
+Native menus, uncertain input, plans, and quoted lists are not automatically
+converted into reply buttons. No reply is selected or sent by classification.
 
 The active-session bar lists open agent terminals until their processes exit, independently of classification. Meaningful terminal output or user input marks an agent working immediately, with a 15-second activity window. Identical repaints and resizing do not count as activity. Without recent activity, the terminal is idle; this does not mean the task is complete. A current model decision can identify waiting, errors, or an idle prompt. New activity invalidates that decision. This works for every agent engine, including custom agents. Provider/auth/quota failures remain monitoring diagnostics and do not hide sessions or introduce an unknown status. Settings show calls, failures, timeouts, last latency, and tokens when the adapter receives usage data; these counters reset on server restart. Codex's current final-text adapter does not expose token counts.
 
