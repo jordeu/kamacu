@@ -38,10 +38,11 @@ icon. Click it to reopen the details or cancel queued checks; started checks
 finish normally. Closing the dialog leaves the queue running, while a server
 restart stops it.
 
-The Claude quota indicator also shows extra-credit spending for the current
-month and the configured monthly spending limit. When a subscription window
-reaches 100%, the indicator and popup highlight spending in that continuous
-extra-credit period. The counter survives restarts and overlapping limits, and
+The Claude quota indicator opens a popup showing extra-credit spending for the
+current month and the configured monthly spending limit. When a subscription
+window reaches 100%, the popup highlights spending in that continuous
+extra-credit period. The minimized indicator shows only the Claude label and
+quota bar. The counter survives restarts and overlapping limits, and
 ends when subscription quota is available again. If the original crossing was
 not observed, it says **Since tracking began** and marks the amount as partial.
 Open **Daily extra spending** in the popup for the last 31 recorded days; this
