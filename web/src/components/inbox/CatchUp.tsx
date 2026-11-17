@@ -52,21 +52,21 @@ function CatchUpPass({ items, onClose }: { items: FeedbackQuestion[]; onClose: (
   const [pass] = useState(items);
   const [index, setIndex] = useState(0);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [notice, setNotice] = useState("");
   const q = pass[index];
-  function advance(message = "") { setNotice(message); setIndex(current => current + 1); }
+  function advance() { setIndex(current => current + 1); }
   return <>
     <CatchUpHeader onClose={onClose} progress={q ? `${index + 1} / ${pass.length}` : "Pass complete"} />
-    {q ? <CatchUpMessage key={q.id} initial={q} draft={drafts[q.id]} onDraft={draft => setDrafts(current => ({ ...current, [q.id]: draft }))} notice={notice} onNotice={setNotice} onClose={onClose} onPrevious={index ? () => { setNotice(""); setIndex(index - 1); } : undefined} onAdvance={advance} /> : <div className="min-h-0 flex-1 overflow-y-auto p-6">
-      <div className="mx-auto max-w-xl space-y-5 py-16 text-center"><CheckCheck className="mx-auto size-9 text-emerald-300" /><h2 className="text-2xl font-semibold">{pass.length ? "You’ve reached the end of this pass" : "You’re all caught up"}</h2><p className="text-sm text-muted-foreground">{pass.length ? "Skipped messages remain pending. New arrivals will be included the next time you open Catch up." : "New requests and completed work will appear here."}</p>{notice && <p role="status" className="text-sm">{notice}</p>}<div className="flex justify-center gap-3">{pass.length > 0 && <Button variant="outline" onClick={() => { setNotice(""); setIndex(pass.length - 1); }}>Previous message</Button>}<Button onClick={onClose}>Back to your page</Button></div></div>
+    {q ? <CatchUpMessage key={q.id} initial={q} draft={drafts[q.id]} onDraft={draft => setDrafts(current => ({ ...current, [q.id]: draft }))} onClose={onClose} onPrevious={index ? () => setIndex(index - 1) : undefined} onAdvance={advance} /> : <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-xl space-y-5 py-16 text-center"><CheckCheck className="mx-auto size-9 text-emerald-300" /><h2 className="text-2xl font-semibold">{pass.length ? "You’ve reached the end of this pass" : "You’re all caught up"}</h2><p className="text-sm text-muted-foreground">{pass.length ? "Skipped messages remain pending. New arrivals will be included the next time you open Catch up." : "New requests and completed work will appear here."}</p><div className="flex justify-center gap-3">{pass.length > 0 && <Button variant="outline" onClick={() => setIndex(pass.length - 1)}>Previous message</Button>}<Button onClick={onClose}>Back to your page</Button></div></div>
     </div>}
   </>;
 }
-function CatchUpMessage({ initial, draft, onDraft, notice, onNotice, onClose, onPrevious, onAdvance }: {
+function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvance }: {
   initial: FeedbackQuestion; draft?: Draft; onDraft: (draft: Draft) => void;
-  notice: string; onNotice: (message: string) => void; onClose: () => void;
-  onPrevious?: () => void; onAdvance: (message?: string) => void;
+  onClose: () => void;
+  onPrevious?: () => void; onAdvance: () => void;
 }) {
+  const [notice, setNotice] = useState("");
   const selected = useInboxMessage(initial.id);
   const q = selected.data ?? initial;
   const context = useCatchUpContext(q);
@@ -86,13 +86,14 @@ function CatchUpMessage({ initial, draft, onDraft, notice, onNotice, onClose, on
   function edit(update: Partial<Draft>) { onDraft({ answer: draft?.answer ?? "", optionID: draft?.optionID, revision: draft?.revision ?? q.revision, ...update }); }
   async function submit(kind: "answer" | "dismiss") {
     if (blocked) return;
+    setNotice("");
     try {
       const result = await action.mutateAsync({ question: q, action: kind, option_id: kind === "answer" && !answer.trim() ? optionID : undefined, answer: kind === "answer" && answer.trim() ? answer : undefined });
       const latest = client.setQueryData<FeedbackQuestion>(["inbox", "message", q.id], current => latestCatchUpMessage(current, result.question));
       if (latest && latest.revision > result.question.revision) {
-        onNotice("This message changed again while your response was being saved. Review its latest version before continuing.");
-      } else if (catchUpActionSucceeded(result, kind)) onAdvance(feedbackOutcomeMessage(result));
-      else onNotice(feedbackOutcomeMessage(result));
+        setNotice("This message changed again while your response was being saved. Review its latest version before continuing.");
+      } else if (catchUpActionSucceeded(result, kind)) onAdvance();
+      else setNotice(feedbackOutcomeMessage(result));
     } catch { /* Keep this message and its draft visible, including uncertain delivery. */ }
   }
   return <>
@@ -121,7 +122,7 @@ function CatchUpMessage({ initial, draft, onDraft, notice, onNotice, onClose, on
               {canWrite && <details open={answer ? true : undefined} className="border-t border-border pt-3"><summary className="cursor-pointer text-xs text-muted-foreground">Write your own answer</summary><label htmlFor={`catch-up-answer-${q.id}`} className="mt-3 block text-xs text-muted-foreground">Your instructions{q.origin === "notification" && " · interpreted once before execution"}</label><Textarea id={`catch-up-answer-${q.id}`} value={answer} onChange={e => edit({ answer: e.target.value })} maxLength={16000} rows={3} className="mt-2 resize-y" disabled={action.isPending} /><p className="mt-2 text-xs text-muted-foreground">Written instructions take precedence over a selected option.</p></details>}
               {!canChoose && <p className="text-sm text-muted-foreground">Respond in the originating agent terminal.</p>}
               {q.origin !== "notification" && <Button variant="outline" size="sm" asChild><Link to={feedbackTaskURL(q)} onClick={onClose}>{q.task_id === 0 ? "Open Scratchpad" : "Open task terminal"} ↗</Link></Button>}
-              {changed && <div role="alert" className="space-y-2 rounded-lg border border-orange-300/40 p-3 text-sm"><p>This message changed while you were responding. Review the updated context before continuing. Your draft has been kept.</p><Button variant="outline" size="sm" onClick={() => edit({ revision: q.revision, optionID: undefined })}>I’ve reviewed the updated message</Button></div>}
+              {changed && <div role="alert" className="space-y-2 rounded-lg border border-orange-300/40 p-3 text-sm"><p>This message changed while you were responding. Review the updated context before continuing. Your draft has been kept.</p><Button variant="outline" size="sm" onClick={() => { setNotice(""); edit({ revision: q.revision, optionID: undefined }); }}>I’ve reviewed the updated message</Button></div>}
               <Button variant="ghost" size="sm" disabled={blocked} onClick={() => void submit("dismiss")}>Dismiss message</Button>
             </>}
             {action.isError && <p role="alert" className="break-words text-sm text-destructive">{action.error.message} Your draft has been kept. Review the message and delivery status before retrying.</p>}
@@ -140,7 +141,7 @@ function CatchUpMessage({ initial, draft, onDraft, notice, onNotice, onClose, on
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-card/60 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
       <Button variant="ghost" size="sm" disabled={!onPrevious || action.isPending} onClick={onPrevious}><ChevronLeft className="size-4" />Previous</Button>
       <span className="hidden text-xs text-muted-foreground lg:inline">Skip leaves this message pending.</span>
-      <div className="flex gap-2"><Button variant="outline" size="sm" disabled={action.isPending} onClick={() => onAdvance("Skipped for this pass. Message left unchanged.")}>Skip for now →</Button><Button size="sm" disabled={blocked || (!answer.trim() && !optionID)} onClick={() => void submit("answer")}>{action.isPending ? "Sending…" : answer.trim() ? "Send reply & next" : optionID ? "Confirm & next" : "Choose a response"}</Button></div>
+      <div className="flex gap-2"><Button variant="outline" size="sm" disabled={action.isPending} onClick={onAdvance}>Skip for now →</Button><Button size="sm" disabled={blocked || (!answer.trim() && !optionID)} onClick={() => void submit("answer")}>{action.isPending ? "Sending…" : answer.trim() ? "Send reply & next" : optionID ? "Confirm & next" : "Choose a response"}</Button></div>
     </footer>
   </>;
 }
