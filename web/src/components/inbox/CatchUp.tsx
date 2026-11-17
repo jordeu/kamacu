@@ -46,7 +46,7 @@ function CatchUpSession({ onClose }: { onClose: () => void }) {
   if (!queue.data) return <><CatchUpHeader onClose={onClose} /><div className="p-8">{queue.isError ? <div role="alert">Couldn’t load your catch-up pass. <Button variant="outline" onClick={() => void queue.refetch()}>Retry inbox</Button></div> : <p role="status">Loading your inbox…</p>}</div></>;
   return <CatchUpPass items={queue.data} onClose={onClose} />;
 }
-interface Draft { answer: string; optionID?: string; revision: number }
+interface Draft { answer: string; optionID?: string; custom?: boolean; revision: number }
 function CatchUpPass({ items, onClose }: { items: FeedbackQuestion[]; onClose: () => void }) {
   // This snapshot stays fixed until the overlay closes, including past 50 items.
   const [pass] = useState(items);
@@ -73,19 +73,23 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
   const action = useFeedbackAction();
   const client = useQueryClient();
   const history = useRef<HTMLDivElement>(null);
+  const answerInput = useRef<HTMLTextAreaElement>(null);
   const completion = q.kind === "completion";
   const operational = q.reason === "operational_failure";
-  const canChoose = completion || (q.delivery_mode !== "terminal" && !q.hidden);
+  const canChoose = !q.hidden && (completion || q.delivery_mode !== "terminal");
   const choices: FeedbackQuestion["options"] = canChoose ? (completion ? completionActions(q) : q.options) : [];
-  const canWrite = !completion && !operational && !q.hidden && q.delivery_mode !== "terminal" && q.delivery_mode !== "claude_question";
+  const canWrite = !q.hidden && (completion || (q.delivery_mode !== "terminal" && q.delivery_mode !== "claude_question"));
+  const customInTerminal = !canWrite && !q.hidden && q.origin !== "notification";
+  const custom = canWrite && (draft?.custom ?? (choices.length === 0));
   const pending = q.status === "pending";
   const changed = !!draft && draft.revision !== q.revision;
   const blocked = action.isPending || selected.isError || selected.isPending || !pending || changed;
-  const answer = canWrite ? (draft?.answer ?? "") : "";
-  const optionID = choices.find(o => o.id === draft?.optionID)?.id;
-  function edit(update: Partial<Draft>) { onDraft({ answer: draft?.answer ?? "", optionID: draft?.optionID, revision: draft?.revision ?? q.revision, ...update }); }
+  const answer = custom ? (draft?.answer ?? "") : "";
+  const answerTooLong = new TextEncoder().encode(answer.trim()).length > 16000;
+  const optionID = !custom ? choices.find(o => o.id === draft?.optionID)?.id : undefined;
+  function edit(update: Partial<Draft>) { onDraft({ answer: draft?.answer ?? "", optionID: draft?.optionID, custom: draft?.custom ?? (choices.length === 0), revision: draft?.revision ?? q.revision, ...update }); }
   async function submit(kind: "answer" | "dismiss") {
-    if (blocked) return;
+    if (blocked || (kind === "answer" && (answerTooLong || (!answer.trim() && !optionID)))) return;
     setNotice("");
     try {
       const result = await action.mutateAsync({ question: q, action: kind, option_id: kind === "answer" && !answer.trim() ? optionID : undefined, answer: kind === "answer" && answer.trim() ? answer : undefined });
@@ -115,11 +119,14 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
             {completion && <p className="text-xs text-muted-foreground">Choose what happens next.</p>}
             {!pending && <p role="status" className="rounded-lg border border-border p-3 text-sm">This message is {q.status}. {q.delivery_status && `Delivery: ${q.delivery_status}.`} {q.answer && <InboxText text={q.answer} />}Skip to continue.</p>}
             {pending && <>
-              {choices.length > 0 && <div role="group" aria-label="Choose a response" className="space-y-2">{choices.map(option => <div key={option.id}>
-                <Button variant="outline" className={`h-auto w-full justify-start whitespace-normal p-3 text-left ${optionID === option.id ? "border-orange-300/60 bg-orange-300/10" : ""}`} aria-pressed={optionID === option.id} disabled={blocked} onClick={() => edit({ optionID: option.id })}><span className="mr-2 shrink-0" aria-hidden="true">{optionID === option.id ? "◉" : "○"}</span><span className="min-w-0 break-words">{option.label}</span></Button>
+              {(choices.length > 0 || canWrite || customInTerminal) && <div role="group" aria-label="Choose a response" className="space-y-2">{choices.map(option => <div key={option.id}>
+                <Button variant="outline" className={`h-auto w-full justify-start whitespace-normal p-3 text-left ${optionID === option.id ? "border-orange-300/60 bg-orange-300/10" : ""}`} aria-pressed={optionID === option.id} disabled={blocked} onClick={() => edit({ optionID: option.id, custom: false })}><span className="mr-2 shrink-0" aria-hidden="true">{optionID === option.id ? "◉" : "○"}</span><span className="min-w-0 break-words">{option.label}</span></Button>
                 {option.action && <details className="px-2 pt-1 text-xs text-muted-foreground"><summary className="cursor-pointer">Direct action · saved instructions</summary><p className="mt-2">{option.action_summary}</p>{option.action.guards?.review_seed && <p className="mt-2 whitespace-pre-wrap">Review prompt: {option.action.guards.review_seed}</p>}{option.action.actions.filter(a => a.instructions).map(a => <p key={a.id} className="mt-2 whitespace-pre-wrap">{a.instructions}</p>)}</details>}
-              </div>)}</div>}
-              {canWrite && <details open={answer ? true : undefined} className="border-t border-border pt-3"><summary className="cursor-pointer text-xs text-muted-foreground">Write your own answer</summary><label htmlFor={`catch-up-answer-${q.id}`} className="mt-3 block text-xs text-muted-foreground">Your instructions{q.origin === "notification" && " · interpreted once before execution"}</label><Textarea id={`catch-up-answer-${q.id}`} value={answer} onChange={e => edit({ answer: e.target.value })} maxLength={16000} rows={3} className="mt-2 resize-y" disabled={action.isPending} /><p className="mt-2 text-xs text-muted-foreground">Written instructions take precedence over a selected option.</p></details>}
+              </div>)}
+                {canWrite && <Button variant="outline" className={`h-auto w-full justify-start whitespace-normal p-3 text-left ${custom ? "border-orange-300/60 bg-orange-300/10" : ""}`} aria-pressed={custom} aria-expanded={custom} aria-controls={`catch-up-answer-${q.id}`} disabled={blocked} onClick={() => { edit({ custom: true, optionID: undefined }); requestAnimationFrame(() => answerInput.current?.focus()); }}><span className="mr-2 shrink-0" aria-hidden="true">{custom ? "◉" : "○"}</span>Custom answer</Button>}
+                {customInTerminal && <Button variant="outline" className="h-auto w-full justify-start whitespace-normal p-3 text-left" asChild><Link to={feedbackTaskURL(q)} onClick={onClose}>Custom answer in terminal ↗</Link></Button>}
+              </div>}
+              {custom && <div className="border-t border-border pt-3"><label htmlFor={`catch-up-answer-${q.id}`} className="block text-xs text-muted-foreground">Your answer{q.origin === "notification" && " · interpreted once before execution"}</label><Textarea ref={answerInput} id={`catch-up-answer-${q.id}`} value={answer} onChange={e => edit({ answer: e.target.value, custom: true })} placeholder="Write a short answer…" aria-invalid={answerTooLong} aria-describedby={answerTooLong ? `catch-up-answer-error-${q.id}` : undefined} maxLength={16000} rows={2} className="mt-2 resize-y" disabled={action.isPending} />{answerTooLong && <p id={`catch-up-answer-error-${q.id}`} role="alert" className="mt-2 text-xs text-destructive">Your answer is too long. Shorten it before sending.</p>}{completion && <p className="mt-2 text-xs text-muted-foreground">Send follow-up instructions to the agent and keep the session open.</p>}</div>}
               {!canChoose && <p className="text-sm text-muted-foreground">Respond in the originating agent terminal.</p>}
               {q.origin !== "notification" && <Button variant="outline" size="sm" asChild><Link to={feedbackTaskURL(q)} onClick={onClose}>{q.task_id === 0 ? "Open Scratchpad" : "Open task terminal"} ↗</Link></Button>}
               {changed && <div role="alert" className="space-y-2 rounded-lg border border-orange-300/40 p-3 text-sm"><p>This message changed while you were responding. Review the updated context before continuing. Your draft has been kept.</p><Button variant="outline" size="sm" onClick={() => { setNotice(""); edit({ revision: q.revision, optionID: undefined }); }}>I’ve reviewed the updated message</Button></div>}
@@ -141,7 +148,7 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-card/60 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
       <Button variant="ghost" size="sm" disabled={!onPrevious || action.isPending} onClick={onPrevious}><ChevronLeft className="size-4" />Previous</Button>
       <span className="hidden text-xs text-muted-foreground lg:inline">Skip leaves this message pending.</span>
-      <div className="flex gap-2"><Button variant="outline" size="sm" disabled={action.isPending} onClick={onAdvance}>Skip for now →</Button><Button size="sm" disabled={blocked || (!answer.trim() && !optionID)} onClick={() => void submit("answer")}>{action.isPending ? "Sending…" : answer.trim() ? "Send reply & next" : optionID ? "Confirm & next" : "Choose a response"}</Button></div>
+      <div className="flex gap-2"><Button variant="outline" size="sm" disabled={action.isPending} onClick={onAdvance}>Skip for now →</Button><Button size="sm" disabled={blocked || answerTooLong || (!answer.trim() && !optionID)} onClick={() => void submit("answer")}>{action.isPending ? "Sending…" : custom ? "Send reply & next" : optionID ? "Confirm & next" : "Choose a response"}</Button></div>
     </footer>
   </>;
 }
