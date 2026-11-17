@@ -15,7 +15,6 @@ import {
   type UsageWindow,
 } from "@/api/usage";
 import { ExtraUsageDetails } from "./ExtraUsageDetails";
-import { formatCreditAmount, activeCreditPeriod } from "@/lib/creditUsage";
 import { formatAgo } from "@/lib/time";
 
 /** Threshold colors (D-69): muted zinc below 60, amber 60–84, red ≥85.
@@ -223,7 +222,6 @@ export function QuotaIndicator() {
   const fiveHour = windows.find((w) => w.key === "five_hour") ?? windows[0];
   const fiveHourUtil = Math.min(100, Math.max(0, fiveHour?.utilization ?? 0));
   const maxUtil = Math.max(0, ...windows.map((w) => w.utilization));
-  const period = activeCreditPeriod(data.extraUsage, windows);
 
   return (
     <QuotaDetails content={<QuotaPopup data={data} windows={windows} />}>
@@ -236,13 +234,6 @@ export function QuotaIndicator() {
           style={{ width: `${fiveHourUtil}%` }}
         />
       </div>
-      {data.extraUsage?.usedCredits != null && (
-        <span className="text-[10px] leading-none text-muted-foreground tabular-nums" title={period ? "Extra-credit spending during the current exhausted-quota period" : "Extra-credit spending this month"}>
-          {period
-            ? `${formatCreditAmount(period.spentCredits, data.extraUsage.currency)} ${period.baselineKnown ? "since limit" : "tracked"}`
-            : `${formatCreditAmount(data.extraUsage.usedCredits, data.extraUsage.currency)} extra`}
-        </span>
-      )}
     </QuotaDetails>
   );
 }
