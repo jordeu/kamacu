@@ -39,9 +39,7 @@ The adjacent status button pins the preview for touch or keyboard use; the link
 still opens GitHub. Previews load on demand and share the full PR section’s cache.
 Catch up shows the decision explanation as its main text, with **Read full context** for the fuller response. Older messages without an explanation show their existing context. The current message is not repeated in history; earlier messages remain newest first. Response
 choices sit beside it on desktop and below it on mobile; choices require an
-explicit confirmation, and a written reply takes precedence. Completion actions
-retain their task-move/session-close behavior. Terminal-only prompts link back
-to the originating task or Scratchpad.
+explicit confirmation. **Custom answer** is always visible alongside the choices and opens a short text field, including for completed work. Switching to a predefined choice keeps the custom draft but sends only the selected choice. Custom completion replies send follow-up instructions without moving the task or closing its session. Terminal-only prompts offer **Custom answer in terminal**, linking to the originating task or Scratchpad.
 
 **How we got here** shows earlier messages from newest to oldest. History follows explicit task/notification associations,
 excludes hidden and later messages, and loads older records on request. Related
