@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ScrollArea } from "radix-ui";
 import { Link, useLocation, useParams } from "react-router";
 import { Plus, Settings, Activity } from "lucide-react";
 import { useProjects } from "@/api/queries";
@@ -92,101 +91,94 @@ export function ProjectSidebar() {
         <div className="shrink-0 group-data-[collapsible=icon]:hidden">
           <WorkspaceSwitcher />
         </div>
-        {/* An overlay scrollbar keeps overflow discoverable without narrowing
-            the 48px icon rail or reducing its 40px project click targets. */}
-        <ScrollArea.Root asChild type="auto">
-          <nav aria-label="Projects" className="relative min-h-0 flex-1 overflow-hidden">
-            {/* Radix uses a table for its content wrapper by default. A block
-                keeps long project names constrained so row truncation works. */}
-            <ScrollArea.Viewport className="size-full overscroll-contain [&>div]:block!">
-              <SidebarMenu className="gap-1 px-2 py-1 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-1 group-data-[collapsible=icon]:px-0">
-                {/* Both sidebar modes share workspace filtering and pinned-first
-                    ordering. Preserve the API's name order within each group. */}
-                {workspaceProjects.map((project, index) => {
-                  const count = waitingByProject.get(project.id) ?? 0;
-                  const isActive = projectId === String(project.id);
-                  // Reuse the EXACT existing chip copy for the avatar a11y label.
-                  const waitingLabel =
-                    count === 1
-                      ? "1 agent waiting for input"
-                      : `${count} agents waiting for input`;
-                  // The Link name source is its aria-label (tooltip is supplementary);
-                  // append the waiting copy when present so the rail/row announces both.
-                  const linkLabel =
-                    count > 0 ? `${project.name}, ${waitingLabel}` : project.name;
-                  return (
-                    <Fragment key={project.id}>
-                      {pinnedCount > 0 && index === pinnedCount && (
-                        <li role="separator" aria-label="Other projects" className="mx-3 my-2 self-stretch border-t border-sidebar-border group-data-[collapsible=icon]:mx-2" />
-                      )}
-                      <SidebarMenuItem>
-                        <SidebarMenuButton
-                          asChild
-                          size="sm"
-                          isActive={isActive}
-                          tooltip={project.name}
-                          className="min-h-7 px-3 text-sm transition-colors group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-md group-data-[collapsible=icon]:p-0!"
-                        >
-                          <Link
-                            ref={isActive ? attachActiveProject : undefined}
-                            to={`/projects/${project.id}`}
-                            aria-label={linkLabel}
-                            aria-current={isActive ? "page" : undefined}
+        <nav
+          aria-label="Projects"
+          tabIndex={0}
+          className="no-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring"
+        >
+          <SidebarMenu className="gap-1 px-2 py-1 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-1 group-data-[collapsible=icon]:px-0">
+            {/* Both sidebar modes share workspace filtering and pinned-first
+                ordering. Preserve the API's name order within each group. */}
+            {workspaceProjects.map((project, index) => {
+              const count = waitingByProject.get(project.id) ?? 0;
+              const isActive = projectId === String(project.id);
+              // Reuse the EXACT existing chip copy for the avatar a11y label.
+              const waitingLabel =
+                count === 1
+                  ? "1 agent waiting for input"
+                  : `${count} agents waiting for input`;
+              // The Link name source is its aria-label (tooltip is supplementary);
+              // append the waiting copy when present so the rail/row announces both.
+              const linkLabel =
+                count > 0 ? `${project.name}, ${waitingLabel}` : project.name;
+              return (
+                <Fragment key={project.id}>
+                  {pinnedCount > 0 && index === pinnedCount && (
+                    <li role="separator" aria-label="Other projects" className="mx-3 my-2 self-stretch border-t border-sidebar-border group-data-[collapsible=icon]:mx-2" />
+                  )}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      size="sm"
+                      isActive={isActive}
+                      tooltip={project.name}
+                      className="min-h-7 px-3 text-sm transition-colors group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-md group-data-[collapsible=icon]:p-0!"
+                    >
+                      <Link
+                        ref={isActive ? attachActiveProject : undefined}
+                        to={`/projects/${project.id}`}
+                        aria-label={linkLabel}
+                        aria-current={isActive ? "page" : undefined}
+                      >
+                        {/* Collapsed rail (ICON-05/06/07/08/09): the size-6 avatar is
+                            centered in a 40px rounded-md icon-mode button that fills
+                            the rail row. The active project is highlighted by that
+                            button's bg-sidebar-accent fill — the SAME filled-row
+                            treatment the expanded selection uses, not a ring on the
+                            avatar. Hidden when expanded; the side=right tooltip
+                            carries the full project name. */}
+                        <span className="hidden group-data-[collapsible=icon]:flex">
+                          <ProjectAvatar
+                            size="rail"
+                            letters={project.icon_letters}
+                            color={project.icon_color}
+                            waiting={count > 0}
+                            waitingLabel={waitingLabel}
+                          />
+                        </span>
+                        {/* Expanded row (ICON-10): inline avatar before the unchanged
+                            name + the existing amber count chip. No dot here (D-08).
+                            Hidden in icon mode so only the rail avatar shows. */}
+                        <ProjectAvatar
+                          size="inline"
+                          letters={project.icon_letters}
+                          color={project.icon_color}
+                          className="group-data-[collapsible=icon]:hidden"
+                        />
+                        <span className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">
+                          {project.name}
+                        </span>
+                        {/* UI-SPEC: chip is static (never pulses) and not
+                            independently clickable — the row Link is the action. */}
+                        {count > 0 && (
+                          <span
+                            aria-label={waitingLabel}
+                            className="ml-auto inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-amber-400/10 px-1 text-xs font-medium text-amber-400 tabular-nums group-data-[collapsible=icon]:hidden"
                           >
-                            {/* Collapsed rail (ICON-05/06/07/08/09): the size-6 avatar is
-                                centered in a 40px rounded-md icon-mode button that fills
-                                the rail row. The active project is highlighted by that
-                                button's bg-sidebar-accent fill — the SAME filled-row
-                                treatment the expanded selection uses, not a ring on the
-                                avatar. Hidden when expanded; the side=right tooltip
-                                carries the full project name. */}
-                            <span className="hidden group-data-[collapsible=icon]:flex">
-                              <ProjectAvatar
-                                size="rail"
-                                letters={project.icon_letters}
-                                color={project.icon_color}
-                                waiting={count > 0}
-                                waitingLabel={waitingLabel}
-                              />
-                            </span>
-                            {/* Expanded row (ICON-10): inline avatar before the unchanged
-                                name + the existing amber count chip. No dot here (D-08).
-                                Hidden in icon mode so only the rail avatar shows. */}
-                            <ProjectAvatar
-                              size="inline"
-                              letters={project.icon_letters}
-                              color={project.icon_color}
-                              className="group-data-[collapsible=icon]:hidden"
-                            />
-                            <span className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">
-                              {project.name}
-                            </span>
-                            {/* UI-SPEC: chip is static (never pulses) and not
-                                independently clickable — the row Link is the action. */}
-                            {count > 0 && (
-                              <span
-                                aria-label={waitingLabel}
-                                className="ml-auto inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-amber-400/10 px-1 text-xs font-medium text-amber-400 tabular-nums group-data-[collapsible=icon]:hidden"
-                              >
-                                {count}
-                              </span>
-                            )}
-                          </Link>
-                        </SidebarMenuButton>
-                        <ProjectMenu project={project} />
-                      </SidebarMenuItem>
-                    </Fragment>
-                  );
-                })}
-              </SidebarMenu>
-            </ScrollArea.Viewport>
-            <ScrollArea.Scrollbar orientation="vertical" className="flex w-1 touch-none select-none py-1">
-              <ScrollArea.Thumb className="relative flex-1 rounded-full bg-sidebar-foreground/40 hover:bg-sidebar-foreground/60" />
-            </ScrollArea.Scrollbar>
-          </nav>
-        </ScrollArea.Root>
-        <div className="max-h-[40%] shrink-0 overflow-y-auto md:hidden">
-          <NotificationProcessing onNavigate={() => setOpenMobile(false)} />
+                            {count}
+                          </span>
+                        )}
+                      </Link>
+                    </SidebarMenuButton>
+                    <ProjectMenu project={project} />
+                  </SidebarMenuItem>
+                </Fragment>
+              );
+            })}
+          </SidebarMenu>
+        </nav>
+        <div className="no-scrollbar max-h-[40%] shrink-0 overflow-y-auto md:hidden">
+          <NotificationProcessing className="max-h-none overflow-visible" onNavigate={() => setOpenMobile(false)} />
         </div>
       </SidebarContent>
 

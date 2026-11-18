@@ -47,7 +47,7 @@ const assert = require('node:assert/strict');
     });
 
     const nav = page.getByRole('navigation', { name: 'Projects', exact: true });
-    const viewport = nav.locator('[data-radix-scroll-area-viewport]');
+    const viewport = nav;
     const first = nav.getByRole('link', { name: 'Project 1', exact: true });
     const last = nav.getByRole('link', { name: 'Project 40', exact: true });
     async function isInside(link) {
@@ -58,7 +58,9 @@ const assert = require('node:assert/strict');
     async function checkOverflow() {
       assert.ok(await viewport.evaluate(el => el.scrollHeight > el.clientHeight));
       assert.equal(await viewport.evaluate(el => el.scrollWidth <= el.clientWidth), true, 'no horizontal scrolling');
-      await nav.locator('[data-orientation=vertical]').waitFor({ state: 'visible' });
+      assert.equal(await viewport.evaluate(el => getComputedStyle(el).scrollbarWidth), 'none', 'native scrollbar is hidden');
+      assert.equal(await viewport.evaluate(el => getComputedStyle(el, '::-webkit-scrollbar').display), 'none', 'WebKit scrollbar is hidden');
+      assert.equal(await nav.locator('[data-orientation=vertical]').count(), 0, 'no custom scrollbar');
     }
     async function checkFooter() {
       const footer = page.locator('[data-sidebar=footer]:visible');
@@ -79,11 +81,20 @@ const assert = require('node:assert/strict');
       await checkOverflow();
       await checkFooter();
       assert.equal(await isInside(last), false, 'last project begins below viewport');
+      await nav.focus();
+      await page.keyboard.press('End');
+      await page.waitForFunction(() => {
+        const el = document.querySelector('nav[aria-label=Projects]');
+        return el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+      });
+      assert.ok(await isInside(last), 'End reveals the last project without a scrollbar');
+      await page.keyboard.press('Home');
+      await page.waitForFunction(() => document.querySelector('nav[aria-label=Projects]').scrollTop === 0);
       const navBounds = await nav.boundingBox();
       await page.mouse.move(navBounds.x + navBounds.width / 2, navBounds.y + navBounds.height / 2);
       await page.mouse.wheel(0, 3000);
       await page.waitForFunction(() => {
-        const el = document.querySelector('[aria-label=Projects] [data-radix-scroll-area-viewport]');
+        const el = document.querySelector('nav[aria-label=Projects]');
         return el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
       });
       assert.ok(await isInside(last), 'wheel reveals the last project');
@@ -101,7 +112,7 @@ const assert = require('node:assert/strict');
       await page.waitForURL('**/projects/40');
       await page.reload();
       await last.waitFor({ state: 'attached' });
-      await page.waitForFunction(() => document.querySelector('[aria-label=Projects] [data-radix-scroll-area-viewport]').scrollTop > 0);
+      await page.waitForFunction(() => document.querySelector('nav[aria-label=Projects]').scrollTop > 0);
       assert.ok(await isInside(last), 'active project is revealed after reload');
       await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
       assert.ok(await isInside(last), 'active project stays visible after toggling');
@@ -181,6 +192,27 @@ const assert = require('node:assert/strict');
     await page.getByRole('button', { name: 'Open projects and navigation' }).click();
     await nav.waitFor();
     await checkOverflow();
+    // Exercise a real browser touch gesture, rather than programmatic scrolling.
+    const touch = await page.context().newCDPSession(page);
+    await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    await nav.hover(); // Wait for the mobile sheet's opening animation to settle.
+    const touchBounds = await nav.boundingBox();
+    const touchX = touchBounds.x + touchBounds.width / 2;
+    const touchStartY = touchBounds.y + touchBounds.height * 0.8;
+    const touchDistance = touchBounds.height * 0.6;
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchStart', touchPoints: [{ x: touchX, y: touchStartY }],
+    });
+    for (let step = 1; step <= 8; step++) {
+      await touch.send('Input.dispatchTouchEvent', {
+        type: 'touchMove', touchPoints: [{ x: touchX, y: touchStartY - touchDistance * step / 8 }],
+      });
+    }
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => document.querySelector('nav[aria-label=Projects]').scrollTop > 0);
+    assert.ok(await viewport.evaluate(el => el.scrollTop > 0), 'touch gesture scrolls the project list');
+    await touch.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await touch.detach();
     await last.focus();
     assert.ok(await isInside(last), 'mobile drawer can reveal the last project');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -197,6 +229,15 @@ const assert = require('node:assert/strict');
     await page.getByRole('button', { name: 'Open projects and navigation' }).click();
     await last.waitFor({ state: 'attached' });
     assert.ok((await viewport.boundingBox()).height >= 40, 'short mobile drawer retains room for projects');
+    const visibleScrollbars = await page.getByRole('dialog').evaluate(dialog =>
+      [...dialog.querySelectorAll('*')].filter(el => {
+        const style = getComputedStyle(el);
+        return el.getClientRects().length && el.scrollHeight > el.clientHeight + 1 &&
+          ['auto', 'scroll'].includes(style.overflowY) && style.scrollbarWidth !== 'none' &&
+          getComputedStyle(el, '::-webkit-scrollbar').display !== 'none';
+      }).map(el => ({ tag: el.tagName, classes: el.className })),
+    );
+    assert.deepEqual(visibleScrollbars, [], 'all scrollable sections of the project sidebar hide their scrollbar');
     await last.focus();
     assert.ok(await isInside(last), 'last project remains reachable with long notifications');
 
