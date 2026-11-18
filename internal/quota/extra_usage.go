@@ -12,14 +12,13 @@ import (
 // Credit amounts are minor currency units (cents for USD), as supplied by
 // /api/oauth/usage. Keep fractional cents until display; never estimate from tokens.
 type ExtraUsage struct {
-	Enabled          bool          `json:"enabled"`
-	UsedCredits      *float64      `json:"usedCredits"`
-	MonthlyLimit     *float64      `json:"monthlyLimit"`
-	Utilization      *float64      `json:"utilization"`
-	Currency         string        `json:"currency"`
-	HistoryAvailable bool          `json:"historyAvailable"`
-	Daily            []DailySpend  `json:"daily"`
-	CreditPeriod     *CreditPeriod `json:"creditPeriod"`
+	Enabled          bool         `json:"enabled"`
+	UsedCredits      *float64     `json:"usedCredits"`
+	MonthlyLimit     *float64     `json:"monthlyLimit"`
+	Utilization      *float64     `json:"utilization"`
+	Currency         string       `json:"currency"`
+	HistoryAvailable bool         `json:"historyAvailable"`
+	Daily            []DailySpend `json:"daily"`
 }
 
 type DailySpend struct {
@@ -91,53 +90,53 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-func (s *Service) recordExtraUsage(ctx context.Context, account string, extra *ExtraUsage, windows []Window, now time.Time) ([]DailySpend, error) {
-	if extra.UsedCredits == nil {
-		_, err := s.db.ExecContext(ctx, "DELETE FROM quota_credit_tracking WHERE account = ? AND currency = ?", account, extra.Currency)
-		return nil, err
-	}
+func (s *Service) recordExtraUsage(ctx context.Context, account string, extra *ExtraUsage, now time.Time) ([]DailySpend, error) {
 	day := now.UTC().Format("2006-01-02")
-	total := *extra.UsedCredits
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	var previousDay string
-	var previousTotal, spent float64
-	var partial bool
-	err = tx.QueryRowContext(ctx, `SELECT day, total, spent, partial FROM quota_extra_usage_daily WHERE account = ? AND currency = ? ORDER BY day DESC LIMIT 1`, account, extra.Currency).Scan(&previousDay, &previousTotal, &spent, &partial)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-	if previousDay <= day {
-		if previousDay != day {
-			spent = 0
-			partial = false
-		}
-		switch {
-		case previousDay == "":
-			// The existing monthly balance predates tracking, so it is not today's spend.
-			partial = true
-		case previousDay[:7] != day[:7]:
-			spent += total
-			partial = day[8:] != "01" || now.UTC().Sub(parseDay(previousDay)) > 48*time.Hour
-		default:
-			if total > previousTotal {
-				spent += total - previousTotal
-			}
-			// Retain the month's high-water mark on corrections to avoid double counting.
-			if total < previousTotal {
-				total = previousTotal
-				partial = true
-			}
-			if previousDay != day && parseDay(day).Sub(parseDay(previousDay)) > 24*time.Hour {
-				partial = true
-			}
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO quota_extra_usage_daily (account, currency, day, total, spent, partial) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(account, currency, day) DO UPDATE SET total=excluded.total, spent=excluded.spent, partial=excluded.partial`, account, extra.Currency, day, total, spent, partial)
-		if err != nil {
+	// The daily ledger is independent of the latest monthly balance. A null
+	// balance skips recording a sample but still returns existing history.
+	if extra.UsedCredits != nil {
+		total := *extra.UsedCredits
+		var previousDay string
+		var previousTotal, spent float64
+		var partial bool
+		err = tx.QueryRowContext(ctx, `SELECT day, total, spent, partial FROM quota_extra_usage_daily WHERE account = ? AND currency = ? ORDER BY day DESC LIMIT 1`, account, extra.Currency).Scan(&previousDay, &previousTotal, &spent, &partial)
+		if err != nil && err != sql.ErrNoRows {
 			return nil, err
+		}
+		if previousDay <= day {
+			if previousDay != day {
+				spent = 0
+				partial = false
+			}
+			switch {
+			case previousDay == "":
+				// The existing monthly balance predates tracking, so it is not today's spend.
+				partial = true
+			case previousDay[:7] != day[:7]:
+				spent += total
+				partial = day[8:] != "01" || now.UTC().Sub(parseDay(previousDay)) > 48*time.Hour
+			default:
+				if total > previousTotal {
+					spent += total - previousTotal
+				}
+				// Retain the month's high-water mark on corrections to avoid double counting.
+				if total < previousTotal {
+					total = previousTotal
+					partial = true
+				}
+				if previousDay != day && parseDay(day).Sub(parseDay(previousDay)) > 24*time.Hour {
+					partial = true
+				}
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO quota_extra_usage_daily (account, currency, day, total, spent, partial) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(account, currency, day) DO UPDATE SET total=excluded.total, spent=excluded.spent, partial=excluded.partial`, account, extra.Currency, day, total, spent, partial)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT day, spent, partial FROM quota_extra_usage_daily WHERE account = ? AND currency = ? ORDER BY day DESC LIMIT 31`, account, extra.Currency)
@@ -158,14 +157,9 @@ func (s *Service) recordExtraUsage(ctx context.Context, account string, extra *E
 	if err != nil {
 		return nil, err
 	}
-	period, err := recordCreditPeriod(ctx, tx, account, extra, windows, now)
-	if err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	extra.CreditPeriod = period
 	return history, nil
 }
 

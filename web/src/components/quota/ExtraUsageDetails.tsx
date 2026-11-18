@@ -1,34 +1,36 @@
 import { ChevronRight } from "lucide-react";
 import type { ExtraUsage, UsageWindow } from "@/api/usage";
-import { activeCreditPeriod, formatCreditAmount } from "@/lib/creditUsage";
-import { formatDateTime } from "@/lib/time";
+import { formatCreditAmount } from "@/lib/creditUsage";
 
-export function ExtraUsageDetails({ extra, windows, stale }: {
+export function ExtraUsageDetails({ extra, windows, stale, now }: {
   extra: ExtraUsage | null;
   windows: UsageWindow[];
   stale: boolean;
+  now: number;
 }) {
   if (!extra) return <p className="mt-2 text-xs text-muted-foreground">Extra-credit usage unavailable</p>;
   const exhausted = windows.filter((w) => w.utilization >= 100);
-  const period = activeCreditPeriod(extra, windows);
+  const today = extra.daily?.find((day) => day.date === new Date(now).toISOString().slice(0, 10));
   return (
     <div className="mt-2.5 border-t border-foreground/10 pt-2 text-xs">
-      {extra.enabled && exhausted.length > 0 && (
+      {exhausted.length > 0 && (
         <div className="mb-3 rounded-md border border-amber-400/20 bg-amber-400/5 px-3 py-3">
           <div className="flex items-center gap-1.5 text-[10px] font-medium text-amber-400">
             <span className={`size-1.5 rounded-full ${stale ? "border border-amber-400" : "bg-amber-400"}`} />
-            {stale ? "Last known extra usage" : "Using extra credits"}
+            {stale ? "Last known extra usage" : "Quota exhausted"}
           </div>
           <div className="mt-2 text-3xl font-medium tracking-tight tabular-nums">
-            {period ? formatCreditAmount(period.spentCredits, extra.currency) : "—"}
+            {today ? formatCreditAmount(today.spent, extra.currency) : "—"}
           </div>
-          <p className="mt-0.5">{period ? (period.baselineKnown ? "Since quota reached" : "Since tracking began") : "Period spending unavailable"}</p>
+          <p className="mt-0.5">Extra spending today</p>
           <p className="mt-1 text-[10px] text-muted-foreground">
-            {exhausted.map((w) => w.label).join(" + ")} limit
-            {period && ` · observed ${formatDateTime(period.startedAt)}`}
+            {exhausted.map((w) => w.label).join(" + ")} limit · today (UTC)
           </p>
-          {period && !period.baselineKnown && (
-            <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">Only observed spending is included. Earlier spending or gaps in tracking are unknown.</p>
+          {today?.partial && (
+            <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">Partial day: only observed spending is included.</p>
+          )}
+          {!today && (
+            <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">Today's extra spending is unavailable.</p>
           )}
         </div>
       )}

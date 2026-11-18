@@ -126,7 +126,7 @@ function QuotaPopup({
           <QuotaRow key={w.key} w={w} now={now} />
         ))}
       </div>
-      <ExtraUsageDetails extra={data.extraUsage} windows={windows} stale={data.stale} />
+      <ExtraUsageDetails extra={data.extraUsage} windows={windows} stale={data.stale} now={now} />
       <div className="mt-2.5 flex items-center justify-between border-t border-foreground/10 pt-1.5">
         {data.stale ? (
           // Stale variant (D-73): amber footer text, trigger untouched.

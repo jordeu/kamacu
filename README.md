@@ -40,11 +40,9 @@ restart stops it.
 
 The Claude quota indicator opens a popup showing extra-credit spending for the
 current month and the configured monthly spending limit. When a subscription
-window reaches 100%, the popup highlights spending in that continuous
-extra-credit period. The minimized indicator shows only the Claude label and
-quota bar. The counter survives restarts and overlapping limits, and
-ends when subscription quota is available again. If the original crossing was
-not observed, it says **Since tracking began** and marks the amount as partial.
+window reaches 100%, the popup highlights today's recorded extra spending (UTC).
+The minimized indicator shows only the Claude label and quota bar. Daily totals
+survive restarts; partial days and missing data are identified in the popup.
 Open **Daily extra spending** in the popup for the last 31 recorded days; this
 history starts collapsed. Kamacu samples usage every minute while the
 server is running, even with the browser closed, and keeps history across restarts.
