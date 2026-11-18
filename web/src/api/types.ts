@@ -19,6 +19,7 @@ export interface Project {
   // ~/.kangent/repos/ (gated-remove on delete); false for user-pointed folder
   // projects. The backend serializes this as json:"managed".
   managed: boolean;
+  pinned: boolean;
   // v1.7 icon identity (Phase 18): two uppercase letters + a curated-palette
   // hex (#rrggbb). Both NOT NULL on the wire (never null). The backend
   // serializes these as json:"icon_letters" / json:"icon_color".

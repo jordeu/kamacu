@@ -90,6 +90,20 @@ export function useRenameProject() {
   });
 }
 
+export function useSetProjectPinned() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, pinned }: { id: number; pinned: boolean }) =>
+      patch<Project>(`/api/projects/${id}`, { pinned }),
+    onSuccess: (project) => {
+      queryClient.setQueryData<Project[]>(["projects"], (projects) =>
+        projects?.map((existing) => existing.id === project.id ? project : existing),
+      );
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
 export function useUpdateProjectSettings() {
   const queryClient = useQueryClient();
   return useMutation({
