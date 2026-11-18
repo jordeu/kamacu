@@ -1,11 +1,12 @@
 import { Link } from "react-router";
+import { cn } from "@/lib/utils";
 import { Bell, ListFilter, LoaderCircle } from "lucide-react";
 import { useNotificationStatus, useProcessNotifications } from "@/api/notifications";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { NotificationProgress } from "./NotificationProgress";
 
-export function NotificationProcessing({ collapsed = false, onNavigate, layout = "sidebar" }: { collapsed?: boolean; onNavigate?: () => void; layout?: "sidebar" | "page" }) {
+export function NotificationProcessing({ collapsed = false, onNavigate, layout = "sidebar", className }: { collapsed?: boolean; onNavigate?: () => void; layout?: "sidebar" | "page"; className?: string }) {
  const query = useNotificationStatus();
  const start = useProcessNotifications();
  const count = query.data?.pending_count;
@@ -15,7 +16,7 @@ export function NotificationProcessing({ collapsed = false, onNavigate, layout =
  const disabled = !configured || count === undefined || count === 0 || processing || start.isPending;
  const label = processing ? `Processing ${run.notification_count} notifications` : !configured ? "Choose a notification model in Settings" : "Process pending notifications";
  const page = layout === "page";
- return <div className={collapsed ? "flex flex-col items-center gap-3 border-t border-border pt-4" : page ? "space-y-4 bg-muted/20 p-4 sm:p-5" : "max-h-[40%] shrink-0 space-y-3 overflow-y-auto border-t border-border bg-muted/20 p-4"}>
+ return <div className={cn(collapsed ? "flex flex-col items-center gap-3 border-t border-border pt-4" : page ? "space-y-4 bg-muted/20 p-4 sm:p-5" : "max-h-[40%] shrink-0 space-y-3 overflow-y-auto border-t border-border bg-muted/20 p-4", className)}>
    <div className={collapsed ? "relative flex flex-col items-center" : "flex items-center gap-2"}>
      <Tooltip><TooltipTrigger asChild><Link onClick={onNavigate} to="/notifications" aria-label="Open raw notifications" title="Raw notifications" className="inline-flex min-h-9 min-w-9 items-center justify-center gap-2 rounded-md text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Bell className="size-4" />{!collapsed && "Notifications"}</Link></TooltipTrigger><TooltipContent side="left">Notifications · {count ?? "…"} pending</TooltipContent></Tooltip>
      <span className={`rounded-full py-0.5 text-center font-semibold tabular-nums ${collapsed ? "pointer-events-none absolute -right-1.5 -top-1.5 min-w-4 px-1 text-[10px] ring-2 ring-sidebar" : "ml-auto px-2 text-xs"} ${(count ?? 0) > 0 ? "bg-blue-500/15 text-blue-400" : "text-muted-foreground"}`} aria-live="polite" aria-label={count === undefined ? "Loading pending notifications" : `${count} pending notifications`}>{collapsed && (count ?? 0) > 99 ? "99+" : count ?? "…"}</span>
