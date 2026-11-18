@@ -43,7 +43,7 @@ func TestDailyHistoryPersistenceAndBoundaries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := s.recordExtraUsage(context.Background(), account, &ExtraUsage{UsedCredits: &total, Currency: "USD"}, nil, now)
+		got, err := s.recordExtraUsage(context.Background(), account, &ExtraUsage{UsedCredits: &total, Currency: "USD"}, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,6 +122,13 @@ func TestServiceExtraUsageHistoryAndTokenRefresh(t *testing.T) {
 	res = s.Get(context.Background(), false)
 	if res.ExtraUsage.Daily[0].Spent != 500 {
 		t.Fatalf("token refresh lost history: %+v", res.ExtraUsage)
+	}
+	// An omitted monthly balance must not hide today's persisted spending.
+	total = "null"
+	advance(time.Minute)
+	res = s.Get(context.Background(), false)
+	if res.ExtraUsage == nil || res.ExtraUsage.UsedCredits != nil || !res.ExtraUsage.HistoryAvailable || len(res.ExtraUsage.Daily) != 1 || res.ExtraUsage.Daily[0].Spent != 500 {
+		t.Fatalf("missing monthly balance hid known daily spending: %+v", res.ExtraUsage)
 	}
 	fail = true
 	advance(time.Minute)

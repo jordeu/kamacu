@@ -306,7 +306,7 @@ func (s *Service) Get(ctx context.Context, force bool) Result {
 		}
 		s.extra = normalizeExtraUsage(body)
 		if s.extra != nil && s.db != nil && account != "" && account == s.accountID() {
-			history, err := s.recordExtraUsage(ctx, account, s.extra, windows, s.now())
+			history, err := s.recordExtraUsage(ctx, account, s.extra, s.now())
 			s.extra.HistoryAvailable = err == nil
 			s.extra.Daily = history
 			if err != nil {

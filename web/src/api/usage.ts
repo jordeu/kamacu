@@ -8,14 +8,7 @@ export interface UsageWindow {
   resetsAt: string | null;
 }
 
-export interface CreditPeriod {
-  spentCredits: number;
-  startedAt: string;
-  baselineKnown: boolean;
-}
-
 export interface ExtraUsage {
-  creditPeriod: CreditPeriod | null;
   enabled: boolean;
   usedCredits: number | null;
   monthlyLimit: number | null;
