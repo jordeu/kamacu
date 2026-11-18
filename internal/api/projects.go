@@ -58,6 +58,7 @@ type Project struct {
 	AgentID   int64  `json:"agent_id"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	Pinned    bool   `json:"pinned"`
 }
 
 // projectHandlers carries the gated-delete dependencies (mirrors taskHandlers /
@@ -101,7 +102,7 @@ func validateRepoPath(p string) (string, error) {
 	return abs, nil
 }
 
-const projectColumns = `id, name, repo_path, description, github_repo, managed, icon_letters, icon_color, workspace_id, agent_id, created_at, updated_at`
+const projectColumns = `id, name, repo_path, description, github_repo, managed, icon_letters, icon_color, workspace_id, agent_id, created_at, updated_at, pinned`
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
@@ -116,7 +117,7 @@ func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	// INTEGER NOT NULL (migration 00012, D-10) — scan straight into int64 (never
 	// null). Order MUST match projectColumns: managed, icon_letters, icon_color,
 	// workspace_id, then the timestamps.
-	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.IconLetters, &p.IconColor, &p.WorkspaceID, &p.AgentID, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Description, &repo, &managedInt, &p.IconLetters, &p.IconColor, &p.WorkspaceID, &p.AgentID, &p.CreatedAt, &p.UpdatedAt, &p.Pinned)
 	if repo.Valid {
 		p.GithubRepo = &repo.String
 	}
@@ -500,6 +501,7 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Name        *string `json:"name"`
+		Pinned      *bool   `json:"pinned"`
 		Description *string `json:"description"`
 		GithubRepo  *string `json:"github_repo"`
 		IconLetters *string `json:"icon_letters"`
@@ -519,7 +521,7 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == nil && req.Description == nil && req.GithubRepo == nil &&
 		req.IconLetters == nil && req.IconColor == nil && req.WorkspaceID == nil &&
-		req.AgentID == nil {
+		req.AgentID == nil && req.Pinned == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
@@ -627,6 +629,11 @@ func (h *projectHandlers) update(w http.ResponseWriter, r *http.Request) {
 		}
 		sets = append(sets, "agent_id = ?")
 		args = append(args, *req.AgentID)
+	}
+
+	if req.Pinned != nil {
+		sets = append(sets, "pinned = ?")
+		args = append(args, *req.Pinned)
 	}
 
 	sets = append(sets, "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")

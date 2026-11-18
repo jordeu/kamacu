@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Pin, PinOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/api/client";
-import { useDeleteProject, useMoveProject } from "@/api/mutations";
+import { useDeleteProject, useMoveProject, useSetProjectPinned } from "@/api/mutations";
 import { useWorkspaces } from "@/api/queries";
 import { useActiveWorkspace } from "@/lib/useActiveWorkspace";
 import type { Project } from "@/api/types";
@@ -39,6 +39,7 @@ export interface ProjectMenuProps {
 }
 
 export function ProjectMenu({ project }: ProjectMenuProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -50,6 +51,7 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
   }, [deleteOpen, forceDelete]);
   const deleteProject = useDeleteProject();
   const moveProject = useMoveProject();
+  const setProjectPinned = useSetProjectPinned();
   const { data: workspaces } = useWorkspaces();
   const { setActiveWorkspaceId } = useActiveWorkspace();
   const queryClient = useQueryClient();
@@ -95,7 +97,12 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={(open) => {
+        // Reset only a previous error. Resetting an in-flight mutation would
+        // detach its observer, allowing duplicate saves and losing its result.
+        if (open && setProjectPinned.isError) setProjectPinned.reset();
+        setMenuOpen(open);
+      }}>
         <DropdownMenuTrigger asChild>
           <SidebarMenuAction
             showOnHover
@@ -105,6 +112,24 @@ export function ProjectMenu({ project }: ProjectMenuProps) {
           </SidebarMenuAction>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="bottom" align="start">
+          <DropdownMenuItem
+            disabled={setProjectPinned.isPending}
+            onSelect={(event) => {
+              event.preventDefault();
+              if (setProjectPinned.isPending) return;
+              setProjectPinned.mutate({ id: project.id, pinned: !project.pinned }, {
+                onSuccess: () => setMenuOpen(false),
+              });
+            }}
+          >
+            {project.pinned ? <PinOff /> : <Pin />}
+            {project.pinned ? "Unpin project" : "Pin project"}
+          </DropdownMenuItem>
+          {setProjectPinned.isError && (
+            <p role="alert" className="max-w-64 px-2 py-1 text-xs text-destructive">
+              Could not {project.pinned ? "unpin" : "pin"} project. Please try again.
+            </p>
+          )}
           <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
             Rename
           </DropdownMenuItem>
