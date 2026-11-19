@@ -43,7 +43,7 @@ current month and the configured monthly spending limit. When a subscription
 window reaches 100%, the popup highlights today's recorded extra spending (UTC).
 The minimized indicator shows only the Claude label and quota bar. Daily totals
 survive restarts; partial days and missing data are identified in the popup.
-Open **Daily extra spending** in the popup for the last 31 recorded days; this
+Open **Daily extra spending** in the popup for the last 5 recorded days; this
 history starts collapsed. Kamacu samples usage every minute while the
 server is running, even with the browser closed, and keeps history across restarts.
 Daily amounts are changes between samples assigned to the UTC day observed;

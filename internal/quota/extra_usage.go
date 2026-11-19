@@ -139,7 +139,7 @@ func (s *Service) recordExtraUsage(ctx context.Context, account string, extra *E
 			}
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT day, spent, partial FROM quota_extra_usage_daily WHERE account = ? AND currency = ? ORDER BY day DESC LIMIT 31`, account, extra.Currency)
+	rows, err := tx.QueryContext(ctx, `SELECT day, spent, partial FROM quota_extra_usage_daily WHERE account = ? AND currency = ? ORDER BY day DESC LIMIT 5`, account, extra.Currency)
 	if err != nil {
 		return nil, err
 	}
