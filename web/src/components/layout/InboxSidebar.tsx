@@ -120,7 +120,7 @@ function CompactMessage({ question: q, onOpenTask, onResult }: { question: Feedb
       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${completion ? "bg-emerald-500/10 text-emerald-400" : "bg-orange-500/10 text-orange-400"}`}>{completion ? "Completed" : "Needs reply"}</span>
     </div>
     <h3 className="whitespace-pre-wrap break-words text-sm font-semibold leading-snug"><InboxText text={q.question} /></h3>
-    <MessagePreview text={q.abstract || q.summary} />
+    <MessagePreview text={q.summary || q.abstract} />
     {!completion && q.options.length > 0 && <div className="flex flex-col gap-2" role="group" aria-label="Choose an answer to send immediately">
       {q.options.map((option) => <InboxTextAction text={option.label} key={option.id} className={`${buttonVariants({ variant: "outline", size: "sm" })} h-auto min-h-9 max-w-full justify-start whitespace-normal break-words text-left`} disabled={action.isPending} onClick={() => submit("answer", option.id)} />)}
     </div>}

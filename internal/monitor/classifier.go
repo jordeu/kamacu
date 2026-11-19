@@ -80,7 +80,7 @@ Use current visible output to determine state: working, waiting, idle, error, un
 
 User-facing message:
 Write summary, context, and question as the original agent addressing the user directly. Preserve the agent's wording and first-person voice where possible. Never narrate the agent's activity or the monitoring process: avoid "The agent explained...", "The agent is waiting...", "The user needs to...", or "I detected...". Do not substitute a description of a message for the message itself.
-summary: a concise preview under 400 characters conveying the concrete outcome, recommendation, or decision. Lead with useful facts rather than "waiting for feedback".
+` + inbox.HeadlineInstructions + `
 question: the actual user-facing request, preserving its wording, or empty when there is no question. Do not invent an approval request merely because a completed response invites general questions.
 context: a self-contained Markdown message containing the substance the user needs to answer. Relay the relevant original response from SCREEN and recent history; deduplicate repeated terminal repaints and omit prompts, spinners, and unrelated logs. If the original response contains a PR description, reproduce that description and its material details instead of summarizing that it was explained. Preserve relevant headings, bullet points, links, changes, rationale, alternatives, recommendations, tradeoffs, verification results, and limitations that actually appear. There is no 400-character limit on context; use up to 24000 bytes. Keep relevant details even if they scrolled into history. Never invent facts, links, test results, decisions, or actions, and never claim the monitoring process performed the work. If the details are unavailable, relay only what is supported. For kind none use empty summary, context, and question; for questions, completions, permissions and errors include the relevant message.
 ` + inbox.ExplanationInstructions + `
@@ -111,7 +111,7 @@ var decisionSchema = map[string]any{
 		"state":              map[string]any{"type": "string", "enum": []string{"working", "waiting", "idle", "error", "unknown"}},
 		"kind":               map[string]any{"type": "string", "enum": []string{"none", "question", "permission", "completion", "error"}},
 		"evidence":           map[string]string{"type": "string"},
-		"summary":            map[string]string{"type": "string"},
+		"summary":            map[string]any{"type": "string", "maxLength": inbox.MaxHeadlineCharacters},
 		"context":            map[string]string{"type": "string"},
 		"explanation":        map[string]any{"type": "string", "maxLength": inbox.MaxExplanationBytes},
 		"question":           map[string]string{"type": "string"},
@@ -312,6 +312,9 @@ func (b Backend) classifyOnce(ctx context.Context, p Profile, s observation.Snap
 		return d, err
 	}
 	if d.Kind != "none" {
+		if err := inbox.ValidateGeneratedHeadline(d.Summary); err != nil {
+			return d, err
+		}
 		if err := inbox.ValidateGeneratedExplanation(d.Explanation); err != nil {
 			return d, err
 		}

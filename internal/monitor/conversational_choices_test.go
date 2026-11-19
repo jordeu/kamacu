@@ -119,7 +119,7 @@ func TestConversationalChoiceRepairIsBoundedAndUsesSameContext(t *testing.T) {
 				if calls == 2 && !strings.Contains(string(body), "CLASSIFICATION CORRECTION") {
 					t.Error("repair omitted the correction")
 				}
-				d := Decision{State: "waiting", Kind: "question", Evidence: "Should I publish?", Question: "Should I publish?", InputMode: "terminal", Explanation: "The review is drafted. Choose whether to publish or edit it."}
+				d := Decision{State: "waiting", Kind: "question", Evidence: "Should I publish?", Summary: "Review draft is ready", Question: "Should I publish?", InputMode: "terminal", Explanation: "The review is drafted. Choose whether to publish or edit it."}
 				if outcome == "corrected" && calls == 2 {
 					d.InputMode, d.Options = "text", []string{"1. Publish the review", "2. Edit the draft"}
 				}

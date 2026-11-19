@@ -942,3 +942,22 @@ func TestAgentRejectsEmptyExplanationWithoutPublishing(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentRejectsInvalidHeadlineWithoutPublishing(t *testing.T) {
+	for _, headline := range []string{"", "PR approved\nChecks pending", strings.Repeat("界", inbox.MaxHeadlineCharacters+1)} {
+		t.Run(headline[:min(len(headline), 20)], func(t *testing.T) {
+			s, model, tools, source := fixture(t)
+			seed(t, s, source, event())
+			model.respond = func(prompt string) (any, error) {
+				out := finalResponse(inputSnapshot(t, prompt), true)
+				out.Messages[0].Summary = headline
+				return out, nil
+			}
+			p := processAgent(t, s)
+			cards, err := s.Inbox.ListWithOrder(context.Background(), nil, false, 0, true)
+			if err != nil || p.Status != "failed" || !strings.Contains(p.Error, "headline") || p.ActionCount != 0 || len(cards.Items) != 0 || len(tools.calls) != 0 {
+				t.Fatal(p, cards, err)
+			}
+		})
+	}
+}

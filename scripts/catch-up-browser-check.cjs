@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
  try {
   const page = await browser.newPage({viewport:{width:1440,height:1000},hasTouch:true});
   const errors=[]; page.on('pageerror',error=>{errors.push(error.message);console.error('Browser error:',error.message)});
-  const base={task_id:1,project_id:1,task_title:'Improve task context',project_name:'Kamacu',session_id:'s',abstract:'The fix is ready. Review the release constraints before continuing.',summary:'Detailed summary',explanation:'The patch is ready, but the release is on hold. Keep it on hold until the rollout check passes.',context:'Context for https://github.com/acme/repo/pull/7',question:'Which release should contain this fix?',options:[{id:'yes',label:'Keep the release on hold'}],status:'pending',reason:'',answer:'',revision:1,created_at:3000,updated_at:3000,kind:'question',origin:'observer',delivery_mode:'text'};
+  const base={task_id:1,project_id:1,task_title:'Improve task context',project_name:'Kamacu',session_id:'s',abstract:'The fix is ready. Review the release constraints before continuing.',summary:'Release fix is ready',explanation:'The patch is ready, but the release is on hold. Keep it on hold until the rollout check passes.',context:'Context for https://github.com/acme/repo/pull/7',question:'Which release should contain this fix?',options:[{id:'yes',label:'Keep the release on hold'}],status:'pending',reason:'',answer:'',revision:1,created_at:3000,updated_at:3000,kind:'question',origin:'observer',delivery_mode:'text'};
   let messages=[{...base,id:'first'},{...base,explanation:undefined,id:'second',kind:'completion',question:'Work completed',options:[{id:'move_to_review',label:'Move to review and close session'}]}];
   let mode='accept',writes=[],queueReads=0,releaseAnswer,holdCompletions=false,releaseCompletions;
   const prReads=[];
@@ -15,11 +15,11 @@ const assert = require('node:assert/strict');
    const url=new URL(route.request().url()),path=url.pathname;let data=[];
    if(path==='/api/inbox/catch-up'){queueReads++;data=messages.filter(m=>m.status==='pending').map(m=>({...m}));}
    else if(path==='/api/inbox') data={items:url.searchParams.get('view')==='archived'?messages.filter(m=>m.status!=='pending'):messages.filter(m=>m.status==='pending').slice(0,50),pending_count:messages.filter(m=>m.status==='pending').length,has_more:messages.length>50};
-   else if(/\/api\/inbox\/[^/]+\/history$/.test(path)) data={items:[{...base,explanation:'',id:'prior-new',created_at:2000,abstract:'Newer prior message',status:'answered'},{...base,explanation:'',id:'prior-old',created_at:1000,abstract:'Older prior message',status:'answered'}],has_more:false};
+   else if(/\/api\/inbox\/[^/]+\/history$/.test(path)) data={items:[{...base,explanation:'',id:'prior-new',created_at:2000,abstract:'Newer prior message',summary:'Newer prior message',status:'answered'},{...base,explanation:'',id:'prior-old',created_at:1000,abstract:'Older prior message',summary:'Older prior message',status:'answered'}],has_more:false};
    else if(/\/api\/inbox\/[^/]+\/(answer|dismiss)$/.test(path)){
     const q=messages.find(m=>m.id===path.split('/')[3]),body=route.request().postDataJSON();writes.push({id:q.id,path,body});
     if(mode==='fail')return route.fulfill({status:500,json:{error:'Could not save answer'}});
-    if(mode==='delayed'){const saved={...q,status:'answered'};q.revision++;q.question='A newer question arrived';await new Promise(resolve=>{releaseAnswer=resolve});data={outcome:'accepted',question:saved};}
+    if(mode==='delayed'){const saved={...q,status:'answered'};q.revision++;q.question='A newer question arrived';q.summary='A newer event arrived';await new Promise(resolve=>{releaseAnswer=resolve});data={outcome:'accepted',question:saved};}
     else if(mode==='stale'){q.revision++;data={outcome:'stale_revision',question:{...q}};}else{q.status=path.endsWith('/dismiss')?'dismissed':'answered';q.answer=body.answer||body.option_id||'';q.reason=body.option_id||'';data={outcome:path.endsWith('/dismiss')?'dismissed':'accepted',question:{...q}};}
    }
    else if(path==='/api/inbox/tasks/1/completions'){data=messages.filter(m=>m.task_id===1&&m.kind==='completion'&&m.status==='pending').map(m=>({...m}));if(holdCompletions)await new Promise(resolve=>{releaseCompletions=resolve});}
@@ -54,8 +54,8 @@ const assert = require('node:assert/strict');
   const explanation=view.getByTestId('catch-up-explanation');
   await explanation.getByText(base.explanation,{exact:true}).waitFor();
   assert.equal(await view.getByText(base.explanation,{exact:true}).count(),1,'decision explanation appears only once');
-  assert.equal(await view.locator('section[aria-label="Current message"]').getByRole('heading',{name:base.question,exact:true}).count(),1);
-  assert.equal(await view.locator('section[aria-label="Your response"]').getByText(base.question,{exact:true}).count(),0,'response does not repeat the question');
+  assert.equal(await view.locator('section[aria-label="Current message"]').getByRole('heading',{name:base.summary,exact:true}).count(),1);
+  assert.equal(await view.locator('section[aria-label="Your response"]').getByText(base.question,{exact:true}).count(),1,'the question is shown above the response options');
   const fullContext=view.locator('section[aria-label="Current message"] details');
   assert.equal(await fullContext.getAttribute('open'),null);
   await fullContext.locator('summary').click();
@@ -79,8 +79,9 @@ const assert = require('node:assert/strict');
   messages.push({...base,id:'new-arrival',question:'Arrived after this pass started'});
   await view.getByRole('button',{name:'Skip for now →',exact:true}).click();
   await view.getByRole('heading',{name:'What should happen next?',exact:true}).waitFor();
+  await view.getByRole('heading',{name:base.summary,exact:true}).waitFor();
   assert.match(await view.getByTestId('catch-up-explanation').textContent(),/Context for/,'old messages fall back to full context');
-  assert.match(await view.getByTestId('catch-up-explanation').textContent(),/Detailed summary/,'legacy source keeps facts from both saved text fields');
+  assert.equal(await view.locator('section[aria-label="Current message"]').getByText(base.summary,{exact:true}).count(),1,'legacy headline is visible once while full context stays in the body');
   assert.equal(writes.length,0,'Skip must not write or reorder the inbox');
   assert.equal(await view.getByRole('status').filter({hasText:'Skipped for this pass'}).count(),0,'skip does not carry a notice to the next message');
   await view.getByRole('button',{name:'Previous',exact:true}).click();
@@ -116,7 +117,7 @@ const assert = require('node:assert/strict');
   assert.equal(await settingsScroll.evaluate(el=>el.scrollTop),originalScroll,'underlying scroll position is retained');
   await page.waitForFunction(el=>el===document.activeElement,await launch.elementHandle());
   assert.equal(await launch.evaluate(el=>el===document.activeElement),true,'focus returns to launcher');
-  await launch.click();await view.getByRole('heading',{name:'Arrived after this pass started',exact:true}).waitFor();
+  await launch.click();await view.locator('section[aria-label="Your response"]').getByText('Arrived after this pass started',{exact:true}).waitFor();
   await view.getByRole('button',{name:'Close',exact:true}).click();await view.waitFor({state:'detached'});
   // The compact inbox is itself a sheet; catch-up must restore that exact place.
   await page.setViewportSize({width:1000,height:900});
@@ -137,7 +138,7 @@ const assert = require('node:assert/strict');
   await page.keyboard.press('Escape');await view.waitFor({state:'detached'});
   messages=Array.from({length:51},(_,i)=>({...base,id:'page-'+i,question:'Queue message '+i}));
   await page.locator('main').getByRole('button',{name:'Catch up',exact:true}).click();
-  for(let i=0;i<51;i++){await view.getByRole('heading',{name:'Queue message '+i,exact:true}).waitFor();await view.getByRole('button',{name:'Skip for now →',exact:true}).click()}
+  for(let i=0;i<51;i++){await view.locator('section[aria-label="Your response"]').getByText('Queue message '+i,{exact:true}).waitFor();await view.getByRole('button',{name:'Skip for now →',exact:true}).click()}
   await view.getByRole('heading',{name:'You’ve reached the end of this pass',exact:true}).waitFor();
   assert.equal(messages.filter(m=>m.status==='pending').length,51);
   await page.keyboard.press('Escape');messages=[];
@@ -149,7 +150,7 @@ const assert = require('node:assert/strict');
   await page.locator('main').getByRole('button',{name:'Catch up',exact:true}).click();
   await view.getByRole('button',{name:'Move to done and close session',exact:true}).click();
   await view.getByRole('button',{name:'Confirm & next',exact:true}).click();
-  await view.getByRole('heading',{name:'Message after completing a task',exact:true}).waitFor();
+  await view.locator('section[aria-label="Your response"]').getByText('Message after completing a task',{exact:true}).waitFor();
   assert.equal(writes.at(-1).body.option_id,'move_to_done');
   assert.equal(await view.getByRole('status').filter({hasText:/Task moved|Message archived|session is closing/}).count(),0,'task outcomes do not carry over to the next message');
   await page.keyboard.press('Escape');
@@ -161,7 +162,7 @@ const assert = require('node:assert/strict');
   assert.equal(await view.getByRole('button',{name:'Send reply & next',exact:true}).isDisabled(),true,'empty custom reply cannot submit a prior option');
   await view.getByLabel('Your answer',{exact:true}).fill('Add one regression test before closing.');
   await view.getByRole('button',{name:'Send reply & next',exact:true}).click();
-  await view.getByRole('heading',{name:'Question with no predefined choices',exact:true}).waitFor();
+  await view.locator('section[aria-label="Your response"]').getByText('Question with no predefined choices',{exact:true}).waitFor();
   assert.equal(writes.at(-1).body.answer,'Add one regression test before closing.');
   assert.equal(writes.at(-1).body.option_id,undefined,'completion follow-up is not a task-move or close action');
   assert.equal(messages[0].reason,'');
@@ -230,7 +231,7 @@ const assert = require('node:assert/strict');
   messages=[{...base,id:'dismiss-first'},{...base,id:'dismiss-second',question:'Message after dismissal'}];
   await page.locator('main').getByRole('button',{name:'Catch up',exact:true}).click();
   await view.getByRole('button',{name:'Dismiss message',exact:true}).click();
-  await view.getByRole('heading',{name:'Message after dismissal',exact:true}).waitFor();
+  await view.locator('section[aria-label="Your response"]').getByText('Message after dismissal',{exact:true}).waitFor();
   assert.equal(messages[0].status,'dismissed');
   assert.equal(await view.getByRole('status').filter({hasText:/dismissed.*archived/i}).count(),0,'dismissal does not carry a notice to the next message');
   assert.equal(writes.at(-1).path,'/api/inbox/dismiss-first/dismiss');
@@ -241,10 +242,11 @@ const assert = require('node:assert/strict');
   await page.locator('main').getByRole('button',{name:'Catch up',exact:true}).click();
   await view.getByRole('button',{name:'Keep the release on hold',exact:true}).click();
   await view.getByRole('button',{name:'Confirm & next',exact:true}).click();
-  await view.getByRole('heading',{name:'A newer question arrived',exact:true}).waitFor();
+  await view.locator('section[aria-label="Your response"]').getByText('A newer question arrived',{exact:true}).waitFor();
   assert.equal(typeof releaseAnswer,'function');releaseAnswer();
   await view.getByRole('status').filter({hasText:'changed again while your response was being saved'}).waitFor();
-  await view.getByRole('heading',{name:'A newer question arrived',exact:true}).waitFor();
+  await view.getByRole('heading',{name:'A newer event arrived',exact:true}).waitFor();
+  await view.locator('section[aria-label="Your response"]').getByText('A newer question arrived',{exact:true}).waitFor();
   await view.getByRole('button',{name:'I’ve reviewed the updated message',exact:true}).waitFor();
   await page.keyboard.press('Escape');mode='accept';
   // A grouped notification loads only the expanded PR, not every referenced PR.

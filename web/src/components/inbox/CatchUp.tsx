@@ -5,7 +5,7 @@ import { CheckCheck, ChevronLeft, Inbox, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { setTerminalViewObscured } from "@/presence/activeSessionStore";
 import { CatchUpContext, CatchUpOpenContext } from "@/lib/useCatchUp";
-import { useCatchUpQueue, useCatchUpContext, catchUpSourceText, catchUpActionSucceeded, latestCatchUpMessage } from "@/api/catchUp";
+import { useCatchUpQueue, useCatchUpContext, catchUpSourceText, catchUpHeadline, catchUpReadingText, catchUpActionSucceeded, latestCatchUpMessage } from "@/api/catchUp";
 import { completionActions, feedbackOutcomeMessage, feedbackTaskURL, useFeedbackAction, useInboxMessage, type FeedbackQuestion } from "@/api/inbox";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -75,6 +75,7 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
   const history = useRef<HTMLDivElement>(null);
   const answerInput = useRef<HTMLTextAreaElement>(null);
   const completion = q.kind === "completion";
+  const readingText = catchUpReadingText(q);
   const operational = q.reason === "operational_failure";
   const canChoose = !q.hidden && (completion || q.delivery_mode !== "terminal");
   const choices: FeedbackQuestion["options"] = canChoose ? (completion ? completionActions(q) : q.options) : [];
@@ -109,14 +110,14 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
           <section className="min-w-0" aria-label="Current message">
             <CatchUpReferences projects={context.projects.data ?? []} names={context.projectNames} prs={context.prs} scratchpad={q.task_id === 0 && q.origin !== "notification"} />
             <p className="mb-4 text-xs text-muted-foreground">{completion ? "Completed work" : operational ? "Operational issue" : "Needs your decision"} · <time dateTime={new Date(q.created_at).toISOString()}>{new Date(q.created_at).toLocaleString()}</time></p>
-            <h1 className="break-words text-2xl font-semibold leading-snug tracking-tight sm:text-3xl"><InboxText text={completion && q.task_title ? q.task_title : q.question} /></h1>
-            <div className={`mt-5 ${contextProse}`} data-testid="catch-up-explanation"><InboxText text={q.explanation?.trim() || catchUpSourceText(q)} paragraphs /></div>
+            <h1 className="break-words text-2xl font-semibold leading-snug tracking-tight sm:text-3xl"><InboxText text={catchUpHeadline(q)} /></h1>
+            {readingText && <div className={`mt-5 ${contextProse}`} data-testid="catch-up-explanation"><InboxText text={readingText} paragraphs /></div>}
             {!!q.explanation?.trim() && <details className="mt-5 border-t border-border pt-3"><summary className="cursor-pointer text-xs text-muted-foreground">Read full context</summary><div className={`mt-4 ${contextProse}`}><InboxText text={catchUpSourceText(q)} paragraphs /></div></details>}
             <Button variant="outline" size="sm" className="mt-5" onClick={() => history.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>How we got here ↓</Button>
           </section>
           <section className={`${contextCard} space-y-4`} aria-label="Your response">
             <h2 className="text-base font-semibold">{completion ? "What should happen next?" : operational ? "Recovery actions" : "Your response"}</h2>
-            {completion && <p className="text-xs text-muted-foreground">Choose what happens next.</p>}
+            {completion ? <p className="text-xs text-muted-foreground">Choose what happens next.</p> : <div className="break-words text-base font-medium"><InboxText text={q.question} /></div>}
             {!pending && <p role="status" className="rounded-lg border border-border p-3 text-sm">This message is {q.status}. {q.delivery_status && `Delivery: ${q.delivery_status}.`} {q.answer && <InboxText text={q.answer} />}Skip to continue.</p>}
             {pending && <>
               {(choices.length > 0 || canWrite || customInTerminal) && <div role="group" aria-label="Choose a response" className="space-y-2">{choices.map(option => <div key={option.id}>

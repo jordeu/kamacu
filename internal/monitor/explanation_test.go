@@ -42,7 +42,7 @@ func TestClassifierCollectsExplanationAndFullContextInOneCall(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(response))), Header: make(http.Header)}, nil
 	})}}
 	got, err := b.Classify(context.Background(), Profile{Backend: "openai_compatible", Model: "test", Endpoint: "https://model.invalid"}, observation.Snapshot{Screen: source})
-	if err != nil || calls != 1 || got.Explanation != explanation || got.Context != source || got.Question != want.Question {
+	if err != nil || calls != 1 || got.Summary != want.Summary || got.Explanation != explanation || got.Context != source || got.Question != want.Question {
 		t.Fatal(got, err, calls)
 	}
 }

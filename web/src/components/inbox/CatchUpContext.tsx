@@ -40,7 +40,7 @@ function HistoryEvent({ question: q }: { question: FeedbackQuestion }) {
     <div className="space-y-3">
       <p className="mb-3 text-xs font-medium text-muted-foreground">{q.kind === "completion" ? "Work reported complete" : "Decision requested"}{q.task_id > 0 && ` · Task ${q.task_id}`}</p>
       {q.kind !== "completion" && <h3 className="mb-2 text-sm font-medium"><InboxText text={q.question} /></h3>}
-      <div className="whitespace-pre-wrap break-words text-sm leading-relaxed"><InboxText text={q.explanation?.trim() || q.abstract || q.summary} /></div>
+      <div className="whitespace-pre-wrap break-words text-sm leading-relaxed"><InboxText text={q.explanation?.trim() || q.summary || q.abstract} /></div>
       <details className="mt-4"><summary className="cursor-pointer text-xs text-muted-foreground">Read original context</summary><div className={`mt-4 ${contextProse}`}><InboxText text={catchUpSourceText(q)} paragraphs /></div>
         {q.answer && <div className="mt-4 border-t border-border pt-3 text-xs"><p className="mb-2 text-muted-foreground">Recorded answer · {q.status}</p><InboxText text={q.answer} /></div>}
       </details>

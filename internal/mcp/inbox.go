@@ -52,14 +52,14 @@ func registerInboxTools(s *mcp.Server, b *bridge) {
 	}
 	add("report_completion", "complete", "Legacy compatibility only. New completion summaries belong in the terminal and are detected automatically; do not call this tool for new work.", map[string]any{
 		"request_key": str("Unique key for this completed work; reuse on retries"),
-		"abstract":    map[string]any{"type": "string", "minLength": 1, "maxLength": 480, "description": "Self-contained plain-text sidebar message, up to 480 characters. Include concrete outcome and verification for completions; decision, essential findings, tradeoffs and recommendation for questions. Not a title or teaser."},
-		"summary":     str("Summary of completed work (max 4000 bytes)"),
+		"abstract":    map[string]any{"type": "string", "minLength": 1, "maxLength": 480, "description": "Short event headline matching summary. Describe what happened or what is new; keep the facts and tradeoffs in context."},
+		"summary":     str("Short event headline: what happened or what is new, preferably 6–12 words and at most 160 characters. Keep details in context."),
 		"context":     str("Markdown details: changes, verification and remaining limitations (max 32000 bytes)"),
 	}, "request_key", "abstract", "summary", "context")
 	add("ask_feedback", "ask", inboxInstructions, map[string]any{
 		"request_key": str("Stable unique key for this question; reuse on retries to prevent duplicates"),
-		"abstract":    map[string]any{"type": "string", "minLength": 1, "maxLength": 480, "description": "Self-contained plain-text sidebar message, up to 480 characters. Include concrete outcome and verification for completions; decision, essential findings, tradeoffs and recommendation for questions. Not a title or teaser."},
-		"summary":     str("Required task summary, sufficient to understand what the agent is doing (max 4000 bytes)"),
+		"abstract":    map[string]any{"type": "string", "minLength": 1, "maxLength": 480, "description": "Short event headline matching summary. Describe what happened or what is new; keep the facts and tradeoffs in context."},
+		"summary":     str("Short event headline: what happened or what is new, preferably 6–12 words and at most 160 characters. Put the request in question and details in context."),
 		"context":     str("Required Markdown decision context: relevant findings, alternatives, tradeoffs and recommendation (max 32000 bytes)"),
 		"question":    str("The specific decision the user needs to make (max 4000 bytes)"),
 		"options":     map[string]any{"type": "array", "maxItems": 10, "items": map[string]any{"type": "object", "properties": map[string]any{"id": str("Stable unique option ID"), "label": str("Simple answer label")}, "required": []string{"id", "label"}, "additionalProperties": false}},

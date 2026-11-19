@@ -188,7 +188,7 @@ export function InboxMessage({
           <div className="mt-6 space-y-6">
             <div>
               <h3 className="mb-2 text-sm font-medium text-muted-foreground">
-                {notification ? "Notification summary" : "Task summary"}
+                What happened
               </h3>
               <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
                 <InboxText text={q.summary} />
@@ -289,8 +289,8 @@ export function InboxMessage({
             <div className="mt-6 space-y-4 border-t border-border pt-5 text-sm">
               <h3 className="font-medium text-muted-foreground">
                 {notification
-                  ? "Notification summary and context"
-                  : "Task summary and context"}
+                  ? "Notification headline and context"
+                  : "Task headline and context"}
               </h3>
               <div className="whitespace-pre-wrap break-words leading-relaxed">
                 <InboxText text={q.summary} />

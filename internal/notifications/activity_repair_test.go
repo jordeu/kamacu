@@ -71,8 +71,23 @@ func TestRepairSkipsNewerCompleteDecision(t *testing.T) {
 		t.Fatal(items, err)
 	}
 }
-func TestRepairIncludesUnseenFeedbackOlderThanLatestNotification(t *testing.T) {
+
+// Repair uses a seven-day lookback from the real clock. Keep this fixture's
+// synthetic activity within that window instead of letting a fixed date expire.
+func newRepairActivityFixture(t *testing.T) *activityGitHubFixture {
+	t.Helper()
 	f := newActivityFixture(t)
+	f.now = time.Now().UTC().Truncate(time.Second)
+	f.source.CreatedAt = f.now.Add(-2 * time.Hour).UnixMilli()
+	f.event.Version = f.now.Add(-time.Minute).Format(time.RFC3339)
+	if _, err := f.s.DB.Exec(`UPDATE notification_sources SET created_at=? WHERE id=?`, f.source.CreatedAt, f.source.ID); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestRepairIncludesUnseenFeedbackOlderThanLatestNotification(t *testing.T) {
+	f := newRepairActivityFixture(t)
 	f.event.Version = f.now.Format(time.RFC3339)
 	oldIncompleteDecision(t, f)
 	items, err := f.s.NotificationRepairPreview(context.Background())
@@ -97,7 +112,7 @@ func TestRepairIncludesUnseenFeedbackOlderThanLatestNotification(t *testing.T) {
 }
 
 func TestRepairPromotesUnseenContextWithoutReplayingKnownDecisions(t *testing.T) {
-	f := newActivityFixture(t)
+	f := newRepairActivityFixture(t)
 	f.addReview()
 	f.reviews[0]["submitted_at"] = f.now.Add(-4 * time.Hour).Format(time.RFC3339)
 	seed(t, f.s, f.source, f.event)

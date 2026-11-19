@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { catchUpPRs, catchUpSourceText, catchUpActionSucceeded, latestCatchUpMessage } from "./catchUp";
+import { catchUpPRs, catchUpHeadline, catchUpReadingText, catchUpSourceText, catchUpActionSucceeded, latestCatchUpMessage } from "./catchUp";
 import type { FeedbackQuestion } from "./inbox";
 import type { Project, Task } from "./types";
 
@@ -57,4 +57,24 @@ it("does not repeat a source summary already present in the full context", () =>
 it("keeps conflicting source text instead of treating a negated substring as a repeat", () => {
   const q = { summary: "Not approved.", context: "approved." } as FeedbackQuestion;
   expect(catchUpSourceText(q)).toBe("Not approved.\n\napproved.");
+});
+
+
+it("keeps a legacy headline's facts in the title without copying it into the body", () => {
+  const q = { summary: "Merged; deployment still needs Terraform apply.", context: "Check the next nightly run after applying it." } as FeedbackQuestion;
+  expect(catchUpHeadline(q)).toBe(q.summary);
+  expect(catchUpReadingText(q)).toBe(q.context);
+  expect(catchUpSourceText(q)).toContain(q.summary);
+});
+it("removes only an exact leading headline paragraph, preserving caveats and source formatting", () => {
+  const q = { summary: "PR approved", context: "PR approved\n\n    check_artifact_version()\n\nCI still needs checking." } as FeedbackQuestion;
+  expect(catchUpReadingText(q)).toBe("    check_artifact_version()\n\nCI still needs checking.");
+  const qualified = "PR approved, but the tested artifact version is unknown.";
+  expect(catchUpReadingText({ ...q, explanation: qualified })).toBe(qualified);
+  expect(catchUpSourceText(q)).toBe(q.context);
+});
+it("falls back to context when the explanation adds nothing beyond the headline", () => {
+  const q = { summary: "Fix merged", explanation: "Fix merged", context: "It is not released yet." } as FeedbackQuestion;
+  expect(catchUpReadingText(q)).toBe(q.context);
+  expect(catchUpReadingText({ ...q, context: "Fix merged" })).toBe("");
 });

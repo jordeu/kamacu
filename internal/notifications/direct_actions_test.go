@@ -383,7 +383,7 @@ func TestFreeTextReplyPlansOnceThenExecutesWithoutModelLoop(t *testing.T) {
 func TestUnsupportedFreeTextBecomesOneClarificationWithoutMutation(t *testing.T) {
 	s, m, r, tools, source := directFixture(t)
 	q := directCard(t, s, source, inboxaction.Action{ID: "ignore", Kind: "ignore"})
-	m.responses = []any{map[string]any{"actions": []inboxaction.Action{}, "question": "Which task should receive the investigation?", "context": "Two tasks cover different parts of this request. Choose the target.", "explanation": "This work spans two tasks. Pick which task should look into it.", "authorization_quote": ""}}
+	m.responses = []any{map[string]any{"actions": []inboxaction.Action{}, "summary": "Investigation target is unclear", "question": "Which task should receive the investigation?", "context": "Two tasks cover different parts of this request. Choose the target.", "explanation": "This work spans two tasks. Pick which task should look into it.", "authorization_quote": ""}}
 	ctx := context.Background()
 	if _, err := s.Inbox.Answer(ctx, nil, q.ID, q.Revision, "Look into the two related issues", ""); err != nil {
 		t.Fatal(err)
@@ -393,7 +393,7 @@ func TestUnsupportedFreeTextBecomesOneClarificationWithoutMutation(t *testing.T)
 	}
 	out, _ := s.Inbox.Get(ctx, q.ID)
 	cards, _ := s.Inbox.ListWithOrder(ctx, nil, false, 0, true)
-	if out.DeliveryStatus != "succeeded" || len(m.prompts) != 1 || len(r.submitted) > 0 || len(tools.calls) > 0 || len(cards.Items) != 1 || cards.Items[0].Explanation != "This work spans two tasks. Pick which task should look into it." {
+	if out.DeliveryStatus != "succeeded" || len(m.prompts) != 1 || len(r.submitted) > 0 || len(tools.calls) > 0 || len(cards.Items) != 1 || cards.Items[0].Explanation != "This work spans two tasks. Pick which task should look into it." || cards.Items[0].Summary != "Investigation target is unclear" {
 		t.Fatal(out, cards)
 	}
 }
