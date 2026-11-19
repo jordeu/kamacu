@@ -26,6 +26,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.M
 	ah := &agentCRUDHandlers{db: db}
 	mux.HandleFunc("GET /api/agents", ah.list)
 	mux.HandleFunc("POST /api/agents", ah.create)
+	mux.HandleFunc("POST /api/agents/discover-models", ah.discoverModels)
 	mux.HandleFunc("PATCH /api/agents/{id}", ah.update)
 	mux.HandleFunc("DELETE /api/agents/{id}", ah.delete)
 	mux.HandleFunc("POST /api/agents/{id}/default", ah.setDefault)

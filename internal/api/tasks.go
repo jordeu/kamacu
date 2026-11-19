@@ -26,6 +26,8 @@ import (
 // (D-26): worktree_path set → active; worktree_error set → failed (Retry);
 // both NULL → absent ("Create worktree"). No status enum.
 type Task struct {
+	AgentID       *int64              `json:"agent_id"`
+	Model         string              `json:"model"`
 	PRLinks       []store.PRLink      `json:"pr_links,omitempty"`
 	ObservedWork  []store.SessionWork `json:"observed_work,omitempty"`
 	ID            int64               `json:"id"`
@@ -69,12 +71,12 @@ type taskHandlers struct {
 	tmuxClient tmux.Client
 }
 
-const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url, recurrent, snoozed_until, snoozed_from`
+const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url, recurrent, snoozed_until, snoozed_from, agent_id, model`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent, &t.SnoozedUntil, &t.SnoozedFrom)
+		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent, &t.SnoozedUntil, &t.SnoozedFrom, &t.AgentID, &t.Model)
 	return t, err
 }
 
@@ -325,6 +327,8 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		AgentID     *int64 `json:"agent_id"`
+		Model       string `json:"model"`
 		Title       string `json:"title"`
 		Description string `json:"description"`
 	}
@@ -347,11 +351,21 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	agentID, model, err := validateTaskAgent(h.db, pid, req.AgentID, req.Model)
+	if err != nil {
+		var validationError taskAgentValidationError
+		if errors.As(err, &validationError) {
+			writeError(w, http.StatusBadRequest, err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
 	t, err := scanTask(h.db.QueryRow(
-		`INSERT INTO tasks (project_id, title, description, status, position)
-		 VALUES (?, ?, ?, 'todo',
+		`INSERT INTO tasks (project_id, title, description, agent_id, model, status, position)
+		 VALUES (?, ?, ?, ?, ?, 'todo',
 		   (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks WHERE project_id = ? AND status = 'todo' AND source = 'manual'))
-		 RETURNING `+taskColumns, pid, title, req.Description, pid))
+		 RETURNING `+taskColumns, pid, title, req.Description, agentID, model, pid))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -110,19 +110,12 @@ export default function TaskPage() {
 function TaskPageContent({ task }: { task: Task }) {
   const projectId = task.project_id;
   const taskId = task.id;
-  // M001: resolve the active project's agent engine to hide the Claude-only
-  // QuotaIndicator when the project runs a non-claude agent. Both queries are
-  // already cached app-wide (sidebar/settings), so this adds no fetches.
+  // Task overrides also determine agent-specific controls and quota visibility.
   const { data: allProjects } = useProjects();
   const { data: allAgents } = useAgents();
-  const projectAgentId = allProjects?.find((p) => p.id === projectId)?.agent_id;
-  const projectEngine = allAgents?.find((a) => a.id === projectAgentId)?.engine;
-  // D-62: strict claude-only rule, aligned with /global's locked predicate
-  // (config.agent.engine === "claude"). The quota chip shows ONLY for
-  // claude-engine projects and stays hidden while agents are unresolved
-  // (loading) — the accepted cosmetic flip; no loading machinery (17-UI-SPEC
-  // delta b).
-  const isClaudeAgent = projectEngine === "claude";
+  const activeAgentId = task.agent_id ?? allProjects?.find((p) => p.id === projectId)?.agent_id;
+  const activeAgent = allAgents?.find((agent) => agent.id === activeAgentId);
+  const isClaudeAgent = activeAgent?.engine === "claude";
   const navigate = useNavigate();
   const location = useLocation();
   const startAgent = useSpawnAgent(taskId);
@@ -739,6 +732,9 @@ function TaskPageContent({ task }: { task: Task }) {
             </DropdownMenu>
           )}
         </header>
+        {task.agent_id != null && activeAgent && (
+          <p className="text-xs text-muted-foreground">{activeAgent.name} · {task.model || "Agent default"}</p>
+        )}
         {updateRecurrence.isError && (
           <p role="alert" className="text-sm text-destructive">
             Could not change recurrence. {updateRecurrence.error.message}

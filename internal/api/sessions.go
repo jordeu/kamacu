@@ -453,16 +453,17 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 	// client Resume after a Reset minted a new id simply resumes the NEW id,
 	// which is correct newest-wins behavior).
 	var csid, ocsid, cxid sql.NullString
+	var taskModel, modelArgument string
 	var agentEngine, agentCommand, agentExtraParams string // M001: resolved alongside the task's worktree
 	if req.TaskID > 0 {
 		var path sql.NullString
 		err := h.db.QueryRow(
-			`SELECT t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, a.engine, a.command, a.extra_params
+			`SELECT t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, a.engine, a.command, a.extra_params, t.model, a.model_argument
 			 FROM tasks t
 			 JOIN projects p ON p.id = t.project_id
-			 JOIN agents a ON a.id = p.agent_id
+			 JOIN agents a ON a.id = COALESCE(t.agent_id, p.agent_id)
 			 WHERE t.id = ?`, req.TaskID,
-		).Scan(&path, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams)
+		).Scan(&path, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams, &taskModel, &modelArgument)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &sessionCreateError{http.StatusNotFound, "task not found"}
 		}
@@ -649,6 +650,19 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 					id = "--last"
 				}
 				opts.AgentArgs = append(opts.AgentArgs, "resume", id)
+			}
+		}
+		if taskModel != "" {
+			if modelArgument == "" {
+				return nil, &sessionCreateError{http.StatusConflict, "the task's agent no longer has a model argument; restore it in Settings → Agents"}
+			}
+			if agentEngine == "" || agentEngine == "claude" {
+				opts.ExtraArgs = applyModelArgument(opts.ExtraArgs, modelArgument, taskModel, agentEngine)
+			} else {
+				if len(opts.AgentArgs) == 0 {
+					return nil, &sessionCreateError{http.StatusBadRequest, "agent command is empty"}
+				}
+				opts.AgentArgs = append(opts.AgentArgs[:1], applyModelArgument(opts.AgentArgs[1:], modelArgument, taskModel, agentEngine)...)
 			}
 		}
 	} else if reattach {
@@ -1453,7 +1467,7 @@ func (h *sessionHandlers) joinSessionContext(infos []session.Info) map[int64]ses
 		`SELECT t.id, t.title, p.name, a.name
 		 FROM tasks t
 		 JOIN projects p ON p.id = t.project_id
-		 JOIN agents a ON a.id = p.agent_id
+		 JOIN agents a ON a.id = COALESCE(t.agent_id, p.agent_id)
 		 WHERE t.id IN (`+placeholders+`)`, ids...)
 	if err != nil {
 		slog.Warn("joinSessionContext: query", "error", err)

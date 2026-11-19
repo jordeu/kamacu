@@ -25,8 +25,6 @@ import { AgentNameDialog } from "@/components/settings/AgentNameDialog";
 
 const SECTION_HELP = `Agents available in project task tabs. The default is used for new projects.`;
 
-export interface AgentsSectionProps {}
-
 /**
  * The M001 agents management section — one more Settings <section> in the 640px
  * column, mirroring the ManageWorkspacesDialog hub but as a page section (per
@@ -39,7 +37,7 @@ export interface AgentsSectionProps {}
  * block-until-unassigned) + ON DELETE RESTRICT; here they are UX affordances
  * only, mirroring ManageWorkspacesDialog's count-by-parent derivation.
  */
-export function AgentsSection({}: AgentsSectionProps) {
+export function AgentsSection() {
   const { data: agents } = useAgents();
   const { data: projects } = useProjects();
   const deleteAgent = useDeleteAgent();
@@ -69,10 +67,9 @@ export function AgentsSection({}: AgentsSectionProps) {
     setNameOpen(true);
   }
 
-  async function handleDelete() {
-    if (!deleteTarget) return;
-    await deleteAgent.mutateAsync(deleteTarget.id);
-    setDeleteTarget(null);
+  function handleDelete() {
+    if (!deleteTarget || deleteAgent.isPending) return;
+    deleteAgent.mutate(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) });
   }
 
   return (
@@ -151,7 +148,7 @@ export function AgentsSection({}: AgentsSectionProps) {
                     variant="ghost"
                     size="icon-sm"
                     aria-label={`Delete ${a.name}`}
-                    onClick={() => setDeleteTarget(a)}
+                    onClick={() => { deleteAgent.reset(); setDeleteTarget(a); }}
                   >
                     <Trash2 className="size-4" />
                   </Button>
@@ -186,13 +183,14 @@ export function AgentsSection({}: AgentsSectionProps) {
             <AlertDialogTitle>Delete agent?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `"${deleteTarget.name}" will be removed. Its projects are unaffected — it has none.`
+                ? `"${deleteTarget.name}" will be removed. Agents assigned to tasks, projects, or the Scratchpad must be unassigned before deletion.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteAgent.isError && <p role="alert" className="text-sm text-destructive">Could not delete the agent. {deleteAgent.error.message}</p>}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleDelete}>
+            <AlertDialogAction variant="destructive" disabled={deleteAgent.isPending} onClick={(event) => { event.preventDefault(); handleDelete(); }}>
               Delete agent
             </AlertDialogAction>
           </AlertDialogFooter>

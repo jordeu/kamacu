@@ -160,7 +160,7 @@ export function useDeleteProject() {
 export function useCreateTask(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { title: string; description?: string }) =>
+    mutationFn: (body: { title: string; description?: string; agent_id?: number; model?: string }) =>
       post<Task>(`/api/projects/${projectId}/tasks`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });
@@ -267,8 +267,8 @@ export function useMoveTask(projectId: number) {
 export function useCreateAgent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ name, command }: { name: string; command: string }) =>
-      post<Agent>("/api/agents", { name, command }),
+    mutationFn: (body: { name: string; command: string; models?: string[]; model_argument?: string; model_discovery_command?: string }) =>
+      post<Agent>("/api/agents", body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
@@ -284,13 +284,19 @@ export function useUpdateAgent() {
       command,
       engine,
       extra_params,
+      models,
+      model_argument,
+      model_discovery_command,
     }: {
       id: number;
       name?: string;
       command?: string;
       engine?: "claude" | "custom";
       extra_params?: string;
-    }) => patch<Agent>(`/api/agents/${id}`, { name, command, engine, extra_params }),
+      models?: string[];
+      model_argument?: string;
+      model_discovery_command?: string;
+    }) => patch<Agent>(`/api/agents/${id}`, { name, command, engine, extra_params, models, model_argument, model_discovery_command }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },

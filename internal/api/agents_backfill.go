@@ -32,7 +32,7 @@ func BackfillAgents(db *sql.DB) error {
 	// created it). engine='claude' is the full capability tier (hooks/resume/
 	// quota); is_system=1 makes it non-deletable; is_default=1 satisfies the
 	// exactly-one-default invariant.
-	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('Claude Code', 'claude', 'claude', 1, 1)`)
+	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system, model_argument) VALUES ('Claude Code', 'claude', 'claude', 1, 1, '--model {{model}}')`)
 	return err
 }
 
@@ -42,7 +42,7 @@ func BackfillAgents(db *sql.DB) error {
 // Claude seed row's extra_params column, so the relocation from a global setting
 // onto the agent row loses no one's config or the default. Idempotent: a no-op
 // once the seed row already carries a non-empty value (the user may have
-// intentionally cleared it to '' — preserved by the non-empty guard on the
+// intentionally cleared it to ” — preserved by the non-empty guard on the
 // *seed*, while the very first run copies the effective setting).
 //
 // Runs after store.Migrate (the column must exist) and after BackfillAgents
@@ -99,7 +99,7 @@ func BackfillOpenCodeAgent(db *sql.DB) error {
 	}
 	// No opencode seed: re-create it (defensive; 00015 normally created it).
 	// is_default=0 preserves the exactly-one-default invariant (claude stays it).
-	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('OpenCode', 'opencode', 'opencode', 0, 1)`)
+	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system, model_argument) VALUES ('OpenCode', 'opencode', 'opencode', 0, 1, '--model {{model}}')`)
 	return err
 }
 
@@ -126,7 +126,7 @@ func BackfillCodexAgent(db *sql.DB) error {
 	}
 	// No codex seed: re-create it (defensive; 00019 normally created it).
 	// is_default=0 preserves the exactly-one-default invariant (claude stays it).
-	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES ('Codex', 'codex', 'codex', 0, 1)`)
+	_, err = db.Exec(`INSERT INTO agents (name, command, engine, is_default, is_system, model_argument) VALUES ('Codex', 'codex', 'codex', 0, 1, '--model {{model}}')`)
 	return err
 }
 

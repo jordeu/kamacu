@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { ApiError } from "@/api/client";
 import { useCreateAgent, useUpdateAgent } from "@/api/mutations";
 import type { Agent } from "@/api/types";
@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AgentModelsEditor } from "./AgentModelsEditor";
 import { Input } from "@/components/ui/input";
 
 export interface AgentNameDialogProps {
@@ -26,18 +27,13 @@ function sentenceCase(message: string): string {
   return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
-/**
- * Create/edit agent dialog (M001) — a two-field variant of WorkspaceNameDialog.
- * One dialog serves both flows: "create" opens with empty fields, "edit"
- * prefills the existing name + command. The server's duplicate-name reject
- * (`name UNIQUE COLLATE NOCASE`, migration 00013) arrives as `ApiError.message`
- * and renders sentence-cased inline; Save is disabled while pending or empty.
- *
- * The Command field is mono and carries placeholder help for the
- * {{worktree}} / {{session_id}} template tokens (D-M001-1). A system agent's
- * engine is server-locked; the form edits only name + command for any agent.
- */
-export function AgentNameDialog({
+/** Mount a fresh form on each open so cancel discards all draft configuration. */
+export function AgentNameDialog(props: AgentNameDialogProps) {
+  if (!props.open) return null;
+  return <AgentNameForm key={`${props.mode}:${props.agent?.id ?? "new"}`} {...props} />;
+}
+
+function AgentNameForm({
   mode,
   agent,
   open,
@@ -52,33 +48,29 @@ export function AgentNameDialog({
   const [extraParams, setExtraParams] = useState(
     mode === "edit" ? (agent?.extra_params ?? "") : "",
   );
+  const [models, setModels] = useState<string[]>(agent?.models ?? []);
+  const [modelArgument, setModelArgument] = useState(agent?.model_argument ?? "");
+  const [discoveryCommand, setDiscoveryCommand] = useState(agent?.model_discovery_command ?? "");
   const [error, setError] = useState<string | null>(null);
   const createAgent = useCreateAgent();
   const updateAgent = useUpdateAgent();
 
   const pending = mode === "create" ? createAgent.isPending : updateAgent.isPending;
 
-  // Prefill each time the dialog opens; clear any prior error.
-  useEffect(() => {
-    if (open) {
-      setName(mode === "edit" ? (agent?.name ?? "") : "");
-      setCommand(mode === "edit" ? (agent?.command ?? "") : "");
-      setExtraParams(mode === "edit" ? (agent?.extra_params ?? "") : "");
-      setError(null);
-    }
-  }, [open, mode, agent?.name, agent?.command]);
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     try {
       if (mode === "create") {
-        await createAgent.mutateAsync({ name: name.trim(), command: command.trim() });
+        await createAgent.mutateAsync({ name: name.trim(), command: command.trim(), models, model_argument: modelArgument, model_discovery_command: discoveryCommand });
       } else {
         await updateAgent.mutateAsync({
           id: agent!.id,
           name: name.trim(),
           command: command.trim(),
+          models,
+          model_argument: modelArgument,
+          model_discovery_command: discoveryCommand,
           // Only the claude engine uses extra_params; send it when editing a
           // claude agent so the field is persisted on the row.
           ...(agent!.engine === "claude" ? { extra_params: extraParams } : {}),
@@ -100,7 +92,7 @@ export function AgentNameDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent aria-describedby={undefined}>
+      <DialogContent aria-describedby={undefined} className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -152,6 +144,16 @@ export function AgentNameDialog({
               </p>
             </div>
           )}
+          {open && <AgentModelsEditor
+            engine={mode === "edit" ? (agent?.engine ?? "custom") : "custom"}
+            command={command}
+            models={models}
+            onModelsChange={setModels}
+            modelArgument={modelArgument}
+            onModelArgumentChange={setModelArgument}
+            discoveryCommand={discoveryCommand}
+            onDiscoveryCommandChange={setDiscoveryCommand}
+          />}
           {error && <p className="text-xs text-destructive">{error}</p>}
           <DialogFooter>
             <Button

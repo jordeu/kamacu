@@ -54,6 +54,9 @@ export interface Workspace {
 // Mirrors the backend api.Agent struct. `is_default` marks the protected default
 // (key off this flag, never the name); `is_system` marks the non-deletable seed.
 export interface Agent {
+  models?: string[];
+  model_argument?: string;
+  model_discovery_command?: string;
   id: number;
   name: string;
   // The command template; {{worktree}} and {{session_id}} placeholders are
@@ -86,6 +89,8 @@ export interface TaskPRLink {
 }
 
 export interface Task {
+  agent_id?: number | null;
+  model?: string;
   pr_links?: TaskPRLink[];
   issue_repo?: string | null;
   issue_number?: number | null;
