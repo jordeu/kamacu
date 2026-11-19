@@ -19,6 +19,14 @@ are built in, with live working/idle/waiting status on the board; any other CLI 
 can be registered as a custom agent from just a name and a command. The default agent is
 configurable per project.
 
+Open **Overview** beneath the workspace switcher to see tasks in progress,
+tasks in review, and PRs awaiting your review across the workspace's projects,
+in that order. Search or filter by project, sort by last update, and expand a
+queue to see every item. Task rows open the task; PR rows open its review
+workspace. The entry remains available in the collapsed sidebar and mobile
+navigation. Switching workspaces while viewing Overview keeps you in Overview.
+Unavailable or cached GitHub results are identified separately from empty queues.
+
 It runs entirely on your machine, single user, accessed from a browser at localhost. The
 whole point is one place to see and drive all your agent work: every task gets its own
 isolated git worktree and a persistent agent session you can open, leave, and

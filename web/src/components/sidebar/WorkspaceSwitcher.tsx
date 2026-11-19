@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useMatch, useNavigate } from "react-router";
 import { ChevronsUpDown, Plus, Settings } from "lucide-react";
 import { useProjects, useWorkspaces } from "@/api/queries";
 import { getWorkspaceProject } from "@/lib/workspaceProject";
@@ -32,6 +32,7 @@ export function WorkspaceSwitcher() {
   const { data: workspaces } = useWorkspaces();
   const { data: projects } = useProjects();
   const navigate = useNavigate();
+  const onOverview = useMatch("/workspaces/:workspaceId/overview");
 
   const [nameOpen, setNameOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
@@ -46,6 +47,10 @@ export function WorkspaceSwitcher() {
 
   function handlePick(id: number) {
     setActiveWorkspaceId(id);
+    if (onOverview) {
+      navigate(`/workspaces/${id}/overview`);
+      return;
+    }
     const project = getWorkspaceProject(id, projects ?? []);
     navigate(project ? `/projects/${project.id}` : "/");
   }
