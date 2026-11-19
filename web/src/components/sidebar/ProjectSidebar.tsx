@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
-import { Plus, Settings, Activity } from "lucide-react";
+import { Plus, Settings, Activity, PanelsTopLeft } from "lucide-react";
 import { useProjects } from "@/api/queries";
 import { useAgentStatuses } from "@/api/agents";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,29 @@ export function ProjectSidebar() {
         <div className="shrink-0 group-data-[collapsible=icon]:hidden">
           <WorkspaceSwitcher />
         </div>
+        {activeWorkspaceId !== null && (
+          <SidebarMenu className="shrink-0 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0">
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                size="sm"
+                tooltip="Workspace overview"
+                isActive={location.pathname === `/workspaces/${activeWorkspaceId}/overview`}
+                className="min-h-9 px-3 group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
+              >
+                <Link
+                  to={`/workspaces/${activeWorkspaceId}/overview`}
+                  aria-label="Workspace overview"
+                  aria-current={location.pathname === `/workspaces/${activeWorkspaceId}/overview` ? "page" : undefined}
+                  onClick={() => setOpenMobile(false)}
+                >
+                  <PanelsTopLeft className="size-4 shrink-0" aria-hidden="true" />
+                  <span className="group-data-[collapsible=icon]:hidden">Overview</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        )}
         <nav
           aria-label="Projects"
           tabIndex={0}

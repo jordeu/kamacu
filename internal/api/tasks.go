@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -199,19 +200,36 @@ func provisionWorktree(ctx context.Context, db *sql.DB, wt *worktree.Service, ta
 	return "", "", err
 }
 
-// list handles GET /api/tasks — the UNSCOPED task list. It is the bridge
-// target for list_tasks when project_id is omitted (D-01, MCPPROC-07 /
-// MCPTASK-01). It mirrors listByProject's SELECT with two changes:
-//   - the WHERE project_id = ? clause is dropped (no path id); and
-//   - the project-existence check is dropped (no project to look up).
-//
-// Everything else is verbatim: the source = 'manual' filter stays (PR reviews
-// keep off the board — GHREV-04), and the ORDER BY status, position ASC
-// ordering stays (board order is global across projects).
+// list handles GET /api/tasks, optionally filtered by workspace_id and repeated
+// status parameters. Without filters it remains the unscoped manual task list
+// used by MCP. PR review workspaces are always excluded.
 func (h *taskHandlers) list(w http.ResponseWriter, r *http.Request) {
 	// GHREV-04: the unscoped list is MANUAL tasks only — PR reviews
 	// (source='github_pr') own a worktree/agent/diff but never render as cards.
-	rows, err := h.db.Query(`SELECT ` + taskColumns + ` FROM tasks WHERE source = 'manual' ORDER BY status, position ASC`)
+	query := `SELECT ` + taskColumns + ` FROM tasks WHERE source = 'manual'`
+	var args []any
+	if raw := r.URL.Query().Get("workspace_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid workspace_id")
+			return
+		}
+		query += ` AND project_id IN (SELECT id FROM projects WHERE workspace_id = ?)`
+		args = append(args, id)
+	}
+	if statuses := r.URL.Query()["status"]; len(statuses) > 0 {
+		placeholders := make([]string, 0, len(statuses))
+		for _, status := range statuses {
+			if !validStatuses[status] {
+				writeError(w, http.StatusBadRequest, "invalid status")
+				return
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, status)
+		}
+		query += ` AND status IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	rows, err := h.db.QueryContext(r.Context(), query+` ORDER BY status, position ASC`, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -17,6 +17,7 @@ import GlobalTaskPage from "@/pages/GlobalTaskPage";
 import SettingsPage from "@/pages/SettingsPage";
 import TaskPage from "@/pages/TaskPage";
 import TerminalPage from "@/pages/TerminalPage";
+import WorkspaceOverviewPage from "@/pages/WorkspaceOverviewPage";
 
 function RedirectToWorkspaceProject() {
   const { data: projects, isLoading } = useProjects();
@@ -128,6 +129,7 @@ export default function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<RedirectToWorkspaceProject />} />
+        <Route path="/workspaces/:workspaceId/overview" element={<WorkspaceOverviewPage />} />
         <Route
           path="/projects/:projectId"
           element={
