@@ -33,14 +33,16 @@ type Service struct {
 	TaskSession    func(int64) string
 	Providers      map[string]Provider
 	// workMu serializes ticks; source CRUD has its own short lock.
-	workMu         sync.Mutex
-	progressMu     sync.RWMutex
-	progressRun    *notificationRun
-	progress       Progress
-	handoffMu      sync.Mutex
-	SessionChanges func() <-chan struct{}
-	actionMu       sync.Mutex
-	sourceMu       sync.Mutex
+	workMu                  sync.Mutex
+	automaticInterval       time.Duration
+	nextAutomaticProcessing time.Time
+	progressMu              sync.RWMutex
+	progressRun             *notificationRun
+	progress                Progress
+	handoffMu               sync.Mutex
+	SessionChanges          func() <-chan struct{}
+	actionMu                sync.Mutex
+	sourceMu                sync.Mutex
 }
 
 func New(db *sql.DB, box *inbox.Service, model Model, tools Tools) *Service {
@@ -203,6 +205,10 @@ func (s *Service) Tick(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+	// Scheduling failures must not prevent an already queued manual run.
+	if err := s.scheduleAutomaticProcessing(ctx, time.Now()); err != nil && ctx.Err() == nil {
+		slog.Warn("automatic notification processing", "error", err)
 	}
 	return s.processNext(ctx)
 }

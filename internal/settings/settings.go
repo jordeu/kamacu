@@ -13,19 +13,22 @@ import (
 
 // Setting keys. The set of valid keys is exactly the Defaults map's keys.
 const (
-	KeyWorktreeBase      = "worktree_base"
-	KeyShell             = "shell"
-	KeyBranchTemplate    = "branch_template"
-	KeyDoneSessionTTL    = "done_session_ttl"
-	KeyGithubIntegration = "github_integration"
-	KeyPRReviewSeed      = "pr_review_seed"
+	KeyWorktreeBase            = "worktree_base"
+	KeyShell                   = "shell"
+	KeyBranchTemplate          = "branch_template"
+	KeyDoneSessionTTL          = "done_session_ttl"
+	KeyGithubIntegration       = "github_integration"
+	KeyPRReviewSeed            = "pr_review_seed"
+	KeyNotificationAutoProcess = "notification_auto_process"
 )
 
 // Defaults maps each setting key to its code default. Absent row = default.
 var Defaults = map[string]string{
-	KeyWorktreeBase:   "~/.kamacu/worktrees/", // WT-01; stored raw, expanded at use
-	KeyShell:          "bash",                 // SHELL-01
-	KeyBranchTemplate: "task/{slug}-{id}",     // BRANCH-01
+	// Automatic notification processing is opt-in.
+	KeyNotificationAutoProcess: "off",
+	KeyWorktreeBase:            "~/.kamacu/worktrees/", // WT-01; stored raw, expanded at use
+	KeyShell:                   "bash",                 // SHELL-01
+	KeyBranchTemplate:          "task/{slug}-{id}",     // BRANCH-01
 	// REAP-01/D-91: Done-TTL reaper window. Go-style duration; empty/"0"/
 	// "never" disable reaping (see ParseDoneSessionTTL). Read-at-use by 09-05.
 	KeyDoneSessionTTL: "24h",

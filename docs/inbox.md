@@ -124,6 +124,12 @@ source retains its checkpoint; disconnecting retains its history.
 
 Choose a notification processing model independently of terminal monitoring.
 **Process pending** captures the pending event revisions, rules and Inbox history.
+The Notifications page also offers automatic processing every 5, 10, 20 (the default
+interval when enabling), or 40 minutes. Automatic processing is off until enabled.
+The saved interval applies in the background while the server runs, even with the
+view closed. Changing the interval or restarting the server starts a fresh wait;
+turning it off leaves any active run to finish. Empty queues are skipped and active
+runs are reused rather than duplicated. A notification model must be configured.
 One batch agent reads the plain numbered rules and context, with bounded read-only
 lookups when needed. It decides relevance, grouping, task ownership and wording
 in one workflow. Rules have stable IDs and save directly; there is no compiler,
