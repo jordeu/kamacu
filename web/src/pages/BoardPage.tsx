@@ -187,6 +187,7 @@ export default function BoardPage() {
         />
       )}
       <NewTaskDialog
+        key={projectId}
         projectId={projectId}
         open={dialogOpen}
         onOpenChange={setDialogOpen}

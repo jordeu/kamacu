@@ -17,7 +17,18 @@ agent session — the agent's real CLI running in a PTY, rendered live in a brow
 terminal — plus optional tabs for extra bash sessions. Claude Code, OpenCode and Codex
 are built in, with live working/idle/waiting status on the board; any other CLI agent
 can be registered as a custom agent from just a name and a command. The default agent is
-configurable per project.
+configurable per project. When creating a task, you can override its agent and
+choose a model from that agent's curated list. In **Settings → Agents → Edit**,
+add or remove model IDs, or click **Discover models** and add suggestions to the
+list before saving. Discovery never changes the list automatically. Tasks keep
+their chosen agent and model for subsequent starts and resumes.
+
+Custom agents can configure a model argument such as `--model {{model}}` or
+`--model={{model}}`. An optional discovery command can return a JSON array of
+model IDs or one ID per line. Built-in agents also support a discovery override;
+use it when launch arguments select a provider or configuration. Both commands and model arguments are passed
+directly as arguments, without shell evaluation. Leaving the task model at
+**Agent default** preserves the CLI's normal default and resume behavior.
 
 Open **Overview** beneath the workspace switcher to see tasks in progress,
 tasks in review, and PRs awaiting your review across the workspace's projects,

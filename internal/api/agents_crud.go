@@ -16,29 +16,39 @@ import (
 // default agent (D-M001-3: identified by the flag, rename-proof). IsSystem
 // marks the non-deletable Claude seed.
 type Agent struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Command   string `json:"command"`
-	Engine      string `json:"engine"`
+	Models                []string `json:"models"`
+	ModelArgument         string   `json:"model_argument"`
+	ModelDiscoveryCommand string   `json:"model_discovery_command"`
+	ID                    int64    `json:"id"`
+	Name                  string   `json:"name"`
+	Command               string   `json:"command"`
+	Engine                string   `json:"engine"`
 	// ExtraParams is claude-engine only (M001 gate follow-up): extra argv flags
 	// appended after the fixed claude flags at spawn. Custom agents ignore it.
 	ExtraParams string `json:"extra_params"`
 	IsDefault   bool   `json:"is_default"`
-	IsSystem  bool   `json:"is_system"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	IsSystem    bool   `json:"is_system"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // agentColumns is the canonical SELECT/RETURNING column list; its ORDER must
 // match the scanAgent Scan order.
-const agentColumns = `id, name, command, engine, extra_params, is_default, is_system, created_at, updated_at`
+const agentColumns = `id, name, command, engine, extra_params, is_default, is_system, created_at, updated_at, models, model_argument, model_discovery_command`
 
 // scanAgent scans one agents row. is_default/is_system come back as INTEGER 0/1;
 // scan into ints and map to bool (the managedInt != 0 idiom in scanWorkspace).
 func scanAgent(row interface{ Scan(...any) error }) (Agent, error) {
 	var a Agent
 	var isDefaultInt, isSystemInt int
-	err := row.Scan(&a.ID, &a.Name, &a.Command, &a.Engine, &a.ExtraParams, &isDefaultInt, &isSystemInt, &a.CreatedAt, &a.UpdatedAt)
+	var models string
+	err := row.Scan(&a.ID, &a.Name, &a.Command, &a.Engine, &a.ExtraParams, &isDefaultInt, &isSystemInt, &a.CreatedAt, &a.UpdatedAt, &models, &a.ModelArgument, &a.ModelDiscoveryCommand)
+	if err == nil {
+		err = json.Unmarshal([]byte(models), &a.Models)
+	}
+	if a.Models == nil {
+		a.Models = []string{}
+	}
 	a.IsDefault = isDefaultInt != 0
 	a.IsSystem = isSystemInt != 0
 	return a, err
@@ -82,8 +92,11 @@ func (h *agentCRUDHandlers) list(w http.ResponseWriter, r *http.Request) {
 // ever created by migration 00013 / BackfillAgents, never by this handler.
 func (h *agentCRUDHandlers) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name    string `json:"name"`
-		Command string `json:"command"`
+		Name                  string   `json:"name"`
+		Command               string   `json:"command"`
+		Models                []string `json:"models"`
+		ModelArgument         string   `json:"model_argument"`
+		ModelDiscoveryCommand string   `json:"model_discovery_command"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -109,9 +122,14 @@ func (h *agentCRUDHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	models, err := validateModelConfig(req.Models, strings.TrimSpace(req.ModelArgument))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	a, err := scanAgent(h.db.QueryRow(
-		`INSERT INTO agents (name, command, engine, is_default, is_system) VALUES (?, ?, 'custom', 0, 0) RETURNING `+agentColumns,
-		name, command))
+		`INSERT INTO agents (name, command, engine, is_default, is_system, models, model_argument, model_discovery_command) VALUES (?, ?, 'custom', 0, 0, ?, ?, ?) RETURNING `+agentColumns,
+		name, command, models, strings.TrimSpace(req.ModelArgument), strings.TrimSpace(req.ModelDiscoveryCommand)))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -129,26 +147,29 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name        *string `json:"name"`
-		Command     *string `json:"command"`
-		Engine      *string `json:"engine"`
-		ExtraParams *string `json:"extra_params"`
+		Name                  *string   `json:"name"`
+		Command               *string   `json:"command"`
+		Engine                *string   `json:"engine"`
+		ExtraParams           *string   `json:"extra_params"`
+		Models                *[]string `json:"models"`
+		ModelArgument         *string   `json:"model_argument"`
+		ModelDiscoveryCommand *string   `json:"model_discovery_command"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == nil && req.Command == nil && req.Engine == nil && req.ExtraParams == nil {
+	if req.Name == nil && req.Command == nil && req.Engine == nil && req.ExtraParams == nil && req.Models == nil && req.ModelArgument == nil && req.ModelDiscoveryCommand == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
 
 	// Load the existing row to enforce the system-engine lock and build the
 	// conditional UPDATE (mirrors the projects partial-PATCH pattern).
-	var curName, curCommand, curEngine, curExtra string
+	var curName, curCommand, curEngine, curExtra, curModels, curModelArgument, curDiscovery string
 	var isSystem int
-	err := h.db.QueryRow(`SELECT name, command, engine, extra_params, is_system FROM agents WHERE id = ?`, id).
-		Scan(&curName, &curCommand, &curEngine, &curExtra, &isSystem)
+	err := h.db.QueryRow(`SELECT name, command, engine, extra_params, is_system, models, model_argument, model_discovery_command FROM agents WHERE id = ?`, id).
+		Scan(&curName, &curCommand, &curEngine, &curExtra, &isSystem, &curModels, &curModelArgument, &curDiscovery)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -209,9 +230,28 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 		extra = *req.ExtraParams
 	}
 
+	if req.ModelArgument != nil {
+		curModelArgument = strings.TrimSpace(*req.ModelArgument)
+	}
+	if req.ModelDiscoveryCommand != nil {
+		curDiscovery = strings.TrimSpace(*req.ModelDiscoveryCommand)
+	}
+	var modelList []string
+	if err := json.Unmarshal([]byte(curModels), &modelList); err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid stored model list")
+		return
+	}
+	if req.Models != nil {
+		modelList = *req.Models
+	}
+	modelJSON, err := validateModelConfig(modelList, curModelArgument)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	a, err := scanAgent(h.db.QueryRow(
-		`UPDATE agents SET name = ?, command = ?, engine = ?, extra_params = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? RETURNING `+agentColumns,
-		name, command, engine, extra, id))
+		`UPDATE agents SET name = ?, command = ?, engine = ?, extra_params = ?, models = ?, model_argument = ?, model_discovery_command = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? RETURNING `+agentColumns,
+		name, command, engine, extra, modelJSON, curModelArgument, curDiscovery, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -234,6 +274,7 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 //   - Global task guard: the agent referenced by the global_task singleton is
 //     refused 409 with the count-free D-09 string (the singleton references
 //     exactly one agent, always); the 00017 RESTRICT FK is the backstop.
+//
 // An unused, non-system agent is removed -> 204.
 func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
@@ -277,6 +318,14 @@ func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if g > 0 {
 		writeError(w, http.StatusConflict, "reassign the Scratchpad agent first")
+		return
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE agent_id = ?`, id).Scan(&n); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n > 0 {
+		writeError(w, http.StatusConflict, fmt.Sprintf("agent is assigned to %d task(s)", n))
 		return
 	}
 	res, err := h.db.Exec(`DELETE FROM agents WHERE id = ?`, id)

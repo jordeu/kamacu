@@ -76,6 +76,8 @@ func registerTaskTools(s *mcp.Server, b *bridge) {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"agent_id": map[string]any{"type": "integer", "description": "Optional agent override; defaults to the project agent."},
+					"model":    map[string]any{"type": "string", "description": "Optional model ID from the selected agent configured list; empty uses the agent default."},
 					"project_id": map[string]any{
 						"type":        "integer",
 						"description": "The project id to create the task under.",
@@ -217,6 +219,8 @@ func (b *bridge) getTask(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 // blocking creation.
 func (b *bridge) createTask(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var args struct {
+		AgentID     *int64 `json:"agent_id"`
+		Model       string `json:"model"`
 		ProjectID   int64  `json:"project_id"`
 		Title       string `json:"title"`
 		Description string `json:"description"`
@@ -224,7 +228,14 @@ func (b *bridge) createTask(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
 		return nil, fmt.Errorf("create_task: invalid arguments: %w", err)
 	}
-	body, err := json.Marshal(map[string]any{"title": args.Title, "description": args.Description})
+	payload := map[string]any{"title": args.Title, "description": args.Description}
+	if args.AgentID != nil {
+		payload["agent_id"] = *args.AgentID
+	}
+	if args.Model != "" {
+		payload["model"] = args.Model
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("create_task: marshal body: %w", err)
 	}

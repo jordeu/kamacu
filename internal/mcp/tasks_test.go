@@ -12,6 +12,27 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func TestBridgeCreateTaskAgentAndModel(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+	defer srv.Close()
+	b := &bridge{base: srv.URL, token: "t", client: srv.Client()}
+	_, err := b.createTask(context.Background(), newCallToolRequest(json.RawMessage(`{"project_id":5,"title":"Chosen model","agent_id":2,"model":"curated"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["agent_id"] != float64(2) || got["model"] != "curated" {
+		t.Fatalf("payload = %v", got)
+	}
+}
+
 // TestBridge_ListTasks_NoProjectID_CallsUnscopedEndpoint (MCPTASK-01): when
 // no arguments are supplied (or project_id is omitted), the bridge calls
 // GET /api/tasks — the D-01 unscoped manual-only endpoint added in Plan 01.
