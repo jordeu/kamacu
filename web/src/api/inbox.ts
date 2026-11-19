@@ -31,6 +31,7 @@ export interface FeedbackQuestion {
   project_name: string;
   session_id: string;
   abstract: string;
+  /** Short event headline; older messages may contain a longer summary. */
   summary: string;
   context: string;
   explanation?: string;

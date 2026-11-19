@@ -59,6 +59,23 @@ export function latestCatchUpMessage(current: FeedbackQuestion | undefined, inco
 export function catchUpActionSucceeded(result: FeedbackResult, action: "answer" | "dismiss") {
   return action === "dismiss" ? result.outcome === "dismissed" && result.question.status === "dismissed" : result.outcome === "accepted";
 }
+export function catchUpHeadline(q: FeedbackQuestion) {
+  return q.summary?.trim() || q.abstract?.trim() || q.task_title?.trim() || "Inbox update";
+}
+
+// The headline is already visible above the reading text. Remove only an exact
+// leading paragraph repeat; a sentence with extra caveats must stay intact.
+export function catchUpReadingText(q: FeedbackQuestion) {
+  const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+  const headline = normalize(catchUpHeadline(q));
+  function withoutHeadline(value: string | undefined) {
+    const text = value?.trim() || "";
+    const paragraph = /^[\s\S]*?(?:\r?\n[ \t]*\r?\n|$)/.exec(text)?.[0] || "";
+    return normalize(paragraph) === headline ? text.slice(paragraph.length) : text;
+  }
+  return withoutHeadline(q.explanation) || withoutHeadline(q.context);
+}
+
 // Older producers may put a decisive fact only in summary. Keep both source
 // fields unless one is already a full paragraph in the other. Substring
 // matches can be quotes or negations, so they must not hide conflicting facts.

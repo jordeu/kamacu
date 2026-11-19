@@ -365,7 +365,7 @@ func TestInstalledLoginAuthoredMessages(t *testing.T) {
 }
 
 func TestBackendOptionalWorkDoesNotRejectAttention(t *testing.T) {
-	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Explanation: "Choose whether to continue.", InputMode: "text", WorkSummary: "Unsupported", WorkEvidence: "invented", PRLinks: []WorkLink{{Repository: "acme/repo", Number: 1, Role: "implementation", Evidence: "invented"}}}
+	d := Decision{State: "waiting", Kind: "question", Evidence: "Continue?", Question: "Continue?", Summary: "Work ready for the next step", Explanation: "Choose whether to continue.", InputMode: "text", WorkSummary: "Unsupported", WorkEvidence: "invented", PRLinks: []WorkLink{{Repository: "acme/repo", Number: 1, Role: "implementation", Evidence: "invented"}}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := json.Marshal(d)
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(raw)}}}})
