@@ -11,6 +11,7 @@ import { useSessionEvents } from "@/api/sessionEvents";
 import { MobileNavigation } from "@/components/layout/MobileNavigation";
 import { CatchUpProvider } from "@/components/inbox/CatchUp";
 import { InboxSidebar } from "@/components/layout/InboxSidebar";
+import { BrowserNotifications } from "@/components/layout/BrowserNotifications";
 
 const SIDEBAR_STORAGE_KEY = "kamacu.sidebar";
 
@@ -35,6 +36,7 @@ export function AppLayout() {
 
   return (
     <TooltipProvider delayDuration={0}>
+      <BrowserNotifications />
       <SidebarProvider
         open={open}
         onOpenChange={handleOpenChange}

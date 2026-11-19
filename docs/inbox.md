@@ -15,6 +15,22 @@ A model must be configured before starting new agents. A workspace without an ov
 
 OpenAI-compatible endpoints must support Chat Completions with JSON-schema response formatting. Compatibility varies by server/model; test the actual endpoint. Monitoring is independent of the coding agent's provider.
 
+## Browser notifications
+
+Browser notifications for new inbox messages are enabled by default. Choose
+**Allow notifications** in Kamacu's prompt and approve the browser's permission
+request. Configure them under **Settings → Workspace → Browser notifications**.
+If permission is blocked, allow notifications for the site in your browser settings.
+
+Kamacu must remain open in a supported browser over HTTPS or localhost; background
+tabs also check for messages. Clicking a notification opens that inbox message.
+The existing backlog on startup and messages received while notifications are off
+or permission is missing do not trigger notifications later.
+Reenabling notifications starts with a fresh baseline. An archived message that
+returns to the pending queue can notify again. In browsers with Web Locks, one
+tab handles delivery and another takes over when it closes. Changing the setting
+in one tab also updates other open tabs.
+
 ## Catch up
 
 Choose **Catch up** in the inbox sidebar (including its collapsed rail) or on the

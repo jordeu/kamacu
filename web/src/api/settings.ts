@@ -10,11 +10,13 @@ export interface SettingEntry {
 
 export type Settings = Record<string, SettingEntry>;
 
-/** All four settings in one fetch (GET /api/settings). */
+export const SETTINGS_CHANGED_KEY = "kamacu:settings-changed";
+
+/** All settings in one fetch (GET /api/settings). */
 export function useSettings() {
   return useQuery({
     queryKey: ["settings"],
-    queryFn: () => get<Settings>("/api/settings"),
+    queryFn: ({ signal }) => get<Settings>("/api/settings", { signal }),
   });
 }
 
@@ -28,10 +30,16 @@ export function useSaveSetting(key: string) {
   const qc = useQueryClient();
   return useMutation<SettingEntry, ApiError, string>({
     mutationFn: (value) => put<SettingEntry>(`/api/settings/${key}`, { value }),
-    onSuccess: (entry) =>
+    onSuccess: (entry) => {
       qc.setQueryData<Settings>(
         ["settings"],
         (old) => old && { ...old, [key]: entry },
-      ),
+      );
+      // Let other open tabs refresh global preferences, including the tab
+      // currently delivering inbox notifications. Storage can be unavailable.
+      try {
+        localStorage.setItem(SETTINGS_CHANGED_KEY, crypto.randomUUID());
+      } catch { /* The local cache update still succeeds. */ }
+    },
   });
 }

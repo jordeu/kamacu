@@ -13,6 +13,7 @@ import { AgentsSection } from "@/components/settings/AgentsSection";
 import { NotificationsSection } from "@/components/settings/NotificationsSection";
 import { MonitoringSection } from "@/components/settings/MonitoringSection";
 import { ScratchpadSection } from "@/components/settings/ScratchpadSection";
+import { BrowserNotificationsSection } from "@/components/settings/BrowserNotificationsSection";
 
 /**
  * Wraps the given substrings of a contract literal in the mono stack at
@@ -189,6 +190,7 @@ export default function SettingsPage() {
             {/* Keep panels mounted so drafts and save feedback survive tab changes. */}
             <TabsContent value="workspace" forceMount hidden={activeGroup !== "workspace"} className="space-y-6">
               <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "workspace")?.description}</p>
+              <BrowserNotificationsSection settings={settings} />
               <section className="flex flex-col gap-3">
                 <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Worktrees`}</h2>
                 <SettingsField

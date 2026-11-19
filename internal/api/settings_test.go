@@ -46,6 +46,28 @@ func TestSettingsGetAllDefaults(t *testing.T) {
 	}
 }
 
+func TestBrowserNotificationsSetting(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	for _, value := range []string{"off", "on"} {
+		status, body := doJSON(t, http.MethodPut, srv.URL+"/api/settings/browser_notifications", map[string]string{"value": value})
+		if status != http.StatusOK || body["value"] != value || body["default"] != "on" {
+			t.Fatalf("save %q: status=%d body=%v", value, status, body)
+		}
+		_, all := doJSON(t, http.MethodGet, srv.URL+"/api/settings", nil)
+		if all["browser_notifications"].(map[string]any)["value"] != value {
+			t.Fatalf("setting did not persist: %v", all)
+		}
+	}
+	status, _ := doJSON(t, http.MethodPut, srv.URL+"/api/settings/browser_notifications", map[string]string{"value": "yes"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid value: status=%d, want 400", status)
+	}
+	_, all := doJSON(t, http.MethodGet, srv.URL+"/api/settings", nil)
+	if all["browser_notifications"].(map[string]any)["value"] != "on" {
+		t.Fatalf("invalid save changed setting: %v", all)
+	}
+}
+
 func TestSettingsPutValidTemplate(t *testing.T) {
 	srv, db, _ := newTestServer(t)
 

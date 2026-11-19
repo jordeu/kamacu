@@ -13,12 +13,13 @@ import (
 
 // Setting keys. The set of valid keys is exactly the Defaults map's keys.
 const (
-	KeyWorktreeBase      = "worktree_base"
-	KeyShell             = "shell"
-	KeyBranchTemplate    = "branch_template"
-	KeyDoneSessionTTL    = "done_session_ttl"
-	KeyGithubIntegration = "github_integration"
-	KeyPRReviewSeed      = "pr_review_seed"
+	KeyWorktreeBase         = "worktree_base"
+	KeyShell                = "shell"
+	KeyBranchTemplate       = "branch_template"
+	KeyDoneSessionTTL       = "done_session_ttl"
+	KeyGithubIntegration    = "github_integration"
+	KeyBrowserNotifications = "browser_notifications"
+	KeyPRReviewSeed         = "pr_review_seed"
 )
 
 // Defaults maps each setting key to its code default. Absent row = default.
@@ -30,7 +31,8 @@ var Defaults = map[string]string{
 	// "never" disable reaping (see ParseDoneSessionTTL). Read-at-use by 09-05.
 	KeyDoneSessionTTL: "24h",
 	// GHSET-01/D-01: global GitHub integration toggle; absent row = on
-	KeyGithubIntegration: "on",
+	KeyGithubIntegration:    "on",
+	KeyBrowserNotifications: "on",
 	// GHREV/12-07: configurable PR-review seed prompt. <n>/<title> are
 	// interpolated on the frontend at Start; stored literally. Free-text.
 	KeyPRReviewSeed: `Review PR #<n> "<title>". Summarize the changes, then flag bugs, risky changes, and missing tests.`,

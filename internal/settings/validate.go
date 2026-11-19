@@ -54,7 +54,7 @@ func Validate(key, value string) error {
 			return errors.New("Enter a duration like 24h, 90m, or 'never' to disable.")
 		}
 		return nil
-	case KeyGithubIntegration:
+	case KeyGithubIntegration, KeyBrowserNotifications:
 		// D-01: accept only the on/off literals.
 		if value == "on" || value == "off" {
 			return nil

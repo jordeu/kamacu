@@ -27,7 +27,7 @@ describe("settings categories", () => {
   it("keeps each control in its expected category with labelled panels", () => {
     const html = render();
     const expected = {
-      workspace: ["Worktree base directory", "Shell", "Branch name template"],
+      workspace: ["Worktree base directory", "Shell", "Branch name template", "Browser notifications"],
       agents: ["Agent controls", "Scratchpad controls"],
       monitoring: ["Monitor controls"],
       github: ["GitHub integration", "Notification controls"],
