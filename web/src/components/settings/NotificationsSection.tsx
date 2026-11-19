@@ -16,7 +16,7 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
   const githubEnabled = settings.github_integration?.value === "on";
   return <section className="flex flex-col gap-3" aria-labelledby="notifications-heading">
     <h2 id="notifications-heading" className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Notifications</h2>
-    <p className="text-xs text-muted-foreground">Activity in registered repositories is collected using your GitHub CLI login. Choose Process pending to let the notification model read your rules and context and propose important Inbox messages. Your reply authorizes task actions. GitHub read state stays unchanged.</p>
+    <p className="text-xs text-muted-foreground">Activity in registered repositories is collected using your GitHub CLI login. Choose Process pending or enable automatic processing on the Notifications page to let the notification model read your rules and context and propose important Inbox messages. Your reply authorizes task actions. GitHub read state stays unchanged.</p>
     {!githubEnabled && <p className="text-xs text-muted-foreground">GitHub collection and actions are paused while GitHub integration is off.</p>}
     {sources.isLoading && <p className="text-sm">Loading sources…</p>}
     {sources.isError && <p role="alert" className="text-sm text-destructive">Could not load notification sources. <button type="button" className="underline" onClick={() => void sources.refetch()}>Retry</button></p>}
