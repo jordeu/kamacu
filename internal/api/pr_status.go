@@ -73,7 +73,11 @@ func (h prContextHandlers) projectStatuses(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT DISTINCT lower(l.repository),l.number FROM task_pr_links l JOIN tasks t ON t.id=l.task_id WHERE t.project_id=? AND t.source='manual' AND l.role!='incidental' ORDER BY lower(l.repository),l.number`, id)
+	query := `SELECT DISTINCT lower(l.repository),l.number FROM task_pr_links l JOIN tasks t ON t.id=l.task_id WHERE t.project_id=? AND t.source='manual' AND l.role!='incidental'`
+	if r.URL.Query().Get("active") == "1" {
+		query += ` AND t.status IN ('in_progress','in_review')`
+	}
+	rows, err := h.db.QueryContext(r.Context(), query+` ORDER BY lower(l.repository),l.number`, id)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -114,7 +118,7 @@ func (h prContextHandlers) projectStatuses(w http.ResponseWriter, r *http.Reques
 		// Rotate the first worker-sized batch, including after failed polls.
 		// Results still occupy their original, stable output positions.
 		workers := min(4, len(links))
-		start := h.statuses.NextBatchStart(strconv.FormatInt(id, 10), len(links), workers)
+		start := h.statuses.NextBatchStart(strconv.FormatInt(id, 10)+":"+r.URL.Query().Get("active"), len(links), workers)
 		jobs := make(chan int)
 		var wg sync.WaitGroup
 		for worker := 0; worker < workers; worker++ {
@@ -123,7 +127,11 @@ func (h prContextHandlers) projectStatuses(w http.ResponseWriter, r *http.Reques
 				defer wg.Done()
 				for i := range jobs {
 					l := links[i]
-					statuses[i] = h.statuses.Get(ctx, l.repo, l.number)
+					if r.URL.Query().Get("refresh") == "1" {
+						statuses[i] = h.statuses.Refresh(ctx, l.repo, l.number)
+					} else {
+						statuses[i] = h.statuses.Get(ctx, l.repo, l.number)
+					}
 				}
 			}()
 		}

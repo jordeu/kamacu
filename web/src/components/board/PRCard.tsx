@@ -1,3 +1,4 @@
+import { useEffect, useState, type ReactNode } from "react";
 import { Check, X, Circle, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
@@ -62,9 +63,13 @@ function agentRail(
 export function PRCard({
   pr,
   projectId,
+  footer,
+  "aria-label": ariaLabel,
 }: {
   pr: PRSummary;
   projectId: number;
+  footer?: ReactNode;
+  "aria-label"?: string;
 }) {
   const navigate = useNavigate();
   const openReview = useOpenReview(projectId);
@@ -78,9 +83,11 @@ export function PRCard({
   );
   const rail = entry ? agentRail(entry.status) : null;
 
-  // Hoisted out of the meta-line render to clear the carried Date.now()-in-render
-  // advisory (D-50, non-blocking lint cleanup).
-  const now = Date.now();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const open = () => {
     // In-flight guard (RESEARCH Pitfall 5): a double-click must not fire two
@@ -98,13 +105,14 @@ export function PRCard({
       tabIndex={0}
       aria-label={
         rail
-          ? `Open review for PR #${pr.number} — agent ${rail.label}`
-          : `Open review for PR #${pr.number}`
+          ? `${ariaLabel ?? `Open review for PR #${pr.number}`} — agent ${rail.label}`
+          : ariaLabel ?? `Open review for PR #${pr.number}`
       }
       title={rail ? `Agent ${rail.label}` : undefined}
       aria-busy={openReview.isPending}
       onClick={open}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           open();
@@ -140,7 +148,7 @@ export function PRCard({
       {/* Row 1: title (flex-1 owns extra width) + right-aligned cluster. Locked
           order (redesigned): [title]·[CI icon if checks≠none]·[↗]. */}
       <div className="flex gap-2">
-        <span className="line-clamp-2 flex-1 text-sm font-medium">
+        <span className="line-clamp-2 min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere]">
           {pr.title}
         </span>
         {pr.checks !== "none" && (() => {
@@ -166,7 +174,7 @@ export function PRCard({
           href={pr.url}
           target="_blank"
           rel="noreferrer"
-          aria-label={`Open PR #${pr.number} on GitHub`}
+          aria-label={`Open ${pr.url} on GitHub (opens in a new tab)`}
           // ↗ opens GitHub only — stop the body's open-review handler (D-02).
           onClick={(e) => e.stopPropagation()}
           className="mt-[2px] shrink-0 text-muted-foreground hover:text-foreground"
@@ -179,6 +187,7 @@ export function PRCard({
         #{pr.number} · @{pr.author} · updated {formatAgo(pr.updatedAt, now)}{" "}
         ago
       </div>
+      {footer && <div className="mt-2">{footer}</div>}
       {/* In-flight + error feedback (UI-SPEC §F). */}
       {openReview.isPending && (
         <div className="mt-1 text-xs text-muted-foreground">

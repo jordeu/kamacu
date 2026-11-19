@@ -30,13 +30,15 @@ use it when launch arguments select a provider or configuration. Both commands a
 directly as arguments, without shell evaluation. Leaving the task model at
 **Agent default** preserves the CLI's normal default and resume behavior.
 
-Open **Overview** beneath the workspace switcher to see tasks in progress,
-tasks in review, and PRs awaiting your review across the workspace's projects,
-in that order. Search or filter by project, sort by last update, and expand a
-queue to see every item. Task rows open the task; PR rows open its review
-workspace. The entry remains available in the collapsed sidebar and mobile
-navigation. Switching workspaces while viewing Overview keeps you in Overview.
-Unavailable or cached GitHub results are identified separately from empty queues.
+Open **Overview** from the sidebar footer to see tasks in progress, tasks in
+review, and PRs awaiting your review across the workspace's projects in three
+columns. Cards share the project board's related PR links and status details,
+with a project badge that filters the overview. Search or filter by project and
+sort by last update. Each column scrolls independently; on mobile, swipe between
+columns. Task cards open the task; PR cards open its review workspace. Switching
+workspaces while viewing Overview keeps you there. Unavailable or cached GitHub
+results are identified separately from empty queues. **Activity** is available
+in the bottom bar beside **Scratchpad** on desktop and mobile.
 
 It runs entirely on your machine, single user, accessed from a browser at localhost. The
 whole point is one place to see and drive all your agent work: every task gets its own

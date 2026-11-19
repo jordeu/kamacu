@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
-import { ChevronUp, ChevronDown, Globe } from "lucide-react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { ChevronUp, ChevronDown, Globe, Activity } from "lucide-react";
 import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
 import { dotMeta } from "@/components/StatusDot";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { PendingDialog } from "./PendingDialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * The Global Active Sessions Bar (SBAR-01..09) — a persistent, collapsible bar
@@ -216,6 +217,18 @@ export function ActiveSessionsBar() {
             )}
           </span>
         </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button asChild variant="ghost" size="icon-sm"
+              onClick={(event) => event.stopPropagation()}
+              className={cn("text-muted-foreground", location.pathname === "/activity" && "bg-sidebar-accent text-sidebar-accent-foreground")}>
+              <Link to="/activity" aria-label="Activity" aria-current={location.pathname === "/activity" ? "page" : undefined}>
+                <Activity className="size-3.5" aria-hidden="true" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">Activity</TooltipContent>
+        </Tooltip>
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [scrollbar-width:none]">
           {loading ? (
             <Skeleton className="h-3 w-24" />

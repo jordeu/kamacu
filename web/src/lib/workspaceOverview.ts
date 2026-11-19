@@ -64,7 +64,7 @@ export function filterOverview(
   const manual = tasks.filter(
     (task) =>
       task.source === "manual" &&
-      matches(task.project_id, `${task.title} ${task.id}`),
+      matches(task.project_id, `${task.title} ${task.id} ${(task.pr_links ?? []).filter((link) => link.role !== "incidental").map((link) => `${link.repository} ${link.number}`).join(" ")}`),
   );
   const matchingPRs = new Map<string, OverviewPR>();
   for (const pr of prs) {

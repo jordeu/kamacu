@@ -68,7 +68,8 @@ const assert = require('node:assert/strict');
       const navBounds = await nav.boundingBox();
       assert.ok(footerBounds.y >= navBounds.y + navBounds.height - 1, 'footer stays outside scroll region');
       assert.ok(footerBounds.y + footerBounds.height <= 600 - 36 + 1, 'footer clears sessions bar');
-      await footer.getByRole('link', { name: 'Activity', exact: true }).waitFor({ state: 'visible' });
+      await footer.getByRole('link', { name: 'Workspace overview', exact: true }).waitFor({ state: 'visible' });
+      assert.equal(await footer.getByRole('link', { name: 'Activity', exact: true }).count(), 0);
     }
 
     await page.goto(process.argv[2] + '/settings');
