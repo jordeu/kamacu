@@ -93,6 +93,31 @@ func TestSettingsPutValidTemplate(t *testing.T) {
 	}
 }
 
+func TestNotificationAutoProcessSetting(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	url := srv.URL + "/api/settings/notification_auto_process"
+	for _, value := range []string{"20m", "5m", "10m", "40m", "off"} {
+		status, body := doJSON(t, http.MethodPut, url, map[string]string{"value": value})
+		if status != http.StatusOK || body["value"] != value {
+			t.Fatalf("save %q: status=%d body=%v", value, status, body)
+		}
+		stored, err := settings.Get(db, settings.KeyNotificationAutoProcess)
+		if err != nil || stored != value {
+			t.Fatalf("stored=%q error=%v", stored, err)
+		}
+	}
+	for _, value := range []string{"", "0", "1m", "-10m", "1h", "on"} {
+		status, body := doJSON(t, http.MethodPut, url, map[string]string{"value": value})
+		if status != http.StatusBadRequest {
+			t.Fatalf("invalid %q: status=%d body=%v", value, status, body)
+		}
+	}
+	stored, err := settings.Get(db, settings.KeyNotificationAutoProcess)
+	if err != nil || stored != "off" {
+		t.Fatalf("invalid interval changed stored setting: %q, %v", stored, err)
+	}
+}
+
 func TestSettingsPutInvalidTemplateStoresNothing(t *testing.T) {
 	srv, db, _ := newTestServer(t)
 
