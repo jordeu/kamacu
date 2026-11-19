@@ -1,66 +1,111 @@
+import type { ComponentProps, ReactNode } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { useAgentStatuses } from "@/api/agents";
-import type { AgentStatusEntry } from "@/api/agents";
 import { StatusDot } from "@/components/StatusDot";
 import { TaskPRLinks } from "@/components/task/TaskPRLinks";
 import { SnoozeTask } from "@/components/task/SnoozeTask";
 import type { Task } from "@/api/types";
 
-/** Shared inner layout for CardShell, TaskCard, and TaskCardOverlay.
- *  No agent entry → title renders exactly as before: no dot, no reserved
- *  gutter (UI-SPEC: dotless cards must not shift layout). */
-function CardRow({
-  task,
-  entry,
-}: {
+interface TaskCardProps {
   task: Task;
-  entry: AgentStatusEntry | undefined;
-}) {
-  return (
-    <div className="flex gap-2">
-      <span className="line-clamp-2 flex-1 text-sm font-medium">
-        {task.title}
-      </span>
-      {entry && <StatusDot entry={entry} className="mt-[6px]" />}
-    </div>
-  );
+  footer?: ReactNode;
+  sortable?: boolean;
+  activePRsOnly?: boolean;
+  "aria-label"?: string;
 }
 
-function CardShell({ task, className }: { task: Task; className?: string }) {
-  // D-48: AGENT entry only — bash sessions never appear in /api/agents/status.
-  // React Query dedupes per-card hooks on the shared ["agent-statuses"] key.
+/** Shared appearance for project cards, overview cards and the drag overlay. */
+function CardShell({
+  task,
+  footer,
+  activePRsOnly = false,
+  overlay = false,
+  className,
+  ...props
+}: Omit<ComponentProps<"div">, "children"> & {
+  task: Task;
+  footer?: ReactNode;
+  activePRsOnly?: boolean;
+  overlay?: boolean;
+}) {
   const { data } = useAgentStatuses();
-  const entry = data?.find((e) => e.taskId === task.id);
-
+  const entry = data?.find((agent) => agent.taskId === task.id);
   return (
     <div
+      {...props}
       className={cn(
         "rounded-md border bg-card px-3 py-2",
-        // D-44: waiting swaps the border hue, nothing else changes.
         entry?.status === "waiting" ? "border-amber-400/40" : "border-border",
         className,
       )}
     >
-      <CardRow task={task} entry={entry} />
-      <TaskPRLinks task={task} className="mt-1" compact />
+      <div className="flex gap-2">
+        <span className="line-clamp-2 min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere]">
+          {task.title}
+        </span>
+        {entry && <StatusDot entry={entry} className="mt-[6px]" />}
+      </div>
+      <TaskPRLinks
+        task={task}
+        className="mt-1"
+        compact
+        activeOnly={activePRsOnly}
+      />
+      {!overlay && task.snoozed_until && <SnoozeTask task={task} compact />}
+      {footer && <div className="mt-2">{footer}</div>}
     </div>
   );
 }
 
-/** Rendered inside DragOverlay — visual clone with lift feedback, no sortable wiring. */
 export function TaskCardOverlay({ task }: { task: Task }) {
   return (
-    <CardShell task={task} className="scale-[1.02] cursor-grabbing shadow-lg" />
+    <CardShell
+      task={task}
+      overlay
+      className="scale-[1.02] cursor-grabbing shadow-lg"
+    />
   );
 }
 
-export function TaskCard({ task }: { task: Task }) {
+/** Overview cards open existing tasks; project boards retain their drag sensors. */
+export function TaskCard({ sortable = true, ...props }: TaskCardProps) {
+  return sortable ? (
+    <SortableTaskCard {...props} />
+  ) : (
+    <StaticTaskCard {...props} />
+  );
+}
+
+function StaticTaskCard(props: TaskCardProps) {
   const navigate = useNavigate();
-  const { data } = useAgentStatuses();
-  const entry = data?.find((e) => e.taskId === task.id);
+  const open = () =>
+    navigate(`/projects/${props.task.project_id}/tasks/${props.task.id}`);
+  return (
+    <CardShell
+      {...props}
+      role="button"
+      tabIndex={0}
+      aria-label={props["aria-label"] ?? props.task.title}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          event.preventDefault();
+          open();
+        }
+      }}
+      className="cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    />
+  );
+}
+
+function SortableTaskCard(props: TaskCardProps) {
+  const navigate = useNavigate();
   const {
     attributes,
     listeners,
@@ -68,32 +113,22 @@ export function TaskCard({ task }: { task: Task }) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: task.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
+  } = useSortable({ id: props.task.id });
   return (
-    <div
+    <CardShell
+      {...props}
       ref={setNodeRef}
-      style={style}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       {...attributes}
       {...listeners}
-      aria-label={task.title}
+      aria-label={props["aria-label"] ?? props.task.title}
       onClick={() =>
-        navigate(`/projects/${task.project_id}/tasks/${task.id}`)
+        navigate(`/projects/${props.task.project_id}/tasks/${props.task.id}`)
       }
       className={cn(
-        "cursor-grab rounded-md border bg-card px-3 py-2 hover:bg-[#27272a]",
-        entry?.status === "waiting" ? "border-amber-400/40" : "border-border",
+        "cursor-grab hover:bg-[#27272a]",
         isDragging && "opacity-40",
       )}
-    >
-      <CardRow task={task} entry={entry} />
-      <TaskPRLinks task={task} className="mt-1" compact />
-      {task.snoozed_until && <SnoozeTask task={task} compact />}
-    </div>
+    />
   );
 }

@@ -27,6 +27,9 @@ const { expect } = require(
     let refreshRequests = 0;
     let prRequests = 0;
     let openRequests = 0;
+    let activeStatusReads = 0;
+    let forcedStatusReads = 0;
+    let taskMoveRequests = 0;
     const projects = [
       { id: 1, name: "sched", github_repo: "org/sched", workspace_id: 1 },
       { id: 2, name: "fusion", github_repo: "org/fusion", workspace_id: 1 },
@@ -61,9 +64,41 @@ const { expect } = require(
     });
     const tasks = [
       makeTask(101, 1, "in_progress"),
-      ...Array.from({ length: 7 }, (_, i) => makeTask(201 + i, 2, "in_review")),
+      ...Array.from({ length: 18 }, (_, i) =>
+        makeTask(201 + i, 2, "in_review"),
+      ),
       makeTask(301, 4, "in_progress"),
     ];
+    tasks[0].pr_links = [
+      {
+        task_id: 101,
+        repository: "org/sched",
+        number: 55,
+        role: "implementation",
+        url: "https://github.com/org/sched/pull/55",
+        linked_at: "2026-11-19T07:00:00Z",
+      },
+      {
+        task_id: 101,
+        repository: "org/other",
+        number: 42,
+        role: "implementation",
+        url: "https://github.com/org/other/pull/42",
+        linked_at: "2026-11-18T07:00:00Z",
+      },
+    ];
+    const status = (number, repository) => ({
+      repository,
+      number,
+      lifecycle: "open",
+      head: "abcdef",
+      author: "alice",
+      humans: { state: "approved", reviewers: [] },
+      bots: { state: "none", reviewers: [] },
+      ci: { state: forcedStatusReads > 0 ? "fail" : "pass", jobs: [] },
+      fetched_at: "2026-11-19T07:00:00Z",
+      stale: false,
+    });
     const pr = (id) => ({
       number: 17,
       title: `Review request for ${id === 1 ? "sched" : "fusion"}`,
@@ -150,7 +185,32 @@ const { expect } = require(
         };
       else if (/^\/api\/projects\/\d+\/tasks$/.test(path))
         data = tasks.filter((t) => t.project_id === Number(path.split("/")[3]));
-      else if (path === "/api/settings")
+      else if (/\/task-pr-statuses$/.test(path)) {
+        if (url.searchParams.get("active") === "1") activeStatusReads++;
+        if (url.searchParams.get("refresh") === "1") forcedStatusReads++;
+        data = { statuses: [status(55, "org/sched"), status(42, "org/other")] };
+      } else if (/\/task-pr-statuses\/refresh$/.test(path)) {
+        const request = route.request().postDataJSON();
+        data = status(request.number, request.repository);
+      } else if (/^\/api\/tasks\/\d+\/move$/.test(path)) {
+        taskMoveRequests++;
+        const task = tasks.find((t) => t.id === Number(path.split("/")[3]));
+        Object.assign(task, { status: route.request().postDataJSON().status });
+        data = task;
+      } else if (path === "/api/activity") {
+        const time = { n: 0, min: 0, max: 0, median: 0 };
+        data = {
+          tasks: [],
+          reviews: { state: "ok", stale: false, fetchedAt: null, prs: [] },
+          stats: {
+            taskCount: 0,
+            reviewCount: 0,
+            cycle: time,
+            dwellInProgress: time,
+            dwellInReview: time,
+          },
+        };
+      } else if (path === "/api/settings")
         data = { github_integration: { value: github ? "on" : "off" } };
       else if (path === "/api/inbox")
         data = { items: [], pending_count: 0, has_more: false };
@@ -171,78 +231,134 @@ const { expect } = require(
     });
     const base = process.argv[2];
     const overview = page.getByTestId("workspace-overview");
-    const section = (id) =>
-      overview.locator(`section[aria-labelledby="overview-${id}-heading"]`);
+    const section = (kind) =>
+      overview.locator(`section[aria-labelledby="overview-${kind}-heading"]`);
+    const lane = (kind) => section(kind).locator('[tabindex="0"]').first();
+    const taskCard = (task) =>
+      section(task.status === "in_progress" ? "progress" : "review").getByRole(
+        "button",
+        {
+          name: `${task.title} · ${projects.find((p) => p.id === task.project_id).name}`,
+          exact: true,
+        },
+      );
     await page.goto(`${base}/workspaces/1/overview`);
-    await overview
-      .getByRole("button", { name: /Open review for org\/sched/ })
-      .waitFor();
+    await expect(
+      section("prs").getByRole("button", {
+        name: /^Open review for (sched|fusion) PR #17$/,
+      }),
+    ).toHaveCount(2);
     assert.deepEqual(await overview.locator("section h2").allTextContents(), [
       "Tasks in progress",
       "Tasks in review",
       "PRs awaiting your review",
     ]);
-    assert.equal(await section("progress").locator("li").count(), 1);
-    assert.equal(await section("review").locator("li").count(), 5);
+    await expect(
+      section("review").getByRole("button", { name: /^Restore task/ }),
+    ).toHaveCount(18);
     assert.equal(
-      await section("prs").locator("li").count(),
-      2,
-      "equal PR numbers from different repos are retained",
+      await overview.getByRole("button", { name: /Show all/ }).count(),
+      0,
     );
     assert.equal(
       await page.evaluate(() => localStorage.getItem("kamacu.workspace")),
       "1",
-      "URL selects workspace",
     );
+    await expect.poll(() => activeStatusReads).toBeGreaterThan(0);
+    const progressCard = taskCard(tasks[0]);
+    await progressCard
+      .getByRole("link", { name: /org\/sched PR #55/ })
+      .waitFor();
+    await progressCard
+      .getByRole("button", { name: "Show 1 more linked pull request" })
+      .click();
+    await progressCard
+      .getByRole("link", { name: /org\/other PR #42/ })
+      .waitFor();
+    assert(
+      new URL(page.url()).pathname.endsWith("/overview"),
+      "PR controls must not open the task",
+    );
+    await progressCard.locator('button[aria-label*="status"]').first().click();
+    await page
+      .getByRole("heading", { name: "Human reviews", exact: true })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Refresh PR status", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
     await page.screenshot({
-      path: "/tmp/workspace-overview-implemented.png",
+      path: "/tmp/workspace-board-implemented.png",
       fullPage: true,
     });
+    const footer = page.locator('[data-sidebar="footer"]:visible');
+    await footer
+      .getByRole("link", { name: "Workspace overview", exact: true })
+      .waitFor();
+    assert.equal(
+      await footer.getByRole("link", { name: "Activity", exact: true }).count(),
+      0,
+    );
     await overview
       .getByRole("button", { name: "Refresh workspace overview" })
       .click();
     await expect.poll(() => refreshRequests).toBe(2);
+    await expect.poll(() => forcedStatusReads).toBe(1);
+    await expect(
+      progressCard.getByRole("button", {
+        name: /CI failing.*Show PR status overview/,
+      }),
+    ).toHaveCount(2);
     await expect(
       overview.getByRole("button", { name: "Refresh workspace overview" }),
     ).toBeEnabled();
-    await overview.evaluate((element) => {
-      element.scrollTop = 150;
-    });
-    const beforeExpand = await overview.evaluate(
-      (element) => element.scrollTop,
+    await section("prs")
+      .getByRole("button", { name: "Filter to sched", exact: true })
+      .focus();
+    await page.keyboard.press("Enter");
+    await expect(overview.getByLabel("Filter project")).toHaveValue("1");
+    assert.equal(
+      openRequests,
+      0,
+      "keyboard badge activation must not open a review",
     );
-    assert(beforeExpand > 0, "fixture must allow scrolling before expansion");
-    await section("review")
-      .getByRole("button", { name: /Show all/ })
-      .click();
-    await expect(section("review").locator("li")).toHaveCount(7);
-    await expect
-      .poll(() => overview.evaluate((element) => element.scrollTop))
-      .toBe(beforeExpand);
-    const lastReview = section("review").locator("li").last().getByRole("link");
-    await lastReview.scrollIntoViewIfNeeded();
-    const beforeTask = await overview.evaluate((element) => element.scrollTop);
-    await lastReview.click();
-    await page.waitForURL("**/projects/2/tasks/207");
-    await page.goBack();
-    await expect(section("review").locator("li")).toHaveCount(7);
-    await expect
-      .poll(() => overview.evaluate((element) => element.scrollTop))
-      .toBe(beforeTask);
-    await overview.getByLabel("Filter project").selectOption("1");
-    await expect(section("review").locator("li")).toHaveCount(0);
-    await expect(section("prs").locator("li")).toHaveCount(1);
-    await overview.getByLabel("Search work").fill("alice");
-    await expect(section("progress").locator("li")).toHaveCount(0);
-    await expect(section("prs").locator("li")).toHaveCount(1);
+    await expect(
+      section("review").getByRole("button", { name: /^Restore task/ }),
+    ).toHaveCount(0);
+    await overview.getByLabel("Search work").fill("42");
+    await expect(
+      section("progress").getByRole("button", {
+        name: `${tasks[0].title} · sched`,
+        exact: true,
+      }),
+    ).toHaveCount(1);
     await overview.getByLabel("Search work").fill("");
-    await section("progress").getByRole("link").click();
+    await overview.getByLabel("Filter project").selectOption("all");
+    await expect(
+      section("review").getByRole("button", { name: /^Restore task/ }),
+    ).toHaveCount(18);
+    await lane("review").evaluate((el) => {
+      el.scrollTop = 400;
+    });
+    await expect
+      .poll(() => lane("review").evaluate((el) => el.scrollTop))
+      .toBe(400);
+    const toOpen = taskCard(tasks[10]);
+    await toOpen.scrollIntoViewIfNeeded();
+    const beforeTask = await lane("review").evaluate((el) => el.scrollTop);
+    await toOpen.click();
+    await page.waitForURL(`**/projects/2/tasks/${tasks[10].id}`);
+    await page.goBack();
+    await expect
+      .poll(() => lane("review").evaluate((el) => el.scrollTop))
+      .toBe(beforeTask);
+    await progressCard.focus();
+    await page.keyboard.press("Enter");
     await page.waitForURL("**/projects/1/tasks/101");
     await page.goBack();
-    await overview.waitFor();
-    assert.equal(await overview.getByLabel("Filter project").inputValue(), "1");
-    await overview
-      .getByRole("button", { name: /Open review for org\/sched/ })
+    await section("prs")
+      .getByRole("button", { name: /^Open review for (sched|fusion) PR #17$/ })
+      .first()
       .click();
     await page.waitForURL("**/projects/1/tasks/900");
     assert.equal(openRequests, 1);
@@ -254,12 +370,12 @@ const { expect } = require(
       .getByRole("menuitemcheckbox", { name: "Other", exact: true })
       .click();
     await page.waitForURL("**/workspaces/2/overview");
-    await overview
-      .locator("li")
-      .getByText("Other project", { exact: true })
-      .waitFor();
-    assert.equal(await section("progress").locator("li").count(), 1);
-    assert.equal(await section("prs").locator("li").count(), 0);
+    await expect(
+      section("progress").getByRole("button", {
+        name: `${tasks[19].title} · Other project`,
+        exact: true,
+      }),
+    ).toHaveCount(1);
     await page
       .getByRole("button", { name: "Workspace: Other", exact: true })
       .click();
@@ -276,11 +392,28 @@ const { expect } = require(
       name: "Workspace overview",
       exact: true,
     });
-    await entry.waitFor();
     await expect
       .poll(async () => Math.round((await entry.boundingBox()).width))
       .toBe(40);
     assert.equal(await entry.getAttribute("aria-current"), "page");
+    const activity = page.getByRole("link", { name: "Activity", exact: true });
+    assert.equal(
+      await activity.evaluate((el) =>
+        el.previousElementSibling?.getAttribute("title"),
+      ),
+      "Scratchpad",
+    );
+    const bar = page.getByRole("button", { name: /^Active agent sessions:/ });
+    const barExpanded = await bar.getAttribute("aria-expanded");
+    await activity.click();
+    await page.waitForURL("**/activity");
+    await expect(activity).toHaveAttribute("aria-current", "page");
+    assert.equal(
+      await bar.getAttribute("aria-expanded"),
+      barExpanded,
+      "Activity click must not toggle sessions",
+    );
+    await page.goBack();
     await page.setViewportSize({ width: 390, height: 844 });
     await page
       .getByRole("button", {
@@ -298,10 +431,22 @@ const { expect } = require(
       ),
       false,
     );
+    const board = overview.locator('[aria-label="Workspace board"]');
+    assert(
+      await board.evaluate((el) => el.scrollWidth > el.clientWidth),
+      "mobile board supports horizontal scrolling",
+    );
+    await board.evaluate((el) => {
+      el.scrollLeft = el.scrollWidth;
+    });
+    await expect(section("prs")).toBeInViewport();
     await page.screenshot({
-      path: "/tmp/workspace-overview-implemented-mobile.png",
+      path: "/tmp/workspace-board-implemented-mobile.png",
       fullPage: true,
     });
+    await activity.click();
+    await page.waitForURL("**/activity");
+    await page.goBack();
     pendingReviews = true;
     await page.reload();
     await overview
@@ -311,28 +456,25 @@ const { expect } = require(
     await expect(
       overview.locator('[aria-label="PRs awaiting your review: —"]'),
     ).toHaveCount(1);
-    assert(!(await section("prs").innerText()).includes("No PRs are waiting"));
     pendingReviews = false;
     await expect(
       section("prs").getByRole("button", {
-        name: /Open review for org\/sched/,
+        name: /^Open review for (sched|fusion) PR #17$/,
       }),
-    ).toBeVisible({ timeout: 10000 });
+    ).toHaveCount(2, { timeout: 10000 });
     failReviews = true;
     await page.reload();
     await overview
       .getByText("PR count is partial.", { exact: false })
       .waitFor();
+    await expect(
+      overview.locator('[aria-label="PRs awaiting your review: —"]'),
+    ).toHaveCount(1);
     assert.equal(
-      await overview
-        .locator('[aria-label="PRs awaiting your review: —"]')
+      await section("progress")
+        .getByRole("button", { name: `${tasks[0].title} · sched`, exact: true })
         .count(),
       1,
-    );
-    assert.equal(
-      await section("progress").locator("li").count(),
-      1,
-      "GitHub failure does not hide tasks",
     );
     github = false;
     prRequests = 0;
@@ -342,13 +484,38 @@ const { expect } = require(
     failTasks = true;
     await page.reload();
     await overview.getByText("Couldn't load tasks.", { exact: true }).waitFor();
-    assert.equal(
-      await overview.locator('[aria-label="Tasks in progress: —"]').count(),
-      1,
+    await expect(
+      overview.locator('[aria-label="Tasks in progress: —"]'),
+    ).toHaveCount(1);
+    // The shared card refactor must preserve drag-and-drop in project boards.
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${base}/projects/1`);
+    const draggable = page.getByRole("button", {
+      name: tasks[0].title,
+      exact: true,
+    });
+    const source = await draggable.boundingBox();
+    const destination = await page
+      .getByText("In Review", { exact: true })
+      .locator("..")
+      .locator("..")
+      .boundingBox();
+    await page.mouse.move(source.x + source.width / 2, source.y + 15);
+    await page.mouse.down();
+    await page.mouse.move(source.x + source.width / 2 + 10, source.y + 15, {
+      steps: 3,
+    });
+    await page.mouse.move(
+      destination.x + destination.width / 2,
+      destination.y + 65,
+      { steps: 15 },
     );
+    await page.mouse.up();
+    await expect.poll(() => taskMoveRequests).toBe(1);
+    assert.equal(tasks[0].status, "in_review");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queue order, counts, expansion, filters, task/review navigation, workspace switching, empty workspace, collapsed entry, mobile navigation, GitHub failures/off, task errors.",
+      "PASS: shared task/PR cards, linked PR expansion and status refresh, badge filtering, all cards, independent scroll/back restoration, project drag-and-drop, overview footer, Activity beside Scratchpad without toggling sessions, mobile board, workspace switching and unavailable data.",
     );
   } finally {
     await browser.close();

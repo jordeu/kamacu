@@ -78,6 +78,25 @@ func TestProjectPRStatusesScopeDedupAndDisabled(t *testing.T) {
 	if calls.Load() != 2 {
 		t.Fatal("duplicate links or polls caused duplicate GitHub reads", calls.Load())
 	}
+	if _, err = db.Exec(`UPDATE tasks SET status='in_progress' WHERE id=2`); err != nil {
+		t.Fatal(err)
+	}
+	if code, active := get("/api/projects/1/task-pr-statuses?active=1"); code != 200 || len(active) != 1 || active[0].Number != 7 {
+		t.Fatal("active overview must exclude backlog, completed and review-workspace links", code, active)
+	}
+	if _, err = db.Exec(`UPDATE tasks SET status='in_review' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if code, active := get("/api/projects/1/task-pr-statuses?active=1"); code != 200 || len(active) != 2 {
+		t.Fatal("active overview must include review-stage links", code, active)
+	}
+	if _, err = db.Exec(`UPDATE tasks SET status='done' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if code, active := get("/api/projects/1/task-pr-statuses?active=1"); code != 200 || len(active) != 1 {
+		t.Fatal("completed task links must leave the active overview", code, active)
+	}
+
 	if err = settings.Set(db, settings.KeyGithubIntegration, "off"); err != nil {
 		t.Fatal(err)
 	}
@@ -262,5 +281,66 @@ func TestSinglePRStatusBeforeTaskExists(t *testing.T) {
 	// No tasks or task-to-PR links were needed; disabling integration never reads GitHub.
 	if calls.Load() != 1 {
 		t.Fatal(calls.Load())
+	}
+}
+
+func TestActiveProjectPRStatusesRefreshBypassesCache(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "active-refresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO projects(id,name,repo_path) VALUES(1,'one','/one')`,
+		`INSERT INTO tasks(id,project_id,title,source,status,position) VALUES(1,1,'active','manual','in_progress',0),(2,1,'done','manual','done',1)`,
+	} {
+		if _, err = db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, link := range []struct{ task, number int64 }{{1, 7}, {2, 8}} {
+		if err = store.PutPRLink(t.Context(), db, store.PRLink{TaskID: link.task, Repository: "acme/repo", Number: link.number, Role: "implementation", Source: "explicit", Evidence: "test", ObservedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var calls atomic.Int32
+	svc := github.NewPRStatusService(func(_ context.Context, repo string, n int64) (github.PRStatus, error) {
+		calls.Add(1)
+		result := github.UnknownPRStatus(repo, n, "")
+		now := time.Now()
+		result.FetchedAt = &now
+		return result, nil
+	}, nil)
+	h := prContextHandlers{db: db, statuses: svc}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{id}/task-pr-statuses", h.projectStatuses)
+	for i, path := range []string{"?active=1", "?active=1", "?active=1&refresh=1"} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/projects/1/task-pr-statuses"+path, nil))
+		var result struct{ Statuses []github.PRStatus }
+		if err = json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 200 || len(result.Statuses) != 1 || result.Statuses[0].Number != 7 {
+			t.Fatal("refresh must retain active-only scope", w.Code, result)
+		}
+		want := int32(1)
+		if i == 2 {
+			want = 2
+		}
+		if calls.Load() != want {
+			t.Fatalf("%s: got %d GitHub calls, want %d", path, calls.Load(), want)
+		}
+	}
+	if err = settings.Set(db, settings.KeyGithubIntegration, "off"); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/projects/1/task-pr-statuses?active=1&refresh=1", nil))
+	if calls.Load() != 2 || !strings.Contains(w.Body.String(), "GitHub integration disabled") {
+		t.Fatal("forced overview refresh must respect integration settings", calls.Load(), w.Body.String())
 	}
 }

@@ -7,17 +7,17 @@ import { cn } from "@/lib/utils";
 import { PRLifecycleIcon, PRStatusOverview } from "./PRStatusOverview";
 
 /** Secondary task metadata, shared by the board and task header. */
-export function TaskPRLinks({ task, className, compact = false }: { task: Task; className?: string; compact?: boolean }) {
+export function TaskPRLinks({ task, className, compact = false, activeOnly = false }: { task: Task; className?: string; compact?: boolean; activeOnly?: boolean }) {
   const links = task.pr_links?.filter((link) => link.role !== "incidental") ?? [];
   if (!links.length) return null;
-  return <LinkedTaskPRLinks task={task} links={links} className={className} compact={compact} />;
+  return <LinkedTaskPRLinks task={task} links={links} className={className} compact={compact} activeOnly={activeOnly} />;
 }
 
-function LinkedTaskPRLinks({ task, links, className, compact }: {
-  task: Task; links: TaskPRLink[]; className?: string; compact: boolean;
+function LinkedTaskPRLinks({ task, links, className, compact, activeOnly }: {
+  task: Task; links: TaskPRLink[]; className?: string; compact: boolean; activeOnly: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const query = useProjectPRStatuses(task.project_id);
+  const query = useProjectPRStatuses(task.project_id, activeOnly);
   const multipleRepos = new Set(links.map((link) => link.repository)).size > 1;
 
   const renderLink = (link: TaskPRLink) => {
