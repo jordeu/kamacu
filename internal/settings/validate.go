@@ -34,6 +34,8 @@ var tokenRe = regexp.MustCompile(`\{[^}]*\}`)
 // verbatim on failure — the frontend mirrors these strings exactly.
 func Validate(key, value string) error {
 	switch key {
+	case KeyCustomPrompts:
+		return validateCustomPrompts(value)
 	case KeyNotificationAutoProcess:
 		switch value {
 		case "off", "5m", "10m", "20m", "40m":

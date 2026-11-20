@@ -4,6 +4,8 @@ import { Ellipsis } from "lucide-react";
 import { useTask } from "@/api/queries";
 import { useGlobal } from "@/api/global";
 import { useAgentStatuses } from "@/api/agents";
+import { useSettings } from "@/api/settings";
+import { parseCustomPrompts } from "@/lib/customPrompts";
 import {
   useResumeAgent,
   useResumeGlobalAgent,
@@ -93,6 +95,8 @@ export function AgentTab({
   // ["global"] query the /global shell drives (D-17; both cached app-wide).
   const { data: task } = useTask(taskId);
   const { data: globalConfig } = useGlobal();
+  const { data: settings } = useSettings();
+  const customPrompts = isTask ? parseCustomPrompts(settings?.custom_prompts?.value) : [];
 
   // The server's resumable flag is the SINGLE driver for which pair renders —
   // the UI never infers resumability client-side (UI-SPEC). Read it from the
@@ -216,7 +220,7 @@ export function AgentTab({
   // when not running, agentMenu is undefined so TerminalPane's default
   // exited/not-found handling applies.
   //
-  // Global scope (D-36): both Insert affordances are forced false — the menu
+  // Global scope (D-36): Insert affordances are forced false — the menu
   // renders exactly ONE item (Stop, destructive) with no separator before a
   // lone item, and no Settings shortcut joins it.
   //
@@ -237,7 +241,7 @@ export function AgentTab({
           <Ellipsis className="size-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
         {showInsertDescription && (
           <DropdownMenuItem onSelect={() => pasteApiRef.current?.paste(desc)}>
             {`Insert description`}
@@ -250,7 +254,13 @@ export function AgentTab({
             {`Insert review prompt`}
           </DropdownMenuItem>
         )}
-        {(showInsertDescription || showInsertSeed) && <DropdownMenuSeparator />}
+        {(showInsertDescription || showInsertSeed) && customPrompts.length > 0 && <DropdownMenuSeparator />}
+        {customPrompts.map((prompt, index) => (
+          <DropdownMenuItem key={index} onSelect={() => pasteApiRef.current?.paste(prompt.text)}>
+            <span className="min-w-0 flex-1 truncate" title={prompt.title}>{prompt.title}</span>
+          </DropdownMenuItem>
+        ))}
+        {(showInsertDescription || showInsertSeed || customPrompts.length > 0) && <DropdownMenuSeparator />}
         <DropdownMenuItem
           variant="destructive"
           onSelect={() => stopSession.mutate(agentSession.id)}
