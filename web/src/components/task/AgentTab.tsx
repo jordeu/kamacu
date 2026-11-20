@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Ellipsis } from "lucide-react";
 import { useTask } from "@/api/queries";
@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
+import type { PromptInput } from "@/components/terminal/promptInput";
 
 /**
  * Scope discriminator (16-02, research Pattern 4): the ONE prop that selects
@@ -64,8 +65,8 @@ export function AgentTab({
   // scope passes none — no description exists there, so that menu item
   // degrades away (D-36).
   description?: string;
-  // PR-review seed (Phase 12 D-06/D-07): when set, prefill (never send) this
-  // prompt into the agent once, after the session connects. Task scope only.
+  // PR-review seed: when set, expose the Insert review prompt action.
+  // Task scope only; selecting the action inserts and submits the prompt.
   seed?: string;
   autoFocus?: boolean;
   // Share the task page mutation so automatic startup and manual retries
@@ -87,7 +88,12 @@ export function AgentTab({
   // Stop is scope-blind: it targets a session id either way.
   const stopSession = useStopSession();
   const queryClient = useQueryClient();
-  const pasteApiRef = useRef<{ paste: (t: string) => void } | null>(null);
+  const promptInputRef = useRef<PromptInput | null>(null);
+  const [promptError, setPromptError] = useState(false);
+
+  function sendPrompt(text: string) {
+    setPromptError(promptInputRef.current?.sendPrompt(text) !== true);
+  }
 
   // Scope metadata from the already-shared caches — never a new round-trip:
   // the task scope reads ["task", id] (TaskPage resolved it before mounting
@@ -224,10 +230,8 @@ export function AgentTab({
   // renders exactly ONE item (Stop, destructive) with no separator before a
   // lone item, and no Settings shortcut joins it.
   //
-  // Both insert items reuse the SAME bracketed-paste mechanism (pasteApiRef →
-  // term.paste, wrapped by xterm in \x1b[200~..\x1b[201~ because claude enables
-  // mode 2004): the text is prefilled, NEVER auto-submitted — the user reviews
-  // and presses Enter. Repeatable.
+  // All prompt actions paste through xterm's bracketed-paste mechanism,
+  // then send a separate Enter to submit the prompt to the agent.
   const running = agentSession.status === "running";
   // Insert text items: task scope only. `description` is undefined and `seed`
   // is undefined on the global scope, so both flags are false there.
@@ -243,20 +247,20 @@ export function AgentTab({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
         {showInsertDescription && (
-          <DropdownMenuItem onSelect={() => pasteApiRef.current?.paste(desc)}>
+          <DropdownMenuItem onSelect={() => sendPrompt(desc)}>
             {`Insert description`}
           </DropdownMenuItem>
         )}
         {showInsertSeed && (
           <DropdownMenuItem
-            onSelect={() => pasteApiRef.current?.paste(seed as string)}
+            onSelect={() => sendPrompt(seed as string)}
           >
             {`Insert review prompt`}
           </DropdownMenuItem>
         )}
         {(showInsertDescription || showInsertSeed) && customPrompts.length > 0 && <DropdownMenuSeparator />}
         {customPrompts.map((prompt, index) => (
-          <DropdownMenuItem key={index} onSelect={() => pasteApiRef.current?.paste(prompt.text)}>
+          <DropdownMenuItem key={index} onSelect={() => sendPrompt(prompt.text)}>
             <span className="min-w-0 flex-1 truncate" title={prompt.title}>{prompt.title}</span>
           </DropdownMenuItem>
         ))}
@@ -323,9 +327,14 @@ export function AgentTab({
         })
       }
       onReady={(api) => {
-        pasteApiRef.current = api;
+        promptInputRef.current = api;
       }}
       headerMenu={agentMenu}
+      headerActions={promptError && running ? (
+        <span role="alert" className="max-w-56 text-xs text-destructive">
+          Prompt not sent. Wait for the agent to be ready, then try again.
+        </span>
+      ) : undefined}
     />
   );
 }

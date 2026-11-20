@@ -42,7 +42,7 @@ export function CustomPromptsSection({ settings }: { settings: Settings }) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Custom prompts</h2>
-      <p className="text-sm text-muted-foreground">Save reusable prompts, then select their titles from a task's Agent actions menu. Text is inserted for you to review before sending.</p>
+      <p className="text-sm text-muted-foreground">Save reusable prompts, then select their titles from a task's Agent actions menu to insert and send them immediately.</p>
       {prompts.length === 0 && <p className="text-sm text-muted-foreground">No custom prompts yet.</p>}
       {prompts.map((prompt, index) => (
         <div key={index} className="flex items-start gap-3 rounded-lg border p-3">

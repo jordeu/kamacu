@@ -6,7 +6,7 @@ import { useSpawnAgent, type TermSession } from "@/api/sessions";
 import type { ReactNode } from "react";
 
 const promptActions = vi.hoisted(() => ({
-  paste: vi.fn(),
+  sendPrompt: vi.fn(),
   items: new Map<string, () => void>(),
 }));
 
@@ -23,8 +23,8 @@ vi.mock("@/api/sessions", () => ({
   useResumeGlobalAgent: () => ({}),
   useStopSession: () => ({}),
 }));
-vi.mock("@/components/terminal/TerminalPane", () => ({ TerminalPane: ({ headerMenu, onReady }: { headerMenu: ReactNode; onReady: (api: { paste: (text: string) => void }) => void }) => {
-  onReady({ paste: promptActions.paste });
+vi.mock("@/components/terminal/TerminalPane", () => ({ TerminalPane: ({ headerMenu, onReady }: { headerMenu: ReactNode; onReady: (api: { sendPrompt: (text: string) => boolean }) => void }) => {
+  onReady({ sendPrompt: promptActions.sendPrompt });
   return <div>Running terminal{headerMenu}</div>;
 } }));
 vi.mock("@/components/ui/dropdown-menu", () => {
@@ -49,20 +49,21 @@ function show(state: Partial<Spawn>, session?: TermSession) {
   );
 }
 beforeEach(() => {
-  promptActions.paste.mockClear();
+  promptActions.sendPrompt.mockClear();
+  promptActions.sendPrompt.mockReturnValue(true);
   promptActions.items.clear();
   vi.mocked(useSpawnAgent).mockReturnValue({ mutate: vi.fn() } as unknown as Spawn);
 });
 
 describe("custom prompt insertion", () => {
-  it("shows the saved title and pastes the exact text only when selected", () => {
+  it("shows the saved title and sends the exact text only when selected", () => {
     const html = show({}, { id: "agent-1", status: "running" } as TermSession);
     expect(html).toContain("Explain changes");
-    expect(promptActions.paste).not.toHaveBeenCalled();
+    expect(promptActions.sendPrompt).not.toHaveBeenCalled();
     const action = [...promptActions.items.entries()].find(([label]) => label.includes("Explain changes"))?.[1];
     expect(action).toBeDefined();
     action!();
-    expect(promptActions.paste).toHaveBeenCalledExactlyOnceWith("Explain these changes.\nGive examples.");
+    expect(promptActions.sendPrompt).toHaveBeenCalledExactlyOnceWith("Explain these changes.\nGive examples.");
   });
 
   it("does not offer insertion for an exited session", () => {

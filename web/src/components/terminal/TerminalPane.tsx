@@ -18,6 +18,7 @@ import { attachTwoFingerScroll } from "./touchScroll";
 import { scrollTerminal } from "./scrollTerminal";
 import { HelperKeyboard } from "./HelperKeyboard";
 import { followVisualViewport, isolateFullscreenPane } from "./fullscreenViewport";
+import { createPromptInput, type PromptInput } from "./promptInput";
 
 export interface TerminalPaneProps {
   sessionId: string;
@@ -34,7 +35,7 @@ export interface TerminalPaneProps {
   exitedMessage?: string; // exited-banner copy override; default "Session exited (code {N})" (bash)
   exitedActions?: ReactNode; // replaces the default exited/not-found banner action group (agent resume pair); bash defaults unchanged when undefined
   dimWhenExited?: boolean; // default false (bash unchanged); true dims the terminal area once exited (agent)
-  onReady?: (api: { paste: (text: string) => void } | null) => void; // imperative paste handle
+  onReady?: (api: PromptInput | null) => void;
   autoFocus?: boolean; // inbox deep link: focus once when connected
   onConnect?: () => void; // fires when conn state becomes "connected" (D-45 hook)
 }
@@ -97,6 +98,7 @@ export function TerminalPane({
   onReadyRef.current = onReady;
   const onConnectRef = useRef(onConnect);
   onConnectRef.current = onConnect;
+  const promptInputRef = useRef<ReturnType<typeof createPromptInput> | null>(null);
 
   // Set by the mount effect; lets the conn-state effect force a fit + resize
   // send after every (re)connect (the forced send triggers the server-side
@@ -104,6 +106,7 @@ export function TerminalPane({
   const fitAndSendRef = useRef<(force: boolean) => void>(() => {});
 
   const handleState = useCallback((s: ConnState) => {
+    promptInputRef.current?.setConnected(s.kind === "connected");
     setConn(s);
     if (s.kind === "exited") onSessionExitRef.current?.();
   }, []);
@@ -173,6 +176,7 @@ export function TerminalPane({
     term.attachCustomKeyEventHandler((e) => {
       if (isBrowserSwitchShortcut(e)) return false;
       if (e.type !== "keydown") return true;
+      promptInputRef.current?.cancelSubmit();
       if (e.ctrlKey && e.shiftKey && e.code === "KeyC" && term.hasSelection()) {
         void navigator.clipboard.writeText(term.getSelection());
         e.preventDefault();
@@ -212,9 +216,19 @@ export function TerminalPane({
     fitAndSend(false);
 
     setTerm(term);
-    onReadyRef.current?.({ paste: (t: string) => term.paste(t) });
+    const promptInput = createPromptInput(term);
+    promptInputRef.current = promptInput;
+    // Capture clipboard and soft-keyboard input as well as physical keys.
+    // Programmatic term.paste() does not dispatch these DOM events.
+    el.addEventListener("paste", promptInput.cancelSubmit, true);
+    el.addEventListener("input", promptInput.cancelSubmit, true);
+    onReadyRef.current?.(promptInput);
 
     return () => {
+      promptInput.dispose();
+      el.removeEventListener("paste", promptInput.cancelSubmit, true);
+      el.removeEventListener("input", promptInput.cancelSubmit, true);
+      promptInputRef.current = null;
       onReadyRef.current?.(null);
       setTerm(null);
       fitAndSendRef.current = () => {};
@@ -426,6 +440,7 @@ export function TerminalPane({
           applicationCursorKeys={() => term?.modes.applicationCursorKeysMode ?? false}
           onInput={(data) => {
             if (conn.kind !== "connected" || !term) return;
+            promptInputRef.current?.cancelSubmit();
             term.input(data, true);
             term.focus();
           }}
