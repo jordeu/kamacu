@@ -274,3 +274,35 @@ func TestSettingsPutInvalidJSON(t *testing.T) {
 		t.Fatalf("PUT invalid JSON = %d, want 400", resp.StatusCode)
 	}
 }
+
+func TestCustomPromptsSetting(t *testing.T) {
+	srv, db, _ := newTestServer(t)
+	url := srv.URL + "/api/settings/custom_prompts"
+	// Add, edit, and delete prompts through the same persistent settings API.
+	for _, value := range []string{
+		`[{"title":"Explain","text":"Explain the changes.\nInclude examples."}]`,
+		`[{"title":"Explain briefly","text":"Summarize changes."},{"title":"Test","text":"Run tests."}]`,
+		`[]`,
+	} {
+		status, body := doJSON(t, http.MethodPut, url, map[string]string{"value": value})
+		if status != http.StatusOK || body["value"] != value {
+			t.Fatalf("save: status=%d body=%v", status, body)
+		}
+		stored, err := settings.Get(db, settings.KeyCustomPrompts)
+		if err != nil || stored != value {
+			t.Fatalf("stored=%q error=%v", stored, err)
+		}
+		status, all := doJSON(t, http.MethodGet, srv.URL+"/api/settings", nil)
+		if status != http.StatusOK || all["custom_prompts"].(map[string]any)["value"] != value {
+			t.Fatalf("read: status=%d body=%v", status, all)
+		}
+	}
+	status, _ := doJSON(t, http.MethodPut, url, map[string]string{"value": `[{"title":"Missing text"}]`})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid save: status=%d", status)
+	}
+	stored, err := settings.Get(db, settings.KeyCustomPrompts)
+	if err != nil || stored != "[]" {
+		t.Fatalf("invalid save changed prompts: stored=%q error=%v", stored, err)
+	}
+}

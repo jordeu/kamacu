@@ -14,6 +14,7 @@ import { NotificationsSection } from "@/components/settings/NotificationsSection
 import { MonitoringSection } from "@/components/settings/MonitoringSection";
 import { ScratchpadSection } from "@/components/settings/ScratchpadSection";
 import { BrowserNotificationsSection } from "@/components/settings/BrowserNotificationsSection";
+import { CustomPromptsSection } from "@/components/settings/CustomPromptsSection";
 
 /**
  * Wraps the given substrings of a contract literal in the mono stack at
@@ -131,6 +132,7 @@ function GithubSection({
 const SETTINGS_GROUPS = [
   { id: "workspace", label: "Workspace", description: "Choose where tasks run and how shells and branches are created." },
   { id: "agents", label: "Agents", description: "Manage your coding agents and the scratchpad they use." },
+  { id: "prompts", label: "Prompts", description: "Manage reusable prompts for your tasks." },
   { id: "monitoring", label: "Monitoring", description: "Configure AI profiles and workspace monitoring." },
   { id: "github", label: "GitHub", description: "Manage GitHub integration, review prompts, and notification sources." },
   { id: "cleanup", label: "Cleanup", description: "Control idle sessions and clean up task worktrees." },
@@ -233,6 +235,10 @@ export default function SettingsPage() {
               <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "agents")?.description}</p>
               <AgentsSection />
               <ScratchpadSection />
+            </TabsContent>
+            <TabsContent value="prompts" forceMount hidden={activeGroup !== "prompts"} className="space-y-6">
+              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "prompts")?.description}</p>
+              <CustomPromptsSection settings={settings} />
             </TabsContent>
             <TabsContent value="monitoring" forceMount hidden={activeGroup !== "monitoring"} className="space-y-6">
               <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "monitoring")?.description}</p>

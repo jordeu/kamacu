@@ -29,12 +29,13 @@ describe("settings categories", () => {
     const expected = {
       workspace: ["Worktree base directory", "Shell", "Branch name template", "Browser notifications"],
       agents: ["Agent controls", "Scratchpad controls"],
+      prompts: ["Custom prompts", "Add prompt"],
       monitoring: ["Monitor controls"],
       github: ["GitHub integration", "Notification controls"],
       cleanup: ["Done session TTL", "Cleanup controls"],
     };
     const panels = html.split('role="tabpanel"').slice(1);
-    expect(panels).toHaveLength(5);
+    expect(panels).toHaveLength(6);
     Object.entries(expected).forEach(([name, controls], index) => {
       expect(panels[index]).toContain(`-trigger-${name}`);
       controls.forEach(control => expect(panels[index]).toContain(control));
@@ -47,7 +48,7 @@ describe("settings categories", () => {
   it("starts with workspace and keeps other panels mounted but hidden", () => {
     const html = render();
     expect(panel(html, "workspace")).toContain('data-state="active"');
-    for (const name of ["agents", "monitoring", "github", "cleanup"]) {
+    for (const name of ["agents", "prompts", "monitoring", "github", "cleanup"]) {
       expect(panel(html, name)).toContain('hidden=""');
     }
     expect(html).toContain("Agent controls");

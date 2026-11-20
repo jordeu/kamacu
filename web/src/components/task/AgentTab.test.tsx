@@ -3,10 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentTab } from "./AgentTab";
 import { useSpawnAgent, type TermSession } from "@/api/sessions";
+import type { ReactNode } from "react";
+
+const promptActions = vi.hoisted(() => ({
+  paste: vi.fn(),
+  items: new Map<string, () => void>(),
+}));
 
 vi.mock("@/api/queries", () => ({ useTask: () => ({ data: { worktree_path: "/worktree", branch: "task" } }) }));
 vi.mock("@/api/global", () => ({ useGlobal: () => ({}) }));
 vi.mock("@/api/agents", () => ({ useAgentStatuses: () => ({ data: [] }) }));
+vi.mock("@/api/settings", () => ({ useSettings: () => ({ data: {
+  custom_prompts: { value: JSON.stringify([{ title: "Explain changes", text: "Explain these changes.\nGive examples." }]) },
+} }) }));
 vi.mock("@/api/sessions", () => ({
   useSpawnAgent: vi.fn(),
   useResumeAgent: () => ({}),
@@ -14,7 +23,21 @@ vi.mock("@/api/sessions", () => ({
   useResumeGlobalAgent: () => ({}),
   useStopSession: () => ({}),
 }));
-vi.mock("@/components/terminal/TerminalPane", () => ({ TerminalPane: () => <div>Running terminal</div> }));
+vi.mock("@/components/terminal/TerminalPane", () => ({ TerminalPane: ({ headerMenu, onReady }: { headerMenu: ReactNode; onReady: (api: { paste: (text: string) => void }) => void }) => {
+  onReady({ paste: promptActions.paste });
+  return <div>Running terminal{headerMenu}</div>;
+} }));
+vi.mock("@/components/ui/dropdown-menu", () => {
+  const Container = ({ children }: { children: ReactNode }) => <div>{children}</div>;
+  return {
+    DropdownMenu: Container, DropdownMenuTrigger: Container, DropdownMenuContent: Container,
+    DropdownMenuSeparator: () => <hr />,
+    DropdownMenuItem: ({ children, onSelect }: { children: ReactNode; onSelect: () => void }) => {
+      promptActions.items.set(renderToStaticMarkup(<>{children}</>), onSelect);
+      return <div>{children}</div>;
+    },
+  };
+});
 
 type Spawn = ReturnType<typeof useSpawnAgent>;
 function show(state: Partial<Spawn>, session?: TermSession) {
@@ -26,7 +49,26 @@ function show(state: Partial<Spawn>, session?: TermSession) {
   );
 }
 beforeEach(() => {
+  promptActions.paste.mockClear();
+  promptActions.items.clear();
   vi.mocked(useSpawnAgent).mockReturnValue({ mutate: vi.fn() } as unknown as Spawn);
+});
+
+describe("custom prompt insertion", () => {
+  it("shows the saved title and pastes the exact text only when selected", () => {
+    const html = show({}, { id: "agent-1", status: "running" } as TermSession);
+    expect(html).toContain("Explain changes");
+    expect(promptActions.paste).not.toHaveBeenCalled();
+    const action = [...promptActions.items.entries()].find(([label]) => label.includes("Explain changes"))?.[1];
+    expect(action).toBeDefined();
+    action!();
+    expect(promptActions.paste).toHaveBeenCalledExactlyOnceWith("Explain these changes.\nGive examples.");
+  });
+
+  it("does not offer insertion for an exited session", () => {
+    expect(show({}, { id: "agent-1", status: "exited" } as TermSession)).not.toContain("Explain changes");
+    expect(promptActions.items.size).toBe(0);
+  });
 });
 describe("shared automatic and manual agent startup", () => {
   it("disables manual startup while the automatic request is pending", () => {

@@ -20,11 +20,13 @@ const (
 	KeyDoneSessionTTL          = "done_session_ttl"
 	KeyGithubIntegration       = "github_integration"
 	KeyPRReviewSeed            = "pr_review_seed"
+	KeyCustomPrompts           = "custom_prompts"
 	KeyNotificationAutoProcess = "notification_auto_process"
 )
 
 // Defaults maps each setting key to its code default. Absent row = default.
 var Defaults = map[string]string{
+	KeyCustomPrompts: "[]",
 	// Automatic notification processing is opt-in.
 	KeyNotificationAutoProcess: "off",
 	KeyWorktreeBase:            "~/.kamacu/worktrees/", // WT-01; stored raw, expanded at use

@@ -25,6 +25,7 @@ func testDB(t *testing.T) *sql.DB {
 
 func TestDefaultsValues(t *testing.T) {
 	want := map[string]string{
+		settings.KeyCustomPrompts:           "[]",
 		settings.KeyBrowserNotifications:    "on",
 		settings.KeyNotificationAutoProcess: "off",
 		settings.KeyWorktreeBase:            "~/.kamacu/worktrees/",
