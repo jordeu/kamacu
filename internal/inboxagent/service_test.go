@@ -23,7 +23,7 @@ func (f modelFunc) GenerateValidatedJSON(ctx context.Context, p monitor.Profile,
 	}
 	raw, _ := json.Marshal(d)
 	if err = validate(raw); err != nil {
-		return nil, err
+		return raw, err
 	}
 	return raw, nil
 }
@@ -461,5 +461,225 @@ func TestPublishedPendingUpdatesDoNotReplayTheInboxAgent(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatal("updated pending message was automatically reprocessed", calls)
+	}
+}
+
+type quoteRepairModel struct {
+	response func(string, any) any
+}
+
+func (m quoteRepairModel) GenerateValidatedJSON(_ context.Context, _ monitor.Profile, prompt string, schema any, check func([]byte) error) ([]byte, error) {
+	raw, err := json.Marshal(m.response(prompt, schema))
+	if err != nil {
+		return nil, err
+	}
+	return raw, check(raw)
+}
+func TestAnnotatedEvidenceGetsOneCorrectionWithoutChangingTheAction(t *testing.T) {
+	for _, mode := range []string{"correct_quotes", "invented_quote", "change_action"} {
+		t.Run(mode, func(t *testing.T) {
+			s, who := setup(t)
+			calls := 0
+			s.Model = quoteRepairModel{response: func(prompt string, schema any) any {
+				calls++
+				if calls == 1 {
+					d := reply()
+					d.Evidence = []string{"release is verified", "rule: When the release task asks to proceed with the verified release, reply Yes, proceed.", `options: {"id":"yes","label":"Yes, proceed."}`}
+					return d
+				}
+				if calls > 2 {
+					t.Fatal("more than one quote correction")
+				}
+				if !strings.Contains(prompt, "SAME rule and response") {
+					t.Fatal("correction can replan the action")
+				}
+				shape := jsonText(schema)
+				if strings.Contains(shape, "option_id") || strings.Contains(shape, "rule_ids") {
+					t.Fatal("correction schema permits changing authorization", shape)
+				}
+				switch mode {
+				case "invented_quote":
+					return map[string]any{"evidence": []string{"Approval was definitely published on GitHub"}}
+				case "change_action":
+					return map[string]any{"evidence": []string{"release is verified"}, "option_id": "different"}
+				default:
+					return map[string]any{"evidence": []string{"release is verified"}}
+				}
+			}}
+			q := observed(t, s, who, "release")
+			if err := s.Inbox.FinalizePublication(context.Background(), q.ID); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := s.Inbox.Get(context.Background(), q.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 2 {
+				t.Fatal("unexpected calls", calls)
+			}
+			if mode == "correct_quotes" {
+				if saved.Status != "answered" || saved.Answer != "Yes, proceed." || saved.Automation == nil || saved.Automation.Rules[0].ID != "release" {
+					t.Fatal(saved)
+				}
+			} else {
+				if saved.Status != "pending" || saved.Answer != "" || saved.Automation == nil || saved.Automation.Error == "" {
+					t.Fatal("invalid correction authorized a reply", saved)
+				}
+				if saved.Automation.Answer != "Yes, proceed." || len(saved.Automation.Rules) != 1 {
+					t.Fatal("attempted response attribution was lost", saved.Automation)
+				}
+				var decision string
+				if err := s.DB.QueryRow(`SELECT decision FROM inbox_agent_decisions WHERE question_id=?`, q.ID).Scan(&decision); err != nil || !strings.Contains(decision, `"option_id":"yes"`) {
+					t.Fatal("rejected proposal was lost", decision, err)
+				}
+			}
+		})
+	}
+}
+
+func TestQuoteCorrectionStopsBeforeUnnecessaryModelCalls(t *testing.T) {
+	for _, mode := range []string{"cancelled", "budget", "unknown_option", "invalid_text"} {
+		t.Run(mode, func(t *testing.T) {
+			s, who := setup(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			if mode == "budget" {
+				c, err := s.Config(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				c.ContextBytes = 64000
+				if _, err = s.SaveConfig(ctx, c); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.Model = quoteRepairModel{response: func(prompt string, _ any) any {
+				calls++
+				if calls != 1 {
+					t.Fatal("unnecessary quote correction", mode)
+				}
+				d := reply()
+				d.Evidence = []string{"rule: this is an annotation"}
+				switch mode {
+				case "cancelled":
+					cancel()
+				case "budget":
+					if len(prompt) > 64000 {
+						t.Fatal("initial prompt exceeded budget")
+					}
+					d.Evidence = []string{strings.Repeat("z", 8000)}
+				case "unknown_option":
+					d.OptionID = "invented"
+				case "invalid_text":
+					d.OptionID = ""
+					d.Answer = strings.Repeat("x", 16001)
+				}
+				return d
+			}}
+			q := observed(t, s, who, "release")
+			if mode == "budget" {
+				if _, err := s.DB.Exec(`UPDATE inbox_questions SET context=? WHERE id=?`, strings.Repeat("x", 57000)+"release is verified", q.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.Inbox.FinalizePublication(ctx, q.ID); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := s.Inbox.Get(context.Background(), q.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 1 || saved.Status != "pending" || saved.Answer != "" || saved.Automation == nil {
+				t.Fatalf("unexpected result: %+v calls=%d", saved, calls)
+			}
+			if mode == "budget" || mode == "cancelled" {
+				if saved.Automation.Answer != "Yes, proceed." || len(saved.Automation.Rules) != 1 {
+					t.Fatal("attempted response attribution was lost", saved.Automation)
+				}
+				var raw string
+				if err := s.DB.QueryRow(`SELECT decision FROM inbox_agent_decisions WHERE question_id=?`, q.ID).Scan(&raw); err != nil || !strings.Contains(raw, `"option_id":"yes"`) {
+					t.Fatal("original rejected proposal was lost", raw, err)
+				}
+			}
+		})
+	}
+}
+func TestQuoteCorrectionStillChecksChangedRulesAndSource(t *testing.T) {
+	for _, mode := range []string{"rules", "source"} {
+		t.Run(mode, func(t *testing.T) {
+			s, who := setup(t)
+			calls := 0
+			source := `{"head":"old"}`
+			s.Evidence = func(context.Context, inbox.Question) (json.RawMessage, error) { return json.RawMessage(source), nil }
+			s.Model = quoteRepairModel{response: func(string, any) any {
+				calls++
+				if calls == 1 {
+					d := reply()
+					d.Evidence = []string{"option yes: Yes, proceed."}
+					return d
+				}
+				if mode == "source" {
+					source = `{"head":"new"}`
+				} else {
+					c, err := s.Config(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+					c.Rules = nil
+					if _, err = s.SaveConfig(context.Background(), c); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return map[string]any{"evidence": []string{"release is verified"}}
+			}}
+			q := observed(t, s, who, "release")
+			if err := s.Inbox.FinalizePublication(context.Background(), q.ID); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := s.Inbox.Get(context.Background(), q.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 2 || saved.Status != "pending" || saved.Answer != "" || saved.Automation == nil || saved.Automation.Error == "" {
+				t.Fatal("correction bypassed freshness checks", saved, calls)
+			}
+		})
+	}
+}
+
+func TestApprovedPRCompletionClosesWithCorrectedEvidence(t *testing.T) {
+	s, who := setup(t)
+	ctx := context.Background()
+	c, err := s.Config(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Rules = []Rule{{ID: "after-approval", Text: "after I approved a PR we can close the session", Enabled: true}}
+	if _, err = s.SaveConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	quote := "I approved PR #2074 with an empty body and no inline comments, and GitHub now shows it as APPROVED."
+	calls := 0
+	s.Model = quoteRepairModel{response: func(string, any) any {
+		calls++
+		if calls == 1 {
+			return Decision{ClearMatch: true, Outcome: "reply", RuleIDs: []string{"after-approval"}, Reason: "The approval was published, so the close-session rule applies.", OptionID: "exit", Evidence: []string{quote, `options: {"id":"exit","label":"Close session"}`, "rule: after I approved a PR we can close the session"}}
+		}
+		return map[string]any{"evidence": []string{quote}}
+	}}
+	out, err := s.Inbox.Observe(ctx, who, inbox.Create{Key: "approved-pr", Abstract: "PR approved", Summary: "Approved PR #2074 with empty body; token access still unverified", Context: quote + "\n\nOne thing is still open on the author's side: the user behind SCHED_GHA_PLATFORM_TOKEN needs access to the gha-runner workspace before the next release.", Question: "Work completed"}, "completion", "terminal", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Inbox.FinalizePublication(ctx, out.Question.ID); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.Inbox.Get(ctx, out.Question.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || saved.Status != "answered" || saved.Answer != "Close session" || saved.Reason != "exit" || saved.AnswerSource != "inbox_agent" || saved.Automation == nil || saved.Automation.Rules[0].Text != c.Rules[0].Text {
+		t.Fatalf("completion was not automatically answered: %+v calls=%d", saved, calls)
 	}
 }

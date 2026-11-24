@@ -42,6 +42,11 @@ assessment and checked again before a response, independently of collection
 cursors and retrieval caches. Saved rules, model revisions,
 message revisions and terminal input guards are rechecked before authorization.
 Existing notification actions retain their durable execution and recovery checks.
+If a proposal fails only the exact-quote evidence check, one read-only correction
+call may replace its evidence quotes. It cannot change the selected rule or
+response. The correction shares the assessment deadline and context budget;
+failed corrections keep the message pending with its attempted response, rule
+and original rejected proposal available for inspection.
 
 Successful replies are published directly to Archived, labelled **Automatically
 answered**, with the exact response, explanation and triggering rule text at its
