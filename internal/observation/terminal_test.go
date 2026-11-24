@@ -32,15 +32,91 @@ func TestRenderingAndInput(t *testing.T) {
 func TestBoundedHistory(t *testing.T) {
 	v := New(80, 8)
 	for i := 0; i < 1000; i++ {
-		v.Feed([]byte(strings.Repeat("x", 70) + "\r\n"))
+		v.Feed([]byte(fmt.Sprintf("%04d %s\r\n", i, strings.Repeat("x", 70))))
 	}
 	s := v.Snapshot()
 	n := len(s.Screen)
 	for _, h := range s.History {
 		n += len(h)
 	}
-	if n > 24000 || len(s.History) > 8 {
+	if n > 24000 || len(s.History) > 256 {
 		t.Fatal("unbounded evidence", n)
+	}
+}
+
+func TestScrollbackSurvivesRepaints(t *testing.T) {
+	v := New(100, 6)
+	const explanation = "Problem: native memory exhausted the pod.\nSolution: reduce the embedded database cap."
+	v.Feed([]byte(strings.ReplaceAll(explanation, "\n", "\r\n")))
+	rendered := v.Snapshot().Screen
+	original := v.Snapshot().EvidenceAt(rendered)
+	v.Feed([]byte("\x1b[2J\x1b[HChoose review effort\r\n1. Low\r\n2. High\r\nspinner 0"))
+	for i := 1; i <= 100; i++ {
+		v.Feed([]byte(fmt.Sprintf("\r\x1b[2Kspinner %d", i)))
+	}
+	s := v.Snapshot()
+	if !s.ContainsEvidence(rendered) || !s.EvidenceAt(rendered).Equal(original) {
+		t.Fatal("repaints displaced the explanation or changed its time", s.History)
+	}
+	if !strings.Contains(s.Screen, "Choose review effort") || strings.Contains(s.Screen, "Problem:") {
+		t.Fatal("history changed the current screen", s.Screen)
+	}
+}
+
+func TestLongResponseRetainsOpening(t *testing.T) {
+	v := New(80, 6)
+	var response strings.Builder
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&response, "Explanation line %02d\r\n", i)
+	}
+	v.Feed([]byte(response.String()))
+	s := v.Snapshot()
+	for i := 0; i < 60; i++ {
+		if !s.ContainsEvidence(fmt.Sprintf("Explanation line %02d", i)) {
+			t.Fatalf("lost response line %d", i)
+		}
+	}
+}
+
+func TestHistoryPreservesContextAcrossComplexRepaints(t *testing.T) {
+	for _, tc := range []struct{ name, original, repaint string }{
+		{"headings", "Before\r\nfailed\r\nAfter\r\npassed", "\x1b[2;1Hpassed\x1b[K\x1b[4;1Hfailed\x1b[K"},
+		{"code", "func first() {\r\nreturn 1\r\n}\r\nfunc other() {\r\nreturn 2\r\n}", "\x1b[1;1Hfunc other() {\x1b[4;1Hfunc first() {"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := New(80, 8)
+			v.Feed([]byte(tc.original))
+			before := v.Snapshot()
+			// Reorder existing lines without clearing the screen. A bag of matching
+			// lines must not erase the earlier association between headings and values.
+			v.Feed([]byte(tc.repaint))
+			s := v.Snapshot()
+			if !s.ContainsEvidence(before.Screen) {
+				t.Fatal("lost the original ordering and heading context", s.History)
+			}
+			if !s.EvidenceAt(before.Screen).Equal(before.EvidenceAt(before.Screen)) {
+				t.Fatal("changed the original context's timestamp")
+			}
+		})
+	}
+}
+
+func TestDistinctOutputStillExpiresOldHistory(t *testing.T) {
+	v := New(80, 4)
+	v.Feed([]byte("Old question?"))
+	for i := 0; i < 600; i++ {
+		v.Feed([]byte(fmt.Sprintf("\x1b[2J\x1b[HNew output %04d %s", i, strings.Repeat("x", 50))))
+	}
+	s := v.Snapshot()
+	if s.ContainsEvidence("Old question?") {
+		t.Fatal("retained old evidence beyond the history budget")
+	}
+	n := len(s.Screen)
+	for _, h := range s.History {
+		n += len(h)
+	}
+	if n > 24000 || len(s.History) > 256 || len(s.History) != len(s.HistoryAt) || len(s.History) != len(s.HistoryLineTimes) {
+		t.Fatal("history budget or timestamp alignment broken", n)
 	}
 }
 
