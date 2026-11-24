@@ -5,12 +5,75 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"kamacu/internal/inbox"
 	"kamacu/internal/observation"
 )
+
+// Opt-in model quality check, rather than a mocked assertion that simply
+// returns the expected prose. Keep short requests short and substantive
+// responses useful without opening the full context.
+func TestInstalledLoginExplanationQuality(t *testing.T) {
+	if os.Getenv("KAMACU_MONITOR_MESSAGES") != "1" {
+		t.Skip("opt-in explanation quality check")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	for _, tc := range []struct {
+		name, source string
+		facts        []string
+		maxWords     int
+		kind         string
+	}{
+		{"review", "Problem: a prod pod peaked at 1.7 GiB; only 950 MiB is JVM memory, with the remainder native memory. Dropping the 2Gi pod limit to 1792Mi is unsafe. Solution: reduce DuckDB's cap from 256MB to 128MB and jemalloc decay from 5 s to 1 s. This reduces native memory before a later pod limit reduction. Config only, low complexity. Risk: larger queries may fail or spill; faster purging may cost CPU. Which review effort should I use? Low (recommended), Medium, High, Xhigh.", []string{"1.7", "1792", "128", "native"}, 0, "question"},
+		{"implementation", "The upload endpoint allowed non-members to submit files. I now require authentication and workspace membership, cap uploads at 8 MiB, and check PNG/JPEG signatures. All 12 tests passed. Existing attachments are unchanged. Implementation is complete.", []string{"member", "8 MiB", "PNG", "JPEG"}, 0, "completion"},
+		{"troubleshooting", "The worker times out because the upstream rate limit is 100 requests/minute. I can lower concurrency, which slows the backlog, or add retries, which needs a code change and may duplicate work unless we add idempotency. Which approach should I take?", []string{"100", "concurrency", "retr", "duplic"}, 0, "question"},
+		{"completion", "The Terraform fix is merged but has not been applied. It is not live. The next nightly run must confirm the fix after Terraform is applied. My implementation work is complete.", []string{"Terraform", "appl", "nightly"}, 0, "completion"},
+		{"permission", "Allow this command?\n  go test ./internal/inbox\n❯ 1. Yes\n  2. No\nEnter to confirm, Esc to cancel", []string{"go test ./internal/inbox"}, 65, "permission"},
+		{"error", "Error: migration failed because the database user lacks ALTER permission. The agent has stopped. No migration was applied. Fix the database permissions before restarting the migration.", []string{"ALTER", "permission", "appl"}, 0, "error"},
+		{"simple question", "Which branch should I use?", []string{"branch"}, 40, "question"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			screen := tc.source
+			if tc.kind != "permission" {
+				screen += "\n> "
+			}
+			result, err := (Backend{}).Classify(ctx, Profile{Backend: "claude_cli", Model: "sonnet"}, observation.Snapshot{Screen: screen, At: time.Now()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Kind != tc.kind {
+				t.Errorf("expected %s, got %s", tc.kind, result.Kind)
+			}
+			if tc.kind == "permission" && result.InputMode != "terminal" {
+				t.Errorf("native permission needs terminal input, got %s", result.InputMode)
+			}
+			t.Log(result.Explanation)
+			if err := inbox.ValidateGeneratedExplanation(result.Explanation); err != nil {
+				t.Fatal(err)
+			}
+			for _, internalDetail := range []string{"task context", "board move", "working directory", "not a git repository"} {
+				if strings.Contains(strings.ToLower(result.Explanation), internalDetail) {
+					t.Errorf("exposed internal detail %q", internalDetail)
+				}
+			}
+			for _, fact := range tc.facts {
+				if !strings.Contains(strings.ToLower(result.Explanation), strings.ToLower(fact)) {
+					t.Errorf("missing decisive fact %q", fact)
+				}
+			}
+			if tc.maxWords > 0 && len(strings.Fields(result.Explanation)) > tc.maxWords {
+				t.Errorf("simple request expanded to %d words", len(strings.Fields(result.Explanation)))
+			}
+		})
+	}
+}
 
 func TestClassifierCollectsExplanationAndFullContextInOneCall(t *testing.T) {
 	const source = "The PR is approved. CI passed. E2E may have tested the old artifact. Check the version before merging. Should I check and merge?"

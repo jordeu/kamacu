@@ -79,16 +79,14 @@ func (t *Terminal) capture() {
 		return
 	}
 	if t.snap.Screen != "" {
-		t.snap.History = append(t.snap.History, t.snap.Screen)
-		t.snap.HistoryAt = append(t.snap.HistoryAt, t.snap.At)
-		t.snap.HistoryLineTimes = append(t.snap.HistoryLineTimes, append([]time.Time(nil), t.snap.LineTimes...))
+		t.retainDisappearingLines(screen)
 	}
-	// Bound evidence by bytes as well as snapshots. History is rendered text,
-	// not raw escape codes, and no terminal query is ever answered here.
+	// Bound rendered evidence and its metadata. Compact excerpts let scrollback
+	// survive frequent repaints without retaining hundreds of full screens.
 	total := len(screen)
 	for i := len(t.snap.History) - 1; i >= 0; i-- {
 		total += len(t.snap.History[i])
-		if total > 24000 || len(t.snap.History)-i > 8 {
+		if total > 24000 || len(t.snap.History)-i > 256 {
 			t.snap.History = append([]string(nil), t.snap.History[i+1:]...)
 			t.snap.HistoryAt = append([]time.Time(nil), t.snap.HistoryAt[i+1:]...)
 			t.snap.HistoryLineTimes = append([][]time.Time(nil), t.snap.HistoryLineTimes[i+1:]...)
@@ -120,6 +118,48 @@ func (t *Terminal) capture() {
 	t.snap.Revision++
 	t.snap.At = time.Now()
 	t.snap.Digest = fmt.Sprintf("%x", sha256.Sum256([]byte(screen)))
+}
+
+// Compact only contiguous scrolling and single-line repaints. Matching arbitrary
+// lines would detach headings, duplicate choices, or code delimiters from the
+// text they describe. More complex changes keep the entire original screen.
+func (t *Terminal) retainDisappearingLines(screen string) {
+	old := strings.Split(t.snap.Screen, "\n")
+	current := strings.Split(screen, "\n")
+	start, end := 0, len(old)
+	prefix := 0
+	for prefix < min(len(old), len(current)) && old[prefix] == current[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < min(len(old), len(current))-prefix && old[len(old)-1-suffix] == current[len(current)-1-suffix] {
+		suffix++
+	}
+	if len(old)-prefix-suffix <= 1 && len(current)-prefix-suffix <= 1 {
+		// Growing output or a spinner replacing one line needs no duplicate body.
+		start, end = prefix, len(old)-suffix
+	} else {
+		for overlap := min(len(old), len(current)); overlap > 0; overlap-- {
+			matches := true
+			for i := 0; i < overlap; i++ {
+				if old[len(old)-overlap+i] != current[i] {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				end = len(old) - overlap
+				break
+			}
+		}
+	}
+	text := strings.Join(old[start:end], "\n")
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	t.snap.History = append(t.snap.History, text)
+	t.snap.HistoryAt = append(t.snap.HistoryAt, t.snap.At)
+	t.snap.HistoryLineTimes = append(t.snap.HistoryLineTimes, append([]time.Time(nil), t.snap.LineTimes[start:end]...))
 }
 func (t *Terminal) Resize(cols, rows int) {
 	t.mu.Lock()
