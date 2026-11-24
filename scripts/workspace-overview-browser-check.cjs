@@ -30,6 +30,11 @@ const { expect } = require(
     let activeStatusReads = 0;
     let forcedStatusReads = 0;
     let taskMoveRequests = 0;
+    let failMoves = false;
+    let releaseMove = null;
+    let holdMove = false;
+    let cleanupRequests = 0;
+    let raceNextMove = false;
     const projects = [
       { id: 1, name: "sched", github_repo: "org/sched", workspace_id: 1 },
       { id: 2, name: "fusion", github_repo: "org/fusion", workspace_id: 1 },
@@ -194,9 +199,41 @@ const { expect } = require(
         data = status(request.number, request.repository);
       } else if (/^\/api\/tasks\/\d+\/move$/.test(path)) {
         taskMoveRequests++;
+        if (holdMove)
+          await new Promise((resolve) => {
+            releaseMove = resolve;
+          });
+        if (failMoves)
+          return route.fulfill({ status: 500, json: { error: "Move failed" } });
         const task = tasks.find((t) => t.id === Number(path.split("/")[3]));
-        Object.assign(task, { status: route.request().postDataJSON().status });
-        data = task;
+        const input = route.request().postDataJSON();
+        if (raceNextMove) {
+          raceNextMove = false;
+          task.status = "in_review";
+        }
+        if (input.expected_status && input.expected_status !== task.status)
+          return route.fulfill({
+            status: 409,
+            json: {
+              error:
+                "This task has changed since your move. Refresh to see its current status.",
+            },
+          });
+        Object.assign(task, { status: input.status });
+        data = { ...task };
+        delete data.pr_links; // Real move responses omit list enrichment.
+      } else if (/^\/api\/tasks\/\d+\/worktree$/.test(path)) {
+        if (route.request().method() === "DELETE") {
+          cleanupRequests++;
+          tasks[0].worktree_path = null;
+          return route.fulfill({ status: 204 });
+        }
+        data = {
+          path: "/tmp/workspace-task",
+          branch: "task/fix",
+          dirty_files: 0,
+          running_sessions: 0,
+        };
       } else if (path === "/api/activity") {
         const time = { n: 0, min: 0, max: 0, median: 0 };
         data = {
@@ -487,7 +524,162 @@ const { expect } = require(
     await expect(
       overview.locator('[aria-label="Tasks in progress: —"]'),
     ).toHaveCount(1);
+    // Status changes use the existing move endpoint and never open the task.
+    failTasks = false;
+    failReviews = false;
+    github = true;
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${base}/workspaces/1/overview`);
+    const statusMenu = () =>
+      overview.getByRole("button", {
+        name: /^Change status of Restore task 101:/,
+      });
+    const chooseStatus = async (name) => {
+      await statusMenu().click();
+      await page.getByRole("menuitemradio", { name, exact: true }).click();
+    };
+    await statusMenu().focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("menuitemradio", { name: "In Progress", exact: true }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("menuitemradio")).toHaveCount(4);
+    await page.keyboard.press("Escape");
+    assert.equal(new URL(page.url()).pathname, "/workspaces/1/overview");
+    const beforeNoop = taskMoveRequests;
+    await chooseStatus("In Progress");
+    assert.equal(taskMoveRequests, beforeNoop);
+    holdMove = true;
+    await chooseStatus("In Review");
+    await expect.poll(() => releaseMove !== null).toBe(true);
+    await expect(
+      section("review").getByRole("button", {
+        name: `${tasks[0].title} · sched`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      overview.getByRole("button", { name: /^Change status of/ }).first(),
+    ).toBeDisabled();
+    releaseMove();
+    releaseMove = null;
+    holdMove = false;
+    await expect(
+      overview.getByRole("button", { name: "Undo", exact: true }),
+    ).toBeEnabled();
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(
+      section("progress").getByRole("button", {
+        name: `${tasks[0].title} · sched`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(statusMenu()).toBeEnabled();
+    // The server rechecks status if it changes after Undo's initial GET.
+    await chooseStatus("To Do");
+    await expect(
+      overview.getByRole("button", { name: "Undo", exact: true }),
+    ).toBeEnabled();
+    raceNextMove = true;
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(overview.getByRole("alert")).toContainText(
+      "has changed since your move",
+    );
+    assert.equal(tasks[0].status, "in_review");
+    await expect(
+      overview.getByRole("button", { name: "Undo", exact: true }),
+    ).toHaveCount(0);
+    await chooseStatus("In Progress");
+    await expect(statusMenu()).toBeEnabled();
+    // Keyboard selection moves a card without firing its navigation handler.
+    await statusMenu().focus();
+    await page.keyboard.press("Enter");
+    await page
+      .getByRole("menuitemradio", { name: "In Review", exact: true })
+      .focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      overview.getByRole("button", { name: "Undo", exact: true }),
+    ).toBeEnabled();
+    assert.equal(new URL(page.url()).pathname, "/workspaces/1/overview");
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(statusMenu()).toBeEnabled();
+    await chooseStatus("To Do");
+    await expect(
+      overview.getByRole("button", {
+        name: `${tasks[0].title} · sched`,
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(statusMenu()).toBeEnabled();
+    // Failed writes restore the card and show a useful error.
+    failMoves = true;
+    await chooseStatus("Done");
+    await expect(overview.getByRole("alert")).toContainText("Move failed");
+    await expect(statusMenu()).toBeEnabled();
+    failMoves = false;
+    await chooseStatus("Done");
+    await expect(
+      overview.getByRole("button", {
+        name: `${tasks[0].title} · sched`,
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    // A failed Undo can be retried.
+    await expect(
+      overview.getByRole("button", { name: "Undo", exact: true }),
+    ).toBeEnabled();
+    failMoves = true;
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(overview.getByRole("alert")).toContainText(
+      "Couldn't undo the move",
+    );
+    failMoves = false;
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(statusMenu()).toBeEnabled();
+    // Completion preserves the worktree confirmation; keeping it preserves Undo.
+    tasks[0].worktree_path = "/tmp/workspace-task";
+    await page.reload();
+    await chooseStatus("Done");
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Keep worktree" })
+      .click();
+    assert.equal(cleanupRequests, 0);
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(statusMenu()).toBeEnabled();
+    await chooseStatus("Done");
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Remove worktree", exact: true })
+      .click();
+    await expect.poll(() => cleanupRequests).toBe(1);
+    await expect(
+      overview.getByRole("button", { name: "Undo", exact: true }),
+    ).toHaveCount(0);
+    // Restore fixture state for touch and existing project-board checks.
+    tasks[0].status = "in_progress";
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await chooseStatus("Done");
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(statusMenu()).toBeEnabled();
+    // Undo must not overwrite a later external status change.
+    await chooseStatus("To Do");
+    await expect(
+      overview.getByRole("button", { name: "Undo", exact: true }),
+    ).toBeEnabled();
+    tasks[0].status = "in_review";
+    const beforeStaleUndo = taskMoveRequests;
+    await overview.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(overview.getByRole("alert")).toContainText(
+      "has changed since your move",
+    );
+    assert.equal(taskMoveRequests, beforeStaleUndo);
+    tasks[0].status = "in_progress";
     // The shared card refactor must preserve drag-and-drop in project boards.
+    const beforeDrag = taskMoveRequests;
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`${base}/projects/1`);
     const draggable = page.getByRole("button", {
@@ -511,11 +703,11 @@ const { expect } = require(
       { steps: 15 },
     );
     await page.mouse.up();
-    await expect.poll(() => taskMoveRequests).toBe(1);
+    await expect.poll(() => taskMoveRequests).toBe(beforeDrag + 1);
     assert.equal(tasks[0].status, "in_review");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: shared task/PR cards, linked PR expansion and status refresh, badge filtering, all cards, independent scroll/back restoration, project drag-and-drop, overview footer, Activity beside Scratchpad without toggling sessions, mobile board, workspace switching and unavailable data.",
+      "PASS: status dropdown with keyboard and mobile access, optimistic moves, Undo and stale-Undo protection, failure recovery, explicit worktree cleanup, shared task/PR cards, linked PR refresh, filters, scroll restoration, project drag-and-drop, navigation, and unavailable data.",
     );
   } finally {
     await browser.close();

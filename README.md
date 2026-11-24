@@ -37,7 +37,10 @@ review, and PRs awaiting your review across the workspace's projects in three
 columns. Cards share the project board's related PR links and status details,
 with a project badge that filters the overview. Search or filter by project and
 sort by last update. Each column scrolls independently; on mobile, swipe between
-columns. Task cards open the task; PR cards open its review workspace. Switching
+columns. Each task card's status dropdown moves it to To Do, In Progress, In
+Review, or Done, with an Undo action. To Do and Done tasks leave the overview;
+completion still offers worktree cleanup. Task cards open the task; PR cards
+open its review workspace. Switching
 workspaces while viewing Overview keeps you there. Unavailable or cached GitHub
 results are identified separately from empty queues. **Activity** is available
 in the bottom bar beside **Scratchpad** on desktop and mobile.

@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
-import type { Project, Task } from "@/api/types";
+import type { Project, Status, Task } from "@/api/types";
 import type { OverviewPR } from "@/lib/workspaceOverview";
 import { TaskCard } from "@/components/board/TaskCard";
 import { PRCard } from "@/components/board/PRCard";
 import { ProjectAvatar } from "@/components/ui/ProjectAvatar";
 import { cn } from "@/lib/utils";
+import { TaskStatusDropdown } from "./TaskStatusDropdown";
 
 const positions = new Map<
   string,
@@ -56,6 +57,8 @@ export function WorkspaceBoard({
   scrollKey,
   tasksReady,
   reviewsReady,
+  movePending,
+  onTaskMove,
 }: {
   progress: Task[];
   review: Task[];
@@ -70,6 +73,8 @@ export function WorkspaceBoard({
   scrollKey: string;
   tasksReady: boolean;
   reviewsReady: boolean;
+  movePending: boolean;
+  onTaskMove: (task: Task, status: Status) => void;
 }) {
   const board = useRef<HTMLDivElement>(null);
   const lanes = useRef<Record<string, HTMLDivElement | null>>({});
@@ -190,10 +195,18 @@ export function WorkspaceBoard({
                       sortable={false}
                       activePRsOnly
                       footer={
-                        <ProjectBadge
-                          project={projectMap.get(task.project_id)!}
-                          onSelect={onProjectSelect}
-                        />
+                        <div className="flex items-center justify-between gap-2">
+                          <ProjectBadge
+                            project={projectMap.get(task.project_id)!}
+                            onSelect={onProjectSelect}
+                          />
+                          <TaskStatusDropdown
+                            task={task}
+                            projectName={projectMap.get(task.project_id)!.name}
+                            disabled={movePending}
+                            onMove={onTaskMove}
+                          />
+                        </div>
                       }
                     />
                   ))}
