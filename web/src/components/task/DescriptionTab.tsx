@@ -6,6 +6,7 @@ import { useUpdateTask } from "@/api/mutations";
 import type { Task } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { TaskAgentSettings } from "./TaskAgentSettings";
 
 const markdownComponents: Components = {
   a: ({ href, title, children }) => (
@@ -52,12 +53,13 @@ export function DescriptionTab({
   projectId: number;
   readOnlySource?: string;
 }) {
-  if (readOnlySource !== undefined) {
-    return <ReadOnlyDescription source={readOnlySource} />;
-  }
-
   return (
-    <EditableDescription task={task} projectId={projectId} />
+    <div className="space-y-6">
+      <TaskAgentSettings key={task.id} task={task} projectId={projectId} />
+      {readOnlySource !== undefined
+        ? <ReadOnlyDescription source={readOnlySource} />
+        : <EditableDescription task={task} projectId={projectId} />}
+    </div>
   );
 }
 

@@ -21,7 +21,9 @@ configurable per project. When creating a task, you can override its agent and
 choose a model from that agent's curated list. In **Settings → Agents → Edit**,
 add or remove model IDs, or click **Discover models** and add suggestions to the
 list before saving. Discovery never changes the list automatically. Tasks keep
-their chosen agent and model for subsequent starts and resumes.
+their chosen agent and model for subsequent starts and resumes. You can change
+them later in the task’s **Description** tab. Stop a running agent before saving
+a new configuration; existing conversation histories are preserved.
 
 Custom agents can configure a model argument such as `--model {{model}}` or
 `--model={{model}}`. An optional discovery command can return a JSON array of
