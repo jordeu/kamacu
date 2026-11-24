@@ -83,7 +83,7 @@ func MonitorRoutes(mux *http.ServeMux, db *sql.DB, backend monitor.Classifier, m
 		}
 		result, err := db.ExecContext(r.Context(), `DELETE FROM monitor_profiles WHERE id=?`, id)
 		if err != nil {
-			writeError(w, 409, "model profile is still selected for monitoring or notification processing")
+			writeError(w, 409, "model profile is still selected for monitoring, notification or inbox processing")
 			return
 		}
 		n, _ := result.RowsAffected()

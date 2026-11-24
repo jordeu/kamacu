@@ -25,6 +25,7 @@ import (
 	"kamacu/internal/diagnostics"
 	"kamacu/internal/github"
 	"kamacu/internal/inbox"
+	"kamacu/internal/inboxagent"
 	"kamacu/internal/integration"
 	kamacumcp "kamacu/internal/mcp"
 	"kamacu/internal/monitor"
@@ -320,6 +321,10 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		slog.Error("recovering inbox delivery", "error", err)
 		return subcommands.ExitFailure
 	}
+	if err := inboxService.RecoverPublications(ctx); err != nil {
+		slog.Error("recovering inbox publications", "error", err)
+		return subcommands.ExitFailure
+	}
 	defer inboxService.Close()
 	api.PresenceRoutes(mux, presenceTracker, hookToken, func(id string) {
 		if err := inboxService.HideObserved(ctx, id, true); err != nil {
@@ -377,12 +382,16 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 
 	mgr.SetAgentReady(func(taskID int64) error { _, err := monitor.Resolve(ctx, db, taskID); return err })
 	terminalMonitor := monitor.New(db, mgr, inboxService, presenceTracker, classifier)
-	go terminalMonitor.Run(ctx)
-	api.InboxTerminalRoutes(mux, inboxService, hookToken, mgr, func(id string) {
+	inboxResponder := api.InboxTerminalRoutes(mux, inboxService, hookToken, mgr, func(id string) {
 		if sess, ok := mgr.Get(id); ok {
 			go sess.Stop()
 		}
 	})
+	inboxMetrics := &monitor.Metrics{}
+	inboxAgent := &inboxagent.Service{DB: db, Inbox: inboxService, Model: monitor.Backend{Metrics: inboxMetrics, Transcripts: transcripts}, Metrics: inboxMetrics, Respond: inboxResponder, Evidence: notificationService.InboxEvidence}
+	inboxService.SetBeforePublish(inboxAgent.Process)
+	go terminalMonitor.Run(ctx)
+	api.InboxAgentRoutes(mux, inboxAgent)
 	integrationManager, err := integration.Default()
 	if err != nil {
 		slog.Warn("agent integration unavailable", "error", err)

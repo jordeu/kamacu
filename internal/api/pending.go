@@ -107,7 +107,7 @@ type pendingCandidate struct {
 func (h *sessionHandlers) pendingCandidates(f pendingFilter, taskID int64) ([]pendingCandidate, error) {
 	rows, err := h.db.Query(`SELECT t.id, t.project_id, t.title, p.name, t.status, t.worktree_path, a.engine,
  CASE a.engine WHEN 'claude' THEN COALESCE(t.claude_session_id,'') WHEN 'codex' THEN COALESCE(t.codex_session_id,'') WHEN 'opencode' THEN COALESCE(t.opencode_session_id,'') ELSE '' END,
- EXISTS(SELECT 1 FROM inbox_questions q WHERE q.task_id=t.id AND q.status='pending')
+ EXISTS(SELECT 1 FROM inbox_questions q WHERE q.task_id=t.id AND q.publishing=0 AND q.status='pending')
  FROM tasks t JOIN projects p ON p.id=t.project_id JOIN agents a ON a.id=COALESCE(t.agent_id,p.agent_id)
  WHERE t.source='manual' AND t.snoozed_until IS NULL AND t.status IN ('in_review','in_progress')
  AND (?='anywhere' OR (?='project' AND t.project_id=?) OR (?='workspace' AND p.workspace_id=?))

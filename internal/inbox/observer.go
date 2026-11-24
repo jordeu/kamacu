@@ -12,6 +12,7 @@ import (
 func (s *Service) Observe(ctx context.Context, who Identity, c Create, kind, mode string, revision, input uint64) (Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	c.staged = s.beforePublish != nil
 	c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration = "observer", mode, revision, input
 	if kind == "completion" {
 		if err := s.prepareCompletion(ctx, who, &c); err != nil {

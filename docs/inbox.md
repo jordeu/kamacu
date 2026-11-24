@@ -6,7 +6,7 @@ Messages relay the agent’s response directly in its own voice. The existing mo
 
 ## Setup
 
-1. Open **Settings → Terminal monitoring → Add monitoring model**.
+1. Open **Settings → Agents → Monitoring agent → Add monitoring model**.
 2. Choose **Installed Claude Code login** or **Installed Codex login** to reuse the CLI's authentication on the Kamacu server. Sign in using that CLI first. Leave Model empty to use its default, or specify a model available to your account. Kamacu invokes the unmodified CLI; it does not copy OAuth tokens. Existing environment authentication overrides and provider subscription limits still apply.
 3. Alternatively choose **OpenAI-compatible API or local endpoint**, or **Anthropic API**. Enter a base URL including its API version, such as `http://localhost:11434/v1` or `https://api.anthropic.com/v1`, and a model ID. For authenticated endpoints, name an environment variable containing the API key on the Kamacu server. Leave it empty for unauthenticated local endpoints. Keys are not stored in these settings or returned to the browser.
 4. Use **Test connection**, save, and select the global default. Scratchpad uses this default. Choose a workspace override under **Workspace models** or **Manage workspaces → Monitoring model**.
@@ -14,6 +14,45 @@ Messages relay the agent’s response directly in its own voice. The existing mo
 A model must be configured before starting new agents. A workspace without an override inherits the global default. A failing explicit override stays unavailable; Kamacu never silently sends its terminal text to another provider. Changes apply to running sessions. The selected model receives rendered terminal text, so choose its endpoint accordingly.
 
 OpenAI-compatible endpoints must support Chat Completions with JSON-schema response formatting. Compatibility varies by server/model; test the actual endpoint. Monitoring is independent of the coding agent's provider.
+
+## Inbox agent
+
+**Settings → Agents** groups the monitoring, notification and inbox agents. Each
+has an independent model selection. Notification source connections remain under
+**Settings → GitHub**. Existing monitoring settings links still open Agents.
+
+The Inbox agent is the final step of monitoring and notification processing,
+before a new message becomes visible. It has its own editable, numbered text
+rules and model limits. It is off until a model and at least one enabled rule
+are saved. There is no periodic or manual Inbox processing, and saving rules
+does not process the existing backlog. Content refreshes to an already published
+pending message do not replay the Inbox agent or hide the card for reassessment.
+
+A rule must clearly authorize both the case and the response. Specify the exact
+repository/project, author, relevant evidence and permitted response or action.
+For example, a rereview rule can require evidence that the logged-in user
+previously approved the PR; release rules should name the exact author, project
+and release criteria. These examples are not installed as automatic policies.
+Ambiguous matches, unknown facts and conflicting rules leave the message in
+Pending. Native terminal permission dialogs are never answered automatically.
+
+The agent can send text or select an existing action button. It cannot invent
+buttons or execute independent tools. Notification evidence is refreshed before
+assessment and checked again before a response, independently of collection
+cursors and retrieval caches. Saved rules, model revisions,
+message revisions and terminal input guards are rechecked before authorization.
+Existing notification actions retain their durable execution and recovery checks.
+
+Successful replies are published directly to Archived, labelled **Automatically
+answered**, with the exact response, explanation and triggering rule text at its
+saved revision. They never enter the visible pending queue or trigger a browser
+notification for that queue. Assessment and delivery failures remain visible in
+Pending with the attempted response and error. Uncertain terminal delivery is
+never automatically repeated; inspect the terminal before sending further input.
+Notification task-execution failures use the existing pending recovery notice.
+Interrupted publication is recovered visibly after restart without rerunning the
+Inbox model or resending a response. Full assessment inputs, model settings and
+decisions are retained separately for audit.
 
 ## Browser notifications
 
@@ -73,12 +112,12 @@ retry states. These are read-only lookups and never create workspaces or PR link
 - Watching a terminal suppresses its notifications, while status continues updating. Viewing means that exact terminal is selected in a visible, focused browser window. Any fresh window viewing it counts.
 - An unanswered question appears after leaving, without requiring more terminal output. Returning hides its card and attention count; leaving restores the same card. Dismissal is permanent for that episode.
 - A completion produced while watching is considered seen, even if inference finishes after leaving. Unrelated screen repaints preserve the evidence's original time.
-- Explicit choices in conversational questions appear as clickable answer buttons. When no choices are offered, the monitor suggests two or three relevant replies based on the question and context. Suggestions do not invent missing user information and are never sent automatically. Clicking one sends its displayed text; you can also write your own answer. Updated choices invalidate older buttons.
+- Explicit choices in conversational questions appear as clickable answer buttons. When no choices are offered, the monitor suggests two or three relevant replies based on the question and context. Suggestions do not invent missing user information. They are sent automatically only when an explicitly configured Inbox agent rule clearly authorizes the response. Clicking one sends its displayed text; you can also write your own answer. Updated choices invalidate older buttons.
 - Ordinary conversational answers are saved and sent as plain terminal text. Recognized Claude Code single-select question dialogs show the original choices and descriptions as buttons. Choosing one navigates with arrow keys, checks the rendered selection after each step, and presses Enter. Multi-question dialogs can advance one question at a time; additional review screens require terminal interaction. Multi-select, preview, free-text entry and unrecognized layouts use Open task / Open Scratchpad. Native approval menus offer **Open task** / **Open Scratchpad** so the user handles them in the terminal.
 - Replies check the screen revision and input generation before writing. If delivery is uncertain, the saved answer remains in Archived for manual recovery. After a server restart, interrupted delivery is explicitly marked uncertain. Other message writers and keyboard input cannot interleave between a reply’s paste and submit key. Kamacu never automatically resends it: a successful PTY write is not proof that the agent processed it.
 - Completion cards always offer **Close session**, Open task (or Open Scratchpad), and Dismiss. Manual tasks also offer every legal forward board move: **Move to review and close session** from Todo/In progress, and **Move to done and close session** from Todo/In progress/Review. These controls are available even when the model makes no recommendation. Model recommendations are labeled **Recommended** using the scoped objective, project/repository, and terminal evidence. Scratchpad, PR-review sessions, and tasks already Done still offer Close session, without board moves. Closing alone leaves the task status unchanged.
 - Published reviews complete review sessions even when they include nonblocking comments or optional follow-up offers. A resolved Renovate batch can recommend Done without waiting for informational post-merge CI; explicitly required validation or extra requested work remains outstanding and is explained in the message.
-- Completion actions run only when clicked. Kamacu rechecks terminal freshness before closing. For a board move, it also rechecks the message and task status, saves the move and message answer together, and then closes the originating session. Failed or stale moves leave the session open. Open task and Dismiss archive the message and keep the session running. Inbox/MCP exits do not open another task-status dialog; only an exit from the actively viewed agent terminal offers that dialog.
+- Completion actions run when clicked or explicitly authorized by a clearly matching Inbox agent rule. Kamacu rechecks terminal freshness before closing. For a board move, it also rechecks the message and task status, saves the move and message answer together, and then closes the originating session. Failed or stale moves leave the session open. Open task and Dismiss archive the message and keep the session running. Inbox/MCP exits do not open another task-status dialog; only an exit from the actively viewed agent terminal offers that dialog.
 
 The sidebar and full Inbox share pending counts. Hidden cards do not count. Model rewording updates the same attention episode rather than reopening a dismissed card. Fresh request evidence after user input starts a new episode, even if the question text repeats. Questions superseded by observed progress and questions belonging to stopped sessions are archived as unanswered, without inventing a user response. Existing inbox history and compatibility tools remain available for recovering older messages; there is no legacy status-monitoring mode.
 

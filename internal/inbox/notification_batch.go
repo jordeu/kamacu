@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"kamacu/internal/store"
+	"log/slog"
 
 	"github.com/google/uuid"
 )
@@ -48,7 +49,15 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 		}
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var staged, created []string
+	defer func() {
+		s.mu.Unlock()
+		for _, id := range staged {
+			if e := s.FinalizePublication(ctx, id); e != nil {
+				slog.Warn("finalize notification publication", "question", id, "error", e)
+			}
+		}
+	}()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -164,6 +173,12 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 		if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,abstract,summary,context,question,options,status,kind,origin,delivery_mode,created_at,updated_at,heartbeat_at,notification_id,source_name,source_url,notification_group,explanation) VALUES(?,NULL,'',?,?,?,?,?,?,?,'pending','question','notification','notification',?,?,?,?,?,?,?,?)`, id, "notification:"+id, c.Key, c.Abstract, c.Summary, c.Context, c.Question, string(opts), now, now, now, a.EventIDs[0], a.SourceName, a.SourceURL, id, c.Explanation); err != nil {
 			return err
 		}
+		if s.beforePublish != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE inbox_questions SET publishing=1 WHERE id=?`, id); err != nil {
+				return err
+			}
+			created = append(created, id)
+		}
 		if a.Plan == "" {
 			return ErrInvalid
 		}
@@ -200,6 +215,7 @@ func (s *Service) ApplyNotificationBatch(ctx context.Context, batchID string, ac
 	if err = tx.Commit(); err != nil {
 		return err
 	}
+	staged = created
 	s.signal()
 	return nil
 }

@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -572,4 +573,35 @@ func TestClaudeTerminalQuestionPublishesNativeChoices(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("native question was not published")
+}
+
+func TestFinalInboxCheckRunsBeforeVisibilityAndOutsideSchedulerLocks(t *testing.T) {
+	svc, sess, _, _ := reviewFixture(t, fixtureClassifier{})
+	ctx := context.Background()
+	calls := 0
+	svc.Inbox.SetBeforePublish(func(ctx context.Context, q inbox.Question) error {
+		// Both locks must be available while an Inbox model is running.
+		svc.mu.Lock()
+		svc.mu.Unlock()
+		_ = svc.Presence.ViewingSession(sess.Info().ID)
+		calls++
+		pending, err := svc.Inbox.List(ctx, nil, false, 0)
+		if err != nil || pending.PendingCount != 0 || len(pending.Items) != 0 {
+			t.Errorf("message was visible before final check: %+v %v", pending, err)
+		}
+		_, err = svc.Inbox.AnswerAutomatic(ctx, inbox.Response{ID: q.ID, Revision: q.Revision, Answer: "Continue."}, func(tx *sql.Tx) error {
+			return inbox.SaveAutomation(ctx, tx, q.ID, inbox.Automation{Status: "answered", Answer: "Continue.", Rules: []inbox.AutomationRule{{ID: "I-continue", Text: "Continue this test task."}}})
+		})
+		return err
+	})
+	svc.tick(ctx)
+	svc.jobs.Wait()
+	pending, err := svc.Inbox.List(ctx, nil, false, 0)
+	if err != nil || pending.PendingCount != 0 {
+		t.Fatal(pending, err)
+	}
+	archived, err := svc.Inbox.List(ctx, nil, true, 0)
+	if err != nil || len(archived.Items) != 1 || archived.Items[0].AnswerSource != "inbox_agent" || calls != 1 {
+		t.Fatal(archived, calls, err)
+	}
 }

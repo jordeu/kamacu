@@ -13,6 +13,15 @@ export interface NotificationTaskLink {
   evidence: string;
 }
 export interface FeedbackQuestion {
+  automation?: {
+    status: string;
+    config_revision: number;
+    rules: { id: string; text: string }[];
+    reason: string;
+    answer: string;
+    option_id: string;
+    error?: string;
+  };
   attention_source_id?: string;
   linked_tasks?: NotificationTaskLink[];
   notification_id?: number;

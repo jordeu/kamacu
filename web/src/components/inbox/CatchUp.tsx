@@ -1,3 +1,4 @@
+import { AutomaticReply } from "./AutomaticReply";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Dialog as DialogPrimitive } from "radix-ui";
@@ -76,10 +77,11 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
   const answerInput = useRef<HTMLTextAreaElement>(null);
   const completion = q.kind === "completion";
   const readingText = catchUpReadingText(q);
-  const operational = q.reason === "operational_failure";
-  const canChoose = !q.hidden && (completion || q.delivery_mode !== "terminal");
+  const uncertainAutomatic = q.answer_source === "inbox_agent" && q.delivery_status === "uncertain";
+  const operational = q.reason === "operational_failure" || uncertainAutomatic;
+  const canChoose = !uncertainAutomatic && !q.hidden && (completion || q.delivery_mode !== "terminal");
   const choices: FeedbackQuestion["options"] = canChoose ? (completion ? completionActions(q) : q.options) : [];
-  const canWrite = !q.hidden && (completion || (q.delivery_mode !== "terminal" && q.delivery_mode !== "claude_question"));
+  const canWrite = !uncertainAutomatic && !q.hidden && (completion || (q.delivery_mode !== "terminal" && q.delivery_mode !== "claude_question"));
   const customInTerminal = !canWrite && !q.hidden && q.origin !== "notification";
   const custom = canWrite && (draft?.custom ?? (choices.length === 0));
   const pending = q.status === "pending";
@@ -116,6 +118,7 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
             <Button variant="outline" size="sm" className="mt-5" onClick={() => history.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>How we got here ↓</Button>
           </section>
           <section className={`${contextCard} space-y-4`} aria-label="Your response">
+            <AutomaticReply question={q} />
             <h2 className="text-base font-semibold">{completion ? "What should happen next?" : operational ? "Recovery actions" : "Your response"}</h2>
             {completion ? <p className="text-xs text-muted-foreground">Choose what happens next.</p> : <div className="break-words text-base font-medium"><InboxText text={q.question} /></div>}
             {!pending && <p role="status" className="rounded-lg border border-border p-3 text-sm">This message is {q.status}. {q.delivery_status && `Delivery: ${q.delivery_status}.`} {q.answer && <InboxText text={q.answer} />}Skip to continue.</p>}
@@ -149,7 +152,7 @@ function CatchUpMessage({ initial, draft, onDraft, onClose, onPrevious, onAdvanc
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-card/60 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
       <Button variant="ghost" size="sm" disabled={!onPrevious || action.isPending} onClick={onPrevious}><ChevronLeft className="size-4" />Previous</Button>
       <span className="hidden text-xs text-muted-foreground lg:inline">Skip leaves this message pending.</span>
-      <div className="flex gap-2"><Button variant="outline" size="sm" disabled={action.isPending} onClick={onAdvance}>Skip for now →</Button><Button size="sm" disabled={blocked || answerTooLong || (!answer.trim() && !optionID)} onClick={() => void submit("answer")}>{action.isPending ? "Sending…" : custom ? "Send reply & next" : optionID ? "Confirm & next" : "Choose a response"}</Button></div>
+      <div className="flex gap-2"><Button variant="outline" size="sm" disabled={action.isPending} onClick={onAdvance}>Skip for now →</Button><Button size="sm" disabled={uncertainAutomatic || blocked || answerTooLong || (!answer.trim() && !optionID)} onClick={() => void submit("answer")}>{action.isPending ? "Sending…" : custom ? "Send reply & next" : optionID ? "Confirm & next" : "Choose a response"}</Button></div>
     </footer>
   </>;
 }
