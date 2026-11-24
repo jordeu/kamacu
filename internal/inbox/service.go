@@ -57,44 +57,59 @@ type TaskLink struct {
 	Source    string `json:"source"`
 	Evidence  string `json:"evidence"`
 }
+type AutomationRule struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+type Automation struct {
+	Status         string           `json:"status"`
+	ConfigRevision int64            `json:"config_revision"`
+	Rules          []AutomationRule `json:"rules"`
+	Reason         string           `json:"reason"`
+	Answer         string           `json:"answer"`
+	OptionID       string           `json:"option_id"`
+	Error          string           `json:"error,omitempty"`
+}
 type Question struct {
-	AttentionSourceID    string     `json:"attention_source_id,omitempty"`
-	LinkedTasks          []TaskLink `json:"linked_tasks,omitempty"`
-	NotificationID       int64      `json:"notification_id,omitempty"`
-	SourceName           string     `json:"source_name,omitempty"`
-	SourceURL            string     `json:"source_url,omitempty"`
-	ExecutionResult      string     `json:"execution_result,omitempty"`
-	CompletionTaskStatus string     `json:"completion_task_status,omitempty"`
-	Origin               string     `json:"origin"`
-	Hidden               bool       `json:"hidden"`
-	DeliveryMode         string     `json:"delivery_mode"`
-	DeliveryStatus       string     `json:"delivery_status"`
-	EvidenceRevision     uint64     `json:"evidence_revision"`
-	InputGeneration      uint64     `json:"input_generation"`
-	Kind                 string     `json:"kind"`
-	ID                   string     `json:"id"`
-	TaskID               int64      `json:"task_id"`
-	ProjectID            int64      `json:"project_id"`
-	TaskTitle            string     `json:"task_title"`
-	ProjectName          string     `json:"project_name"`
-	SessionID            string     `json:"session_id"`
-	Abstract             string     `json:"abstract"`
-	Summary              string     `json:"summary"`
-	Context              string     `json:"context"`
-	Explanation          string     `json:"explanation"`
-	Question             string     `json:"question"`
-	Options              []Option   `json:"options"`
-	Status               string     `json:"status"`
-	Reason               string     `json:"reason"`
-	Answer               string     `json:"answer"`
-	AnswerSource         string     `json:"answer_source"`
-	Revision             int64      `json:"revision"`
-	CreatedAt            int64      `json:"created_at"`
-	UpdatedAt            int64      `json:"updated_at"`
-	HeartbeatAt          int64      `json:"heartbeat_at"`
-	AcknowledgedAt       *int64     `json:"acknowledged_at"`
+	Automation           *Automation `json:"automation,omitempty"`
+	AttentionSourceID    string      `json:"attention_source_id,omitempty"`
+	LinkedTasks          []TaskLink  `json:"linked_tasks,omitempty"`
+	NotificationID       int64       `json:"notification_id,omitempty"`
+	SourceName           string      `json:"source_name,omitempty"`
+	SourceURL            string      `json:"source_url,omitempty"`
+	ExecutionResult      string      `json:"execution_result,omitempty"`
+	CompletionTaskStatus string      `json:"completion_task_status,omitempty"`
+	Origin               string      `json:"origin"`
+	Hidden               bool        `json:"hidden"`
+	DeliveryMode         string      `json:"delivery_mode"`
+	DeliveryStatus       string      `json:"delivery_status"`
+	EvidenceRevision     uint64      `json:"evidence_revision"`
+	InputGeneration      uint64      `json:"input_generation"`
+	Kind                 string      `json:"kind"`
+	ID                   string      `json:"id"`
+	TaskID               int64       `json:"task_id"`
+	ProjectID            int64       `json:"project_id"`
+	TaskTitle            string      `json:"task_title"`
+	ProjectName          string      `json:"project_name"`
+	SessionID            string      `json:"session_id"`
+	Abstract             string      `json:"abstract"`
+	Summary              string      `json:"summary"`
+	Context              string      `json:"context"`
+	Explanation          string      `json:"explanation"`
+	Question             string      `json:"question"`
+	Options              []Option    `json:"options"`
+	Status               string      `json:"status"`
+	Reason               string      `json:"reason"`
+	Answer               string      `json:"answer"`
+	AnswerSource         string      `json:"answer_source"`
+	Revision             int64       `json:"revision"`
+	CreatedAt            int64       `json:"created_at"`
+	UpdatedAt            int64       `json:"updated_at"`
+	HeartbeatAt          int64       `json:"heartbeat_at"`
+	AcknowledgedAt       *int64      `json:"acknowledged_at"`
 }
 type Create struct {
+	staged                            bool
 	Informational                     bool `json:"-"`
 	completionTaskStatus              string
 	origin, deliveryMode              string
@@ -117,6 +132,8 @@ type Page struct {
 	HasMore      bool       `json:"has_more"`
 }
 type Service struct {
+	finalizing      map[string]bool
+	beforePublish   func(context.Context, Question) error
 	moveCompletion  func(context.Context, *sql.Tx, int64, string) (func(), error)
 	terminalManaged bool
 	db              *sql.DB
@@ -162,12 +179,15 @@ func (s *Service) valid(who Identity) error {
 	return nil
 }
 
-const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.explanation,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status,COALESCE(q.notification_id,0),q.source_name,q.source_url,q.execution_result,COALESCE((SELECT json_group_array(json_object('task_id',lt.id,'project_id',lt.project_id,'title',lt.title,'status',lt.status,'role',link.role,'source',link.source,'evidence',link.evidence)) FROM notification_task_links link JOIN tasks lt ON lt.id=link.task_id WHERE link.question_id=q.id),'[]'),COALESCE((SELECT r.id FROM notification_runs r WHERE r.attention_question_id=q.id),'') FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
+const selectQuestion = `SELECT q.id,COALESCE(q.task_id,0),COALESCE(t.project_id,0),COALESCE(t.title,'Scratchpad'),COALESCE(p.name,''),q.session_id,q.summary,q.context,q.explanation,q.question,q.options,q.status,q.reason,q.answer,q.answer_source,q.revision,q.created_at,q.updated_at,q.heartbeat_at,q.acknowledged_at,q.kind,q.abstract,q.origin,q.hidden,q.delivery_mode,q.delivery_status,q.evidence_revision,q.input_generation,q.completion_task_status,COALESCE(q.notification_id,0),q.source_name,q.source_url,q.execution_result,COALESCE((SELECT json_group_array(json_object('task_id',lt.id,'project_id',lt.project_id,'title',lt.title,'status',lt.status,'role',link.role,'source',link.source,'evidence',link.evidence)) FROM notification_task_links link JOIN tasks lt ON lt.id=link.task_id WHERE link.question_id=q.id),'[]'),COALESCE((SELECT r.id FROM notification_runs r WHERE r.attention_question_id=q.id),''),q.automation FROM inbox_questions q LEFT JOIN tasks t ON t.id=q.task_id LEFT JOIN projects p ON p.id=t.project_id `
 
 func scan(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
-	var opts, links string
-	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Explanation, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus, &q.NotificationID, &q.SourceName, &q.SourceURL, &q.ExecutionResult, &links, &q.AttentionSourceID)
+	var opts, links, automation string
+	err := row.Scan(&q.ID, &q.TaskID, &q.ProjectID, &q.TaskTitle, &q.ProjectName, &q.SessionID, &q.Summary, &q.Context, &q.Explanation, &q.Question, &opts, &q.Status, &q.Reason, &q.Answer, &q.AnswerSource, &q.Revision, &q.CreatedAt, &q.UpdatedAt, &q.HeartbeatAt, &q.AcknowledgedAt, &q.Kind, &q.Abstract, &q.Origin, &q.Hidden, &q.DeliveryMode, &q.DeliveryStatus, &q.EvidenceRevision, &q.InputGeneration, &q.CompletionTaskStatus, &q.NotificationID, &q.SourceName, &q.SourceURL, &q.ExecutionResult, &links, &q.AttentionSourceID, &automation)
+	if err == nil && automation != "{}" {
+		err = json.Unmarshal([]byte(automation), &q.Automation)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrNotFound
 	}
@@ -218,7 +238,7 @@ func (s *Service) transitionWith(ctx context.Context, before func(*sql.Tx) error
 	return err
 }
 func (s *Service) reconcile(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,heartbeat_at FROM inbox_questions WHERE status='pending' AND origin!='notification'`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,heartbeat_at FROM inbox_questions WHERE status='pending' AND origin!='notification' AND COALESCE(json_extract(automation,'$.status'),'')!='failed'`)
 	if err != nil {
 		return err
 	}
@@ -372,7 +392,7 @@ func (s *Service) createLocked(ctx context.Context, who Identity, c Create, kind
 	opts, _ := json.Marshal(c.Options)
 	id := uuid.NewString()
 	now := s.now().UnixMilli()
-	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract,origin,delivery_mode,evidence_revision,input_generation,completion_task_status,explanation) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract, c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration, c.completionTaskStatus, c.Explanation)
+	err = s.transition(ctx, id, "created", who.SessionID, `INSERT INTO inbox_questions(id,task_id,session_id,created_session_id,request_key,summary,context,question,options,status,created_at,updated_at,heartbeat_at,kind,abstract,origin,delivery_mode,evidence_revision,input_generation,completion_task_status,explanation,publishing) VALUES(?,NULLIF(?,0),?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?)`, id, who.TaskID, who.SessionID, who.SessionID, c.Key, c.Summary, c.Context, c.Question, string(opts), now, now, now, kind, c.Abstract, c.origin, c.deliveryMode, c.evidenceRevision, c.inputGeneration, c.completionTaskStatus, c.Explanation, c.staged)
 	if err != nil {
 		return Result{}, err
 	}
@@ -439,6 +459,30 @@ func (s *Service) Wait(ctx context.Context, who Identity, id string, wait time.D
 // Answer is shared by the browser and the session-reporting tool. nil identity
 // means browser; browser callers must supply the revision rendered with the form.
 func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision int64, answer, optionID string) (Result, error) {
+	return s.answer(ctx, who, id, revision, answer, optionID, nil)
+}
+
+// AnswerGuard runs in the answer transaction, before any task move or queued
+// notification action. It records automatic authorization and rejects edits
+// made while the model was working.
+type AnswerGuard func(*sql.Tx) error
+
+type Response struct {
+	ID       string `json:"id"`
+	Revision int64  `json:"revision"`
+	Answer   string `json:"answer"`
+	OptionID string `json:"option_id"`
+}
+type Responder func(context.Context, Response, AnswerGuard) (Result, error)
+
+func (s *Service) AnswerAutomatic(ctx context.Context, req Response, guard AnswerGuard) (Result, error) {
+	if guard == nil {
+		return Result{}, ErrInvalid
+	}
+	return s.answer(ctx, nil, req.ID, req.Revision, req.Answer, req.OptionID, guard)
+}
+
+func (s *Service) answer(ctx context.Context, who *Identity, id string, revision int64, answer, optionID string, guard AnswerGuard) (Result, error) {
 	s.mu.Lock()
 	var afterCommit func()
 	defer func() {
@@ -462,6 +506,18 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 	}
 	if q.Status != "pending" {
 		return Result{"already_resolved", q}, nil
+	}
+	if q.AnswerSource == "inbox_agent" && q.DeliveryStatus == "uncertain" {
+		return Result{}, fmt.Errorf("%w: automatic delivery is uncertain; inspect the terminal before sending new instructions", ErrConflict)
+	}
+	if guard == nil {
+		var publishing bool
+		if err := s.db.QueryRowContext(ctx, `SELECT publishing FROM inbox_questions WHERE id=?`, q.ID).Scan(&publishing); err != nil {
+			return Result{}, err
+		}
+		if publishing {
+			return Result{}, ErrConflict
+		}
 	}
 	if q.Origin == "observer" && (q.Hidden || (q.DeliveryMode != "text" && q.DeliveryMode != "claude_question" && q.Kind != "completion")) {
 		return Result{}, fmt.Errorf("%w: open the terminal to respond", ErrConflict)
@@ -506,6 +562,9 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 		}
 	}
 	source := "inbox"
+	if guard != nil {
+		source = "inbox_agent"
+	}
 	var ack any
 	if who != nil {
 		source = "session"
@@ -550,6 +609,18 @@ func (s *Service) Answer(ctx context.Context, who *Identity, id string, revision
 			var moveErr error
 			moved, moveErr = s.moveCompletedTask(ctx, tx, q, optionID)
 			return moveErr
+		}
+	}
+	if guard != nil {
+		original := before
+		before = func(tx *sql.Tx) error {
+			if err := guard(tx); err != nil {
+				return err
+			}
+			if original != nil {
+				return original(tx)
+			}
+			return nil
 		}
 	}
 	err = s.transitionWith(ctx, before, id, "answered_"+source, q.SessionID, `UPDATE inbox_questions SET status='answered',answer=?,answer_source=?,updated_at=?,acknowledged_at=?,reason=? WHERE id=?`, answer, source, s.now().UnixMilli(), ack, reason, id)
@@ -713,16 +784,16 @@ func (s *Service) ListWithOrder(ctx context.Context, who *Identity, archived boo
 	if err := s.reconcile(ctx); err != nil {
 		return page, err
 	}
-	where := "WHERE q.status='pending' AND q.hidden=0"
+	where := "WHERE q.publishing=0 AND q.status='pending' AND q.hidden=0"
 	args := []any{}
 	if archived {
-		where = "WHERE q.status!='pending'"
+		where = "WHERE q.publishing=0 AND q.status!='pending'"
 	}
 	if who != nil {
-		where = "WHERE q.task_id IS NULLIF(?,0)"
+		where = "WHERE q.publishing=0 AND q.task_id IS NULLIF(?,0)"
 		args = append(args, who.TaskID)
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox_questions WHERE status='pending' AND hidden=0`).Scan(&page.PendingCount); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox_questions WHERE publishing=0 AND status='pending' AND hidden=0`).Scan(&page.PendingCount); err != nil {
 		return page, err
 	}
 	pageSize := 50
@@ -771,7 +842,7 @@ func (s *Service) PendingCompletions(ctx context.Context, taskID int64) ([]Quest
 	if err := s.reconcile(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, selectQuestion+` WHERE q.task_id IS NULLIF(?,0) AND q.kind='completion' AND q.status='pending'`, taskID)
+	rows, err := s.db.QueryContext(ctx, selectQuestion+` WHERE q.task_id IS NULLIF(?,0) AND q.publishing=0 AND q.kind='completion' AND q.status='pending'`, taskID)
 	if err != nil {
 		return nil, err
 	}

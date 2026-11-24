@@ -10,7 +10,7 @@ func (s *Service) CatchUp(ctx context.Context) ([]Question, error) {
 	if err := s.reconcile(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, selectQuestion+`WHERE q.status='pending' AND q.hidden=0 ORDER BY q.queue_position,q.rowid`)
+	rows, err := s.db.QueryContext(ctx, selectQuestion+`WHERE q.publishing=0 AND q.status='pending' AND q.hidden=0 ORDER BY q.queue_position,q.rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (s *Service) History(ctx context.Context, id string, offset int) (Page, err
 ), related AS (
  SELECT task_id FROM selected WHERE task_id IS NOT NULL
  UNION SELECT task_id FROM notification_task_links WHERE question_id=?
-) `+selectQuestion+`WHERE q.hidden=0 AND EXISTS (
+) `+selectQuestion+`WHERE q.publishing=0 AND q.hidden=0 AND EXISTS (
  SELECT 1 FROM selected current WHERE
  (q.created_at<current.created_at OR (q.created_at=current.created_at AND q.rowid<current.insertion)) AND (
  q.task_id IN (SELECT task_id FROM related)

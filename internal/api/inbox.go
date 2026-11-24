@@ -27,8 +27,8 @@ func InboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, stop 
 }
 
 // InboxTerminalRoutes delivers browser answers directly to their originating agent.
-func InboxTerminalRoutes(mux *http.ServeMux, service *inbox.Service, token string, mgr *session.Manager, stop func(string)) {
-	inboxRoutes(mux, service, token, func(q inbox.Question) error {
+func InboxTerminalRoutes(mux *http.ServeMux, service *inbox.Service, token string, mgr *session.Manager, stop func(string)) inbox.Responder {
+	h := inboxRoutes(mux, service, token, func(q inbox.Question) error {
 		sess, ok := mgr.Get(q.SessionID)
 		if !ok {
 			return fmt.Errorf("originating agent is unavailable")
@@ -46,6 +46,7 @@ func InboxTerminalRoutes(mux *http.ServeMux, service *inbox.Service, token strin
 		}
 		return sendTerminalMessage(sess, feedbackMessage(q))
 	}, stop)
+	return h.respond
 }
 
 func feedbackMessage(q inbox.Question) string {
@@ -59,7 +60,7 @@ func feedbackMessage(q inbox.Question) string {
 	return "Kamacu inbox answer: " + string(payload) + "\nCall acknowledge_feedback with this question_id and revision before acting, and use the returned answer. For reason=seen, end your turn without further work or another completion report."
 }
 
-func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliver func(inbox.Question) error, stop ...func(string)) {
+func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliver func(inbox.Question) error, stop ...func(string)) *inboxHandlers {
 	h := &inboxHandlers{service: service, token: token, deliver: deliver}
 	if len(stop) > 0 {
 		h.stop = stop[0]
@@ -73,6 +74,7 @@ func inboxRoutes(mux *http.ServeMux, service *inbox.Service, token string, deliv
 	mux.HandleFunc("POST /api/inbox/{id}/dismiss", h.dismiss)
 	mux.HandleFunc("POST /api/inbox/{id}/requeue", h.requeue)
 	mux.HandleFunc("POST /api/agent-feedback/{action}", h.agent)
+	return h
 }
 func inboxError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
@@ -154,41 +156,56 @@ func (h *inboxHandlers) answer(w http.ResponseWriter, r *http.Request) {
 	if !inboxDecode(w, r, &body) {
 		return
 	}
-	out, err := h.service.Answer(r.Context(), nil, r.PathValue("id"), body.Revision, body.Answer, body.OptionID)
+	out, err := h.respond(r.Context(), inbox.Response{ID: r.PathValue("id"), Revision: body.Revision, Answer: body.Answer, OptionID: body.OptionID}, nil)
 	if err != nil {
-		inboxError(w, err)
+		if out.Outcome == "accepted" {
+			writeError(w, http.StatusBadGateway, err.Error())
+		} else {
+			inboxError(w, err)
+		}
 		return
 	}
-	// Once accepted, finish recording the outcome even if the browser disconnects.
-	deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-	defer cancelDelivery()
-	// Inject only the newly accepted browser answer; retries and terminal answers
-	// must not submit a second prompt. Persist first so recovery is always possible.
+	writeJSON(w, 200, out)
+}
+
+// respond is the single delivery path for user and rule-authorized replies.
+func (h *inboxHandlers) respond(ctx context.Context, req inbox.Response, guard inbox.AnswerGuard) (inbox.Result, error) {
+	var out inbox.Result
+	var err error
+	if guard == nil {
+		out, err = h.service.Answer(ctx, nil, req.ID, req.Revision, req.Answer, req.OptionID)
+	} else {
+		out, err = h.service.AnswerAutomatic(ctx, req, guard)
+	}
+	if err != nil {
+		return out, err
+	}
+	deliveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if out.Outcome == "accepted" && out.Question.Origin != "notification" && out.Question.Reason != "exit" && inbox.CompletionTarget(out.Question.Reason) == "" && h.deliver != nil {
 		if out.Question.Origin == "observer" {
 			if err := h.service.RecordDelivery(deliveryCtx, out.Question.ID, "attempting"); err != nil {
-				inboxError(w, err)
-				return
+				return out, err
 			}
 		}
 		if err := h.deliver(out.Question); err != nil {
 			if out.Question.Origin == "observer" {
 				_ = h.service.RecordDelivery(deliveryCtx, out.Question.ID, "uncertain")
 			}
-
 			slog.Error("deliver inbox answer", "question", out.Question.ID, "error", err)
-			writeError(w, http.StatusBadGateway, "Answer saved, but terminal delivery could not be confirmed. Open the terminal and review the saved answer before submitting it manually.")
-			return
+			return out, fmt.Errorf("Answer saved, but terminal delivery could not be confirmed. Open the terminal and review the saved answer before submitting it manually.")
 		}
 		if out.Question.Origin == "observer" {
-			_ = h.service.RecordDelivery(deliveryCtx, out.Question.ID, "submitted")
+			if err := h.service.RecordDelivery(deliveryCtx, out.Question.ID, "submitted"); err != nil {
+				return out, err
+			}
 			out.Question.DeliveryStatus = "submitted"
 		}
 	}
-	// Only the winning explicit exit option can stop the originating session.
 	h.stopCompleted(out)
-	writeJSON(w, 200, out)
+	return out, nil
 }
+
 func (h *inboxHandlers) stopCompleted(out inbox.Result) {
 	if h.stop != nil && out.Outcome != "stale_revision" && out.Question.Kind == "completion" && out.Question.Status == "answered" && (out.Question.Reason == "exit" || inbox.CompletionTarget(out.Question.Reason) != "") {
 		h.stop(out.Question.SessionID)

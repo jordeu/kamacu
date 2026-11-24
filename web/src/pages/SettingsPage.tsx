@@ -11,6 +11,10 @@ import { SettingsField } from "@/components/settings/SettingsField";
 import { WorktreeCleanupSection } from "@/components/settings/WorktreeCleanupSection";
 import { AgentsSection } from "@/components/settings/AgentsSection";
 import { NotificationsSection } from "@/components/settings/NotificationsSection";
+import { InboxAgentSection } from "@/components/settings/InboxAgentSection";
+import { NotificationModel } from "@/components/settings/NotificationModel";
+import { NotificationRules } from "@/components/settings/NotificationRules";
+import { NotificationSchedule } from "@/components/inbox/NotificationSchedule";
 import { MonitoringSection } from "@/components/settings/MonitoringSection";
 import { ScratchpadSection } from "@/components/settings/ScratchpadSection";
 import { BrowserNotificationsSection } from "@/components/settings/BrowserNotificationsSection";
@@ -131,9 +135,8 @@ function GithubSection({
 
 const SETTINGS_GROUPS = [
   { id: "workspace", label: "Workspace", description: "Choose where tasks run and how shells and branches are created." },
-  { id: "agents", label: "Agents", description: "Manage your coding agents and the scratchpad they use." },
+  { id: "agents", label: "Agents", description: "Configure monitoring, notification and inbox agents, plus your coding agents and Scratchpad." },
   { id: "prompts", label: "Prompts", description: "Manage reusable prompts for your tasks." },
-  { id: "monitoring", label: "Monitoring", description: "Configure AI profiles and workspace monitoring." },
   { id: "github", label: "GitHub", description: "Manage GitHub integration, review prompts, and notification sources." },
   { id: "cleanup", label: "Cleanup", description: "Control idle sessions and clean up task worktrees." },
 ] as const;
@@ -141,7 +144,8 @@ const SETTINGS_GROUPS = [
 export default function SettingsPage() {
   const { data: settings, isLoading, isError, refetch } = useSettings();
   const [params, setParams] = useSearchParams();
-  const activeGroup = SETTINGS_GROUPS.find(group => group.id === params.get("section"))?.id ?? "workspace";
+  const requestedGroup = params.get("section") === "monitoring" ? "agents" : params.get("section");
+  const activeGroup = SETTINGS_GROUPS.find(group => group.id === requestedGroup)?.id ?? "workspace";
 
   function selectGroup(value: string) {
     setParams(previous => {
@@ -233,16 +237,15 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="agents" forceMount hidden={activeGroup !== "agents"} className="space-y-6">
               <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "agents")?.description}</p>
+              <section aria-label="Monitoring agent" className="space-y-3"><h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Monitoring agent</h2><MonitoringSection /></section>
+              <section aria-label="Notification agent" className="space-y-3"><h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Notification agent</h2><NotificationModel /><NotificationRules /><NotificationSchedule /></section>
+              <InboxAgentSection />
               <AgentsSection />
               <ScratchpadSection />
             </TabsContent>
             <TabsContent value="prompts" forceMount hidden={activeGroup !== "prompts"} className="space-y-6">
               <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "prompts")?.description}</p>
               <CustomPromptsSection settings={settings} />
-            </TabsContent>
-            <TabsContent value="monitoring" forceMount hidden={activeGroup !== "monitoring"} className="space-y-6">
-              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "monitoring")?.description}</p>
-              <MonitoringSection />
             </TabsContent>
             <TabsContent value="github" forceMount hidden={activeGroup !== "github"} className="space-y-6">
               <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "github")?.description}</p>

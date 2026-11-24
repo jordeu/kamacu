@@ -1,3 +1,4 @@
+import { AutomaticReply } from "./AutomaticReply";
 import { ActionRunDetails } from "./ActionRunDetails";
 import { RuleImprovement } from "./RuleImprovement";
 import { useState } from "react";
@@ -42,11 +43,12 @@ export function InboxMessage({
   const navigate = useNavigate();
   const notification = q.origin === "notification";
   const completion = q.kind === "completion";
-  const choices: FeedbackQuestion["options"] = completion
+  const choices: FeedbackQuestion["options"] = q.answer_source === "inbox_agent" && q.delivery_status === "uncertain" ? [] : completion
     ? completionActions(q)
     : q.options;
   const pending = q.status === "pending";
-  const operational = q.reason === "operational_failure";
+  const uncertainAutomatic = q.answer_source === "inbox_agent" && q.delivery_status === "uncertain";
+  const operational = q.reason === "operational_failure" || uncertainAutomatic;
   function navigateToTask() {
     onNavigate?.();
     navigate(feedbackTaskURL(q));
@@ -184,6 +186,7 @@ export function InboxMessage({
           />
         )}
         {notification && !operational && <RuleImprovement questionID={q.id} />}
+        <AutomaticReply question={q} />
         {pending ? (
           <div className="mt-6 space-y-6">
             <div>
@@ -433,7 +436,7 @@ export function InboxMessage({
             )}
             {(completion ||
               q.delivery_mode === "terminal" ||
-              q.delivery_mode === "claude_question") && (
+              q.delivery_mode === "claude_question" || uncertainAutomatic) && (
               <Button
                 variant="ghost"
                 disabled={action.isPending}
@@ -512,7 +515,7 @@ export function InboxMessage({
                 aria-hidden="true"
               />
               <span className="hidden sm:inline">
-                {operational
+                {q.automation?.status === "failed" ? "Automatic reply failed" : operational
                   ? "Operational issue"
                   : completion
                     ? "Completed"
@@ -520,7 +523,7 @@ export function InboxMessage({
               </span>
             </span>
           ) : (
-            <span>{status}</span>
+            <span>{q.answer_source === "inbox_agent" ? "Automatically answered" : status}</span>
           )}
         </span>
       </summary>

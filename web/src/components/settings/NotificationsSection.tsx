@@ -3,8 +3,6 @@ import { useAddNotificationSource, useEnableNotificationSource, useNotificationS
 import type { Settings } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { NotificationModel } from "./NotificationModel";
-import { NotificationRules } from "./NotificationRules";
 
 
 export function NotificationsSection({ settings }: { settings: Settings }) {
@@ -15,8 +13,8 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
   const [name, setName] = useState("GitHub");
   const githubEnabled = settings.github_integration?.value === "on";
   return <section className="flex flex-col gap-3" aria-labelledby="notifications-heading">
-    <h2 id="notifications-heading" className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Notifications</h2>
-    <p className="text-xs text-muted-foreground">Activity in registered repositories is collected using your GitHub CLI login. Choose Process pending or enable automatic processing on the Notifications page to let the notification model read your rules and context and propose important Inbox messages. Your reply authorizes task actions. GitHub read state stays unchanged.</p>
+    <h2 id="notifications-heading" className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Notification sources</h2>
+    <p className="text-xs text-muted-foreground">Activity in registered repositories is collected using your GitHub CLI login. Choose Process pending or enable automatic processing on the Notifications page to let the notification model read your rules and context and propose important Inbox messages. Your reply or a clearly matching Inbox agent rule authorizes task actions. GitHub read state stays unchanged.</p>
     {!githubEnabled && <p className="text-xs text-muted-foreground">GitHub collection and actions are paused while GitHub integration is off.</p>}
     {sources.isLoading && <p className="text-sm">Loading sources…</p>}
     {sources.isError && <p role="alert" className="text-sm text-destructive">Could not load notification sources. <button type="button" className="underline" onClick={() => void sources.refetch()}>Retry</button></p>}
@@ -34,7 +32,5 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
       <Button type="submit" variant="outline" disabled={add.isPending || !name.trim() || !githubEnabled}>{add.isPending ? "Adding…" : "Add GitHub source"}</Button>
     </form>}
     {(add.isError || enable.isError || remove.isError) && <p role="alert" className="text-sm text-destructive">{add.error?.message || enable.error?.message || remove.error?.message}</p>}
-    <NotificationModel />
-    <NotificationRules />
   </section>;
 }

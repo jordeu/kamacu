@@ -12,6 +12,10 @@ vi.mock("@/components/settings/SettingsField", () => ({ SettingsField: ({ label 
 vi.mock("@/components/settings/AgentsSection", () => ({ AgentsSection: () => <div>Agent controls</div> }));
 vi.mock("@/components/settings/ScratchpadSection", () => ({ ScratchpadSection: () => <div>Scratchpad controls</div> }));
 vi.mock("@/components/settings/MonitoringSection", () => ({ MonitoringSection: () => <div>Monitor controls</div> }));
+vi.mock("@/components/settings/InboxAgentSection", () => ({ InboxAgentSection: () => <div>Inbox agent controls</div> }));
+vi.mock("@/components/settings/NotificationModel", () => ({ NotificationModel: () => <div>Notification model controls</div> }));
+vi.mock("@/components/settings/NotificationRules", () => ({ NotificationRules: () => <div>Notification rules controls</div> }));
+vi.mock("@/components/inbox/NotificationSchedule", () => ({ NotificationSchedule: () => <div>Notification schedule controls</div> }));
 vi.mock("@/components/settings/NotificationsSection", () => ({ NotificationsSection: () => <div>Notification controls</div> }));
 vi.mock("@/components/settings/WorktreeCleanupSection", () => ({ WorktreeCleanupSection: () => <div>Cleanup controls</div> }));
 
@@ -28,14 +32,13 @@ describe("settings categories", () => {
     const html = render();
     const expected = {
       workspace: ["Worktree base directory", "Shell", "Branch name template", "Browser notifications"],
-      agents: ["Agent controls", "Scratchpad controls"],
+      agents: ["Agent controls", "Scratchpad controls", "Monitor controls", "Notification model controls", "Notification rules controls", "Inbox agent controls"],
       prompts: ["Custom prompts", "Add prompt"],
-      monitoring: ["Monitor controls"],
       github: ["GitHub integration", "Notification controls"],
       cleanup: ["Done session TTL", "Cleanup controls"],
     };
     const panels = html.split('role="tabpanel"').slice(1);
-    expect(panels).toHaveLength(6);
+    expect(panels).toHaveLength(5);
     Object.entries(expected).forEach(([name, controls], index) => {
       expect(panels[index]).toContain(`-trigger-${name}`);
       controls.forEach(control => expect(panels[index]).toContain(control));
@@ -48,7 +51,7 @@ describe("settings categories", () => {
   it("starts with workspace and keeps other panels mounted but hidden", () => {
     const html = render();
     expect(panel(html, "workspace")).toContain('data-state="active"');
-    for (const name of ["agents", "prompts", "monitoring", "github", "cleanup"]) {
+    for (const name of ["agents", "prompts", "github", "cleanup"]) {
       expect(panel(html, name)).toContain('hidden=""');
     }
     expect(html).toContain("Agent controls");
@@ -62,6 +65,10 @@ describe("settings categories", () => {
     expect(panel(html, "workspace")).toContain('hidden=""');
     expect(html).toContain("GitHub integration");
     expect(html).toContain("Notification controls");
+  });
+
+  it("keeps old monitoring URLs pointing to agent settings", () => {
+    expect(panel(render("?section=monitoring"), "agents")).toContain('data-state="active"');
   });
 
   it("falls back to workspace for an unknown category", () => {

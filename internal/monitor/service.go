@@ -252,14 +252,14 @@ func (s *Service) tick(ctx context.Context) {
 				w.inflightProfile = p.Key()
 				w.inflightTask = task
 				s.jobs.Add(1)
-				go func() { defer s.jobs.Done(); s.classify(jobCtx, sess, p, obs, task) }()
+				go func() { defer s.jobs.Done(); s.classify(jobCtx, sess, p, obs, task, ctx) }()
 			default:
 			}
 		}
 		s.mu.Unlock()
 	}
 }
-func (s *Service) classify(parent context.Context, sess *session.Session, p Profile, obs observation.Snapshot, task TaskContext) {
+func (s *Service) classify(parent context.Context, sess *session.Session, p Profile, obs observation.Snapshot, task TaskContext, publications ...context.Context) {
 	defer func() { <-s.workers }()
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
@@ -464,7 +464,11 @@ func (s *Service) classify(parent context.Context, sess *session.Session, p Prof
 	}
 	recordAccepted()
 	if !s.Presence.ViewingSession(info.ID) && !w.seen {
-		s.publish(parent, info, w)
+		publicationCtx := parent
+		if len(publications) > 0 {
+			publicationCtx = publications[0]
+		}
+		s.publish(publicationCtx, info, w)
 	}
 }
 func (s *Service) persist(ctx context.Context, id string, w *watch) error {
@@ -542,10 +546,23 @@ func (s *Service) publish(ctx context.Context, info session.Info, w *watch) {
 	if len(abstract) > 480 {
 		abstract = abstract[:480]
 	}
+	var published inbox.Result
 	err = s.Presence.WhileAway(info.ID, func() error {
-		_, err := s.Inbox.Observe(ctx, inbox.Identity{TaskID: info.TaskID, SessionID: info.ID}, inbox.Create{Key: "observer:" + w.episode, Abstract: string(abstract), Summary: summary, Question: question, Context: message, Explanation: d.Explanation, Options: options}, kind, mode, w.revision, w.input)
+		var err error
+		published, err = s.Inbox.Observe(ctx, inbox.Identity{TaskID: info.TaskID, SessionID: info.ID}, inbox.Create{Key: "observer:" + w.episode, Abstract: string(abstract), Summary: summary, Question: question, Context: message, Explanation: d.Explanation, Options: options}, kind, mode, w.revision, w.input)
 		return err
 	})
+	if err == nil && published.Question.ID != "" {
+		// publish can run under the monitor scheduler lock. The Inbox model must
+		// not block monitoring or presence updates for other sessions.
+		s.jobs.Add(1)
+		go func(id string) {
+			defer s.jobs.Done()
+			if err := s.Inbox.FinalizePublication(ctx, id); err != nil {
+				slog.Warn("finalize observation publication", "question", id, "error", err)
+			}
+		}(published.Question.ID)
+	}
 	if err != nil {
 		slog.Warn("publish observation", "error", err)
 	}
