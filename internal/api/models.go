@@ -54,6 +54,13 @@ type taskAgentValidationError string
 
 func (e taskAgentValidationError) Error() string { return string(e) }
 
+func sameAgentOverride(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 // A task with an explicit model pins its agent too, so changing a project's
 // default later cannot send that model to a different agent. Existing clients
 // that omit both fields keep inheriting the project's agent.
@@ -92,6 +99,46 @@ func validateTaskAgent(db *sql.DB, projectID int64, agentID *int64, model string
 		}
 	}
 	return &id, model, nil
+}
+
+// PATCH accepts null to restore the project default, and an empty model to
+// restore the CLI default. Changing agents without a model clears the previous
+// model; model-only edits keep the task's existing agent.
+func resolveTaskAgentUpdate(db *sql.DB, task Task, rawAgent json.RawMessage, model *string) (*int64, string, bool, error) {
+	agentID, nextModel := task.AgentID, task.Model
+	if len(rawAgent) > 0 {
+		var replacement *int64
+		if err := json.Unmarshal(rawAgent, &replacement); err != nil {
+			return nil, "", false, taskAgentValidationError("agent_id must be an integer or null")
+		}
+		agentID = replacement
+	}
+	var projectAgent int64
+	if err := db.QueryRow(`SELECT agent_id FROM projects WHERE id = ?`, task.ProjectID).Scan(&projectAgent); err != nil {
+		return nil, "", false, err
+	}
+	previous, next := projectAgent, projectAgent
+	if task.AgentID != nil {
+		previous = *task.AgentID
+	}
+	if agentID != nil {
+		next = *agentID
+	}
+	if model != nil {
+		nextModel = strings.TrimSpace(*model)
+	} else if previous != next {
+		nextModel = ""
+	}
+	changed := previous != next || task.Model != nextModel
+	if changed {
+		resolved, validated, err := validateTaskAgent(db, task.ProjectID, agentID, nextModel)
+		return resolved, validated, true, err
+	}
+	// Retain a saved model even if it has since been removed from suggestions.
+	if agentID == nil && nextModel != "" {
+		agentID = &next
+	}
+	return agentID, nextModel, false, nil
 }
 
 // Split the template before substitution: a model ID is always literal argv,

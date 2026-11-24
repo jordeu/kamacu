@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { del, patch, post } from "./client";
+import { ApiError, del, patch, post } from "./client";
 import type { Agent, Project, Status, Task, Workspace } from "./types";
 
 export type MoveArgs = { id: number; status: Status; afterId: number | null };
@@ -179,8 +179,23 @@ export function useUpdateTask(projectId: number) {
       title?: string;
       description?: string;
       recurrent?: boolean;
+      agent_id?: number | null;
+      model?: string;
+      expected_agent_id?: number | null;
+      expected_model?: string;
     }) => patch<Task>(`/api/tasks/${id}`, body),
-    onSuccess: (_task, { id }) => {
+    onError: (error, { id, agent_id, model }) => {
+      if ((agent_id !== undefined || model !== undefined) && error instanceof ApiError && error.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ["task", id] });
+        queryClient.invalidateQueries({ queryKey: ["sessions", id] });
+      }
+    },
+    onSuccess: (task, { id, agent_id, model }) => {
+      queryClient.setQueryData<Task>(["task", id], (current) => ({ ...current, ...task }));
+      if (agent_id !== undefined || model !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ["agent-statuses"] });
+        queryClient.invalidateQueries({ queryKey: ["sessions", id] });
+      }
       queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });
       queryClient.invalidateQueries({ queryKey: ["task", id] });
     },

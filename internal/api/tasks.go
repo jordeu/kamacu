@@ -412,17 +412,22 @@ func (h *taskHandlers) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
-// update handles PATCH /api/tasks/{id} — content edits only (title and/or
-// description, recurrence). Status and position changes go through /move exclusively.
+// update handles PATCH /api/tasks/{id}. Agent changes share the spawn lifecycle
+// lock so a concurrent start cannot launch with configuration being replaced.
+// Status and position changes go through /move exclusively.
 func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var req struct {
-		Title       *string `json:"title"`
-		Description *string `json:"description"`
-		Recurrent   *bool   `json:"recurrent"`
+		Title           *string         `json:"title"`
+		Description     *string         `json:"description"`
+		Recurrent       *bool           `json:"recurrent"`
+		AgentID         json.RawMessage `json:"agent_id"`
+		Model           *string         `json:"model"`
+		ExpectedAgentID json.RawMessage `json:"expected_agent_id"`
+		ExpectedModel   *string         `json:"expected_model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -430,6 +435,59 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	}
 	sets := []string{}
 	args := []any{}
+	if len(req.AgentID) > 0 || req.Model != nil {
+		if h.mgr != nil {
+			unlock := h.mgr.LockTaskLifecycle(id)
+			defer unlock()
+		}
+		current, err := scanTask(h.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Compare only agent settings, so concurrent description/title edits
+		// do not invalidate a configuration draft. This check shares the spawn
+		// lifecycle lock with the read and write, preventing lost settings edits.
+		if len(req.ExpectedAgentID) > 0 {
+			var expected *int64
+			if err := json.Unmarshal(req.ExpectedAgentID, &expected); err != nil {
+				writeError(w, http.StatusBadRequest, "expected_agent_id must be an integer or null")
+				return
+			}
+			if !sameAgentOverride(expected, current.AgentID) {
+				writeError(w, http.StatusConflict, "agent settings changed; reload the saved settings before trying again")
+				return
+			}
+		}
+		if req.ExpectedModel != nil && *req.ExpectedModel != current.Model {
+			writeError(w, http.StatusConflict, "agent settings changed; reload the saved settings before trying again")
+			return
+		}
+		agentID, model, changed, err := resolveTaskAgentUpdate(h.db, current, req.AgentID, req.Model)
+		if err != nil {
+			var invalid taskAgentValidationError
+			if errors.As(err, &invalid) {
+				writeError(w, http.StatusBadRequest, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+		if changed && h.mgr != nil {
+			for _, info := range h.mgr.ListByTask(id) {
+				if info.Kind == session.KindAgent && info.Status == session.StatusRunning {
+					writeError(w, http.StatusConflict, "stop the running agent before changing its agent or model")
+					return
+				}
+			}
+		}
+		sets = append(sets, "agent_id = ?", "model = ?")
+		args = append(args, agentID, model)
+	}
 	if req.Title != nil {
 		title := strings.TrimSpace(*req.Title)
 		if title == "" {
