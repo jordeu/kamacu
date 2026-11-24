@@ -22,6 +22,7 @@ interface CleanupWorktreeDialogProps {
   projectId: number;
   /** "done" = board move-to-Done trigger (cancel reads `Keep worktree`); "menu" = ellipsis item (cancel reads `Cancel`). */
   trigger: "done" | "menu";
+  onCleanedUp?: () => void;
 }
 
 /**
@@ -40,18 +41,23 @@ export function CleanupWorktreeDialog({
   taskTitle,
   projectId,
   trigger,
+  onCleanedUp,
 }: CleanupWorktreeDialogProps) {
   // Variant derives from the RESPONSE, never from cached task/board data.
   const state = useWorktreeState(taskId, open);
   const cleanup = useCleanupWorktree(taskId, projectId);
 
   const [confirmText, setConfirmText] = useState("");
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    setConfirmText("");
+  }
 
   // Fresh dialog on every open/close flip: clear the typed confirmation and
   // any prior mutation error.
   const resetCleanup = cleanup.reset;
   useEffect(() => {
-    setConfirmText("");
     resetCleanup();
   }, [open, resetCleanup]);
 
@@ -80,6 +86,7 @@ export function CleanupWorktreeDialog({
       { stop_sessions: sessions > 0, force: dirty > 0 },
       {
         onSuccess: () => {
+          onCleanedUp?.();
           // Hook invalidations land the task in the absent state; bash tabs
           // vanish because their sessions were stopped.
           onOpenChange(false);

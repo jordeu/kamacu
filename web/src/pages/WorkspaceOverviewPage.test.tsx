@@ -112,6 +112,9 @@ it("renders three board columns using project task cards and project badges", ()
     html.indexOf('id="overview-prs-heading"'),
   );
   expect(html).toContain('aria-label="Restore task · sched"');
+  expect(html).toContain(
+    'aria-label="Change status of Restore task · sched: In Progress"',
+  );
   expect(html).toContain('aria-label="Filter to sched"');
   expect(html).not.toContain("Show all");
   expect(html).toContain(pr.url);

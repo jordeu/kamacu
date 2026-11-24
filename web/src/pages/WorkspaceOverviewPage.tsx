@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, X } from "lucide-react";
 import { useProjects, useWorkspaces } from "@/api/queries";
 import { useSettings } from "@/api/settings";
 import { useRefreshActiveProjectPRStatuses } from "@/api/prStatus";
@@ -18,6 +18,10 @@ import { formatDateTime } from "@/lib/time";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceBoard } from "@/components/overview/WorkspaceBoard";
+import { useMoveWorkspaceTask } from "@/api/workspaceTaskMove";
+import { STATUS_LABELS, type Status, type Task } from "@/api/types";
+import { ApiError, get } from "@/api/client";
+import { CleanupWorktreeDialog } from "@/components/task/CleanupWorktreeDialog";
 
 export default function WorkspaceOverviewPage() {
   const { workspaceId: rawId } = useParams();
@@ -91,13 +95,67 @@ function WorkspaceOverview({
   const projectsQuery = useProjects();
   const settingsQuery = useSettings();
   const statusRefresh = useRefreshActiveProjectPRStatuses();
+  const move = useMoveWorkspaceTask(workspaceId);
+  const moving = useRef(false);
+  const [lastMove, setLastMove] = useState<{ task: Task; from: Status } | null>(
+    null,
+  );
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [undoPending, setUndoPending] = useState(false);
+  const [cleanupTask, setCleanupTask] = useState<Task | null>(null);
+  function moveTask(task: Task, status: Status) {
+    if (moving.current || task.status === status) return;
+    moving.current = true;
+    setLastMove(null);
+    setMoveError(null);
+    move.mutate(
+      { task, status },
+      {
+        onSuccess: (result) => {
+          setLastMove({ task: result, from: task.status });
+          if (status === "done" && result.worktree_path) setCleanupTask(result);
+        },
+        onError: (error) =>
+          setMoveError(`Couldn't move “${task.title}”: ${error.message}`),
+        onSettled: () => {
+          moving.current = false;
+        },
+      },
+    );
+  }
+  async function undoMove() {
+    if (!lastMove || moving.current) return;
+    moving.current = true;
+    setUndoPending(true);
+    setMoveError(null);
+    try {
+      // Do not overwrite a status change made since the original move.
+      const current = await get<Task>(`/api/tasks/${lastMove.task.id}`);
+      if (current.status !== lastMove.task.status) {
+        setLastMove(null);
+        throw new Error(
+          "This task has changed since your move. Refresh to see its current status.",
+        );
+      }
+      await move.mutateAsync({ task: current, status: lastMove.from });
+      setLastMove(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) setLastMove(null);
+      setMoveError(
+        `Couldn't undo the move: ${error instanceof Error ? error.message : "Try again."}`,
+      );
+    } finally {
+      moving.current = false;
+      setUndoPending(false);
+    }
+  }
   const { data: settings, isError: settingsError } = settingsQuery;
   const projects = (projectsQuery.data ?? []).filter(
     (project) => project.workspace_id === workspaceId,
   );
   const tasks = useWorkspaceTasks(
     workspaceId,
-    projectsQuery.data !== undefined,
+    projectsQuery.data !== undefined && !move.isPending,
   );
   const githubEnabled = settings?.github_integration?.value === "on";
   const reviews = useWorkspaceReviews(
@@ -192,7 +250,7 @@ function WorkspaceOverview({
     );
   return (
     <div
-      className="flex h-full min-h-0 flex-col"
+      className="relative flex h-full min-h-0 flex-col"
       data-testid="workspace-overview"
     >
       <header className="shrink-0 px-3 pt-5 pb-4 md:px-6 md:pt-6">
@@ -208,7 +266,11 @@ function WorkspaceOverview({
             variant="ghost"
             onClick={refresh}
             disabled={
-              tasks.isFetching || reviews.isFetching || statusRefresh.isPending
+              tasks.isFetching ||
+              reviews.isFetching ||
+              statusRefresh.isPending ||
+              move.isPending ||
+              undoPending
             }
             aria-label="Refresh workspace overview"
           >
@@ -305,6 +367,8 @@ function WorkspaceOverview({
         prs={list.prs}
         projects={projects}
         onProjectSelect={(id) => update("project", String(id))}
+        onTaskMove={moveTask}
+        movePending={move.isPending || undoPending}
         scrollKey={JSON.stringify([workspaceId, projectId, search, sort])}
         tasksReady={tasks.data !== undefined}
         reviewsReady={reviewsReady || reviews.isError || !githubEnabled}
@@ -374,6 +438,58 @@ function WorkspaceOverview({
         Click a project badge to filter. Hover or select a linked PR status for
         details.
       </p>
+      {(lastMove || moveError) && (
+        <div className="absolute right-3 bottom-10 left-3 z-20 flex items-center gap-3 rounded-md border bg-popover p-3 text-sm shadow-lg sm:left-auto sm:max-w-md">
+          <div className="min-w-0 flex-1">
+            {lastMove && (
+              <p role="status" className="break-words">
+                Moved “{lastMove.task.title}” to{" "}
+                {STATUS_LABELS[lastMove.task.status]}.
+              </p>
+            )}
+            {moveError && (
+              <p role="alert" className="break-words text-destructive">
+                {moveError}
+              </p>
+            )}
+          </div>
+          {lastMove && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={move.isPending || undoPending}
+              onClick={() => void undoMove()}
+            >
+              {undoPending ? "Undoing…" : "Undo"}
+            </Button>
+          )}
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Dismiss task move notification"
+            disabled={move.isPending || undoPending}
+            onClick={() => {
+              setLastMove(null);
+              setMoveError(null);
+            }}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+      )}
+      {cleanupTask && (
+        <CleanupWorktreeDialog
+          open
+          taskId={cleanupTask.id}
+          taskTitle={cleanupTask.title}
+          projectId={cleanupTask.project_id}
+          trigger="done"
+          onOpenChange={(open) => {
+            if (!open) setCleanupTask(null);
+          }}
+          onCleanedUp={() => setLastMove(null)}
+        />
+      )}
     </div>
   );
 }

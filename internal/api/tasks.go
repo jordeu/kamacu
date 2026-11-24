@@ -540,17 +540,18 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 }
 
 // move handles POST /api/tasks/{id}/move. The client only sends intent
-// ({status, after_id}); the server computes the fractional position inside a
-// single write transaction (RESEARCH.md Pattern 6) and renormalizes the
-// column when float midpoints are exhausted.
+// ({status, after_id, expected_status?}); the server checks the expectation and
+// computes the fractional position inside a single write transaction
+// (RESEARCH.md Pattern 6), renormalizing when float midpoints are exhausted.
 func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var req struct {
-		Status  string `json:"status"`
-		AfterID *int64 `json:"after_id"`
+		Status         string  `json:"status"`
+		AfterID        *int64  `json:"after_id"`
+		ExpectedStatus *string `json:"expected_status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -571,7 +572,8 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 	// position math, even though the position queries already filter PR rows.
 	var projectID int64
 	var source string
-	if err := tx.QueryRowContext(ctx, `SELECT project_id, source FROM tasks WHERE id = ?`, id).Scan(&projectID, &source); err != nil {
+	var currentStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT project_id, source, status FROM tasks WHERE id = ?`, id).Scan(&projectID, &source, &currentStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 		} else {
@@ -586,6 +588,18 @@ func (h *taskHandlers) move(w http.ResponseWriter, r *http.Request) {
 	if !validStatuses[req.Status] {
 		writeError(w, http.StatusBadRequest, "invalid status")
 		return
+	}
+	// Check the caller's snapshot under the same write lock as the move. A
+	// preceding GET alone cannot prevent a concurrent change during Undo.
+	if req.ExpectedStatus != nil {
+		if !validStatuses[*req.ExpectedStatus] {
+			writeError(w, http.StatusBadRequest, "invalid expected status")
+			return
+		}
+		if *req.ExpectedStatus != currentStatus {
+			writeError(w, http.StatusConflict, "This task has changed since your move. Refresh to see its current status.")
+			return
+		}
 	}
 
 	var pos float64
