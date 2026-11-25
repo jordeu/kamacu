@@ -40,6 +40,11 @@ type AgentOption struct {
 }
 
 func (s *Service) prepareSequence(ctx context.Context, seq inboxaction.Sequence, rules string, sources map[string]Source, subjects map[string]Event, sourceScoped bool) (inboxaction.Sequence, error) {
+	for _, a := range seq.Actions {
+		if (a.Kind == "start_reviews" || a.Kind == "create_investigation") && a.ProjectID <= 0 {
+			return seq, errors.New("action requires a registered project; register this repository as a project or link to an existing task")
+		}
+	}
 	if err := seq.Validate(); err != nil {
 		return seq, err
 	}
@@ -60,6 +65,9 @@ func (s *Service) prepareSequence(ctx context.Context, seq inboxaction.Sequence,
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return seq, err
 		}
+		if project == 0 {
+			continue
+		}
 		sourceProjects[project] = true
 		if _, pr, err := store.PRIdentity(e.URL, 0); err == nil {
 			targets[inboxaction.Target{ProjectID: project, PRNumber: pr}] = true
@@ -74,6 +82,9 @@ func (s *Service) prepareSequence(ctx context.Context, seq inboxaction.Sequence,
 		}
 		var repo string
 		if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(github_repo,'') FROM projects WHERE id=?`, a.ProjectID).Scan(&repo); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return seq, errors.New("action requires a registered project; register this repository as a project or link to an existing task")
+			}
 			return seq, err
 		}
 		seq.Guards.Projects[a.ProjectID] = repo
@@ -81,7 +92,7 @@ func (s *Service) prepareSequence(ctx context.Context, seq inboxaction.Sequence,
 			return seq, errors.New("task reference belongs to another project")
 		}
 		if a.Kind == "create_investigation" && sourceScoped && !sourceProjects[a.ProjectID] {
-			return seq, errors.New("new investigation project is not one of the source projects")
+			return seq, errors.New("new investigation requires a registered source project; register this repository as a project or link to an existing task")
 		}
 		if a.TaskID > 0 {
 			var project int64
@@ -135,7 +146,7 @@ func (s *Service) prepareSequence(ctx context.Context, seq inboxaction.Sequence,
 			}
 			for _, n := range a.PRNumbers {
 				if sourceScoped && !targets[inboxaction.Target{ProjectID: a.ProjectID, PRNumber: n}] {
-					return seq, errors.New("action PR target is not one of this message's source PRs")
+					return seq, errors.New("action PR target must belong to a registered source project; register this repository as a project or link to an existing task")
 				}
 			}
 		}

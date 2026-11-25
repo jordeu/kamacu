@@ -111,6 +111,14 @@ and their caches are scoped to the repository as well as the project/PR number.
 PRs can load before a task exists; unavailable information has separate
 retry states. These are read-only lookups and never create workspaces or PR links.
 
+## GitHub notification scope
+
+The GitHub source collects the authenticated account’s notification feed across all repositories, including repositories that are not Kamacu projects. It includes read and unread threads and all subscription reasons, including watched-repository activity. It does not scan every accessible repository. Only updates since the source was enabled are imported. Existing source checkpoints are preserved; previously dropped notifications are not automatically backfilled and can reappear on a subsequent thread update.
+
+The default has no repository or reason filter: assignments, mentions, review requests and watched discussions can all contain relevant feedback. For high-volume organization watches, use notification rules to exclude repositories or routine updates (with explicit mention exceptions if desired), or adjust GitHub watch subscriptions. Rules suppress Inbox messages after collection; they do not reduce collection/enrichment cost. Collection is paginated and bounded to 100 pages per poll; overflow retains the checkpoint for retry.
+
+The processing agent receives an explicit `repository_registered` flag and can read GitHub context for unregistered repositories. It can link activity to existing tasks across projects, or surface an Inbox message asking whether to register the repository. Large task candidate lists are paged from the frozen batch so they do not crowd out source evidence. Starting reviews and creating tasks require a registered project; repositories are never automatically registered. Registration must be completed in Projects; an Inbox reply cannot register a repository.
+
 ## Notifications and replies
 
 - The inbox sidebar and Pending tab list messages in queue order, oldest first. New messages join the end, and monitoring updates preserve a message's position. **Move to end** puts a pending message at the back of the queue without answering or dismissing it. Queue order survives refreshes and restarts. Archived messages remain newest first.

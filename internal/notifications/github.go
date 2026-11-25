@@ -186,7 +186,7 @@ func (g GitHub) account(ctx context.Context, s Source) (string, error) {
 	}
 	return user.Login, nil
 }
-func (g GitHub) Collect(ctx context.Context, s Source, repos map[string]bool) (Batch, error) {
+func (g GitHub) Collect(ctx context.Context, s Source, _ map[string]bool) (Batch, error) {
 	cfg := g.config(s)
 	now := time.Now()
 	if g.Now != nil {
@@ -239,7 +239,7 @@ func (g GitHub) Collect(ctx context.Context, s Source, repos map[string]bool) (B
 				return batch, e
 			}
 			// The overlap protects page/time boundaries, but never imports pre-enable activity.
-			if updated.Before(time.UnixMilli(s.CreatedAt)) || !repos[strings.ToLower(item.Repository.FullName)] {
+			if updated.Before(time.UnixMilli(s.CreatedAt)) {
 				continue
 			}
 			subjectPath, e := githubPath(cfg.Hostname, item.Subject.URL)
