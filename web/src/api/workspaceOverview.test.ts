@@ -87,15 +87,20 @@ it("cancels outstanding requests instead of reporting cancellation as empty revi
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
-it("shares a single request between projects linked to the same repository", async () => {
-  const fetch = vi.fn(async () => Response.json(queue));
+it("keeps project-specific hidden preferences separate for a shared repository", async () => {
+  const fetch = vi.fn(async (path: string) => Response.json({
+    ...queue,
+    prs: path.includes("/1/") ? [] : [{ number: 7 }],
+  }));
   vi.stubGlobal("fetch", fetch);
   const result = await fetchWorkspaceReviews(
     [project(1, "org/shared"), project(2, "ORG/shared")],
     new AbortController().signal,
   );
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenCalledTimes(2);
   expect(result.map((entry) => entry.projectId)).toEqual([1, 2]);
+  expect(result[0].data?.prs).toEqual([]);
+  expect(result[1].data?.prs).toEqual([{ number: 7 }]);
 });
 
 it("bypasses the repository cache only for a manual refresh", async () => {

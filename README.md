@@ -45,6 +45,14 @@ workspaces while viewing Overview keeps you there. Unavailable or cached GitHub
 results are identified separately from empty queues. **Activity** is available
 in the bottom bar beside **Scratchpad** on desktop and mobile.
 
+In a project's **Review** column, click **Hide PR** to remove a request from
+the default view and the workspace overview. Use the **Hidden PRs** or
+**All PRs** filter to find hidden requests, then click **Restore PR** to show
+one again. These choices persist across refreshes and restarts for each project
+and repository. Hiding a PR leaves its GitHub review request and any running
+review session unchanged. Hidden PRs appear in the filter while they are still
+in the awaiting or recently reviewed queues.
+
 It runs entirely on your machine, single user, accessed from a browser at localhost. The
 whole point is one place to see and drive all your agent work: every task gets its own
 isolated git worktree and a persistent agent session you can open, leave, and

@@ -20,6 +20,7 @@ import (
 // The raw statusCheckRollup is NEVER carried here — it is reduced server-side
 // to a single pass|fail|pending|none value (D-00d).
 type PRSummary struct {
+	Hidden    bool   `json:"hidden,omitempty"` // local Kamacu preference, applied after the GitHub cache
 	Number    int    `json:"number"`
 	Title     string `json:"title"`
 	Author    string `json:"author"`    // author.login flattened
@@ -50,9 +51,9 @@ type PRSummary struct {
 // carries context/createdAt).
 type checkEntry struct {
 	Typename    string `json:"__typename"`
-	Status      string `json:"status"`     // CheckRun
-	Conclusion  string `json:"conclusion"` // CheckRun
-	State       string `json:"state"`      // StatusContext
+	Status      string `json:"status"`      // CheckRun
+	Conclusion  string `json:"conclusion"`  // CheckRun
+	State       string `json:"state"`       // StatusContext
 	Name        string `json:"name"`        // CheckRun identity
 	Context     string `json:"context"`     // StatusContext identity
 	StartedAt   string `json:"startedAt"`   // CheckRun run time
