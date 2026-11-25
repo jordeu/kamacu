@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatAgo } from "@/lib/time";
 import { useProjects } from "@/api/queries";
 import { useSettings } from "@/api/settings";
@@ -41,7 +42,7 @@ export function ReviewColumn({ projectId }: { projectId: number }) {
   const linked = project?.github_repo != null && project.github_repo !== "";
   if (!enabled || !linked) return null;
 
-  return <ReviewColumnInner projectId={projectId} />;
+  return <ReviewColumnInner key={projectId} projectId={projectId} />;
 }
 
 /**
@@ -68,10 +69,13 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
   // --- Data — poll (60s, visibility-paused) + manual refresh (GHCOL-04). ---
   const { data } = usePullRequests(projectId);
   const refresh = useRefreshPullRequests(projectId);
-  const prs = data?.prs ?? [];
+  const [visibility, setVisibility] = useState("visible");
+  const matches = (pr: import("@/api/pullRequests").PRSummary) =>
+    visibility === "all" || (visibility === "hidden" ? pr.hidden : !pr.hidden);
+  const prs = (data?.prs ?? []).filter(matches);
   // Recently-reviewed list (REVWD-01) — already deduped against `prs` and sorted
   // most-recently-updated-first server-side (16-01); rendered verbatim.
-  const reviewed = data?.reviewed ?? [];
+  const reviewed = (data?.reviewed ?? []).filter(matches);
   // count only when the server reports a clean read; null while loading/degraded
   // so the header/badge never shows a fabricated 0 (D-07). The header count stays
   // the AWAITING count — reviewed never rolls into it (UI-SPEC §Recently Reviewed).
@@ -143,12 +147,25 @@ function ReviewColumnInner({ projectId }: { projectId: number }) {
         </Button>
         <ReviewPRPicker projectId={projectId} />
       </div>
+      <div className="px-3 pb-2">
+        <Select value={visibility} onValueChange={setVisibility}>
+          <SelectTrigger size="sm" aria-label="Filter PR visibility" className="w-full text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="visible">Visible PRs</SelectItem>
+            <SelectItem value="hidden">Hidden PRs</SelectItem>
+            <SelectItem value="all">All PRs</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-md bg-[#101013] p-3">
         <ReviewStates
           data={data}
           prs={prs}
           reviewed={reviewed}
           projectId={projectId}
+          visibility={visibility}
         />
       </div>
     </div>
@@ -165,11 +182,13 @@ function ReviewStates({
   prs,
   reviewed,
   projectId,
+  visibility,
 }: {
   data: ReturnType<typeof usePullRequests>["data"];
   prs: import("@/api/pullRequests").PRSummary[];
   reviewed: import("@/api/pullRequests").PRSummary[];
   projectId: number;
+  visibility: string;
 }) {
   // Loading — first fetch unresolved. Quiet skeletons, no spinner, no overlay.
   // (reviewed is [] here, so reviewedSection below yields null — no shimmer.)
@@ -209,7 +228,7 @@ function ReviewStates({
           </span>
         </div>
         {reviewed.map((pr) => (
-          <PRCard key={`reviewed-${pr.number}`} pr={pr} projectId={projectId} />
+          <PRCard key={`reviewed-${pr.number}`} pr={pr} projectId={projectId} allowHiding />
         ))}
       </>
     ) : null;
@@ -247,6 +266,7 @@ function ReviewStates({
           </div>
         </div>
         {staleFooter}
+        {reviewedSection}
       </>
     );
   }
@@ -255,14 +275,15 @@ function ReviewStates({
   // reviewed has items (UI-SPEC §State Matrix: do NOT suppress the empty block);
   // the reviewedSection renders below it (quiet-omitted if reviewed is empty too).
   if (data.state === "ok" && prs.length === 0) {
+    if (visibility === "hidden" && reviewed.length > 0) return reviewedSection;
     return (
       <>
         <div className="flex flex-col gap-1 py-6 text-center">
           <div className="text-sm text-muted-foreground">
-            You're all caught up
+            {visibility === "hidden" ? "No hidden review requests" : "You're all caught up"}
           </div>
           <div className="text-xs text-muted-foreground">
-            No PRs are waiting for your review.
+            {visibility === "hidden" ? "PRs you hide will appear here." : "No PRs are waiting for your review."}
           </div>
         </div>
         {reviewedSection}
@@ -277,7 +298,7 @@ function ReviewStates({
   return (
     <>
       {prs.map((pr) => (
-        <PRCard key={pr.number} pr={pr} projectId={projectId} />
+        <PRCard key={pr.number} pr={pr} projectId={projectId} allowHiding />
       ))}
       {staleFooter}
       {reviewedSection}

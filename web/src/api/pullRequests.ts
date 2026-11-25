@@ -1,14 +1,16 @@
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, post } from "./client";
+import { get, post, put } from "./client";
 import type { ApiError } from "./client";
 import type { Task } from "./types";
+import type { ProjectReviewQueue } from "./workspaceOverview";
 
 /** A single review-requested PR. Fetched rich (the head/base/fork fields feed
  *  Phase 12/13's worktree checkout + diff base), rendered minimal in Phase 11
  *  (D-01/D-02). `checks` is the server-side reduction of `statusCheckRollup`
  *  to one signal — the raw array is never shipped to the browser (D-00d). */
 export interface PRSummary {
+  hidden?: boolean;
   number: number;
   title: string;
   author: string; // author.login
@@ -38,8 +40,8 @@ export interface PullRequestsResponse {
 export function usePullRequests(projectId: number) {
   return useQuery({
     queryKey: ["pull-requests", projectId],
-    queryFn: () =>
-      get<PullRequestsResponse>(`/api/projects/${projectId}/pull-requests`),
+    queryFn: ({ signal }) =>
+      get<PullRequestsResponse>(`/api/projects/${projectId}/pull-requests?include_hidden=1`, { signal }),
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
   });
@@ -48,11 +50,55 @@ export function usePullRequests(projectId: number) {
 export function useRefreshPullRequests(projectId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      get<PullRequestsResponse>(
-        `/api/projects/${projectId}/pull-requests?refresh=1`,
-      ),
-    onSuccess: (data) => qc.setQueryData(["pull-requests", projectId], data),
+    mutationFn: async () => {
+      await qc.cancelQueries({ queryKey: ["pull-requests", projectId] });
+      // Use the same cancellable query as polling. A hide/restore must be able
+      // to cancel this response before it overwrites the saved visibility.
+      return qc.fetchQuery({
+        queryKey: ["pull-requests", projectId],
+        queryFn: ({ signal }) => get<PullRequestsResponse>(
+          `/api/projects/${projectId}/pull-requests?refresh=1&include_hidden=1`, { signal },
+        ),
+        staleTime: 0,
+      });
+    },
+  });
+}
+
+export function useSetPRHidden(projectId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ number, hidden }: { number: number; hidden: boolean }) =>
+      put<{ hidden: boolean }>(`/api/projects/${projectId}/pull-requests/${number}/visibility`, { hidden }),
+    onSuccess: async ({ hidden }, { number }) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ["pull-requests", projectId] }),
+        qc.cancelQueries({ queryKey: ["workspace-reviews"] }),
+      ]);
+      // The preference is already saved. Apply it even if the subsequent list
+      // fetch fails, and keep an older refresh from bringing the card back.
+      qc.setQueryData<PullRequestsResponse>(["pull-requests", projectId], (data) => data && ({
+        ...data,
+        prs: data.prs?.map((pr) => pr.number === number ? { ...pr, hidden } : pr) ?? null,
+        reviewed: data.reviewed?.map((pr) => pr.number === number ? { ...pr, hidden } : pr) ?? null,
+      }));
+      if (hidden) {
+        qc.setQueriesData<ProjectReviewQueue[]>({ queryKey: ["workspace-reviews"] }, (queues) =>
+          queues?.map((queue) => queue.projectId !== projectId || !queue.data ? queue : ({
+            ...queue,
+            data: {
+              ...queue.data,
+              prs: queue.data.prs?.filter((pr) => pr.number !== number) ?? null,
+              reviewed: queue.data.reviewed?.filter((pr) => pr.number !== number) ?? null,
+            },
+          })),
+        );
+      }
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["pull-requests", projectId] }),
+        qc.invalidateQueries({ queryKey: ["workspace-reviews"] }),
+      ]);
+    },
   });
 }
 

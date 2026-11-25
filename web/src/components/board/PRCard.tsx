@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, X, Circle, ExternalLink } from "lucide-react";
+import { Check, X, Circle, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   Tooltip,
@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatAgo } from "@/lib/time";
 import { useAgentStatuses, type AgentStatusEntry } from "@/api/agents";
-import { useOpenReview, type PRSummary } from "@/api/pullRequests";
+import { useOpenReview, useSetPRHidden, type PRSummary } from "@/api/pullRequests";
 
 /** CI status → bare lucide glyph (CHECK-01/02, D-01/D-02/D-03). The card's ONLY
  *  mark: pass → green Check, fail → red X, running → STATIC amber Circle (no
@@ -64,15 +64,18 @@ export function PRCard({
   pr,
   projectId,
   footer,
+  allowHiding = false,
   "aria-label": ariaLabel,
 }: {
   pr: PRSummary;
   projectId: number;
   footer?: ReactNode;
+  allowHiding?: boolean;
   "aria-label"?: string;
 }) {
   const navigate = useNavigate();
   const openReview = useOpenReview(projectId);
+  const visibility = useSetPRHidden(projectId);
 
   // Shared 5s agent-status poll (the same query task cards use). The matched
   // entry is the linked review session (source='github_pr'); it drives the left
@@ -101,23 +104,8 @@ export function PRCard({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={
-        rail
-          ? `${ariaLabel ?? `Open review for PR #${pr.number}`} — agent ${rail.label}`
-          : ariaLabel ?? `Open review for PR #${pr.number}`
-      }
       title={rail ? `Agent ${rail.label}` : undefined}
       aria-busy={openReview.isPending}
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          open();
-        }
-      }}
       className={cn(
         // shrink-0: PRCards live in a `flex flex-col overflow-y-auto` list
         // (ReviewColumn). Flex children default to flex-shrink:1, so once enough
@@ -125,10 +113,23 @@ export function PRCard({
         // natural height; combined with overflow-hidden that clips the 2nd title
         // line and the meta row bleeds into the next card. shrink-0 makes each
         // card keep its content height and the container scroll instead.
-        "relative shrink-0 overflow-hidden rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+        "relative shrink-0 overflow-hidden rounded-md border border-border bg-card px-3 py-2 cursor-pointer hover:bg-[#27272a]",
         openReview.isPending && "opacity-60",
       )}
     >
+      {/* Separate sibling controls keep hide/restore and links accessible.
+          The transparent review button covers the rest of the card. */}
+      <button
+        type="button"
+        aria-label={
+          rail
+            ? `${ariaLabel ?? `Open review for PR #${pr.number}`} — agent ${rail.label}`
+            : ariaLabel ?? `Open review for PR #${pr.number}`
+        }
+        disabled={openReview.isPending}
+        onClick={open}
+        className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+      />
       {/* Agent-state left rail (SIGNL-01/02, D-04/D-06/D-07) — the card's ONLY
           agent signal (the dot was removed in the checkpoint redesign). Any rail
           = an open session; its color is the agent state; waiting pulses (the
@@ -158,7 +159,7 @@ export function PRCard({
           return (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex shrink-0">
+                <span className="relative inline-flex shrink-0" onClick={open}>
                   <Icon
                     role="img"
                     aria-label={tooltip}
@@ -177,7 +178,7 @@ export function PRCard({
           aria-label={`Open ${pr.url} on GitHub (opens in a new tab)`}
           // ↗ opens GitHub only — stop the body's open-review handler (D-02).
           onClick={(e) => e.stopPropagation()}
-          className="mt-[2px] shrink-0 text-muted-foreground hover:text-foreground"
+          className="relative mt-[2px] shrink-0 text-muted-foreground hover:text-foreground"
         >
           <ExternalLink className="size-3.5" />
         </a>
@@ -186,8 +187,29 @@ export function PRCard({
       <div className="truncate text-xs text-muted-foreground">
         #{pr.number} · @{pr.author} · updated {formatAgo(pr.updatedAt, now)}{" "}
         ago
+        {pr.hidden && <span> · Hidden</span>}
       </div>
-      {footer && <div className="mt-2">{footer}</div>}
+      {allowHiding && (
+        <button
+          type="button"
+          aria-label={`${pr.hidden ? "Restore" : "Hide"} PR #${pr.number}`}
+          disabled={visibility.isPending}
+          onClick={(e) => {
+            e.stopPropagation();
+            visibility.mutate({ number: pr.number, hidden: !pr.hidden });
+          }}
+          className="relative mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          {pr.hidden ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+          {pr.hidden ? "Restore PR" : "Hide PR"}
+        </button>
+      )}
+      {visibility.isError && (
+        <div role="alert" className="mt-1 text-xs text-red-500">
+          Couldn't {pr.hidden ? "restore" : "hide"} this PR. Try again.
+        </div>
+      )}
+      {footer && <div className="relative mt-2">{footer}</div>}
       {/* In-flight + error feedback (UI-SPEC §F). */}
       {openReview.isPending && (
         <div className="mt-1 text-xs text-muted-foreground">

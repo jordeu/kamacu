@@ -41,6 +41,7 @@ vi.mock("@/api/settings", () => ({ useSettings: mocks.settings }));
 vi.mock("@/api/agents", () => ({ useAgentStatuses: () => ({ data: [] }) }));
 vi.mock("@/api/pullRequests", () => ({
   useOpenReview: () => ({ isPending: false, isError: false }),
+  useSetPRHidden: () => ({ isPending: false, isError: false }),
 }));
 vi.mock("@/lib/useActiveWorkspace", () => ({
   useActiveWorkspace: () => ({ setActiveWorkspaceId: () => {} }),

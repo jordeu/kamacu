@@ -20,7 +20,6 @@ export async function fetchWorkspaceReviews(
   force = false,
 ): Promise<ProjectReviewQueue[]> {
   const results = new Array<ProjectReviewQueue>(projects.length);
-  const requests = new Map<string, Promise<PullRequestsResponse>>();
   let cursor = 0;
   async function worker() {
     while (cursor < projects.length) {
@@ -29,16 +28,12 @@ export async function fetchWorkspaceReviews(
       const project = projects[index];
       const repository = project.github_repo!;
       try {
-        const identity = repository.toLowerCase();
-        let request = requests.get(identity);
-        if (!request) {
-          request = get<PullRequestsResponse>(
-            `/api/projects/${project.id}/pull-requests${force ? "?refresh=1" : ""}`,
-            { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) },
-          );
-          requests.set(identity, request);
-        }
-        const data = await request;
+        // Hidden review preferences belong to a project. The server still
+        // shares GitHub fetches for projects using the same repository.
+        const data = await get<PullRequestsResponse>(
+          `/api/projects/${project.id}/pull-requests${force ? "?refresh=1" : ""}`,
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) },
+        );
         results[index] = {
           projectId: project.id,
           repository,

@@ -35,6 +35,10 @@ var postReview = github.PostReview
 //   - GET  /api/projects/{id}/pull-requests[?refresh=1]   — the review-queue list
 //   - GET  /api/projects/{id}/pull-requests/{n}            — live PR detail (re-hydrate)
 //   - POST /api/projects/{id}/pull-requests/{n}/review     — open-or-reattach
+//   - PUT  /api/projects/{id}/pull-requests/{n}/visibility — local hide/restore
+//
+// Hidden PRs are excluded from both queues by default. include_hidden=1
+// includes them with hidden=true so the review column can filter locally.
 //
 // Always 200 on the GET — the Result.State field carries degradation (GHSET-03 /
 // GHCOL-05); the frontend branches on state/stale, never on the HTTP status.
@@ -94,7 +98,90 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 		}
 
 		force := r.URL.Query().Get("refresh") == "1"
-		writeJSON(w, http.StatusOK, svc.Get(r.Context(), repo.String, repoPath, force))
+		result := svc.Get(r.Context(), repo.String, repoPath, force)
+		rows, err := db.QueryContext(r.Context(), `SELECT pr_number FROM hidden_pr_reviews WHERE project_id = ? AND repository = ?`, id, repo.String)
+		if err != nil {
+			writeJSON(w, http.StatusOK, github.Result{State: "error"})
+			return
+		}
+		hidden := make(map[int]bool)
+		for rows.Next() {
+			var number int
+			if err := rows.Scan(&number); err != nil {
+				rows.Close()
+				writeJSON(w, http.StatusOK, github.Result{State: "error"})
+				return
+			}
+			hidden[number] = true
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			writeJSON(w, http.StatusOK, github.Result{State: "error"})
+			return
+		}
+		// Copy each slice: the service cache is shared across requests/projects.
+		filter := func(prs []github.PRSummary) []github.PRSummary {
+			if prs == nil {
+				return nil
+			}
+			out := make([]github.PRSummary, 0, len(prs))
+			for _, pr := range prs {
+				pr.Hidden = hidden[pr.Number]
+				if !pr.Hidden || r.URL.Query().Get("include_hidden") == "1" {
+					out = append(out, pr)
+				}
+			}
+			return out
+		}
+		result.PRs, result.Reviewed = filter(result.PRs), filter(result.Reviewed)
+		writeJSON(w, http.StatusOK, result)
+	})
+
+	// Visibility is a local preference; it never changes the GitHub request or
+	// creates a review workspace. Repository identity prevents hiding an unrelated
+	// PR if a project is later linked to a different repository.
+	mux.HandleFunc("PUT /api/projects/{id}/pull-requests/{n}/visibility", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		n, err := strconv.ParseInt(r.PathValue("n"), 10, 64)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid PR number")
+			return
+		}
+		var req struct {
+			Hidden *bool `json:"hidden"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Hidden == nil {
+			writeError(w, http.StatusBadRequest, "hidden must be a boolean")
+			return
+		}
+		var repo sql.NullString
+		err = db.QueryRowContext(r.Context(), `SELECT github_repo FROM projects WHERE id = ?`, id).Scan(&repo)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !repo.Valid || strings.TrimSpace(repo.String) == "" {
+			writeError(w, http.StatusConflict, "project is not linked to a GitHub repo")
+			return
+		}
+		if *req.Hidden {
+			_, err = db.ExecContext(r.Context(), `INSERT INTO hidden_pr_reviews (project_id, repository, pr_number) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`, id, repo.String, n)
+		} else {
+			_, err = db.ExecContext(r.Context(), `DELETE FROM hidden_pr_reviews WHERE project_id = ? AND repository = ? AND pr_number = ?`, id, repo.String, n)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"hidden": *req.Hidden})
 	})
 
 	// GET .../pull-requests/{n} — live PR detail for re-hydration (12-07).
