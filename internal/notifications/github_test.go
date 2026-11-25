@@ -49,7 +49,7 @@ func TestGitHubPaginationScopePollingAndAccount(t *testing.T) {
 		case strings.Contains(path, "page=2"):
 			return response("["+item("new-2", "ACME/REPO", "2026-11-02T11:59:59Z")+"]", ""), nil
 		default:
-			return response("["+strings.Join([]string{item("new-1", "acme/repo", "2026-11-02T11:59:58Z"), item("old", "acme/repo", "2026-11-01T00:00:00Z"), item("foreign", "other/repo", "2026-11-02T11:59:58Z")}, ",")+"]", `X-Poll-Interval: 120`+"\r\n"+`Link: <https://api.github.com/notifications?page=2>; rel="next"`+"\r\n"), nil
+			return response("["+strings.Join([]string{item("new-1", "acme/repo", "2026-11-02T11:59:58Z"), item("old", "acme/repo", "2026-11-01T00:00:00Z"), item("old-foreign", "other/repo", "2026-11-01T00:00:00Z"), item("foreign", "other/repo", "2026-11-02T11:59:58Z")}, ",")+"]", `X-Poll-Interval: 120`+"\r\n"+`Link: <https://api.github.com/notifications?page=2>; rel="next"`+"\r\n"), nil
 		}
 	}}
 	source := Source{Config: json.RawMessage(`{}`), Account: "alice", Checkpoint: "2026-11-02T11:00:00Z", CreatedAt: now.Add(-time.Hour).UnixMilli()}
@@ -57,11 +57,14 @@ func TestGitHubPaginationScopePollingAndAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(batch.Events) != 2 || batch.PollAfter != 2*time.Minute || batch.Checkpoint != "2026-11-02T12:00:00Z" {
+	if len(batch.Events) != 3 || batch.PollAfter != 2*time.Minute || batch.Checkpoint != "2026-11-02T12:00:00Z" {
 		t.Fatalf("batch: %+v", batch)
 	}
 	if !strings.Contains(calls[1], "all=true") || batch.Events[0].URL != "https://github.com/acme/repo/pull/7" {
 		t.Fatalf("bad request/url: %v %+v", calls, batch)
+	}
+	if batch.Events[1].Repository != "other/repo" {
+		t.Fatalf("unregistered repository was dropped: %+v", batch.Events)
 	}
 	source.Account = "bob"
 	if _, err = g.Collect(context.Background(), source, map[string]bool{}); err == nil {
