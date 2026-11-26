@@ -86,6 +86,7 @@ type Info struct {
 // markExited just before Done() fires; replay via Attach still works after
 // exit so late attachers can render the final output.
 type Session struct {
+	contextDir      string // immutable project context directory passed to this agent
 	id              string
 	label           string
 	taskID          int64        // 0 = unscoped dev session; immutable after Spawn

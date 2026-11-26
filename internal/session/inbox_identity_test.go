@@ -10,6 +10,7 @@ import (
 func TestAgentInboxIdentityOverridesInheritedEnvironment(t *testing.T) {
 	t.Setenv("KAMACU_TASK_ID", "999")
 	t.Setenv("KAMACU_SESSION_ID", "stale")
+	t.Setenv("KAMACU_PROJECT_CONTEXT", "stale")
 	for _, taskID := range []int64{0, 7} {
 		for _, engine := range []string{"claude", "codex", "opencode", "custom"} {
 			t.Run(engine+"/"+strconv.FormatInt(taskID, 10), func(t *testing.T) {
@@ -22,6 +23,9 @@ func TestAgentInboxIdentityOverridesInheritedEnvironment(t *testing.T) {
 				mgr.SetAgentConfig(AgentConfig{ClaudeBin: stub, Token: "token", BaseURL: "http://127.0.0.1:7333"})
 				sess := spawnForTestOpts(t, mgr, SpawnOpts{Kind: KindAgent, TaskID: taskID, Global: taskID == 0, Cwd: t.TempDir(), AgentEngine: engine, AgentArgs: []string{stub}})
 				waitForStubReady(t, dump)
+				if value, found := envValue(t, dump, "KAMACU_PROJECT_CONTEXT"); found {
+					t.Fatal("inherited context", value)
+				}
 				if value, _ := envValue(t, dump, "KAMACU_TASK_ID"); value != strconv.FormatInt(taskID, 10) {
 					t.Fatal("incorrect task identity", value)
 				}

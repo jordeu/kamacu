@@ -252,7 +252,8 @@ agent's client, and verifies the install with a real tool call.
 Kamacu drives one loop, from an idea to a reviewed change:
 
 1. **Project** — add a project that points at a local git repo checkout. It shows up in
-   the sidebar with its own kanban board.
+   the sidebar with its own kanban board. Give its agents standing instructions and
+   reusable skills through the [project context folder](docs/agent-integration.md#project-instructions-and-skills).
 2. **Task** — create a task on the board. Kamacu auto-creates a branch and an isolated
    git worktree for it, so concurrent tasks never collide in one checkout.
 3. **Agent** — open the task and start an agent session. It runs as the real CLI —

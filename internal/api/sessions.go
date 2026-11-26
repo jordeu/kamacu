@@ -16,7 +16,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,12 +58,10 @@ func SessionRoutes(mux *http.ServeMux, mgr *session.Manager, db *sql.DB, tmuxCli
 }
 
 type sessionHandlers struct {
-	// Serialize agent identity checks through spawn and persistence.
-	agentSpawnMu sync.Mutex
-	mgr          *session.Manager
-	db           *sql.DB
-	globRoot     string      // ~/.claude/projects; tests inject a temp dir for resume validation
-	tmuxClient   tmux.Client // socket/config for the TMUX-05 has-session reconcile probe
+	mgr        *session.Manager
+	db         *sql.DB
+	globRoot   string      // ~/.claude/projects; tests inject a temp dir for resume validation
+	tmuxClient tmux.Client // socket/config for the TMUX-05 has-session reconcile probe
 }
 
 // list handles GET /api/sessions — newest first, JSON [] when empty.
@@ -430,8 +427,8 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 		return nil, &sessionCreateError{http.StatusConflict, "task has no worktree"}
 	}
 	if kind == session.KindAgent {
-		h.agentSpawnMu.Lock()
-		defer h.agentSpawnMu.Unlock()
+		unlockLaunch := h.mgr.LockAgentLaunch()
+		defer unlockLaunch()
 		unlockTask := h.mgr.LockTaskLifecycle(req.TaskID)
 		defer unlockTask()
 	}
@@ -458,12 +455,12 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 	if req.TaskID > 0 {
 		var path sql.NullString
 		err := h.db.QueryRow(
-			`SELECT t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, a.engine, a.command, a.extra_params, t.model, a.model_argument
+			`SELECT p.id, t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, a.engine, a.command, a.extra_params, t.model, a.model_argument
 			 FROM tasks t
 			 JOIN projects p ON p.id = t.project_id
 			 JOIN agents a ON a.id = COALESCE(t.agent_id, p.agent_id)
 			 WHERE t.id = ?`, req.TaskID,
-		).Scan(&path, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams, &taskModel, &modelArgument)
+		).Scan(&opts.ProjectID, &path, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams, &taskModel, &modelArgument)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &sessionCreateError{http.StatusNotFound, "task not found"}
 		}

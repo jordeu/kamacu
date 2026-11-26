@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"kamacu/internal/github"
+	"kamacu/internal/projectcontext"
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
 	"kamacu/internal/tmux"
@@ -64,9 +66,9 @@ type Project struct {
 // projectHandlers carries the gated-delete dependencies (mirrors taskHandlers /
 // worktreeHandlers): wt removes the managed clone's linked worktrees, mgr stops
 // their sessions, tmuxClient kills detached tmux survivors — all needed by the
-// gated managed-clone delete wired in plan 04. The folder-delete path (D-09)
-// uses none of them.
+// gated managed-clone delete wired in plan 04.
 type projectHandlers struct {
+	folders    *projectcontext.Folders
 	db         *sql.DB
 	wt         *worktree.Service
 	mgr        *session.Manager
@@ -729,9 +731,8 @@ type managedTaskWorktree struct {
 // delete handles DELETE /api/projects/{id}. An optional {"force":true}
 // body opts into discarding local work and stopping sessions for managed projects.
 //
-//   - Folder project (managed=0): today's behavior EXACTLY — DELETE FROM
-//     projects (CASCADE removes tasks); the repository on disk is NEVER touched
-//     (PROJ-03 / D-09). No git, no disk ops.
+//   - Folder project (managed=0): retire agents using its project context and
+//     archive the guidance before releasing its ID. The user owns the checkout.
 //   - Managed project (managed=1, v1.4 CKOUT-03): a two-pass, all-or-nothing
 //     gated removal. The GATE phase computes the four gates
 //     (dirty/unpushed/stash/sessions) over EVERY task worktree AND the clone
@@ -762,6 +763,17 @@ func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if h.folders != nil {
+		unlock := h.mgr.LockAgentLaunch()
+		defer unlock()
+		release, err := h.folders.LockArchive()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer release()
+	}
+
 	// Load the marker + repo root. The marker is the SINGLE source of truth for
 	// "Kamacu owns this dir" — never derive it from the path (data-loss hazard).
 	var managed int
@@ -776,18 +788,9 @@ func (h *projectHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Folder path (UNCHANGED, D-09): never touch the directory. ---
+	// Folder deletion only manages Kamacu-owned resources.
 	if managed == 0 {
-		res, err := h.deleteProjectRows(r.Context(), id)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			writeError(w, http.StatusNotFound, "project not found")
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+		h.finishDeletion(w, r.Context(), id, "", nil, false)
 		return
 	}
 
@@ -824,11 +827,7 @@ func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, 
 	// Explicit force bypasses Git preservation checks, including a missing
 	// default branch. Filesystem errors still fail deletion.
 	if force {
-		if err := h.stopProjectSessions(ctx, id); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.removeManaged(w, ctx, id, clone, worktrees, true)
+		h.finishDeletion(w, ctx, id, clone, worktrees, true)
 		return
 	}
 
@@ -934,13 +933,7 @@ func (h *projectHandlers) deleteManaged(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Stop all tasks, including those without worktrees, before dropping rows.
-	if err := h.stopProjectSessions(ctx, id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	// === REMOVE PHASE (all clear). Order is load-bearing (Pitfall 1). ===
-	h.removeManaged(w, ctx, id, clone, worktrees, false)
+	h.finishDeletion(w, ctx, id, clone, worktrees, false)
 }
 
 // projectWorktrees includes every task so session cleanup also covers tasks
@@ -1004,13 +997,61 @@ func (h *projectHandlers) unownedProjectWorktrees(ctx context.Context, clone str
 	return blockers, nil
 }
 
-// removeManaged is the REMOVE phase of the managed delete — reached ONLY after
-// every gate passed or force was explicitly requested (deleteManaged).
-// The ordering is load-bearing (Pitfall 1): remove each LINKED worktree first (wt.Remove via the shared
-// CleanupWorktreeGated), THEN os.RemoveAll the clone dir, THEN delete the rows
-// FK-ordered. The clone root is NEVER passed to wt.Remove — git refuses the main
-// worktree (Pitfall 2); it is removed with os.RemoveAll.
-func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Context, id int64, clone string, worktrees []managedTaskWorktree, force bool) {
+// finishDeletion runs only after the managed checkout's eligibility checks.
+func (h *projectHandlers) finishDeletion(w http.ResponseWriter, ctx context.Context, id int64, clone string, worktrees []managedTaskWorktree, force bool) {
+	err := h.archiveAndDelete(ctx, id, clone, worktrees, force)
+	var blocked *projectRemovalBlocker
+	switch {
+	case errors.As(err, &blocked):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "Project deletion blocked. Resolve the items below, then retry.", "reasons": []deleteBlocker{blocked.reason}})
+	case errors.Is(err, sql.ErrNoRows):
+		writeError(w, http.StatusNotFound, "project not found")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+type projectRemovalBlocker struct{ reason deleteBlocker }
+
+func (b *projectRemovalBlocker) Error() string { return b.reason.Message }
+
+func (h *projectHandlers) archiveAndDelete(ctx context.Context, id int64, clone string, worktrees []managedTaskWorktree, force bool) (err error) {
+	if h.folders != nil {
+		var repo, created string
+		if err := h.db.QueryRowContext(ctx, "SELECT repo_path, created_at FROM projects WHERE id=?", id).Scan(&repo, &created); err != nil {
+			return err
+		}
+		pending, stageErr := h.folders.StageArchive(id, repo, created)
+		if stageErr != nil {
+			return fmt.Errorf("archive project context: %w", stageErr)
+		}
+		if pending != "" {
+			defer func() {
+				if err != nil {
+					// The request may have been cancelled mid-commit. Check the actual row.
+					err = errors.Join(err, h.folders.Reconcile(context.Background(), h.db, pending))
+				} else if settleErr := h.folders.Finalize(pending); settleErr != nil {
+					slog.Warn("project deleted; will finalize context archive on restart", "archive", pending, "error", settleErr)
+				}
+			}()
+		}
+	}
+	if clone != "" {
+		if err := h.stopProjectSessions(ctx, id); err != nil {
+			return err
+		}
+		if err := h.removeLinkedWorktrees(ctx, clone, worktrees, force); err != nil {
+			return err
+		}
+	} else if h.folders != nil {
+		h.mgr.StopUsingProjectContext(h.folders.Directory(id))
+	}
+	return h.deleteProjectRows(ctx, id, clone)
+}
+
+func (h *projectHandlers) removeLinkedWorktrees(ctx context.Context, clone string, worktrees []managedTaskWorktree, force bool) error {
 	for _, wt := range worktrees {
 		if wt.path == "" {
 			continue
@@ -1024,31 +1065,13 @@ func (h *projectHandlers) removeManaged(w http.ResponseWriter, ctx context.Conte
 			ctx, h.db, h.wt, h.mgr, h.tmuxClient, live,
 			wt.taskID, clone, wt.path, count, true /*stopSessions*/, force)
 		if cerr != nil {
-			writeError(w, http.StatusInternalServerError, cerr.Error())
-			return
+			return cerr
 		}
 		if !removed {
-			// A race re-tripped a gate (rare/defensive). Refuse with the reason.
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":   "Project deletion blocked. Resolve the items below, then retry.",
-				"reasons": []deleteBlocker{projectDeleteBlocker(gateReasonKind(reason), fmt.Sprintf("task #%d", wt.taskID), wt.path, "")},
-			})
-			return
+			return &projectRemovalBlocker{projectDeleteBlocker(gateReasonKind(reason), fmt.Sprintf("task #%d", wt.taskID), wt.path, "")}
 		}
 	}
-
-	// All linked worktrees gone → remove the clone root (main worktree + .git).
-	// os.RemoveAll ONLY (git worktree remove refuses the main worktree).
-	if rerr := os.RemoveAll(clone); rerr != nil {
-		writeError(w, http.StatusInternalServerError, rerr.Error())
-		return
-	}
-
-	if _, err := h.deleteProjectRows(ctx, id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // stopProjectSessions includes tasks without a worktree, so deleting their
@@ -1105,24 +1128,43 @@ func (h *projectHandlers) stopProjectSessions(ctx context.Context, projectID int
 
 // deleteProjectRows clears task terminal records before cascading task deletion.
 // Both project types use a transaction so a failed delete leaves all rows intact.
-func (h *projectHandlers) deleteProjectRows(ctx context.Context, id int64) (sql.Result, error) {
+func (h *projectHandlers) deleteProjectRows(ctx context.Context, id int64, clone string) error {
+	// Finish the local commit once destructive cleanup begins, even if the HTTP client disconnects.
+	ctx = context.WithoutCancel(ctx)
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM tmux_sessions WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id); err != nil {
-		return nil, err
+		return err
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return sql.ErrNoRows
 	}
-	return res, nil
+	// A running agent or editor could recreate the folder after it was staged.
+	// Keep the row and the new files together rather than passing them to a reused ID.
+	if h.folders != nil {
+		path := h.folders.Directory(id)
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("project context was recreated during deletion at %s; retry to archive the new files", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if clone != "" {
+		if err := os.RemoveAll(clone); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // gateReasonKind maps the shared CleanupWorktreeGated reason strings to a

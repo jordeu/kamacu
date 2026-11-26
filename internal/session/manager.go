@@ -36,10 +36,11 @@ var ErrTmuxNotFound = errors.New("tmux not found")
 // kamacuEnvNames must never leak from a parent Kamacu process. Every agent
 // gets fresh task/session identity; built-in engines also get hook credentials.
 var kamacuEnvNames = map[string]bool{
-	"KAMACU_SESSION_ID": true,
-	"KAMACU_TASK_ID":    true,
-	"KAMACU_HOOK_TOKEN": true,
-	"KAMACU_HOOK_BASE":  true,
+	"KAMACU_SESSION_ID":      true,
+	"KAMACU_TASK_ID":         true,
+	"KAMACU_PROJECT_CONTEXT": true,
+	"KAMACU_HOOK_TOKEN":      true,
+	"KAMACU_HOOK_BASE":       true,
 }
 
 // stripKamacuEnv removes inherited instance identity and credentials before
@@ -60,6 +61,7 @@ func stripKamacuEnv(env []string) []string {
 // remove) each live in a single method so Phase 4 can add DB writes inside
 // them without restructuring.
 type Manager struct {
+	agentLaunch   sync.Mutex
 	taskLifecycle sync.Map // task id → *sync.Mutex, shared by spawn and Inbox completion
 
 	agentReady    func(int64) error
@@ -85,6 +87,7 @@ func NewManager() *Manager {
 
 // SpawnOpts configures a new session.
 type SpawnOpts struct {
+	ProjectID       int64
 	Cwd             string // "" -> user home (preserves Phase 2 /terminal dev behavior)
 	TaskID          int64  // 0 -> unscoped dev session, label "bash #N" (global counter)
 	Kind            Kind   // zero value = KindBash (full Phase 2/3 backward compatibility)
@@ -204,7 +207,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (result *Session, resultErr error) {
 	id := uuid.NewString()
 
 	var cmd *exec.Cmd
-	var claudeSessionID string
+	var claudeSessionID, contextDir string
 	var tc *tmux.Client // non-nil only on the tmux spawn branch
 	if kind == KindAgent {
 		m.mu.Lock()
@@ -332,6 +335,16 @@ func (m *Manager) Spawn(opts SpawnOpts) (result *Session, resultErr error) {
 				"KAMACU_HOOK_BASE="+cfg.BaseURL,
 			)
 		} // end claude-engine branch (M001)
+		if opts.ProjectID > 0 && opts.TaskID > 0 && cfg.ProjectContext != nil {
+			path, err := cfg.ProjectContext(opts.ProjectID, opts.AgentEngine)
+			if err != nil {
+				return nil, fmt.Errorf("resolve project context: %w", err)
+			}
+			if path != "" {
+				contextDir = path
+				cmd.Env = append(cmd.Env, "KAMACU_PROJECT_CONTEXT="+path)
+			}
+		}
 	} else if opts.TmuxName != "" {
 		// tmux-backed tab (TMUX-02): the attach client is just another
 		// full-screen PTY child. LookPath-before-PTY posture preserved (D-84
@@ -443,6 +456,7 @@ func (m *Manager) Spawn(opts SpawnOpts) (result *Session, resultErr error) {
 
 	s := &Session{
 		id:              id,
+		contextDir:      contextDir,
 		label:           label,
 		taskID:          opts.TaskID,
 		global:          opts.Global,
@@ -583,24 +597,12 @@ func (m *Manager) listWhere(keep func(*Session) bool) []Info {
 // in the request (D-32 cleanup gate).
 func (m *Manager) StopAllForTask(taskID int64) {
 	slog.Debug("stopping task sessions", "task", taskID)
-	m.mu.Lock()
-	targets := make([]*Session, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		if s.taskID == taskID && s.Info().Status == StatusRunning {
-			targets = append(targets, s)
-		}
-	}
-	m.mu.Unlock()
+	m.stopMatching(func(s *Session) bool { return s.taskID == taskID })
+}
 
-	var wg sync.WaitGroup
-	for _, s := range targets {
-		wg.Add(1)
-		go func(s *Session) {
-			defer wg.Done()
-			s.Stop()
-		}(s)
-	}
-	wg.Wait()
+// StopUsingProjectContext retires processes that could follow a recycled project ID.
+func (m *Manager) StopUsingProjectContext(dir string) {
+	m.stopMatching(func(s *Session) bool { return s.contextDir != "" && s.contextDir == dir })
 }
 
 // StopAllForScope stops every RUNNING global-scope session concurrently and
@@ -609,10 +611,14 @@ func (m *Manager) StopAllForTask(taskID int64) {
 // this method exclusively — NEVER a task-id stop over the zero literal,
 // which would match every dev terminal (GSESS-01 landmine).
 func (m *Manager) StopAllForScope() {
+	m.stopMatching(func(s *Session) bool { return s.global })
+}
+
+func (m *Manager) stopMatching(matches func(*Session) bool) {
 	m.mu.Lock()
 	targets := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		if s.global && s.Info().Status == StatusRunning {
+		if matches(s) && s.Info().Status == StatusRunning {
 			targets = append(targets, s)
 		}
 	}
@@ -661,4 +667,10 @@ func (m *Manager) LockTaskLifecycle(id int64) func() {
 	mu := value.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
+}
+
+// LockAgentLaunch serializes agent identity checks and project deletion with launch.
+func (m *Manager) LockAgentLaunch() func() {
+	m.agentLaunch.Lock()
+	return m.agentLaunch.Unlock
 }

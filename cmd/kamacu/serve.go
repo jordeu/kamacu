@@ -32,6 +32,7 @@ import (
 	"kamacu/internal/notifications"
 	"kamacu/internal/opencode"
 	"kamacu/internal/presence"
+	"kamacu/internal/projectcontext"
 	"kamacu/internal/quota"
 	"kamacu/internal/reaper"
 	"kamacu/internal/session"
@@ -255,9 +256,28 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	}
 	wtSvc := worktree.NewService(wtRoot)
 
+	folders, err := projectcontext.New(logDir, dbPath)
+	if err == nil {
+		err = folders.Recover(ctx, db)
+	}
+	if err != nil {
+		slog.Error("initialize project context folders", "error", err)
+		return subcommands.ExitFailure
+	}
+	integrationManager, integrationErr := integration.Default()
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
 		CodexMCPEnvArgs: codex.FeedbackEnvironmentArgs,
+		ProjectContext: func(id int64, engine string) (string, error) {
+			if integrationManager == nil || engine == "custom" {
+				return "", nil
+			}
+			enabled, err := integrationManager.Enabled(engine)
+			if err != nil || !enabled {
+				return "", err
+			}
+			return folders.Directory(id), nil
+		},
 		// Optional MCP tools run on the server host. hookBaseURL
 		// normalizes a wildcard --addr host (0.0.0.0 / :: / empty) to
 		// 127.0.0.1:<port> so local tools never target a wildcard/remote
@@ -301,7 +321,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		}
 	}()
 	api.ArtifactRoutes(mux, artifactService, hookToken)
-	api.Routes(mux, db, wtSvc, mgr, tmuxClient, collectArtifacts)
+	api.RoutesWithProjectContext(mux, db, wtSvc, mgr, tmuxClient, folders, collectArtifacts)
 	api.SessionRoutes(mux, mgr, db, tmuxClient, ctx)
 	api.WorktreeRoutes(mux, db, wtSvc, mgr, tmuxClient)
 	api.DiffRoutes(mux, db, wtSvc)
@@ -392,9 +412,8 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	inboxService.SetBeforePublish(inboxAgent.Process)
 	go terminalMonitor.Run(ctx)
 	api.InboxAgentRoutes(mux, inboxAgent)
-	integrationManager, err := integration.Default()
-	if err != nil {
-		slog.Warn("agent integration unavailable", "error", err)
+	if integrationErr != nil {
+		slog.Warn("agent integration unavailable", "error", integrationErr)
 	} else {
 		if !c.noIntegrationSync {
 			for _, retire := range []func() error{codex.RetireHookConfig, opencode.RetirePlugin} {

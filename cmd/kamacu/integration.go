@@ -15,7 +15,7 @@ type integrationCmd struct{}
 
 func (integrationCmd) Name() string { return "integration" }
 func (integrationCmd) Synopsis() string {
-	return "Install, inspect, repair, or remove agent MCP integration"
+	return "Install, inspect, repair, or remove agent integration"
 }
 func (integrationCmd) Usage() string {
 	return `integration status
@@ -23,8 +23,8 @@ integration enable <claude|codex|opencode>
 integration repair <claude|codex|opencode>
 integration remove <claude|codex|opencode>
 
-Registers a user-level MCP server. Repair preserves user edits. Remove deletes
-only unchanged managed registrations. Restart agent sessions after changes.
+Registers a user-level MCP server and installs project context instructions. Repair preserves user edits. Remove deletes
+unchanged managed instructions and registrations. Restart agent sessions after changes.
 `
 }
 func (integrationCmd) SetFlags(*flag.FlagSet) {}

@@ -10,7 +10,7 @@ Agents ask questions and show completion reports normally in the terminal.
 
 Open **Settings → Agents → Kamacu integration** and choose **Enable integration**
 for Claude Code, Codex, or OpenCode. This creates a user-level `kamacu mcp serve`
-registration. The client must be installed on the host and available on Kamacu's
+registration and adds a project context instruction to the agent’s global guidance. The client must be installed on the host and available on Kamacu's
 PATH. Integration is opt-in.
 
 The equivalent commands are included in the binary:
@@ -48,6 +48,56 @@ to a different Kamacu server.
 Task identity and connection credentials remain inherited environment variables;
 the installer never copies them into configuration. Kamacu's Codex launcher
 forwards their names into the MCP subprocess environment.
+
+## Project instructions and skills
+
+Find the project ID in its Kamacu URL. For project 12 on the default database,
+create whichever of these files you need under the server account’s home:
+
+```text
+~/.kamacu/projects/12/context/
+├── instructions.md
+└── skills/
+    └── review-migration/
+        ├── SKILL.md
+        └── references/checklist.md
+```
+
+Write standing project guidance in `instructions.md`. Give each skill a
+`SKILL.md` with a name and a description of when to use it:
+
+```markdown
+---
+name: review-migration
+description: Use when reviewing SQLite schema changes.
+---
+Read references/checklist.md and verify the upgrade from the previous release.
+```
+
+On Start and Resume, an enabled agent receives the absolute directory in
+`KAMACU_PROJECT_CONTEXT`. Its global instruction tells it to read the current
+guidance, discover the skills, and read a matching skill when needed. Changes
+are visible the next time the agent reads a file. The folder and both kinds of
+content are optional. Skills are read through the agent’s ordinary file tools.
+An agent that requests permission for directories outside its worktree may
+prompt for read access to the project’s context folder.
+Scratchpad, shell tabs and custom agents do not receive the variable.
+
+The integration installs its block in Claude’s user `CLAUDE.md`, Codex’s
+`AGENTS.md` (or active `AGENTS.override.md`), or OpenCode’s global `AGENTS.md`.
+If OpenCode uses Claude’s global file as a fallback, the integrations share
+the block. Repair preserves edits to the block and surrounding guidance.
+Disable removes unchanged managed instructions when the last owner releases them.
+
+Deleting the project archives its context at
+`~/.kamacu/archive/projects/<id>/<archive-id>/context/`. Copy files back
+manually to restore them. If deletion is interrupted and you have already
+recreated the live folder, recovery keeps your current files there and places
+the previous copy in the archive. Removing a task or its worktree leaves project context
+in place. Custom databases use `~/.kamacu/instances/<hash>/` as the base
+for both directories. The hash is the lowercase SHA-256 of the absolute
+symlink-resolved database path, without a trailing newline. If you relocate
+a custom database, move its context and archive directories to its new base.
 
 ## Updates, repair, and removal
 
