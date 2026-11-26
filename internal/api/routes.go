@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 
+	"kamacu/internal/projectcontext"
 	"kamacu/internal/session"
 	"kamacu/internal/tmux"
 	"kamacu/internal/worktree"
@@ -16,7 +17,12 @@ import (
 // row delete (D-93) — StopAllForTask only reaches in-memory sessions, so a
 // detached tmux survivor needs a direct kill.
 func Routes(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client, afterDelete ...func()) {
-	p := &projectHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
+	RoutesWithProjectContext(mux, db, wt, mgr, tmuxClient, nil, afterDelete...)
+}
+
+// RoutesWithProjectContext wires archival into both project deletion paths.
+func RoutesWithProjectContext(mux *http.ServeMux, db *sql.DB, wt *worktree.Service, mgr *session.Manager, tmuxClient tmux.Client, folders *projectcontext.Folders, afterDelete ...func()) {
+	p := &projectHandlers{folders: folders, db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	t := &taskHandlers{db: db, wt: wt, mgr: mgr, tmuxClient: tmuxClient}
 	wh := &workspaceHandlers{db: db}
 	mux.HandleFunc("GET /api/workspaces", wh.list)

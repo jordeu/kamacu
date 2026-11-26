@@ -275,6 +275,14 @@ func TestRealCodexRegistration(t *testing.T) {
 	if _, err := fresh.Enable(context.Background(), "codex"); err != nil {
 		t.Fatal("fresh Codex home:", err)
 	}
+	// Inspect the real CLI's model-visible input without contacting a model.
+	cmd := exec.Command("codex", "debug", "prompt-input", "Check project conventions.")
+	cmd.Dir = fresh.home
+	cmd.Env = append(os.Environ(), "HOME="+fresh.home, "CODEX_HOME="+fresh.codexHome)
+	prompt, err := cmd.Output()
+	if err != nil || !bytes.Contains(prompt, []byte("KAMACU_PROJECT_CONTEXT")) {
+		t.Fatalf("Codex did not load the project context instruction: %v", err)
+	}
 	if _, err := fresh.Disable(context.Background(), "codex"); err != nil {
 		t.Fatal(err)
 	}

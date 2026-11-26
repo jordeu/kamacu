@@ -20,8 +20,11 @@ import (
 var engines = []string{"claude", "codex", "opencode"}
 
 type engineState struct {
-	Enabled bool   `json:"enabled"`
-	MCPHash string `json:"mcp_hash,omitempty"`
+	InstructionPath        string `json:"instruction_path,omitempty"`
+	InstructionFileCreated bool   `json:"instruction_file_created,omitempty"`
+	InstructionHash        string `json:"instruction_hash,omitempty"`
+	Enabled                bool   `json:"enabled"`
+	MCPHash                string `json:"mcp_hash,omitempty"`
 }
 type manifest struct {
 	Engines map[string]engineState `json:"engines"`
@@ -140,7 +143,7 @@ func (m *Manager) lock() (func(), error) {
 	return func() { unix.Flock(int(f.Fd()), unix.LOCK_UN); f.Close(); m.mu.Unlock() }, nil
 }
 func (m *Manager) status(ctx context.Context, s *manifest, engine string) Status {
-	out := Status{Engine: engine, Enabled: s.Engines[engine].Enabled, Managed: s.Engines[engine].Enabled || s.Engines[engine].MCPHash != ""}
+	out := Status{Engine: engine, Enabled: s.Engines[engine].Enabled, Managed: s.Engines[engine].Enabled || s.Engines[engine].MCPHash != "" || s.Engines[engine].InstructionPath != ""}
 	_, err := m.lookPath(engine)
 	out.Available = err == nil
 	if !out.Available {
@@ -165,6 +168,7 @@ func (m *Manager) status(ctx context.Context, s *manifest, engine string) Status
 	default:
 		out.MCP = "conflict"
 	}
+	out.Message = m.instructionStatus(s.Engines[engine], engine)
 	return out
 }
 func (m *Manager) Status(ctx context.Context) ([]Status, error) {
@@ -237,9 +241,11 @@ func (m *Manager) enable(ctx context.Context, s *manifest, engine string) error 
 		}
 		e.MCPHash = digest(canonical(r.entry))
 		s.Engines[engine] = e
-		return m.save(s)
+		if err := m.save(s); err != nil {
+			return err
+		}
 	}
-	return nil
+	return m.installInstructions(s, engine)
 }
 
 // Disable stops future updates first, then removes only unchanged managed parts.
@@ -279,6 +285,9 @@ func (m *Manager) Disable(ctx context.Context, engine string) (Status, error) {
 		s.Engines[engine] = e
 	}
 	if err = m.save(s); err != nil {
+		notes = append(notes, err)
+	}
+	if err := m.removeInstructions(s, engine); err != nil {
 		notes = append(notes, err)
 	}
 	out := m.status(ctx, s, engine)

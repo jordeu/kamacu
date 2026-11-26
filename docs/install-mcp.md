@@ -89,7 +89,7 @@ For Claude Code, Codex, or OpenCode, use the bundled installer:
 <KAMACU_BIN> integration status
 ```
 
-This registers the user-level MCP server. No separate download or startup prompt is needed. The same controls are
+This registers the user-level MCP server and installs the global instruction for [project instructions and skills](agent-integration.md#project-instructions-and-skills). No separate download or startup prompt is needed. The same controls are
 available under **Settings → Agents → Kamacu integration**. Setup affects the
 user account running Kamacu on the server host; it does not configure a browser
 visitor's computer. Start a new agent session afterward, then verify step 4.
