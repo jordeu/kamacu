@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Maximize, Minimize } from "lucide-react";
 import type { Artifact } from "@/api/artifacts";
+import { followVisualViewport, isolateFullscreenPane } from "@/components/terminal/fullscreenViewport";
 import { Button } from "@/components/ui/button";
 
 // The displayed revision is intentionally independent of the polled revision.
@@ -7,19 +9,69 @@ import { Button } from "@/components/ui/button";
 export function ArtifactTab({ artifact, active }: { artifact: Artifact; active: boolean }) {
   const [revision, setRevision] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const paneRef = useRef<HTMLDivElement>(null);
   if (active && revision === null) setRevision(artifact.revision);
+  if (!active && fullscreen) setFullscreen(false);
+
+  useEffect(() => {
+    if (!fullscreen || !paneRef.current) return;
+    const detachViewport = followVisualViewport(paneRef.current);
+    const restoreBackground = isolateFullscreenPane(paneRef.current);
+    return () => {
+      detachViewport();
+      restoreBackground();
+    };
+  }, [fullscreen]);
 
   function reload() {
     setRevision(artifact.revision);
     setAttempt((value) => value + 1);
   }
 
+  const fullscreenLabel = fullscreen ? "Exit full screen" : "Full screen artifact";
+
   return (
-    <div className="flex h-full min-h-[320px] flex-col gap-2">
-      {revision !== null && revision !== artifact.revision && (
-        <div role="status" className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-          <span>Updated</span>
-          <Button variant="outline" size="sm" onClick={reload}>Reload</Button>
+    <div
+      ref={paneRef}
+      role={fullscreen ? "dialog" : undefined}
+      aria-modal={fullscreen ? true : undefined}
+      aria-label={fullscreen ? artifact.title : undefined}
+      data-state={fullscreen ? "open" : undefined}
+      onKeyDown={(event) => {
+        if (fullscreen && event.key === "Escape" && !event.defaultPrevented) {
+          event.stopPropagation();
+          setFullscreen(false);
+        }
+      }}
+      className={`flex flex-col gap-2 ${fullscreen
+        ? "fixed inset-0 z-50 h-dvh overflow-hidden bg-background pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]"
+        : "h-full min-h-[320px]"}`}
+    >
+      {active && revision && (
+        <div className={`flex shrink-0 items-center gap-2 ${fullscreen
+          ? "pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
+          : ""}`}>
+          {revision !== artifact.revision && (
+            <div role="status" className="flex flex-1 items-center justify-between gap-3 text-sm text-muted-foreground">
+              <span>Updated</span>
+              <Button variant="outline" size="sm" onClick={reload}>Reload</Button>
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="ml-auto"
+            aria-label={fullscreenLabel}
+            title={fullscreenLabel}
+            onClick={(event) => {
+              event.currentTarget.focus();
+              setFullscreen((expanded) => !expanded);
+            }}
+          >
+            {fullscreen ? <Minimize /> : <Maximize />}
+          </Button>
         </div>
       )}
       {revision && (
@@ -112,7 +164,7 @@ function ArtifactPreview({ title, url, onRetry }: {
         src={`${url}?preview_token=${encodeURIComponent(token)}`}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        className="min-h-[320px] w-full flex-1 border-0 bg-white"
+        className="min-h-0 w-full flex-1 border-0 bg-white"
         onLoad={() => { progress.current.loaded = true; finishLoading(); }}
         onError={() => {
           if (timeout.current !== null) clearTimeout(timeout.current);

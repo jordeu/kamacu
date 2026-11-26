@@ -16,7 +16,7 @@ func renderArtifactHTML(w io.Writer, source io.Reader, token string, connectionA
 	}
 	encodedToken, _ := json.Marshal(token)
 	if _, err := fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Artifact preview</title></head><body><p id="preview-status">Checking preview restrictions…</p><script>
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", () => setTimeout(() => {
   const token = %s;
   const report = status => parent.postMessage({kind: "kamacu-artifact-preview", token, status}, "*");
 `, encodedToken); err != nil {
@@ -69,15 +69,16 @@ document.addEventListener("DOMContentLoaded", () => {
 		return err
 	}
 	_, err := io.WriteString(w, `"), character => character.charCodeAt(0)));
-  report("ready");
-  // Wait for the wrapper parser to finish: document.open() is ignored when
-  // called by a parser-executed inline script, leaving the status in the page.
+  // Start a new task after the wrapper's parser has finished handling
+  // DOMContentLoaded. Reopening the document during that event can strand
+  // deferred and module scripts in the new parser.
   // document.open preserves the response's policy container; the new content
   // remains subject to the CSP sandbox and any enabled connection allowlist.
   document.open();
+  window.addEventListener("load", () => report("ready"), {once: true});
   document.write(content);
   document.close();
-}, {once: true});
+}, 0), {once: true});
 </script></body></html>`)
 	return err
 }
