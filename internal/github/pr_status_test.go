@@ -188,6 +188,103 @@ func TestPRStatusChecksAndIncompleteData(t *testing.T) {
 		t.Fatal(got.CI)
 	}
 }
+
+func TestPRStatusReconcilesSupersededCheckFailure(t *testing.T) {
+	for _, tt := range []struct {
+		name, currentStatus, currentConclusion, workflow, want string
+		complete, reverse                                      bool
+		jobs                                                   int
+	}{
+		{"successful rerun", "COMPLETED", "SUCCESS", "lint", "pass", true, false, 1},
+		{"successful rerun listed first", "COMPLETED", "SUCCESS", "lint", "pass", true, true, 1},
+		{"queued rerun", "QUEUED", "", "lint", "pending", true, false, 1},
+		{"failed rerun", "COMPLETED", "FAILURE", "lint", "fail", true, false, 1},
+		{"unknown result", "COMPLETED", "", "lint", "fail", true, false, 1},
+		{"different workflow", "COMPLETED", "SUCCESS", "another-lint", "fail", true, false, 2},
+		{"incomplete checks", "COMPLETED", "SUCCESS", "lint", "fail", false, false, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := statusRerunFixture(t)
+			rollup := p.Commits.Nodes[0].Commit.Rollup
+			checks := rollup.Contexts.Nodes
+			checks[1].Status = tt.currentStatus
+			checks[1].Conclusion = tt.currentConclusion
+			checks[1].CheckSuite.WorkflowRun.Workflow.ID = tt.workflow
+			if tt.reverse {
+				checks[0], checks[1] = checks[1], checks[0]
+			}
+			complete := statusComplete()
+			complete["Checks"] = tt.complete
+			got := reducePRStatus(p, complete).CI
+			if got.State != tt.want || len(got.Jobs) != tt.jobs {
+				t.Fatalf("CI = %+v, want %s with %d jobs", got, tt.want, tt.jobs)
+			}
+		})
+	}
+}
+
+func statusRerunFixture(t *testing.T) statusPRRaw {
+	t.Helper()
+	p := statusFixture(t)
+	rollup := p.Commits.Nodes[0].Commit.Rollup
+	rollup.State = "FAILURE"
+	if err := json.Unmarshal([]byte(`[
+		{"__typename":"CheckRun","name":"Validate PR title","databaseId":1,"status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-11-26T13:47:17Z","checkSuite":{"app":{"slug":"github-actions"},"workflowRun":{"workflow":{"id":"lint"},"runNumber":1,"runAttempt":1}}},
+		{"__typename":"CheckRun","name":"Validate PR title","databaseId":2,"status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-26T13:47:22Z","checkSuite":{"app":{"slug":"github-actions"},"workflowRun":{"workflow":{"id":"lint"},"runNumber":2,"runAttempt":1}}}
+	]`), &rollup.Contexts.Nodes); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPRStatusKeepsFailuresWithoutVerifiedReplacement(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		change func(*statusRollup)
+	}{
+		{"workflow unavailable", func(rollup *statusRollup) {
+			for i := range rollup.Contexts.Nodes {
+				rollup.Contexts.Nodes[i].CheckSuite.WorkflowRun.Workflow.ID = ""
+			}
+		}},
+		{"replacement run ID unavailable", func(rollup *statusRollup) {
+			rollup.Contexts.Nodes[1].DatabaseID = 0
+		}},
+		{"same workflow execution", func(rollup *statusRollup) {
+			rollup.Contexts.Nodes[1].CheckSuite.WorkflowRun.RunNumber = 1
+		}},
+		{"rollup error", func(rollup *statusRollup) {
+			rollup.State = "ERROR"
+		}},
+		{"independent legacy failure with tied timestamp", func(rollup *statusRollup) {
+			success := statusCheckRaw{checkEntry: checkEntry{
+				Typename: "StatusContext", Context: "external CI", State: "SUCCESS", CreatedAt: "2026-11-26T13:48:00Z",
+			}}
+			failure := success
+			failure.State = "FAILURE"
+			rollup.Contexts.Nodes = append(rollup.Contexts.Nodes, success, failure)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := statusRerunFixture(t)
+			tt.change(p.Commits.Nodes[0].Commit.Rollup)
+			if got := reducePRStatus(p, statusComplete()).CI; got.State != "fail" {
+				t.Fatalf("CI = %+v, want fail", got)
+			}
+		})
+	}
+}
+
+func TestPRStatusReconcilesLaterWorkflowAttempt(t *testing.T) {
+	p := statusRerunFixture(t)
+	rerun := &p.Commits.Nodes[0].Commit.Rollup.Contexts.Nodes[1].CheckSuite.WorkflowRun
+	rerun.RunNumber = 1
+	rerun.RunAttempt = 2
+	if got := reducePRStatus(p, statusComplete()).CI; got.State != "pass" {
+		t.Fatalf("CI = %+v, want pass", got)
+	}
+}
+
 func statusEnvelope(t *testing.T, p statusPRRaw) []byte {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": p}}})

@@ -102,7 +102,13 @@ type statusRequest struct {
 type statusCheckRaw struct {
 	checkEntry
 	DatabaseID int64 `json:"databaseId"`
-	CheckSuite struct{ App struct{ Slug string } }
+	CheckSuite struct {
+		App         struct{ Slug string }
+		WorkflowRun struct {
+			Workflow              struct{ ID string }
+			RunNumber, RunAttempt int
+		}
+	}
 }
 type statusRollup struct {
 	State    string
@@ -377,21 +383,8 @@ func reducePRStatus(p statusPRRaw, complete map[string]bool) PRStatus {
 	}
 	humansKnown := complete["Reviews"] && complete["Requests"]
 	botsKnown := humansKnown && complete["Threads"] && complete["Comments"] && threadActorsKnown
-	var rawChecks []statusCheckRaw
-	if p.Commits.Nodes[0].Commit.Rollup != nil {
-		rawChecks = p.Commits.Nodes[0].Commit.Rollup.Contexts.Nodes
-	}
-	latest := map[string]statusCheckRaw{}
-	for _, c := range rawChecks {
-		key := c.identity() + ":" + c.CheckSuite.App.Slug
-		if prev, ok := latest[key]; !ok || newerPRCheck(c, prev) {
-			latest[key] = c
-		}
-	}
-	rawChecks = make([]statusCheckRaw, 0, len(latest))
-	for _, c := range latest {
-		rawChecks = append(rawChecks, c)
-	}
+	rollup := p.Commits.Nodes[0].Commit.Rollup
+	latest := latestPRChecks(rollup)
 	for _, e := range people {
 		r := StatusReviewer{Login: e.actor.Login, State: "none"}
 		if e.actor.Kind == "Bot" {
@@ -444,7 +437,7 @@ func reducePRStatus(p statusPRRaw, complete map[string]bool) PRStatus {
 						}
 					}
 				}
-				for _, c := range rawChecks {
+				for _, c := range latest {
 					slug := c.CheckSuite.App.Slug
 					if slug != "" && strings.EqualFold(slug, strings.TrimSuffix(e.actor.Login, "[bot]")) && c.Status != "COMPLETED" && c.Typename == "CheckRun" {
 						r.State = "running"
@@ -490,27 +483,6 @@ func reducePRStatus(p statusPRRaw, complete map[string]bool) PRStatus {
 	sort.Slice(out.Bots.Reviewers, func(i, j int) bool { return out.Bots.Reviewers[i].Login < out.Bots.Reviewers[j].Login })
 	out.Humans.State = reviewGroupState(out.Humans.Reviewers, humansKnown, false)
 	out.Bots.State = reviewGroupState(out.Bots.Reviewers, botsKnown, true)
-	if complete["Checks"] {
-		out.CI.State = "none"
-		if p.Commits.Nodes[0].Commit.Rollup != nil {
-			switch p.Commits.Nodes[0].Commit.Rollup.State {
-			case "SUCCESS":
-				out.CI.State = "pass"
-			case "FAILURE", "ERROR":
-				out.CI.State = "fail"
-			case "PENDING", "EXPECTED":
-				out.CI.State = "pending"
-			default:
-				out.CI.State = "unknown"
-			}
-		}
-	}
-	if !complete["Checks"] && p.Commits.Nodes[0].Commit.Rollup != nil {
-		state := p.Commits.Nodes[0].Commit.Rollup.State
-		if state == "FAILURE" || state == "ERROR" {
-			out.CI.State = "fail"
-		}
-	}
 	for _, c := range latest {
 		name := c.Name
 		if c.Typename == "StatusContext" {
@@ -524,10 +496,97 @@ func reducePRStatus(p statusPRRaw, complete map[string]bool) PRStatus {
 		out.CI.Jobs = append(out.CI.Jobs, StatusCheck{name, state, strings.ToLower(detail)})
 	}
 	sort.Slice(out.CI.Jobs, func(i, j int) bool { return out.CI.Jobs[i].Name < out.CI.Jobs[j].Name })
+	out.CI.State = prCIState(rollup, complete["Checks"], latest)
 	if !humansKnown || !botsKnown || !complete["Checks"] {
 		out.Error = "Some PR status details are incomplete"
 	}
 	return out
+}
+
+type prCheckKey struct{ identity, app, workflow string }
+
+func (c statusCheckRaw) key() prCheckKey {
+	return prCheckKey{c.identity(), c.CheckSuite.App.Slug, c.CheckSuite.WorkflowRun.Workflow.ID}
+}
+
+func latestPRChecks(rollup *statusRollup) map[prCheckKey]statusCheckRaw {
+	if rollup == nil {
+		return nil
+	}
+	latest := make(map[prCheckKey]statusCheckRaw, len(rollup.Contexts.Nodes))
+	for _, check := range rollup.Contexts.Nodes {
+		key := check.key()
+		if previous, exists := latest[key]; !exists || newerPRCheck(check, previous) {
+			latest[key] = check
+		}
+	}
+	return latest
+}
+
+func prCIState(rollup *statusRollup, complete bool, latest map[prCheckKey]statusCheckRaw) string {
+	if rollup != nil && (rollup.State == "FAILURE" || rollup.State == "ERROR") {
+		if complete && rollup.State == "FAILURE" {
+			return reconcilePRCheckFailure(rollup.Contexts.Nodes, latest)
+		}
+		return "fail"
+	}
+	if !complete {
+		return "unknown"
+	}
+	if rollup == nil {
+		return "none"
+	}
+	switch rollup.State {
+	case "SUCCESS":
+		return "pass"
+	case "PENDING", "EXPECTED":
+		return "pending"
+	default:
+		return "unknown"
+	}
+}
+
+func reconcilePRCheckFailure(checks []statusCheckRaw, latest map[prCheckKey]statusCheckRaw) string {
+	supersededFailure := false
+	for _, check := range checks {
+		switch prCheckState(check) {
+		case "unknown":
+			return "fail"
+		case "fail":
+			// Account for every failure before overriding GitHub's rollup.
+			// Name and timestamp alone can match independent jobs.
+			key := check.key()
+			replacement := latest[key]
+			if check.Typename != "CheckRun" || check.Name == "" || key.workflow == "" ||
+				!laterWorkflowRun(replacement, check) {
+				return "fail"
+			}
+			supersededFailure = true
+		}
+	}
+	if !supersededFailure {
+		return "fail"
+	}
+	for _, check := range latest {
+		if prCheckState(check) == "pending" {
+			return "pending"
+		}
+	}
+	return "pass"
+}
+
+func laterWorkflowRun(current, previous statusCheckRaw) bool {
+	if previous.DatabaseID <= 0 || current.DatabaseID <= previous.DatabaseID {
+		return false
+	}
+	a, b := current.CheckSuite.WorkflowRun, previous.CheckSuite.WorkflowRun
+	if b.RunNumber <= 0 {
+		return false
+	}
+	if a.RunNumber != b.RunNumber {
+		return a.RunNumber > b.RunNumber
+	}
+	return b.RunAttempt > 0 && a.RunAttempt > b.RunAttempt
 }
 
 // CheckRun has no creation timestamp. Its run ID distinguishes a new queued
