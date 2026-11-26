@@ -78,6 +78,9 @@ func (f *Folders) PrepareExisting(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	defer unlock()
+	if err := f.seedDefaultSkills(); err != nil {
+		return err
+	}
 	rows, err := db.QueryContext(ctx, "SELECT id FROM projects")
 	if err != nil {
 		return err

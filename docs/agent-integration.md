@@ -75,17 +75,17 @@ description: Use when reviewing SQLite schema changes.
 Read references/checklist.md and verify the upgrade from the previous release.
 ```
 
-To share a skill across projects, place its directory in `~/.kamacu/skills/`
-or link its original directory there. For example, to share two skills maintained
-in another Git checkout, run the following on the server host with the checkout
-path filled in.
+On server startup, Kamacu installs two bundled skills as ordinary files under
+`~/.kamacu/skills/`, even before the first project exists.
 
-```sh
-director=/path/to/kamacu-director
-mkdir -p ~/.kamacu/skills
-ln -s "$director/.claude/skills/find-project" ~/.kamacu/skills/find-project
-ln -s "$director/.claude/skills/new-task" ~/.kamacu/skills/new-task
-```
+- `find-project` identifies projects using Kamacu’s project list.
+- `new-task` checks the project board for duplicates and creates a task when requested.
+
+Both skills ship in the Kamacu binary and work without a separate checkout or
+download. Startup fills in missing files and preserves edits to installed
+skills. To restore a bundled version, remove its shared `SKILL.md` and restart
+the server. Place additional skill directories in the same library to make
+them available across projects.
 
 Kamacu links each library entry containing a regular `SKILL.md` into the
 project’s `context/skills/`. Editing the original updates every linked project
