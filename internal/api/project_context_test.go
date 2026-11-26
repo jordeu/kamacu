@@ -68,9 +68,27 @@ func TestProjectDeletionArchivesContextBeforeIDReuse(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	repo := gitRepo(t)
+	// A blocked library must not register a project that the client saw fail.
+	library := filepath.Join(root, "skills")
+	if err := os.WriteFile(library, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := doJSON(t, "POST", srv.URL+"/api/projects", map[string]any{"repo_path": repo}); status != 500 {
+		t.Fatal(status, body)
+	}
+	if err := os.Remove(library); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(library, "shared", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("shared"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	id := createProject(t, srv, repo)
 	dir := folders.Directory(id)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "skills", "shared", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "instructions.md"), []byte("original"), 0600); err != nil {
@@ -115,12 +133,18 @@ func TestProjectDeletionArchivesContextBeforeIDReuse(t *testing.T) {
 	if next := createProject(t, srv, repo); next != id {
 		t.Fatalf("expected reuse, got %d", next)
 	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "instructions.md")); !os.IsNotExist(err) {
 		t.Fatal("inherited context", err)
 	}
 	archives, err := filepath.Glob(filepath.Join(root, "instances", "*", "archive", "projects", fmt.Sprint(id), "*", "context", "instructions.md"))
 	if err != nil || len(archives) != 1 {
 		t.Fatal(archives, err)
+	}
+	for _, contextDir := range []string{dir, filepath.Dir(archives[0])} {
+		link := filepath.Join(contextDir, "skills", "shared")
+		if got, err := os.Readlink(link); err != nil || got != filepath.Dir(source) {
+			t.Fatalf("skill link %s = %q, %v", link, got, err)
+		}
 	}
 }
 

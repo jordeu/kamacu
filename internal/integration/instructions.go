@@ -16,8 +16,9 @@ const instructionBlock = "\n" + blockStart + `
 When starting or resuming a task, check the environment variable KAMACU_PROJECT_CONTEXT.
 If it names an existing directory, read instructions.md there when present. Inspect the
 names and descriptions in skills/*/SKILL.md. Whenever a skill matches the task, read
-its current SKILL.md and resolve supporting files relative to its directory. If the
-variable is unset or the folder is absent, proceed normally. Report unreadable files.
+its current SKILL.md. Follow directory symlinks to find supporting files alongside
+the skill. Resolve references to the skill's own repository from that repository's root.
+If the variable is unset or the folder is absent, proceed normally. Report unreadable files.
 ` + blockEnd + "\n"
 
 func optionalFile(path string) ([]byte, error) {

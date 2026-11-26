@@ -51,8 +51,9 @@ forwards their names into the MCP subprocess environment.
 
 ## Project instructions and skills
 
-Find the project ID in its Kamacu URL. For project 12 on the default database,
-create whichever of these files you need under the server account’s home:
+Kamacu creates a context folder with a `skills/` directory for each project on
+creation and fills in missing folders at server startup. Find the project ID in
+its Kamacu URL. This example shows project 12 on the default database.
 
 ```text
 ~/.kamacu/projects/12/context/
@@ -74,13 +75,33 @@ description: Use when reviewing SQLite schema changes.
 Read references/checklist.md and verify the upgrade from the previous release.
 ```
 
+To share a skill across projects, place its directory in `~/.kamacu/skills/`
+or link its original directory there. For example, to share two skills maintained
+in another Git checkout, run the following on the server host with the checkout
+path filled in.
+
+```sh
+director=/path/to/kamacu-director
+mkdir -p ~/.kamacu/skills
+ln -s "$director/.claude/skills/find-project" ~/.kamacu/skills/find-project
+ln -s "$director/.claude/skills/new-task" ~/.kamacu/skills/new-task
+```
+
+Kamacu links each library entry containing a regular `SKILL.md` into the
+project’s `context/skills/`. Editing the original updates every linked project
+immediately. Startup and agent Start or Resume pick up newly shared skills and
+remove links to retired entries. A file, directory or custom link with the
+same name in a project takes precedence. To customize a shared skill for just
+one project, replace its project link with a local skill directory. Custom
+database instances share the same library on the host.
+
 On Start and Resume, an enabled agent receives the absolute directory in
 `KAMACU_PROJECT_CONTEXT`. Its global instruction tells it to read the current
 guidance, discover the skills, and read a matching skill when needed. Changes
-are visible the next time the agent reads a file. The folder and both kinds of
-content are optional. Skills are read through the agent’s ordinary file tools.
+are visible the next time the agent reads a file. Project instructions and local
+skills are optional. Skills are read through the agent’s ordinary file tools.
 An agent that requests permission for directories outside its worktree may
-prompt for read access to the project’s context folder.
+prompt for read access to the context folder and shared skill sources.
 Scratchpad, shell tabs and custom agents do not receive the variable.
 
 The integration installs its block in Claude’s user `CLAUDE.md`, Codex’s
@@ -90,8 +111,8 @@ the block. Repair preserves edits to the block and surrounding guidance.
 Disable removes unchanged managed instructions when the last owner releases them.
 
 Deleting the project archives its context at
-`~/.kamacu/archive/projects/<id>/<archive-id>/context/`. Copy files back
-manually to restore them. If deletion is interrupted and you have already
+`~/.kamacu/archive/projects/<id>/<archive-id>/context/`. Archived shared skills remain
+links to their source. Copy files back manually to restore them. If deletion is interrupted and you have already
 recreated the live folder, recovery keeps your current files there and places
 the previous copy in the archive. Removing a task or its worktree leaves project context
 in place. Custom databases use `~/.kamacu/instances/<hash>/` as the base

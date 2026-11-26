@@ -272,14 +272,40 @@ func (h *projectHandlers) create(w http.ResponseWriter, r *http.Request) {
 	// workspace when supplied, else the default Personal workspace. Set
 	// workspace_id explicitly so create never silently produces a workspace-less
 	// project (the column DEFAULT 1 is only a backstop).
-	p, err := scanProject(h.db.QueryRow(
+	p, err := h.insertProject(r.Context(),
 		`INSERT INTO projects (name, repo_path, icon_letters, icon_color, workspace_id, agent_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING `+projectColumns,
-		name, abs, deriveLetters(name), pickColor(), wsID, agID))
+		name, abs, deriveLetters(name), pickColor(), wsID, agID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+// Publish the new project only after its context is ready. Use the same lock
+// order as deletion so a reused ID cannot race an in-progress archive.
+func (h *projectHandlers) insertProject(ctx context.Context, query string, args ...any) (Project, error) {
+	if h.folders == nil {
+		return scanProject(h.db.QueryRowContext(ctx, query, args...))
+	}
+	unlock, err := h.folders.LockArchive()
+	if err != nil {
+		return Project{}, err
+	}
+	defer unlock()
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Project{}, err
+	}
+	defer tx.Rollback()
+	p, err := scanProject(tx.QueryRowContext(ctx, query, args...))
+	if err != nil {
+		return Project{}, err
+	}
+	if err := h.folders.Ensure(p.ID); err != nil {
+		return Project{}, err
+	}
+	return p, tx.Commit()
 }
 
 // defaultWorkspaceID resolves the protected default workspace (D-02: identified
@@ -441,9 +467,9 @@ func (h *projectHandlers) createByRepo(w http.ResponseWriter, r *http.Request, r
 	// workspace when supplied, else the default Personal workspace. The literal
 	// `1` in the VALUES list is the `managed` marker (repo-first clones are
 	// Kamacu-owned) — workspace_id gets its own `?` placeholder + wsID arg.
-	p, err := scanProject(h.db.QueryRow(
+	p, err := h.insertProject(r.Context(),
 		`INSERT INTO projects (name, repo_path, github_repo, managed, description, icon_letters, icon_color, workspace_id, agent_id) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?) RETURNING `+projectColumns,
-		name, dest, canonical, desc, deriveLetters(name), pickColor(), wsID, agID))
+		name, dest, canonical, desc, deriveLetters(name), pickColor(), wsID, agID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

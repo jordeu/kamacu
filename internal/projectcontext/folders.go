@@ -17,11 +17,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type Folders struct{ root string }
+type Folders struct {
+	root         string
+	sharedSkills string
+}
 
 // New resolves aliases of the same database to the same instance directory.
 // Both the Kamacu directory and database already exist when the server starts.
 func New(home, database string) (*Folders, error) {
+	home, err := filepath.Abs(home)
+	if err != nil {
+		return nil, err
+	}
 	root, err := filepath.EvalSymlinks(home)
 	if err != nil {
 		return nil, err
@@ -34,6 +41,7 @@ func New(home, database string) (*Folders, error) {
 	if err != nil {
 		return nil, err
 	}
+	shared := filepath.Join(root, "skills")
 	def := filepath.Join(root, "kamacu.db")
 	if real, err := filepath.EvalSymlinks(def); err == nil {
 		def = real
@@ -41,7 +49,7 @@ func New(home, database string) (*Folders, error) {
 	if path != def {
 		root = filepath.Join(root, "instances", fmt.Sprintf("%x", sha256.Sum256([]byte(path))))
 	}
-	return &Folders{root}, nil
+	return &Folders{root: root, sharedSkills: shared}, nil
 }
 
 func (f *Folders) Directory(projectID int64) string {

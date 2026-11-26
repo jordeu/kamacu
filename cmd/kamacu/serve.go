@@ -260,6 +260,9 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	if err == nil {
 		err = folders.Recover(ctx, db)
 	}
+	if err == nil {
+		err = folders.PrepareExisting(ctx, db)
+	}
 	if err != nil {
 		slog.Error("initialize project context folders", "error", err)
 		return subcommands.ExitFailure
@@ -276,7 +279,7 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 			if err != nil || !enabled {
 				return "", err
 			}
-			return folders.Directory(id), nil
+			return folders.PrepareForLaunch(ctx, db, id)
 		},
 		// Optional MCP tools run on the server host. hookBaseURL
 		// normalizes a wildcard --addr host (0.0.0.0 / :: / empty) to
