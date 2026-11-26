@@ -20,7 +20,7 @@ func IntegrationRoutes(mux *http.ServeMux, manager *integration.Manager) {
 	mux.HandleFunc("POST /api/integrations/{engine}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		engine := r.PathValue("engine")
 		action := r.PathValue("action")
-		if engine != "claude" && engine != "codex" && engine != "opencode" {
+		if !integration.SupportsEngine(engine) {
 			writeError(w, 400, "unsupported agent engine")
 			return
 		}

@@ -20,6 +20,11 @@ import (
 
 var engines = []string{"claude", "codex", "opencode", "pi"}
 
+// SupportsEngine reports whether the integration manager supports the engine.
+func SupportsEngine(engine string) bool {
+	return slices.Contains(engines, engine)
+}
+
 type engineState struct {
 	InstructionPath        string `json:"instruction_path,omitempty"`
 	InstructionFileCreated bool   `json:"instruction_file_created,omitempty"`
@@ -193,7 +198,7 @@ func (m *Manager) Status(ctx context.Context) ([]Status, error) {
 
 // Enable also repairs missing registrations. Modified or unowned entries are never replaced.
 func (m *Manager) Enable(ctx context.Context, engine string) (Status, error) {
-	if !slices.Contains(engines, engine) {
+	if !SupportsEngine(engine) {
 		return Status{}, fmt.Errorf("unsupported agent engine")
 	}
 	unlock, err := m.lock()
@@ -256,7 +261,7 @@ func (m *Manager) enable(ctx context.Context, s *manifest, engine string) error 
 
 // Disable stops future updates first, then removes only unchanged managed parts.
 func (m *Manager) Disable(ctx context.Context, engine string) (Status, error) {
-	if !slices.Contains(engines, engine) {
+	if !SupportsEngine(engine) {
 		return Status{}, fmt.Errorf("unsupported agent engine")
 	}
 	unlock, err := m.lock()
