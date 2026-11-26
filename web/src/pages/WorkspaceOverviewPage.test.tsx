@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   tasks: vi.fn(),
   reviews: vi.fn(),
   settings: vi.fn(),
+  visibility: vi.fn(),
 }));
 vi.mock("@/api/queries", () => ({
   useWorkspaces: () => ({ data: [{ id: 1, name: "Seqera" }] }),
@@ -41,7 +42,7 @@ vi.mock("@/api/settings", () => ({ useSettings: mocks.settings }));
 vi.mock("@/api/agents", () => ({ useAgentStatuses: () => ({ data: [] }) }));
 vi.mock("@/api/pullRequests", () => ({
   useOpenReview: () => ({ isPending: false, isError: false }),
-  useSetPRHidden: () => ({ isPending: false, isError: false }),
+  useSetPRHidden: mocks.visibility,
 }));
 vi.mock("@/lib/useActiveWorkspace", () => ({
   useActiveWorkspace: () => ({ setActiveWorkspaceId: () => {} }),
@@ -62,6 +63,7 @@ const cached = {
   data: { state: "ok", stale: false, fetchedAt: pr.updatedAt, prs: [pr] },
 };
 beforeEach(() => {
+  mocks.visibility.mockReset().mockReturnValue({ isPending: false, isError: false });
   mocks.tasks.mockReturnValue({ data: [], dataUpdatedAt: 1795075200000 });
   mocks.reviews.mockReturnValue({
     data: [cached],
@@ -119,6 +121,7 @@ it("renders three board columns using project task cards and project badges", ()
   expect(html).toContain('aria-label="Filter to sched"');
   expect(html).not.toContain("Show all");
   expect(html).toContain(pr.url);
+  expect(html).toContain('aria-label="Hide PR #17"');
 });
 
 it("distinguishes matching task titles and PR numbers across projects", () => {
@@ -154,6 +157,7 @@ it("distinguishes matching task titles and PR numbers across projects", () => {
       `aria-label="Open https://github.com/org/${project}/pull/17 on GitHub (opens in a new tab)"`,
     );
   }
+  expect(mocks.visibility.mock.calls.map(([id]) => id)).toEqual([1, 2]);
 });
 
 it("never reports an unknown PR queue as zero or caught up", () => {

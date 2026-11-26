@@ -127,6 +127,32 @@ it("leaves cached visibility unchanged when saving fails", async () => {
   }
 });
 
+it("hides from overview without a cached project board even when overview refresh fails", async () => {
+  const { client, visibility, data } = visibilityEnv();
+  client.removeQueries({ queryKey: ["pull-requests", 1] });
+  const refetch = vi.fn(async () => { throw new Error("offline"); });
+  const observer = new QueryObserver(client, {
+    queryKey: ["workspace-reviews", 1], queryFn: refetch, staleTime: Infinity,
+  });
+  const unsubscribe = observer.subscribe(() => {});
+  const save = vi.fn(async () => Response.json({ hidden: true }));
+  vi.stubGlobal("fetch", save);
+  try {
+    await visibility.mutateAsync({ number: 7, hidden: true });
+    expect(save).toHaveBeenCalledWith("/api/projects/1/pull-requests/7/visibility", expect.objectContaining({
+      method: "PUT", body: JSON.stringify({ hidden: true }),
+    }));
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(client.getQueryData(["pull-requests", 1])).toBeUndefined();
+    const overview = client.getQueryData<ProjectReviewQueue[]>(["workspace-reviews", 1])!;
+    expect(overview[0].data?.prs?.map((pr) => pr.number)).toEqual([8]);
+    expect(overview[1].data).toEqual(data);
+  } finally {
+    unsubscribe();
+    client.clear();
+  }
+});
+
 it("isolates different PR numbers while retaining the matching open-time cache", () => {
   const client = new QueryClient();
   const url = "https://github.com/seqeralabs/sched/pull/1939";
