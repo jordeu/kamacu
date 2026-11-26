@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"kamacu/internal/pi"
 	"kamacu/internal/session"
 )
 
@@ -98,6 +99,7 @@ type pendingCandidate struct {
 	pendingItem
 	status, engine, conversation string
 	worktree                     sql.NullString
+	piRoot                       string
 	inbox                        bool
 	live                         *session.Session
 }
@@ -105,8 +107,9 @@ type pendingCandidate struct {
 // One DB scan and one manager snapshot for previews, with a lazy transcript
 // index shared across all cards. No per-card subprocesses or frontend fan-out.
 func (h *sessionHandlers) pendingCandidates(f pendingFilter, taskID int64) ([]pendingCandidate, error) {
+	piRoot, _ := pi.SessionRoot(h.db)
 	rows, err := h.db.Query(`SELECT t.id, t.project_id, t.title, p.name, t.status, t.worktree_path, a.engine,
- CASE a.engine WHEN 'claude' THEN COALESCE(t.claude_session_id,'') WHEN 'codex' THEN COALESCE(t.codex_session_id,'') WHEN 'opencode' THEN COALESCE(t.opencode_session_id,'') ELSE '' END,
+ CASE a.engine WHEN 'claude' THEN COALESCE(t.claude_session_id,'') WHEN 'codex' THEN COALESCE(t.codex_session_id,'') WHEN 'opencode' THEN COALESCE(t.opencode_session_id,'') WHEN 'pi' THEN COALESCE(t.pi_session_id,'') ELSE '' END,
  EXISTS(SELECT 1 FROM inbox_questions q WHERE q.task_id=t.id AND q.publishing=0 AND q.status='pending')
  FROM tasks t JOIN projects p ON p.id=t.project_id JOIN agents a ON a.id=COALESCE(t.agent_id,p.agent_id)
  WHERE t.source='manual' AND t.snoozed_until IS NULL AND t.status IN ('in_review','in_progress')
@@ -138,6 +141,7 @@ func (h *sessionHandlers) pendingCandidates(f pendingFilter, taskID int64) ([]pe
 			continue
 		}
 		c.live = live[c.TaskID]
+		c.piRoot = piRoot
 		c.State = "queued"
 		if reason := c.reason(f, lookup); reason != "" {
 			c.State = "skipped"
@@ -177,7 +181,8 @@ func (c pendingCandidate) reason(f pendingFilter, transcript func(string) bool) 
 	if c.conversation == "" {
 		return "No previous conversation to resume"
 	}
-	if c.engine == "claude" && !transcript(c.conversation) {
+	if c.engine == "claude" && !transcript(c.conversation) ||
+		c.engine == "pi" && !pi.CanResume(c.piRoot, c.TaskID, c.conversation, c.worktree.String) {
 		return "Previous conversation is unavailable"
 	}
 	return ""
@@ -392,7 +397,7 @@ func (q *pendingQueue) check(f pendingFilter, i int, taskID int64) {
 	reopened := sess == nil
 	if reopened {
 		var spawnErr *sessionCreateError
-		sess, spawnErr = q.sessions.createSession(sessionCreateRequest{TaskID: taskID, Kind: "agent", Resume: true, Pending: &f, PendingBeforeSpawn: q.waitDispatch})
+		sess, spawnErr = q.sessions.createSession(sessionCreateRequest{ctx: q.ctx, TaskID: taskID, Kind: "agent", Resume: true, Pending: &f, PendingBeforeSpawn: q.waitDispatch})
 		if spawnErr != nil {
 			state := "failed"
 			if spawnErr.status == 409 {

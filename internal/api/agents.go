@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"kamacu/internal/pi"
 	"kamacu/internal/session"
 )
 
@@ -71,13 +72,33 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	// engine + ocsid/cxid (M002/S03 + codex) drive the engine-branched
 	// resumable gate: opencode and codex key off their persisted *_session_id
 	// alone (NO transcript glob — neither has kamacu-side transcript files);
-	// claude keys off csid + transcript unchanged.
+	// Claude and Pi also require a transcript.
+	var piRoot string
+	piRootLoaded := false
+	canResumeTask := func(id int64, engine, cwd string, claudeID, openCodeID, piID sql.NullString) bool {
+		switch engine {
+		case "opencode":
+			return openCodeID.Valid
+		case "codex":
+			return true
+		case "pi":
+			if !piRootLoaded {
+				piRoot, _ = pi.SessionRoot(a.db)
+				piRootLoaded = true
+			}
+			return pi.CanResume(piRoot, id, piID.String, cwd)
+		default:
+			return claudeID.Valid && transcriptAvailable(claudeID.String)
+		}
+	}
+
 	type taskMeta struct {
 		projectID   int64
 		engine      string
 		csid        sql.NullString
 		ocsid       sql.NullString
 		cxid        sql.NullString
+		piID        sql.NullString
 		wtp         sql.NullString
 		prNumber    sql.NullInt64
 		source      string
@@ -106,7 +127,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for i, id := range order {
 			args[i] = id
 		}
-		rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.codex_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
+		rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.codex_session_id, tasks.pi_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
 			FROM tasks
 			JOIN projects ON projects.id = tasks.project_id
 			JOIN agents ON agents.id = COALESCE(tasks.agent_id, projects.agent_id)
@@ -119,7 +140,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var id int64
 			var m taskMeta
-			if err := rows.Scan(&id, &m.projectID, &m.engine, &m.csid, &m.ocsid, &m.cxid, &m.wtp, &m.prNumber, &m.source, &m.title, &m.projectName); err != nil {
+			if err := rows.Scan(&id, &m.projectID, &m.engine, &m.csid, &m.ocsid, &m.cxid, &m.piID, &m.wtp, &m.prNumber, &m.source, &m.title, &m.projectName); err != nil {
 				rows.Close()
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -138,15 +159,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 				continue // task deleted under a still-tracked session
 			}
 			info := newest[tid]
-			// Engine-branched resumable derivation (M002/S03 + codex): opencode
-			// and codex key off their persisted *_session_id alone (NO transcript
-			// glob — neither has kamacu-side transcript files, so the claude-only
-			// glob is always false for them); claude keys off csid + the
-			// transcript glob unchanged.
 			resumable := info.AgentStatus == "exited" && m.wtp.Valid &&
-				(m.engine == "opencode" && m.ocsid.Valid ||
-					m.engine == "codex" ||
-					m.engine != "opencode" && m.engine != "codex" && m.csid.Valid && transcriptAvailable(m.csid.String))
+				canResumeTask(tid, m.engine, m.wtp.String, m.csid, m.ocsid, m.piID)
 			entries = append(entries, agentStatusEntry{
 				TaskID:         tid,
 				ProjectID:      m.projectID,
@@ -219,40 +233,37 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	// entries is the whole reconciliation story: no startup mutation pass, no
 	// migration. Emit ONLY when resumable — non-resumable past sessions get no
 	// dot and the plain pre-start state (D-57 only constrains resumable tasks).
-	// M002/S03: widened to surface a persisted claude_session_id OR
-	// opencode_session_id OR codex_session_id, and engine-gates the resumability
-	// check (opencode/codex: own id alone, NO transcript glob; claude: csid +
-	// transcript).
-	rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.codex_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
+
+	rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.codex_session_id, tasks.pi_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
 		FROM tasks
 		JOIN projects ON projects.id = tasks.project_id
 		JOIN agents ON agents.id = COALESCE(tasks.agent_id, projects.agent_id)
-		WHERE (tasks.claude_session_id IS NOT NULL OR tasks.opencode_session_id IS NOT NULL OR tasks.codex_session_id IS NOT NULL OR agents.engine = 'codex') AND tasks.worktree_path IS NOT NULL`)
+		WHERE (tasks.claude_session_id IS NOT NULL OR tasks.opencode_session_id IS NOT NULL OR tasks.codex_session_id IS NOT NULL OR tasks.pi_session_id IS NOT NULL OR agents.engine = 'codex') AND tasks.worktree_path IS NOT NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	type persistedAgent struct {
-		id, pid                    int64
-		engine                     string
-		csid, ocsid, cxid, wtp     sql.NullString
-		prNumber                   sql.NullInt64
-		source, title, projectName string
+		id, pid                      int64
+		engine                       string
+		csid, ocsid, cxid, piID, wtp sql.NullString
+		prNumber                     sql.NullInt64
+		source, title, projectName   string
 	}
 	persisted := []persistedAgent{}
 	for rows.Next() {
 		var id, pid int64
 		var engine string
-		var csid, ocsid, cxid, wtp sql.NullString
+		var csid, ocsid, cxid, piID, wtp sql.NullString
 		var prNumber sql.NullInt64
 		var source string
 		var title, projectName string
-		if err := rows.Scan(&id, &pid, &engine, &csid, &ocsid, &cxid, &wtp, &prNumber, &source, &title, &projectName); err != nil {
+		if err := rows.Scan(&id, &pid, &engine, &csid, &ocsid, &cxid, &piID, &wtp, &prNumber, &source, &title, &projectName); err != nil {
 			rows.Close()
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		persisted = append(persisted, persistedAgent{id, pid, engine, csid, ocsid, cxid, wtp, prNumber, source, title, projectName})
+		persisted = append(persisted, persistedAgent{id, pid, engine, csid, ocsid, cxid, piID, wtp, prNumber, source, title, projectName})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -266,15 +277,7 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		if _, hasManagerEntry := newest[id]; hasManagerEntry {
 			continue // already covered by the manager-derived pass
 		}
-		// Engine-branched resumability check (M002/S03 + codex): opencode and
-		// codex key off their persisted *_session_id alone (NO transcript
-		// glob); claude keys off csid + the transcript glob unchanged. A
-		// non-resumable row (e.g. an exited claude task whose transcript was
-		// deleted) surfaces nothing.
-		resumable := engine == "opencode" && ocsid.Valid ||
-			engine == "codex" ||
-			engine != "opencode" && engine != "codex" && csid.Valid && transcriptAvailable(csid.String)
-		if !resumable {
+		if !canResumeTask(id, engine, meta.wtp.String, csid, ocsid, meta.piID) {
 			continue
 		}
 		// A post-restart PR-review session (github_pr task carrying a
@@ -332,6 +335,8 @@ type globalResumeState struct {
 	csid     sql.NullString
 	ocsid    sql.NullString
 	cxid     sql.NullString
+	piID     sql.NullString
+	piRoot   string
 }
 
 // loadGlobalResumeState reads the singleton + its agent's engine (read-at-use
@@ -341,12 +346,15 @@ type globalResumeState struct {
 func (a *agentHandlers) loadGlobalResumeState() (globalResumeState, error) {
 	var g globalResumeState
 	err := a.db.QueryRow(
-		`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, g.codex_session_id, a.engine
+		`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, g.codex_session_id, g.pi_session_id, a.engine
 		 FROM global_task g JOIN agents a ON a.id = g.agent_id
 		 WHERE g.id = 1`,
-	).Scan(&g.rootPath, &g.csid, &g.ocsid, &g.cxid, &g.engine)
+	).Scan(&g.rootPath, &g.csid, &g.ocsid, &g.cxid, &g.piID, &g.engine)
 	if errors.Is(err, sql.ErrNoRows) {
 		return g, errors.New("global task row missing")
+	}
+	if err == nil && g.engine == "pi" {
+		g.piRoot, _ = pi.SessionRoot(a.db)
 	}
 	return g, err
 }
@@ -367,6 +375,8 @@ func (g globalResumeState) resumable(globRoot string, lookup ...func(string) boo
 		return g.ocsid.Valid
 	case "codex":
 		return true
+	case "pi":
+		return pi.CanResume(g.piRoot, 0, g.piID.String, g.rootPath)
 	}
 	if !g.csid.Valid {
 		return false

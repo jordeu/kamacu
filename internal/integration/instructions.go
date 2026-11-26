@@ -38,6 +38,23 @@ func optionalFile(path string) ([]byte, error) {
 func (m *Manager) instructionPath(engine string) (string, error) {
 	claude := filepath.Join(m.claudeHome, "CLAUDE.md")
 	switch engine {
+	case "pi":
+		// Pi picks the first readable regular file, including an empty override.
+		for _, name := range []string{"AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"} {
+			path := filepath.Join(m.piHome, name)
+			info, err := os.Stat(path)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return path, err
+			}
+			if info.Mode().IsRegular() {
+				// The managed writer rejects symlinks, even if Pi reads them.
+				return path, nil
+			}
+		}
+		return filepath.Join(m.piHome, "AGENTS.md"), nil
 	case "codex":
 		override := filepath.Join(m.codexHome, "AGENTS.override.md")
 		data, err := optionalFile(override)

@@ -15,9 +15,10 @@ import (
 	"sync"
 
 	"golang.org/x/sys/unix"
+	"kamacu/internal/pi"
 )
 
-var engines = []string{"claude", "codex", "opencode"}
+var engines = []string{"claude", "codex", "opencode", "pi"}
 
 type engineState struct {
 	InstructionPath        string `json:"instruction_path,omitempty"`
@@ -42,12 +43,13 @@ type Manager struct {
 	home, configHome, binary, statePath string
 	codexHome                           string
 	claudeHome                          string
+	piHome                              string
 	runCodex                            func(context.Context, ...string) ([]byte, error)
 	lookPath                            func(string) (string, error)
 }
 
 func New(home, configHome, binary string) *Manager {
-	return &Manager{home: home, configHome: configHome, binary: binary, codexHome: filepath.Join(home, ".codex"), claudeHome: filepath.Join(home, ".claude"), statePath: filepath.Join(home, ".kamacu", "integrations.json"), lookPath: exec.LookPath}
+	return &Manager{home: home, configHome: configHome, binary: binary, codexHome: filepath.Join(home, ".codex"), claudeHome: filepath.Join(home, ".claude"), piHome: filepath.Join(home, ".pi", "agent"), statePath: filepath.Join(home, ".kamacu", "integrations.json"), lookPath: exec.LookPath}
 }
 func Default() (*Manager, error) {
 	home, err := os.UserHomeDir()
@@ -68,6 +70,10 @@ func Default() (*Manager, error) {
 	}
 	if v := os.Getenv("CLAUDE_CONFIG_DIR"); v != "" {
 		m.claudeHome = v
+	}
+	m.piHome, err = pi.AgentDir(home, os.Getenv("PI_CODING_AGENT_DIR"))
+	if err != nil {
+		return nil, err
 	}
 	return m, nil
 }
@@ -178,7 +184,7 @@ func (m *Manager) Status(ctx context.Context) ([]Status, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Status, 0, 3)
+	out := make([]Status, 0, len(engines))
 	for _, e := range engines {
 		out = append(out, m.status(ctx, s, e))
 	}

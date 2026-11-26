@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // BackfillAgents guarantees the AGENTDATA invariant at startup, mirroring
@@ -144,4 +145,38 @@ func effectiveExtraParams(db *sql.DB) (string, error) {
 		return "", err
 	}
 	return v, nil
+}
+
+// BackfillPiAgent restores the built-in agent if its seed was removed.
+func BackfillPiAgent(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var exists bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM agents WHERE engine = 'pi' AND is_system = 1)`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	for n := 0; ; n++ {
+		name := "Pi"
+		if n == 1 {
+			name = "Pi (built-in)"
+		} else if n > 1 {
+			name = fmt.Sprintf("Pi (built-in %d)", n-1)
+		}
+		result, err := tx.Exec(`INSERT INTO agents (name, command, engine, is_system, model_argument)
+			VALUES (?, 'pi', 'pi', 1, '--model {{model}}') ON CONFLICT DO NOTHING`, name)
+		if err != nil {
+			return err
+		}
+		if count, err := result.RowsAffected(); err != nil {
+			return err
+		} else if count > 0 {
+			return tx.Commit()
+		}
+	}
 }

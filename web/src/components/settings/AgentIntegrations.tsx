@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useIntegrations, useUpdateIntegration, type IntegrationEngine, type IntegrationStatus } from "@/api/integrations";
 import { Button } from "@/components/ui/button";
 
-const names: Record<IntegrationEngine, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+const names: Record<IntegrationEngine, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "Pi" };
 
 function description(item: IntegrationStatus) {
   if (item.message) return item.message;

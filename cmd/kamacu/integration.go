@@ -19,9 +19,9 @@ func (integrationCmd) Synopsis() string {
 }
 func (integrationCmd) Usage() string {
 	return `integration status
-integration enable <claude|codex|opencode>
-integration repair <claude|codex|opencode>
-integration remove <claude|codex|opencode>
+integration enable <claude|codex|opencode|pi>
+integration repair <claude|codex|opencode|pi>
+integration remove <claude|codex|opencode|pi>
 
 Registers a user-level MCP server and installs project context instructions. Repair preserves user edits. Remove deletes
 unchanged managed instructions and registrations. Restart agent sessions after changes.

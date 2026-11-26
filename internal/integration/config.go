@@ -102,6 +102,9 @@ func (m *Manager) readRegistration(ctx context.Context, engine string) (*registr
 	if m.claudeHome != filepath.Join(m.home, ".claude") {
 		r.path = filepath.Join(m.claudeHome, ".claude.json")
 	}
+	if engine == "pi" {
+		r.path = filepath.Join(m.piHome, "mcp.json")
+	}
 	if engine == "opencode" {
 		r.key = "mcp"
 		r.path = filepath.Join(m.configHome, "opencode", "opencode.json")
@@ -113,7 +116,7 @@ func (m *Manager) readRegistration(ctx context.Context, engine string) (*registr
 			r.path = jsonc
 		}
 	}
-	data, err := os.ReadFile(r.path)
+	data, err := r.readFile()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -144,6 +147,17 @@ func (m *Manager) readRegistration(ctx context.Context, engine string) (*registr
 	return r, nil
 }
 
+func (r *registration) readFile() ([]byte, error) {
+	if r.engine != "pi" {
+		return os.ReadFile(r.path)
+	}
+	data, err := optionalFile(r.path)
+	if err == nil && data == nil {
+		return nil, os.ErrNotExist
+	}
+	return data, err
+}
+
 func canonical(data []byte) []byte {
 	var v any
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -161,6 +175,7 @@ func (m *Manager) compatible(r *registration) bool {
 		Args      []string        `json:"args"`
 		Type      string          `json:"type"`
 		Enabled   *bool           `json:"enabled"`
+		Env       json.RawMessage `json:"env"`
 		Transport struct {
 			Type    string   `json:"type"`
 			Command string   `json:"command"`
@@ -197,6 +212,17 @@ func (m *Manager) compatible(r *registration) bool {
 			return false
 		}
 	}
+	if r.engine == "pi" {
+		var env map[string]string
+		if json.Unmarshal(e.Env, &env) != nil {
+			return false
+		}
+		for key, value := range piMCPEnvironment() {
+			if env[key] != value {
+				return false
+			}
+		}
+	}
 	sameBinary := command == m.binary
 	if !sameBinary {
 		resolved := command
@@ -230,7 +256,7 @@ func (m *Manager) writeRegistration(ctx context.Context, r *registration, remove
 		return err
 	}
 	// Refuse to replace a config concurrently changed by another application.
-	current, err := os.ReadFile(r.path)
+	current, err := r.readFile()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -245,6 +271,9 @@ func (m *Manager) writeRegistration(ctx context.Context, r *registration, remove
 			patches = append(patches, map[string]any{"op": "add", "path": "/" + r.key, "value": map[string]any{}})
 		}
 		var entry any = map[string]any{"command": m.binary, "args": []string{"mcp", "serve"}, "type": "stdio"}
+		if r.engine == "pi" {
+			entry = map[string]any{"command": m.binary, "args": []string{"mcp", "serve"}, "env": piMCPEnvironment()}
+		}
 		if r.engine == "opencode" {
 			entry = map[string]any{"type": "local", "command": []string{m.binary, "mcp", "serve"}, "enabled": true}
 		}
@@ -255,4 +284,13 @@ func (m *Manager) writeRegistration(ctx context.Context, r *registration, remove
 		return fmt.Errorf("could not edit MCP configuration")
 	}
 	return atomicWrite(r.path, r.tree.Pack(), 0600)
+}
+
+func piMCPEnvironment() map[string]string {
+	return map[string]string{
+		"KAMACU_TASK_ID":    "${KAMACU_TASK_ID}",
+		"KAMACU_SESSION_ID": "${KAMACU_SESSION_ID}",
+		"KAMACU_HOOK_BASE":  "${KAMACU_HOOK_BASE}",
+		"KAMACU_HOOK_TOKEN": "${KAMACU_HOOK_TOKEN}",
+	}
 }

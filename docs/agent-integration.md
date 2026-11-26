@@ -9,7 +9,7 @@ Agents ask questions and show completion reports normally in the terminal.
 ## Enable
 
 Open **Settings → Agents → Kamacu integration** and choose **Enable integration**
-for Claude Code, Codex, or OpenCode. This creates a user-level `kamacu mcp serve`
+for Claude Code, Codex, OpenCode, or Pi. This creates a user-level `kamacu mcp serve`
 registration and adds a project context instruction to the agent’s global guidance. The client must be installed on the host and available on Kamacu's
 PATH. Integration is opt-in.
 
@@ -19,6 +19,7 @@ The equivalent commands are included in the binary:
 kamacu integration enable claude
 kamacu integration enable codex
 kamacu integration enable opencode
+kamacu integration enable pi
 kamacu integration status
 ```
 
@@ -37,17 +38,34 @@ can use a manual MCP registration; see [MCP setup](install-mcp.md).
 | Claude Code | User entry in `~/.claude.json` |
 | Codex | Codex's `mcp add` command edits its user configuration |
 | OpenCode | `~/.config/opencode/opencode.json` or existing `opencode.jsonc` |
+| Pi | `~/.pi/agent/mcp.json` |
 
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME` are respected for the
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, and `PI_CODING_AGENT_DIR` are respected for the
 corresponding client configurations. The installer preserves unrelated settings
 and comments. OpenCode configuration with both JSON and JSONC files requires
 consolidation before automated setup. Project-specific configuration can shadow
 these user-level MCP entries; check it if a newly started client still connects
 to a different Kamacu server.
 
-Task identity and connection credentials remain inherited environment variables;
-the installer never copies them into configuration. Kamacu's Codex launcher
-forwards their names into the MCP subprocess environment.
+Task identity and connection credentials remain in the runtime environment.
+Kamacu forwards the variables to Codex and uses environment references in Pi's
+MCP registration.
+
+## Pi sessions and models
+
+Install Pi 1.6.1 or later on the Kamacu host, sign in to the provider through
+Pi, and select Pi in the project, task, or Scratchpad settings. To offer model
+choices on tasks, open **Settings → Agents**, edit Pi, then discover or add
+provider-qualified IDs such as `provider/model-id`. Save the models you want
+in the task picker. Use **Agent default** to leave the choice to Pi. For models
+registered by extensions, supply a discovery command that lists those models.
+
+The selected task model applies the next time the agent starts or resumes.
+Kamacu tracks the conversation it launches. Use Kamacu's Reset to start a
+new tracked conversation. Pi's own `/new` and `/resume` can still switch
+conversations within the terminal. Kamacu keeps saved Pi transcripts in a
+private directory alongside its database and offers Resume after Pi has
+written the conversation there.
 
 ## Project instructions and skills
 
@@ -107,7 +125,10 @@ prompt for read access to the context folder and shared skill sources.
 Scratchpad, shell tabs and custom agents do not receive the variable.
 
 The integration installs its block in Claude’s user `CLAUDE.md`, Codex’s
-`AGENTS.md` (or active `AGENTS.override.md`), or OpenCode’s global `AGENTS.md`.
+`AGENTS.md` (or active `AGENTS.override.md`), OpenCode’s global `AGENTS.md`,
+or the active global context file in Pi’s agent directory. For a fresh Pi
+profile, it creates `AGENTS.md`. Pi’s `--no-context-files` flag skips the
+managed block along with other context files.
 If OpenCode uses Claude’s global file as a fallback, the integrations share
 the block. Repair preserves edits to the block and surrounding guidance.
 Disable removes unchanged managed instructions when the last owner releases them.

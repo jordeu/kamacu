@@ -118,7 +118,7 @@ func TestOpencodeAgentMigration(t *testing.T) {
 	//     the API handler, not the DB. So instead assert the is_system flag is
 	//     present on BOTH, which is what the handler's block-on-is_system reads.
 	var sysCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE is_system = 1`).Scan(&sysCount); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE is_system = 1 AND engine IN ('claude', 'opencode', 'codex')`).Scan(&sysCount); err != nil {
 		t.Fatalf("count system agents after 00015: %v", err)
 	}
 	// Migrate applies the FULL chain (00019 later seeds codex), so the three
@@ -146,7 +146,7 @@ func TestOpencodeAgentMigration(t *testing.T) {
 		t.Fatalf("second Migrate: %v", err)
 	}
 	var agCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM agents").Scan(&agCount); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM agents WHERE engine IN ('claude', 'opencode', 'codex')").Scan(&agCount); err != nil {
 		t.Fatalf("count agents after re-run: %v", err)
 	}
 	// Full-chain posture (00019 seeds codex too): three seed rows, no dupes.

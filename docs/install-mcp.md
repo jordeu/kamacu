@@ -82,10 +82,10 @@ Agents spawned *inside* Kamacu receive `KAMACU_HOOK_BASE` and
 
 ## 3. Enable the agent integration
 
-For Claude Code, Codex, or OpenCode, use the bundled installer:
+For Claude Code, Codex, OpenCode, or Pi, use the bundled installer:
 
 ```sh
-<KAMACU_BIN> integration enable claude   # or: codex / opencode
+<KAMACU_BIN> integration enable claude   # or: codex / opencode / pi
 <KAMACU_BIN> integration status
 ```
 

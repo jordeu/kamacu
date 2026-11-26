@@ -63,11 +63,7 @@ export interface Agent {
   // substituted at spawn. For engine="claude" this is the binary path (the
   // hook/resume argv is built internally, not from this field).
   command: string;
-  // Engine discriminator (D-62): 'opencode' joined the union in Phase 17 and
-  // 'codex' joined with the codex built-in — the backend api.Agent serializes
-  // all four values (migrations 00015/00019 seed the engine="opencode" and
-  // engine="codex" system agents; user-added agents are "custom").
-  engine: "claude" | "custom" | "opencode" | "codex";
+  engine: "claude" | "custom" | "opencode" | "codex" | "pi";
   // M001 gate follow-up: claude-engine only. Extra argv flags appended after
   // the fixed claude flags at spawn (e.g. --dangerously-skip-permissions).
   // Relocated from the global agent_extra_params setting. "" = none.

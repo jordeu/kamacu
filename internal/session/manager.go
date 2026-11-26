@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"kamacu/internal/observation"
+	"kamacu/internal/pi"
 
 	"github.com/armon/circbuf"
 	"github.com/creack/pty"
@@ -34,7 +35,7 @@ var ErrNotFound = errors.New("session not found")
 var ErrTmuxNotFound = errors.New("tmux not found")
 
 // kamacuEnvNames must never leak from a parent Kamacu process. Every agent
-// gets fresh task/session identity; built-in engines also get hook credentials.
+// gets fresh task/session identity. Hook credentials are engine-specific.
 var kamacuEnvNames = map[string]bool{
 	"KAMACU_SESSION_ID":      true,
 	"KAMACU_TASK_ID":         true,
@@ -285,6 +286,21 @@ func (m *Manager) Spawn(opts SpawnOpts) (result *Session, resultErr error) {
 					// the TERM/COLORTERM append pattern above.
 					"PWD="+dir,
 				)
+			case "pi":
+				agentDir, err := pi.AgentDir(home, os.Getenv("PI_CODING_AGENT_DIR"))
+				if err != nil {
+					return nil, fmt.Errorf("resolve Pi agent directory: %w", err)
+				}
+				envExtra = append(envExtra, "PI_CODING_AGENT_DIR="+agentDir)
+				if cfg.PiMCPEnabled != nil {
+					enabled, err := cfg.PiMCPEnabled()
+					if err != nil {
+						return nil, fmt.Errorf("read Pi integration status: %w", err)
+					}
+					if enabled {
+						envExtra = append(envExtra, "KAMACU_HOOK_TOKEN="+cfg.Token, "KAMACU_HOOK_BASE="+cfg.BaseURL)
+					}
+				}
 			case "codex":
 				envExtra = append(envExtra,
 					"KAMACU_SESSION_ID="+id, // the env-gated profile hooks POST back to /api/hooks/sessions/<this id>

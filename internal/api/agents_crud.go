@@ -188,7 +188,7 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 	// Reject any engine value other than 'claude' | 'custom' (forward-safe).
 	if req.Engine != nil {
 		e := strings.TrimSpace(*req.Engine)
-		if e != "claude" && e != "custom" {
+		if e != curEngine && e != "claude" && e != "custom" {
 			writeError(w, http.StatusBadRequest, "engine must be 'claude' or 'custom'")
 			return
 		}
@@ -243,6 +243,15 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Models != nil {
 		modelList = *req.Models
+	}
+	if engine == "pi" {
+		for _, model := range modelList {
+			if err := validatePiModel(model); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		curModelArgument = "--model {{model}}"
 	}
 	modelJSON, err := validateModelConfig(modelList, curModelArgument)
 	if err != nil {
