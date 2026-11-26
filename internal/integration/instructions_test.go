@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -152,5 +153,34 @@ func TestOpenCodeWithClaudeFallbackDisabled(t *testing.T) {
 	}
 	if !bytes.Contains(read(t, filepath.Join(m.configHome, "opencode", "AGENTS.md")), []byte(instructionBlock)) {
 		t.Fatal("missing OpenCode instructions")
+	}
+}
+
+func TestRepairDistinguishesOlderManagedBlockFromUserEdit(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+	if _, err := m.Enable(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := m.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := s.Engines["codex"]
+	previous := []byte("\n" + blockStart + "\nRead project instructions.\n" + blockEnd + "\n")
+	e.InstructionHash = digest(previous)
+	s.Engines["codex"] = e
+	if err := m.save(s); err != nil {
+		t.Fatal(err)
+	}
+	write(t, e.InstructionPath, append([]byte("User guidance.\n"), previous...))
+	if msg := m.instructionStatus(e, "codex"); !strings.Contains(msg, "outdated") {
+		t.Fatal(msg)
+	}
+	if err := m.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(read(t, e.InstructionPath)); got != "User guidance.\n"+instructionBlock {
+		t.Fatal(got)
 	}
 }

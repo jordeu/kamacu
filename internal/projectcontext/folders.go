@@ -59,10 +59,14 @@ func (f *Folders) Directory(projectID int64) string {
 // LockArchive serializes recovery and project deletion across servers using the
 // same database. Worktree cleanup needs the database itself between these steps.
 func (f *Folders) LockArchive() (func(), error) {
-	if err := os.MkdirAll(f.root, 0700); err != nil {
+	return lockDirectory(f.root)
+}
+
+func lockDirectory(path string) (func(), error) {
+	if err := os.MkdirAll(path, 0700); err != nil {
 		return nil, err
 	}
-	dir, err := os.Open(f.root)
+	dir, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}

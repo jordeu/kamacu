@@ -38,7 +38,10 @@ func (f *Folders) Ensure(id int64) error {
 			continue
 		}
 		if err != nil {
-			return err
+			slog.Warn("skip unreadable shared skill", "skill", source, "error", err)
+			// Keep an existing link if the source may be temporarily unavailable.
+			active[name] = true
+			continue
 		}
 		if !skill.Mode().IsRegular() {
 			continue
@@ -73,14 +76,14 @@ func (f *Folders) Ensure(id int64) error {
 
 // PrepareExisting backfills projects created before context provisioning existed.
 func (f *Folders) PrepareExisting(ctx context.Context, db *sql.DB) error {
+	if err := f.seedDefaultSkills(); err != nil {
+		return err
+	}
 	unlock, err := f.LockArchive()
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	if err := f.seedDefaultSkills(); err != nil {
-		return err
-	}
 	rows, err := db.QueryContext(ctx, "SELECT id FROM projects")
 	if err != nil {
 		return err

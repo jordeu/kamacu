@@ -21,23 +21,46 @@ func TestProjectContextOnStartAndResume(t *testing.T) {
 	if err := db.QueryRow("SELECT project_id FROM tasks WHERE id=?", id).Scan(&projectID); err != nil {
 		t.Fatal(err)
 	}
-	base := t.TempDir()
-	dir := filepath.Join(base, fmt.Sprint(projectID), "context folder")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	var dbPath string
+	if err := db.QueryRow("SELECT file FROM pragma_database_list WHERE name = 'main'").Scan(&dbPath); err != nil {
 		t.Fatal(err)
 	}
+	base := filepath.Join(t.TempDir(), "kamacu home")
+	if err := os.Mkdir(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	folders, err := projectcontext.New(base, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := folders.PrepareExisting(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	dir := folders.Directory(projectID)
 	stub := filepath.Join(base, "test-agent")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\ncat \"$KAMACU_PROJECT_CONTEXT/instructions.md\" > \"$FAKE_CLAUDE_ARGS_FILE\"\nexec sleep 60\n"), 0700); err != nil {
+	const script = `#!/bin/sh
+set -eu
+for skill in find-project new-task; do
+	test -s "$KAMACU_PROJECT_CONTEXT/skills/$skill/SKILL.md"
+done
+cat "$KAMACU_PROJECT_CONTEXT/instructions.md" > "$FAKE_CLAUDE_ARGS_FILE"
+exec sleep 60
+`
+	if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
 	mgr.SetAgentConfig(session.AgentConfig{ClaudeBin: stub, ProjectContext: func(id int64, engine string) (string, error) {
 		if engine != "claude" {
 			return "", fmt.Errorf("unexpected engine %s", engine)
 		}
-		return filepath.Join(base, fmt.Sprint(id), "context folder"), nil
+		return folders.PrepareForLaunch(t.Context(), db, id)
 	}})
 	t.Setenv("KAMACU_PROJECT_CONTEXT", "wrong inherited directory")
 	for i, want := range []string{"original", "edited"} {
+		// Exercise per-launch provisioning, including a link removed between sessions.
+		if err := os.Remove(filepath.Join(dir, "skills", "find-project")); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(dir, "instructions.md"), []byte(want), 0600); err != nil {
 			t.Fatal(err)
 		}

@@ -47,6 +47,11 @@ func TestSharedSkillsOnStartupAndLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// An optional skill that cannot be resolved must not block usable skills or launch.
+	if err := os.Symlink("cyclic", filepath.Join(library, "cyclic")); err != nil {
+		t.Fatal(err)
+	}
+
 	ctx := context.Background()
 	if err := f.PrepareExisting(ctx, db); err != nil {
 		t.Fatal(err)
@@ -179,5 +184,66 @@ func TestBootSeedsDefaultsWithoutProjectsAndPreservesEdits(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(target, "SKILL.md")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBootMigratesDirectorLinksAndPreservesOtherSources(t *testing.T) {
+	root := t.TempDir()
+	f := &Folders{root: root, sharedSkills: filepath.Join(root, "skills")}
+	if err := os.Mkdir(f.sharedSkills, 0700); err != nil {
+		t.Fatal(err)
+	}
+	director := filepath.Join(root, "other checkout", "kamacu-director", ".claude", "skills")
+	source := filepath.Join(director, "find-project", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("director copy"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"find-project", "new-task"} {
+		target, err := filepath.Rel(f.sharedSkills, filepath.Join(director, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(f.sharedSkills, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.seedDefaultSkills(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"find-project", "new-task"} {
+		dir := filepath.Join(f.sharedSkills, name)
+		info, err := os.Lstat(dir)
+		if err != nil || !info.IsDir() {
+			t.Fatalf("%s still depends on director: %v, %v", dir, info, err)
+		}
+		want, err := defaultSkills.ReadFile("defaults/" + name + "/SKILL.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(filepath.Join(dir, "SKILL.md")); err != nil || string(got) != string(want) {
+			t.Fatal(name, err)
+		}
+	}
+	if got, err := os.ReadFile(source); err != nil || string(got) != "director copy" {
+		t.Fatal("director file changed", err)
+	}
+
+	// A deliberately linked custom version of a built-in still takes precedence.
+	dir := filepath.Join(f.sharedSkills, "find-project")
+	custom := filepath.Join(root, "custom")
+	if err := os.Rename(dir, custom); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(custom, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.seedDefaultSkills(); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(dir); err != nil || target != custom {
+		t.Fatalf("lost custom skill link: %q, %v", target, err)
 	}
 }

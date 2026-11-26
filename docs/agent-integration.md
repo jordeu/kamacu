@@ -82,8 +82,10 @@ On server startup, Kamacu installs two bundled skills as ordinary files under
 - `new-task` checks the project board for duplicates and creates a task when requested.
 
 Both skills ship in the Kamacu binary and work without a separate checkout or
-download. Startup fills in missing files and preserves edits to installed
-skills. To restore a bundled version, remove its shared `SKILL.md` and restart
+download. On upgrade, startup replaces the old directory links to
+`kamacu-director/.claude/skills/{find-project,new-task}` with the bundled
+files. The director checkout keeps its original files. Subsequent starts fill
+in missing files and preserve local edits. To restore a bundled version, remove its shared `SKILL.md` and restart
 the server. Place additional skill directories in the same library to make
 them available across projects.
 

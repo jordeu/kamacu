@@ -220,11 +220,17 @@ func (m *Manager) instructionStatus(e engineState, engine string) string {
 		return err.Error()
 	}
 	start, end, err := instructionBounds(data)
-	if err != nil || (start >= 0 && !bytes.Equal(data[start:end], []byte(instructionBlock))) {
+	if err != nil {
 		return fmt.Sprintf("Edited instructions in %s preserved.", path)
 	}
 	if start < 0 {
 		return "Project context instructions are missing. Repair the integration to restore them."
+	}
+	if !bytes.Equal(data[start:end], []byte(instructionBlock)) {
+		if digest(data[start:end]) == e.InstructionHash {
+			return "Project context instructions are outdated. Repair the integration to update them."
+		}
+		return fmt.Sprintf("Edited instructions in %s preserved.", path)
 	}
 	return ""
 }
