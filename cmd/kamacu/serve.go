@@ -210,6 +210,10 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 		slog.Error("backfilling codex agent", "error", err)
 		return subcommands.ExitFailure
 	}
+	if err := api.BackfillPiAgent(db); err != nil {
+		slog.Error("backfilling Pi agent", "error", err)
+		return subcommands.ExitFailure
+	}
 
 	// v1.13 (GDATA-01): one-shot idempotent global_task guard. Migration 00017
 	// seeds the singleton, but a migration runs exactly once -- a hand-deleted
@@ -271,6 +275,12 @@ func (c *serveCmd) Execute(ctx context.Context, _ *flag.FlagSet, _ ...any) subco
 	mgr := session.NewManager()
 	mgr.SetAgentConfig(session.AgentConfig{
 		CodexMCPEnvArgs: codex.FeedbackEnvironmentArgs,
+		PiMCPEnabled: func() (bool, error) {
+			if integrationManager == nil {
+				return false, nil
+			}
+			return integrationManager.Enabled("pi")
+		},
 		ProjectContext: func(id int64, engine string) (string, error) {
 			if integrationManager == nil || engine == "custom" {
 				return "", nil

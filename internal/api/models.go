@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -205,44 +206,84 @@ func (h *agentCRUDHandlers) discoverModels(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	args := settings.Tokenize(req.Command)
-	if strings.TrimSpace(req.DiscoveryCommand) != "" {
-		args = settings.Tokenize(req.DiscoveryCommand)
-	} else {
-		if len(args) == 0 {
-			writeError(w, http.StatusBadRequest, "agent command is required")
-			return
-		}
-		// Do not silently discard provider/profile options or command wrappers:
-		// the resulting catalog could describe a different configuration.
-		if len(args) != 1 {
-			writeError(w, http.StatusBadRequest, "agent command has launch arguments; configure a discovery command for the intended provider and settings")
-			return
-		}
-		switch req.Engine {
-		case "codex":
-			args = append(args, "debug", "models")
-		case "opencode":
-			args = append(args, "models")
-		case "claude":
-			// The initialization control request is the CLI protocol underlying
-			// Agent SDK supportedModels(). No user prompt or inference is sent.
-			args = append(args, "--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`)
-		default:
-			writeError(w, http.StatusBadRequest, "configure a discovery command for this custom agent, or add models manually")
-			return
-		}
-	}
-	if len(args) == 0 {
-		writeError(w, http.StatusBadRequest, "discovery command is required")
+	args, err := modelDiscoveryArgs(req.Engine, req.Command, req.DiscoveryCommand)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	models, err := runModelDiscovery(r.Context(), args, req.Engine, strings.TrimSpace(req.DiscoveryCommand) == "")
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			status = http.StatusGatewayTimeout
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+func modelDiscoveryArgs(engine, command, discoveryCommand string) ([]string, error) {
+	if strings.TrimSpace(discoveryCommand) != "" {
+		args := settings.Tokenize(discoveryCommand)
+		if len(args) == 0 {
+			return nil, errors.New("discovery command is required")
+		}
+		return args, nil
+	}
+	args := settings.Tokenize(command)
+	if len(args) == 0 {
+		return nil, errors.New("agent command is required")
+	}
+	if len(args) != 1 {
+		return nil, errors.New("agent command has launch arguments; configure a discovery command for the intended provider and settings")
+	}
+	switch engine {
+	case "codex":
+		return append(args, "debug", "models"), nil
+	case "opencode":
+		return append(args, "models"), nil
+	case "claude":
+		// Query the protocol underlying supportedModels() without sending a prompt.
+		return append(args, "--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`), nil
+	case "pi":
+		return append(args, "--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-context-files", "--no-approve", "--offline"), nil
+	default:
+		return nil, errors.New("configure a discovery command for this custom agent, or add models manually")
+	}
+}
+
+func runModelDiscovery(parent context.Context, args []string, engine string, builtin bool) ([]string, error) {
+	var input string
+	if builtin {
+		switch engine {
+		case "claude":
+			input = `{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}` + "\n"
+		case "pi":
+			input = `{"type":"get_available_models","id":"kamacu-models"}` + "\n"
+		}
+	}
+	output, err := runCatalogCommand(parent, args, input, 20*time.Second)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("model discovery timed out; you can still add models manually: %w", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("model discovery was cancelled: %w", err)
+		}
+		return nil, fmt.Errorf("model discovery failed: %w", err)
+	}
+	if engine == "pi" && builtin {
+		return parsePiDiscoveredModels(output)
+	}
+	return parseDiscoveredModels(output)
+}
+
+func runCatalogCommand(parent context.Context, args []string, input string, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	// Match agent launch isolation: custom catalog tools must not inherit
-	// another Kamacu instance's hook credentials. Claude discovery also works
-	// when Kamacu was started from a Claude Code terminal.
+	// Match launch isolation and allow a server started inside Claude Code.
 	for _, value := range os.Environ() {
 		key, _, _ := strings.Cut(value, "=")
 		if !strings.HasPrefix(key, "KAMACU_") && key != "CLAUDECODE" {
@@ -252,25 +293,59 @@ func (h *agentCRUDHandlers) discoverModels(w http.ResponseWriter, r *http.Reques
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
-	if req.Engine == "claude" && strings.TrimSpace(req.DiscoveryCommand) == "" {
-		cmd.Stdin = strings.NewReader("{\"type\":\"control_request\",\"request_id\":\"models\",\"request\":{\"subtype\":\"initialize\"}}\n")
-	}
+	cmd.Stdin = strings.NewReader(input)
 	var output catalogOutput
 	cmd.Stdout = &output
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			writeError(w, http.StatusGatewayTimeout, "model discovery timed out; you can still add models manually")
-		} else {
-			writeError(w, http.StatusBadGateway, "model discovery failed: "+err.Error())
+			return nil, ctx.Err()
 		}
-		return
+		return nil, err
 	}
-	models, err := parseDiscoveredModels(output.Bytes())
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
+	return output.Bytes(), nil
+}
+
+func parsePiDiscoveredModels(data []byte) ([]string, error) {
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var response struct {
+			ID      string `json:"id"`
+			Type    string `json:"type"`
+			Command string `json:"command"`
+			Success bool   `json:"success"`
+			Data    struct {
+				Models []struct {
+					Provider string `json:"provider"`
+					ID       string `json:"id"`
+				} `json:"models"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(line, &response); err != nil {
+			return nil, errors.New("invalid Pi RPC response")
+		}
+		if response.ID != "kamacu-models" || response.Type != "response" || response.Command != "get_available_models" {
+			continue
+		}
+		if !response.Success || response.Data.Models == nil {
+			return nil, errors.New("Pi rejected model discovery; check the installed Pi version")
+		}
+		models := []string{}
+		seen := map[string]bool{}
+		for _, model := range response.Data.Models {
+			if model.Provider == "" || model.ID == "" {
+				return nil, errors.New("Pi returned a model without a provider or ID")
+			}
+			id := model.Provider + "/" + model.ID
+			if !seen[id] {
+				seen[id] = true
+				models = append(models, id)
+			}
+		}
+		return models, nil
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+	return nil, errors.New("Pi returned no model catalog; check the installed Pi version")
 }
 
 // Bound subprocess output before buffering it, including for custom commands.

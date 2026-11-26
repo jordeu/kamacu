@@ -20,6 +20,7 @@ const (
 // the manager mutex.
 type AgentConfig struct {
 	ProjectContext  func(projectID int64, engine string) (string, error)
+	PiMCPEnabled    func() (bool, error)
 	CodexMCPEnvArgs func(bin, dir string) ([]string, error) // per-launch MCP environment allowlist
 	BaseURL         string                                  // hook receiver origin, e.g. "http://127.0.0.1:7333"
 	Token           string                                  // per-instance X-Kamacu-Token value

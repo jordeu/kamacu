@@ -307,6 +307,8 @@ func (h *globalHandlers) put(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
+	unlock := h.mgr.LockTaskLifecycle(0)
+	defer unlock()
 	repoInput := ""
 	if req.Repo != nil {
 		repoInput = strings.TrimSpace(*req.Repo)
@@ -431,9 +433,13 @@ func (h *globalHandlers) put(w http.ResponseWriter, r *http.Request) {
 	if rootSupplied {
 		sets = append(sets, "root_path = ?", "github_repo = ?")
 		args = append(args, newRoot, newRepo)
-		sets = append(sets, "claude_session_id = NULL", "opencode_session_id = NULL")
+		sets = append(sets, "claude_session_id = NULL", "opencode_session_id = NULL", "pi_session_id = NULL")
 	}
 	if req.AgentID != nil {
+		if !rootSupplied {
+			sets = append(sets, "pi_session_id = CASE WHEN agent_id <> ? THEN NULL ELSE pi_session_id END")
+			args = append(args, *req.AgentID)
+		}
 		sets = append(sets, "agent_id = ?")
 		args = append(args, *req.AgentID)
 	}

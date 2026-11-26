@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"kamacu/internal/pi"
 	"kamacu/internal/session"
 	"kamacu/internal/settings"
 	"kamacu/internal/store"
@@ -347,6 +349,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	req.ctx = r.Context()
 	sess, err := h.createSession(req)
 	if err != nil {
 		writeError(w, err.status, err.message)
@@ -356,6 +359,7 @@ func (h *sessionHandlers) create(w http.ResponseWriter, r *http.Request) {
 }
 
 type sessionCreateRequest struct {
+	ctx                context.Context
 	Pending            *pendingFilter `json:"-"`
 	PendingBeforeSpawn func() bool    `json:"-"`
 	TaskID             int64          `json:"task_id"`
@@ -449,18 +453,19 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 	// in-handler read is the single source of truth at spawn time — a stale
 	// client Resume after a Reset minted a new id simply resumes the NEW id,
 	// which is correct newest-wins behavior).
-	var csid, ocsid, cxid sql.NullString
+	var csid, ocsid, cxid, piID sql.NullString
+	var piFreshID, piFreshDir, discoveryCommand string
 	var taskModel, modelArgument string
 	var agentEngine, agentCommand, agentExtraParams string // M001: resolved alongside the task's worktree
 	if req.TaskID > 0 {
 		var path sql.NullString
 		err := h.db.QueryRow(
-			`SELECT p.id, t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, a.engine, a.command, a.extra_params, t.model, a.model_argument
+			`SELECT p.id, t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, t.pi_session_id, a.engine, a.command, a.extra_params, t.model, a.model_argument, a.model_discovery_command
 			 FROM tasks t
 			 JOIN projects p ON p.id = t.project_id
 			 JOIN agents a ON a.id = COALESCE(t.agent_id, p.agent_id)
 			 WHERE t.id = ?`, req.TaskID,
-		).Scan(&opts.ProjectID, &path, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams, &taskModel, &modelArgument)
+		).Scan(&opts.ProjectID, &path, &csid, &ocsid, &cxid, &piID, &agentEngine, &agentCommand, &agentExtraParams, &taskModel, &modelArgument, &discoveryCommand)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &sessionCreateError{http.StatusNotFound, "task not found"}
 		}
@@ -479,11 +484,11 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 		// loadGlobalConfig fail-loud posture.
 		var rootPath string
 		err := h.db.QueryRow(
-			`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, g.codex_session_id, a.engine, a.command, a.extra_params
+			`SELECT g.root_path, g.claude_session_id, g.opencode_session_id, g.codex_session_id, g.pi_session_id, a.engine, a.command, a.extra_params
 			 FROM global_task g
 			 JOIN agents a ON a.id = g.agent_id
 			 WHERE g.id = 1`,
-		).Scan(&rootPath, &csid, &ocsid, &cxid, &agentEngine, &agentCommand, &agentExtraParams)
+		).Scan(&rootPath, &csid, &ocsid, &cxid, &piID, &agentEngine, &agentCommand, &agentExtraParams)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &sessionCreateError{http.StatusInternalServerError, "global task row missing"}
 		}
@@ -529,6 +534,8 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 			conversation, column = ocsid.String, "opencode_session_id"
 		case "codex":
 			conversation, column = cxid.String, "codex_session_id"
+		case "pi":
+			conversation, column = piID.String, "pi_session_id"
 		}
 		if conversation != "" {
 			for _, info := range h.mgr.List() {
@@ -561,7 +568,7 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 	// — an empty/stale id is an honest 409 "no session to resume" (mirror claude's
 	// posture, NEVER silently fork a fresh session). The claude path is unchanged
 	// byte-for-byte (csid + the transcript glob that self-heals D-56's resumable).
-	if req.Resume {
+	if req.Resume && agentEngine != "pi" {
 		if req.Scope == "global" {
 			// GLOBAL resume (Phase 15, D-31): the ids live in the singleton
 			// (the scope branch above scanned csid/ocsid alongside the agent
@@ -647,6 +654,11 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 					id = "--last"
 				}
 				opts.AgentArgs = append(opts.AgentArgs, "resume", id)
+			}
+		}
+		if agentEngine == "pi" {
+			if err := preparePiCommand(req.ctx, opts.AgentArgs, agentCommand, discoveryCommand, taskModel, modelArgument); err != nil {
+				return nil, err
 			}
 		}
 		if taskModel != "" {
@@ -765,8 +777,39 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 			return nil, &sessionCreateError{http.StatusConflict, reason}
 		}
 	}
+	if req.ctx != nil && req.ctx.Err() != nil && kind == session.KindAgent && agentEngine == "pi" {
+		return nil, &sessionCreateError{http.StatusRequestTimeout, "Pi launch was cancelled"}
+	}
+	if kind == session.KindAgent && agentEngine == "pi" {
+		root, err := pi.SessionRoot(h.db)
+		if err != nil {
+			return nil, &sessionCreateError{http.StatusInternalServerError, "could not locate Pi session storage"}
+		}
+		var managedArgs []string
+		if req.Resume {
+			file, err := pi.ResumeFile(root, req.TaskID, piID.String, opts.Cwd)
+			if err != nil {
+				return nil, &sessionCreateError{http.StatusConflict, "the previous Pi conversation is unavailable in this working directory"}
+			}
+			// An ID lookup fails when the transcript disappears between the
+			// check and launch. Pi opens a missing path as a new session.
+			managedArgs = []string{"--session-dir", filepath.Dir(file), "--session", piID.String}
+		} else {
+			piFreshID = uuid.NewString()
+			piFreshDir, err = pi.CreateSessionDir(root, req.TaskID, piFreshID)
+			if err != nil {
+				slog.Warn("creating Pi session directory", "task", req.TaskID, "error", err)
+				return nil, &sessionCreateError{http.StatusInternalServerError, "could not create Pi session storage"}
+			}
+			managedArgs = []string{"--session-dir", piFreshDir, "--session-id", piFreshID}
+		}
+		opts.AgentArgs = append(append([]string{opts.AgentArgs[0]}, managedArgs...), opts.AgentArgs[1:]...)
+	}
 	sess, err := h.mgr.Spawn(opts)
 	if err != nil {
+		if piFreshDir != "" {
+			_ = os.Remove(piFreshDir)
+		}
 		// Release the reserved n ONLY on a fresh spawn — the name was never
 		// used. A reattach row is a pre-existing survivor, NOT a freshly
 		// reserved n: never delete it on a transient spawn failure (D-89 owns
@@ -782,6 +825,19 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 			return nil, &sessionCreateError{http.StatusConflict, "tmux not found — change the shell setting or reinstall"}
 		}
 		return nil, &sessionCreateError{http.StatusInternalServerError, "couldn't start a session"}
+	}
+	if piFreshID != "" {
+		var err error
+		if req.Scope == "global" {
+			_, err = h.db.Exec(`UPDATE global_task SET pi_session_id = ? WHERE id = 1`, piFreshID)
+		} else {
+			_, err = h.db.Exec(`UPDATE tasks SET pi_session_id = ? WHERE id = ?`, piFreshID, req.TaskID)
+		}
+		if err != nil {
+			sess.Stop()
+			slog.Warn("persisting Pi session ID", "task", req.TaskID, "error", err)
+			return nil, &sessionCreateError{http.StatusInternalServerError, "could not save Pi session identity"}
+		}
 	}
 	// Starting or resuming a board task begins work. The conditional UPDATE
 	// preserves concurrent manual moves and leaves PR/global sessions alone.

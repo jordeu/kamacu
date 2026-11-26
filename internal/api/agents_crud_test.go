@@ -24,8 +24,7 @@ func defaultAgentID(t *testing.T, srvURL string) int64 {
 
 // TestAgentList proves GET /api/agents returns the seeded Claude agent with
 // is_default + is_system true and engine='claude' on a fresh migrated DB. A
-// fresh DB now seeds TWO system agents (claude + opencode, M002 migration 00015),
-// so the test locates the CLAUDE seed by engine rather than assuming list[0].
+// fresh DB seeds system agents, so locate Claude by engine.
 func TestAgentList(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
@@ -83,11 +82,10 @@ func TestAgentCreate(t *testing.T) {
 		t.Errorf("command = %v, want \"gemini\"", a["command"])
 	}
 
-	// The list now has the system seeds (claude + opencode + codex) + the new
-	// custom agent = 4.
+	// The list includes four system agents and the new custom agent.
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 4 {
-		t.Errorf("agents after create = %d, want 4", len(list))
+	if len(list) != 5 {
+		t.Errorf("agents after create = %d, want 5", len(list))
 	}
 }
 
@@ -177,10 +175,10 @@ func TestAgentDeleteUnused(t *testing.T) {
 		t.Errorf("delete unused custom: status=%d, want 204", resp.StatusCode)
 	}
 
-	// Back to the three system seeds (claude + opencode + codex).
+	// Back to the four system seeds.
 	_, list := doJSONList(t, srv.URL+"/api/agents")
-	if len(list) != 3 {
-		t.Errorf("agents after delete = %d, want 3 (system seeds only)", len(list))
+	if len(list) != 4 {
+		t.Errorf("agents after delete = %d, want 4 (system seeds only)", len(list))
 	}
 }
 

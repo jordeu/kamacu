@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "./client";
 
-export type IntegrationEngine = "claude" | "codex" | "opencode";
+export type IntegrationEngine = "claude" | "codex" | "opencode" | "pi";
 export interface IntegrationStatus {
   engine: IntegrationEngine;
   available: boolean;

@@ -57,13 +57,13 @@ export function AgentModelsEditor({ engine, command, models, onModelsChange, mod
     <fieldset className="flex min-w-0 flex-col gap-3 border-t pt-3">
       <legend className="text-xs font-medium">Models</legend>
       <p className="text-xs text-muted-foreground">Choose which models appear when creating tasks. Discovery only suggests models; add the ones you want, then save.</p>
-      <div className="flex flex-col gap-1.5">
+      {engine !== "pi" && <div className="flex flex-col gap-1.5">
         <label htmlFor="agent-model-argument" className="text-xs font-medium">Model argument</label>
         <Input id="agent-model-argument" value={modelArgument} onChange={(event) => onModelArgumentChange(event.target.value)} className="font-mono text-xs" placeholder="--model {{model}}" />
         <p className="text-xs text-muted-foreground">{"Use {{model}} for the selected model, for example --model {{model}} or --model={{model}}. Leave empty if this agent cannot select a model."}</p>
-      </div>
+      </div>}
       <div className="flex gap-2">
-        <Input aria-label="Model ID" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Model ID or alias" className="font-mono text-xs" maxLength={256}
+        <Input aria-label="Model ID" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={engine === "pi" ? "provider/model-id" : "Model ID or alias"} className="font-mono text-xs" maxLength={256}
           onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); add(draft); setDraft(""); } }} />
         <Button type="button" variant="outline" disabled={!draft.trim() || models.includes(draft.trim())} onClick={() => { add(draft); setDraft(""); }}>Add model</Button>
       </div>
