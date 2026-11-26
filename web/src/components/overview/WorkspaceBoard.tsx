@@ -163,9 +163,10 @@ export function WorkspaceBoard({
                 <>
                   {prs.map((pr) => (
                     <PRCard
-                      key={`${pr.project.github_repo}/${pr.number}`}
+                      key={`${pr.project.id}/${pr.project.github_repo}/${pr.number}`}
                       pr={pr}
                       projectId={pr.project.id}
+                      allowHiding
                       aria-label={`Open review for ${pr.project.name} PR #${pr.number}`}
                       footer={
                         <div className="flex items-center justify-between gap-2">
