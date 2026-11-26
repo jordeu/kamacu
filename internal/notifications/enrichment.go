@@ -159,11 +159,11 @@ func compactFactDetails(event *Event, limit int) {
 		// Keep an older positive review as direct evidence, independent of head.
 		hasApproval := false
 		for _, r := range f.ViewerReviews {
-			hasApproval = hasApproval || r.State == "APPROVED"
+			hasApproval = hasApproval || (r.State == "APPROVED" || r.ApprovalPreviouslyObserved)
 		}
 		if !hasApproval {
 			for _, r := range history[:len(history)-5] {
-				if r.State == "APPROVED" {
+				if r.State == "APPROVED" || r.ApprovalPreviouslyObserved {
 					f.ViewerReviews = append([]ViewerReview{r}, f.ViewerReviews...)
 					break
 				}

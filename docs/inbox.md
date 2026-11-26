@@ -36,6 +36,14 @@ and release criteria. These examples are not installed as automatic policies.
 Ambiguous matches, unknown facts and conflicting rules leave the message in
 Pending. Native terminal permission dialogs are never answered automatically.
 
+Prior approval is a historical fact, separate from whether an approval is still
+valid. When GitHub dismisses an approval after new commits, Kamacu can recover
+the original APPROVED state from its recorded GitHub activity versions, matched
+to the same viewer, PR and review ID. The current state stays DISMISSED. A
+dismissal without recorded approval evidence means the earlier verdict is
+unknown. The same facts are supplied to notification and review-session Inbox
+questions; a rereview still has to check the new commits before approving again.
+
 The agent can send text or select an existing action button. It cannot invent
 buttons or execute independent tools. Notification evidence is refreshed before
 assessment and checked again before a response, independently of collection

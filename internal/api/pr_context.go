@@ -104,6 +104,7 @@ func (h prContextHandlers) pr(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		facts = readPRFacts(ctx, repo, n)
+		facts = (notifications.GitHub{DB: h.db}).WithRecordedApprovalHistory(ctx, notifications.Source{}, facts)
 	}
 	writeJSON(w, 200, map[string]any{"github": facts, "related_work": related, "related_sessions": observedSessions, "live_sessions": live, "observation_warning": "Terminal observations are unverified. A running process alone does not imply active work; inspect its monitor state, observation time and terminal evidence. Historical sessions may have ended."})
 }

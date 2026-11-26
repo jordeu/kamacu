@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"kamacu/internal/inbox"
+	"kamacu/internal/settings"
 	"kamacu/internal/store"
 )
 
@@ -15,7 +16,7 @@ import (
 func (s *Service) InboxEvidence(ctx context.Context, q inbox.Question) (json.RawMessage, error) {
 	ctx = freshGitHubReadCache(ctx)
 	if q.Origin != "notification" {
-		return json.RawMessage(`[]`), nil
+		return s.inboxReviewEvidence(ctx, q)
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT e.source_id,e.payload FROM notification_events e WHERE e.id=? OR e.id IN (SELECT event_id FROM notification_question_events WHERE question_id=?) ORDER BY e.id`, q.NotificationID, q.ID)
 	if err != nil {
@@ -105,8 +106,71 @@ func (s *Service) inboxEvidenceEvent(ctx context.Context, source Source, event E
 		if err != nil {
 			return fresh, err
 		}
+		// Full source reads avoid collection cursors; review-history restoration
+		// is read-only and still needs the durable, account-scoped activity cache.
+		github.DB = s.DB
 		facts := github.PRContext(ctx, source, repo, number)
 		fresh.PRFacts = &facts
 	}
 	return fresh, nil
+}
+
+// Review-session questions need the same verified historical facts as the
+// notification that started the review, including when asking to publish it.
+func (s *Service) inboxReviewEvidence(ctx context.Context, q inbox.Question) (json.RawMessage, error) {
+	empty := json.RawMessage(`[]`)
+	if q.Origin != "observer" || q.TaskID <= 0 {
+		return empty, nil
+	}
+	links, err := store.PRLinks(ctx, s.DB, q.TaskID, "", 0)
+	if err != nil {
+		return nil, err
+	}
+	reviews := []store.PRLink{}
+	for _, link := range links {
+		if link.Role == "review" {
+			reviews = append(reviews, link)
+		}
+	}
+	if len(reviews) == 0 {
+		return empty, nil
+	}
+	gate, err := settings.Get(s.DB, settings.KeyGithubIntegration)
+	if err != nil {
+		return nil, err
+	}
+	if gate != "on" {
+		return empty, nil
+	}
+	sources, err := s.Sources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []any{}
+	for _, source := range sources {
+		if !source.Enabled || source.Provider != "github" || source.Account == "" {
+			continue
+		}
+		reader, ok := s.Providers[source.Provider].(interface {
+			PRContext(context.Context, Source, string, int64) PRFacts
+		})
+		if !ok {
+			continue
+		}
+		if err = s.sourceEnabled(ctx, source.ID); err != nil {
+			return nil, err
+		}
+		if err = s.checkIdentity(ctx, source); err != nil {
+			return nil, err
+		}
+		for _, link := range reviews {
+			readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			facts := reader.PRContext(readCtx, source, link.Repository, link.Number)
+			facts = (GitHub{DB: s.DB}).WithRecordedApprovalHistory(readCtx, source, facts)
+			cancel()
+			facts.ObservedAt = time.Time{}
+			out = append(out, map[string]any{"source_id": source.ID, "viewer": source.Account, "repository": link.Repository, "url": link.URL, "pr_facts": facts})
+		}
+	}
+	return json.Marshal(out)
 }

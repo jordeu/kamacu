@@ -11,11 +11,14 @@ import (
 )
 
 type ViewerReview struct {
-	ID          int64  `json:"id"`
-	State       string `json:"state"`
-	CommitID    string `json:"commit_id"`
-	SubmittedAt string `json:"submitted_at"`
-	URL         string `json:"html_url"`
+	ApprovalPreviouslyObserved bool   `json:"approval_previously_observed,omitempty"`
+	ApprovalEvidenceRef        string `json:"approval_evidence_ref,omitempty"`
+	ApprovalObservedAt         string `json:"approval_observed_at,omitempty"`
+	ID                         int64  `json:"id"`
+	State                      string `json:"state"`
+	CommitID                   string `json:"commit_id"`
+	SubmittedAt                string `json:"submitted_at"`
+	URL                        string `json:"html_url"`
 }
 
 // PRCommit contains a bounded subject line, never the full commit body.
@@ -33,6 +36,7 @@ type PRCommit struct {
 // PRFacts keeps identity, status and approvals outside truncatable excerpts.
 // Nil approval means unknown; approval need not match the current head.
 type PRFacts struct {
+	ApprovalHistoryError   string         `json:"approval_history_error,omitempty"`
 	ViewerReviewCount      int            `json:"viewer_review_count,omitempty"`
 	ViewerReviewsTruncated bool           `json:"viewer_reviews_truncated,omitempty"`
 	RecentCommitsTruncated bool           `json:"recent_commits_truncated,omitempty"`
@@ -171,6 +175,7 @@ func (g GitHub) PRContext(ctx context.Context, source Source, repository string,
 	}
 	f.ReviewsComplete = true
 	f.ViewerEverApproved = &approved
+	f = g.WithRecordedApprovalHistory(ctx, source, f)
 	f.RecentCommits, f.ChangesError = g.recentPRCommits(ctx, host, path)
 	return f
 }
