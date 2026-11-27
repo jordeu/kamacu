@@ -11,7 +11,7 @@ vi.mock("@/api/inboxAgent", () => ({
 describe("inbox agent settings", () => {
   it("offers an independent model and explicit publication rules without manual or periodic processing", () => {
     const html = renderToStaticMarkup(<InboxAgentSection />);
-    for (const text of ["Inbox agent", "Inbox model", "Start a rereview only after a previous approval.", "Save inbox agent", "Add inbox rule", "Test inbox model", "Successful replies go directly to Archived", "Unclear cases and failures remain in Pending"]) expect(html).toContain(text);
+    for (const text of ["Inbox model", "Start a rereview only after a previous approval.", "Save inbox agent", "Add inbox rule", "Test inbox model", "Successful replies go directly to Archived", "Unclear cases and failures remain in Pending"]) expect(html).toContain(text);
     expect(html).not.toContain("interval_seconds");
     expect(html).not.toContain("Process pending");
     expect(html).not.toContain("Automatic processing interval");

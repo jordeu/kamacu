@@ -55,11 +55,15 @@ const backendNames: Record<string, string> = {
 };
 const control =
   "h-9 rounded-md border border-input bg-background px-3 text-sm w-full";
-export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
+export function MonitoringSection({ workspaceId, view = "selection" }: {
+  workspaceId?: number;
+  view?: "selection" | "profiles";
+}) {
+  const editingProfiles = view === "profiles";
   const client = useQueryClient();
   const config = useQuery({
     queryKey: ["monitor-config"],
-    refetchInterval: 15000,
+    refetchInterval: editingProfiles ? false : 15000,
     queryFn: () => get<Config>("/api/monitor"),
   });
   const [draft, setDraft] = useState<Profile>(blank);
@@ -82,11 +86,14 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
     setNotice("");
     try {
       await fn();
-      await client.invalidateQueries({ queryKey: ["monitor-config"] });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["monitor-config"] }),
+        ...(editingProfiles ? [client.invalidateQueries({ queryKey: ["model-profiles"] })] : []),
+      ]);
       setNotice(success);
       onSuccess?.();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Could not update monitoring");
+      setNotice(e instanceof Error ? e.message : "Could not save settings.");
     } finally {
       setBusy(false);
     }
@@ -94,11 +101,12 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
   const data = config.data;
   if (!data)
     return (
-      <p className="text-sm text-muted-foreground">
-        {config.isError
-          ? "Could not load monitoring settings."
-          : "Loading monitoring settings…"}
-      </p>
+      <div className="space-y-2">
+        <p className="text-sm text-muted-foreground" role={config.isError ? "alert" : "status"}>
+          {config.isError ? "Could not load model settings." : "Loading model settings…"}
+        </p>
+        {config.isError && <Button variant="outline" size="sm" onClick={() => config.refetch()}>Retry</Button>}
+      </div>
     );
   const global = data.profiles.find((p) => p.id === data.default_profile_id);
   function selection(id: number, name: string, value: number | null) {
@@ -146,44 +154,40 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
     );
   }
   return (
-    <section className="space-y-3" aria-label="Terminal monitoring">
-      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Terminal monitoring
-      </h2>
-      <p className="text-sm text-muted-foreground">
-        Detects agent status and requests for input from terminal output.
-        Notifications stay quiet while you view the terminal. Model changes also
-        apply to running sessions.
-      </p>
-      {workspaceId === undefined
-        ? selection(
-            0,
-            "Global default (including Scratchpad)",
-            data.default_profile_id,
-          )
-        : data.workspaces
-            .filter((w) => w.id === workspaceId)
-            .map((w) => selection(w.id, w.name, w.profile_id))}
-      {workspaceId === undefined && (
+    <div className="space-y-3">
+      {!editingProfiles && (
         <>
-          <details>
-            <summary className="cursor-pointer text-sm">
-              Workspace models
-            </summary>
-            <div className="mt-3 space-y-3">
-              {data.workspaces.map((w) =>
-                selection(w.id, w.name, w.profile_id),
-              )}
-            </div>
-          </details>
+          {workspaceId !== undefined && (
+            <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Terminal monitoring</h2>
+          )}
+          <p className="text-sm text-muted-foreground">
+            Detects agent status and requests for input from terminal output.
+            Notifications stay quiet while you view the terminal. Model changes also
+            apply to running sessions.
+          </p>
+          {workspaceId === undefined
+            ? selection(0, "Global monitoring model (including Scratchpad)", data.default_profile_id)
+            : data.workspaces.filter(w => w.id === workspaceId).map(w => selection(w.id, w.name, w.profile_id))}
+          {workspaceId === undefined && (
+            <details>
+              <summary className="cursor-pointer text-sm">Workspace overrides</summary>
+              <div className="mt-3 space-y-3">
+                {data.workspaces.map(w => selection(w.id, w.name, w.profile_id))}
+              </div>
+            </details>
+          )}
+        </>
+      )}
+      {editingProfiles && (
+        <>
           <div className="overflow-hidden rounded-lg border">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 p-4">
               <div>
                 <h3 className="text-sm font-medium">
-                  Monitoring models ({data.profiles.length})
+                  Configured profiles ({data.profiles.length})
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Add models here, then choose which one each workspace uses.
+                  Choose a profile independently for each feature that uses it.
                 </p>
               </div>
               <Button
@@ -192,19 +196,19 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
                 onClick={(e) => openEditor(blank, e.currentTarget)}
               >
                 <Plus className="size-4" />
-                Add monitoring model
+                Add model profile
               </Button>
             </div>
             {data.profiles.length === 0 ? (
               <div className="p-6 text-center">
-                <p className="text-sm font-medium">No monitoring models yet</p>
+                <p className="text-sm font-medium">No model profiles yet</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Add your first model using an installed agent login, an API,
                   or a local endpoint.
                 </p>
               </div>
             ) : (
-              <ul aria-label="Monitoring models" className="divide-y">
+              <ul aria-label="Configured model profiles" className="divide-y">
                 {data.profiles.map((p) => (
                   <li
                     key={p.id}
@@ -217,7 +221,7 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
                         </span>
                         {p.id === data.default_profile_id && (
                           <span className="rounded bg-muted px-2 py-0.5 text-xs">
-                            Global default
+                            Global monitoring model
                           </span>
                         )}
                       </div>
@@ -279,11 +283,10 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
             >
               <DialogHeader>
                 <DialogTitle>
-                  {draft.id ? "Edit monitoring model" : "Add monitoring model"}
+                  {draft.id ? "Edit model profile" : "Add model profile"}
                 </DialogTitle>
                 <DialogDescription>
-                  Connect a model to detect agent status and requests for input
-                  from terminal output.
+                  Connect a model for monitoring, notifications, or Inbox automation.
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -294,7 +297,7 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
                     () => post("/api/monitor/profiles", draft),
                     draft.id
                       ? "Model updated."
-                      : "Model added. Choose it as the global default or for a workspace.",
+                      : "Model profile added.",
                     () => setEditing(false),
                   );
                 }}
@@ -440,7 +443,7 @@ export function MonitoringSection({ workspaceId }: { workspaceId?: number }) {
           {notice}
         </p>
       )}
-    </section>
+    </div>
   );
 }
 

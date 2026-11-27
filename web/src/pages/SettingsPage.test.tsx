@@ -10,8 +10,9 @@ vi.mock("@/api/settings", () => ({
 vi.mock("@/api/queries", () => ({ useGithubStatus: () => ({ data: { gh_available: true } }) }));
 vi.mock("@/components/settings/SettingsField", () => ({ SettingsField: ({ label }: { label: string }) => <div>{label}</div> }));
 vi.mock("@/components/settings/AgentsSection", () => ({ AgentsSection: () => <div>Agent controls</div> }));
+vi.mock("@/components/settings/AgentIntegrations", () => ({ AgentIntegrations: () => <div>Integration controls</div> }));
 vi.mock("@/components/settings/ScratchpadSection", () => ({ ScratchpadSection: () => <div>Scratchpad controls</div> }));
-vi.mock("@/components/settings/MonitoringSection", () => ({ MonitoringSection: () => <div>Monitor controls</div> }));
+vi.mock("@/components/settings/MonitoringSection", () => ({ MonitoringSection: ({ view }: { view: string }) => <div>{view === "profiles" ? "Profile controls" : "Monitor controls"}</div> }));
 vi.mock("@/components/settings/InboxAgentSection", () => ({ InboxAgentSection: () => <div>Inbox agent controls</div> }));
 vi.mock("@/components/settings/NotificationModel", () => ({ NotificationModel: () => <div>Notification model controls</div> }));
 vi.mock("@/components/settings/NotificationRules", () => ({ NotificationRules: () => <div>Notification rules controls</div> }));
@@ -32,7 +33,7 @@ describe("settings categories", () => {
     const html = render();
     const expected = {
       workspace: ["Worktree base directory", "Shell", "Branch name template", "Browser notifications"],
-      agents: ["Agent controls", "Scratchpad controls", "Monitor controls", "Notification model controls", "Notification rules controls", "Inbox agent controls"],
+      agents: ["Agent controls", "Integration controls", "Profile controls", "Scratchpad controls", "Monitor controls", "Notification model controls", "Notification rules controls", "Inbox agent controls"],
       prompts: ["Custom prompts", "Add prompt"],
       github: ["GitHub integration", "Notification controls"],
       cleanup: ["Done session TTL", "Cleanup controls"],
@@ -67,8 +68,19 @@ describe("settings categories", () => {
     expect(html).toContain("Notification controls");
   });
 
-  it("keeps old monitoring URLs pointing to agent settings", () => {
-    expect(panel(render("?section=monitoring"), "agents")).toContain('data-state="active"');
+  it.each([
+    ["?section=agents", "Coding agents"],
+    ["?section=agents&agent=unknown", "Coding agents"],
+    ["?section=agents&agent=profiles", "Model profiles"],
+    ["?section=monitoring", "Terminal monitoring"],
+  ])("selects the agent category for %s and keeps all category controls mounted", (url, selected) => {
+    const html = render(url);
+    expect(panel(html, "agents")).toContain('data-state="active"');
+    expect(html).toMatch(new RegExp(`<a[^>]*aria-current="page"[^>]*>${selected}</a>`));
+    const sections = [...html.matchAll(/<section[^>]*aria-labelledby="([^"]+)-(coding|integrations|monitoring|notifications|inbox|profiles|scratchpad)"[^>]*>/g)];
+    expect(sections).toHaveLength(7);
+    expect(sections.filter(([tag]) => !tag.includes('hidden=""'))).toHaveLength(1);
+    expect(html).toContain("Profile controls");
   });
 
   it("falls back to workspace for an unknown category", () => {
