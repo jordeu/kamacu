@@ -26,6 +26,8 @@ import (
 // (D-26): worktree_path set → active; worktree_error set → failed (Retry);
 // both NULL → absent ("Create worktree"). No status enum.
 type Task struct {
+	WorkspaceAgentID *int64 `json:"workspace_agent_id"`
+
 	AgentID       *int64              `json:"agent_id"`
 	Model         string              `json:"model"`
 	PRLinks       []store.PRLink      `json:"pr_links,omitempty"`
@@ -71,12 +73,23 @@ type taskHandlers struct {
 	tmuxClient tmux.Client
 }
 
-const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url, recurrent, snoozed_until, snoozed_from, agent_id, model`
+const taskColumns = `id, project_id, title, description, status, position, created_at, updated_at, branch, worktree_path, worktree_error, source, pr_number, pr_base_ref, issue_repo, issue_number, issue_url, recurrent, snoozed_until, snoozed_from, agent_id, model, workspace_agent_id`
 
-func scanTask(row interface{ Scan(...any) error }) (Task, error) {
+// Select the inherited agent in the INSERT so it reflects the configuration
+// at creation time. Projects with a pinned agent retain their existing behavior.
+const newTaskWorkspaceAgent = `(SELECT w.agent_id FROM projects p
+ JOIN workspace_agent_defaults w ON w.workspace_id = p.workspace_id
+ WHERE p.id = ? AND p.agent_id IS NULL)`
+
+func scanTask(row interface{ Scan(...any) error }, extraColumns ...any) (Task, error) {
 	var t Task
-	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent, &t.SnoozedUntil, &t.SnoozedFrom, &t.AgentID, &t.Model)
+	destinations := []any{
+		&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+		&t.Branch, &t.WorktreePath, &t.WorktreeError, &t.Source, &t.PRNumber, &t.PRBaseRef,
+		&t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent, &t.SnoozedUntil, &t.SnoozedFrom,
+		&t.AgentID, &t.Model, &t.WorkspaceAgentID,
+	}
+	err := row.Scan(append(destinations, extraColumns...)...)
 	return t, err
 }
 
@@ -351,7 +364,7 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	agentID, model, err := validateTaskAgent(h.db, pid, req.AgentID, req.Model)
+	agentID, model, err := resolveNewTaskAgent(h.db, pid, req.AgentID, req.Model)
 	if err != nil {
 		var validationError taskAgentValidationError
 		if errors.As(err, &validationError) {
@@ -362,10 +375,10 @@ func (h *taskHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, err := scanTask(h.db.QueryRow(
-		`INSERT INTO tasks (project_id, title, description, agent_id, model, status, position)
-		 VALUES (?, ?, ?, ?, ?, 'todo',
+		`INSERT INTO tasks (project_id, title, description, agent_id, model, workspace_agent_id, status, position)
+		 VALUES (?, ?, ?, ?, ?, `+newTaskWorkspaceAgent+`, 'todo',
 		   (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks WHERE project_id = ? AND status = 'todo' AND source = 'manual'))
-		 RETURNING `+taskColumns, pid, title, req.Description, agentID, model, pid))
+		 RETURNING `+taskColumns, pid, title, req.Description, agentID, model, pid, pid))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -435,12 +448,24 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	}
 	sets := []string{}
 	args := []any{}
+	var db rowQueryer = h.db
+	var tx *sql.Tx
 	if len(req.AgentID) > 0 || req.Model != nil {
 		if h.mgr != nil {
 			unlock := h.mgr.LockTaskLifecycle(id)
 			defer unlock()
 		}
-		current, err := scanTask(h.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id))
+		// Keep the project and workspace defaults stable through validation
+		// and the write, including when clearing a pin restores a default.
+		var err error
+		tx, err = h.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer tx.Rollback()
+		db = tx
+		current, err := scanTask(db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
@@ -467,7 +492,7 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "agent settings changed; reload the saved settings before trying again")
 			return
 		}
-		agentID, model, changed, err := resolveTaskAgentUpdate(h.db, current, req.AgentID, req.Model)
+		agentID, model, changed, err := resolveTaskAgentUpdate(db, current, req.AgentID, req.Model)
 		if err != nil {
 			var invalid taskAgentValidationError
 			if errors.As(err, &invalid) {
@@ -487,6 +512,12 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 		}
 		sets = append(sets, "agent_id = ?", "model = ?")
 		args = append(args, agentID, model)
+		if agentID == nil && current.WorkspaceAgentID == nil {
+			// A deleted fallback may have left a pinned task without a
+			// snapshot. Capture the current workspace default on unpin.
+			sets = append(sets, "workspace_agent_id = "+newTaskWorkspaceAgent)
+			args = append(args, current.ProjectID)
+		}
 	}
 	if req.Title != nil {
 		title := strings.TrimSpace(*req.Title)
@@ -504,7 +535,7 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Recurrent != nil {
 		var source string
-		if err := h.db.QueryRow(`SELECT source FROM tasks WHERE id = ?`, id).Scan(&source); err != nil {
+		if err := db.QueryRow(`SELECT source FROM tasks WHERE id = ?`, id).Scan(&source); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeError(w, http.StatusNotFound, "task not found")
 			} else {
@@ -526,7 +557,7 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	}
 	sets = append(sets, "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
 	args = append(args, id)
-	t, err := scanTask(h.db.QueryRow(
+	t, err := scanTask(db.QueryRow(
 		`UPDATE tasks SET `+strings.Join(sets, ", ")+` WHERE id = ? RETURNING `+taskColumns, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "task not found")
@@ -535,6 +566,12 @@ func (h *taskHandlers) update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, t)
 }
@@ -846,13 +883,13 @@ func (h *taskHandlers) persistTaskMove(ctx context.Context, tx *sql.Tx, id int64
 		// Copy only content and conversation identities. Everything else gets
 		// normal new-task defaults, including a fresh worktree after commit.
 		successor, err = scanTask(tx.QueryRowContext(ctx, `
-			INSERT INTO tasks (project_id, title, description, position, recurrent,
+			INSERT INTO tasks (project_id, title, description, position, recurrent, workspace_agent_id,
 			                   claude_session_id, opencode_session_id, codex_session_id)
 			SELECT project_id, title, description,
 			       (SELECT COALESCE(MIN(position), 2.0) - 1.0 FROM tasks
 			        WHERE project_id = ? AND status = 'todo' AND source = 'manual'),
-			       1, claude_session_id, opencode_session_id, codex_session_id
-			FROM tasks WHERE id = ? RETURNING `+taskColumns, projectID, id))
+			       1, `+newTaskWorkspaceAgent+`, claude_session_id, opencode_session_id, codex_session_id
+			FROM tasks WHERE id = ? RETURNING `+taskColumns, projectID, projectID, id))
 		if err != nil {
 			return Task{}, nil, err
 		}

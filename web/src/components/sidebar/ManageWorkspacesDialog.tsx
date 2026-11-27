@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Pencil, Plus, Trash2, Settings } from "lucide-react";
-import { useProjects, useWorkspaces } from "@/api/queries";
-import { useDeleteWorkspace } from "@/api/mutations";
+import { useAgents, useProjects, useWorkspaces } from "@/api/queries";
+import { useDeleteWorkspace, useSetWorkspaceDefaultAgent } from "@/api/mutations";
 import type { Workspace } from "@/api/types";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,7 +61,8 @@ export function ManageWorkspacesDialog({
     undefined,
   );
   // The delete confirm targets one (empty, non-default) workspace at a time.
-  const [monitorTarget, setMonitorTarget] = useState<Workspace | null>(null);
+  const [settingsId, setSettingsId] = useState<number | null>(null);
+  const settingsWorkspace = workspaces?.find((workspace) => workspace.id === settingsId);
   const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null);
 
   // Per-workspace project count, keyed by workspace_id (D-05) — mirrors the
@@ -130,8 +134,8 @@ export function ManageWorkspacesDialog({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Monitoring model for ${ws.name}`}
-                    onClick={() => setMonitorTarget(ws)}
+                    aria-label={`Settings for ${ws.name}`}
+                    onClick={() => setSettingsId(ws.id)}
                   >
                     <Settings className="size-4" />
                   </Button>
@@ -183,17 +187,20 @@ export function ManageWorkspacesDialog({
       </Dialog>
 
       <Dialog
-        open={monitorTarget !== null}
+        open={settingsWorkspace !== undefined}
         onOpenChange={(open) => {
-          if (!open) setMonitorTarget(null);
+          if (!open) setSettingsId(null);
         }}
       >
         <DialogContent aria-describedby={undefined}>
           <DialogHeader>
-            <DialogTitle>{monitorTarget?.name} monitoring</DialogTitle>
+            <DialogTitle>{settingsWorkspace?.name} settings</DialogTitle>
           </DialogHeader>
-          {monitorTarget && (
-            <MonitoringSection workspaceId={monitorTarget.id} />
+          {settingsWorkspace && (
+            <>
+              <WorkspaceDefaultAgent workspace={settingsWorkspace} />
+              <MonitoringSection workspaceId={settingsWorkspace.id} />
+            </>
           )}
         </DialogContent>
       </Dialog>
@@ -228,5 +235,43 @@ export function ManageWorkspacesDialog({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+function WorkspaceDefaultAgent({ workspace }: { workspace: Workspace }) {
+  const { data: agents } = useAgents();
+  const update = useSetWorkspaceDefaultAgent();
+  const globalDefault = agents?.find((agent) => agent.is_default);
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor="workspace-default-agent" className="text-xs font-medium">
+        Default agent
+      </label>
+      <Select
+        value={workspace.default_agent_id == null ? "global" : String(workspace.default_agent_id)}
+        disabled={!agents || update.isPending}
+        onValueChange={(value) => update.mutate({
+          id: workspace.id,
+          default_agent_id: value === "global" ? null : Number(value),
+        })}
+      >
+        <SelectTrigger id="workspace-default-agent" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="global">
+            Global default{globalDefault ? ` (${globalDefault.name})` : ""}
+          </SelectItem>
+          {agents?.map((agent) => (
+            <SelectItem key={agent.id} value={String(agent.id)}>{agent.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        Used for new tasks in projects that choose Workspace default agent.
+      </p>
+      {update.isError && <p role="alert" className="text-xs text-destructive">{update.error.message}</p>}
+    </div>
   );
 }

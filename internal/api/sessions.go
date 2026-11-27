@@ -463,7 +463,8 @@ func (h *sessionHandlers) createSession(req sessionCreateRequest) (*session.Sess
 			`SELECT p.id, t.worktree_path, t.claude_session_id, t.opencode_session_id, t.codex_session_id, t.pi_session_id, a.engine, a.command, a.extra_params, t.model, a.model_argument, a.model_discovery_command
 			 FROM tasks t
 			 JOIN projects p ON p.id = t.project_id
-			 JOIN agents a ON a.id = COALESCE(t.agent_id, p.agent_id)
+			 JOIN task_agents ta ON ta.task_id = t.id
+			 JOIN agents a ON a.id = ta.agent_id
 			 WHERE t.id = ?`, req.TaskID,
 		).Scan(&opts.ProjectID, &path, &csid, &ocsid, &cxid, &piID, &agentEngine, &agentCommand, &agentExtraParams, &taskModel, &modelArgument, &discoveryCommand)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1520,7 +1521,8 @@ func (h *sessionHandlers) joinSessionContext(infos []session.Info) map[int64]ses
 		`SELECT t.id, t.title, p.name, a.name
 		 FROM tasks t
 		 JOIN projects p ON p.id = t.project_id
-		 JOIN agents a ON a.id = COALESCE(t.agent_id, p.agent_id)
+		 JOIN task_agents ta ON ta.task_id = t.id
+		 JOIN agents a ON a.id = ta.agent_id
 		 WHERE t.id IN (`+placeholders+`)`, ids...)
 	if err != nil {
 		slog.Warn("joinSessionContext: query", "error", err)

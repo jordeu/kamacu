@@ -34,7 +34,8 @@ export function NewTaskDialog({
   const [modelSelection, setModelSelection] = useState<{ agentId: number; model: string } | null>(null);
   const { data: agents } = useAgents();
   const { data: projects } = useProjects();
-  const projectAgentId = projects?.find((project) => project.id === projectId)?.agent_id;
+  const project = projects?.find((entry) => entry.id === projectId);
+  const projectAgentId = project?.agent_id ?? project?.workspace_agent_id;
   const projectAgent = agents?.find((agent) => agent.id === projectAgentId);
   const selectedAgentId = agentId ?? projectAgentId;
   const selectedAgent = agents?.find((agent) => agent.id === selectedAgentId);
@@ -55,8 +56,9 @@ export function NewTaskDialog({
   function handleSubmit(startAgent = false) {
     const trimmed = title.trim();
     if (trimmed === "" || !selectedAgent || createTask.isPending) return;
+    const agentOverride = model ? selectedAgent.id : agentId ?? undefined;
     createTask.mutate(
-      { title: trimmed, description, agent_id: selectedAgentId, model },
+      { title: trimmed, description, agent_id: agentOverride, model },
       {
         onSuccess: (task) => {
           setTitle("");

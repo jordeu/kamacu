@@ -45,16 +45,17 @@ func BackfillWorkspaces(db *sql.DB) error {
 // the flag, rename-proof — never by the name "Personal"). SQLite stores
 // is_default as INTEGER 0/1; scanWorkspace maps it to bool.
 type Workspace struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	IsDefault bool   `json:"is_default"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	IsDefault      bool   `json:"is_default"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	DefaultAgentID *int64 `json:"default_agent_id"`
 }
 
 // workspaceColumns is the canonical SELECT/RETURNING column list; its ORDER must
 // match the scanWorkspace Scan order.
-const workspaceColumns = `id, name, is_default, created_at, updated_at`
+const workspaceColumns = `id, name, is_default, created_at, updated_at, default_agent_id`
 
 // scanWorkspace scans one workspaces row. is_default comes back as INTEGER 0/1;
 // scan into an int and map to bool (the managedInt != 0 idiom in scanProject) to
@@ -62,7 +63,7 @@ const workspaceColumns = `id, name, is_default, created_at, updated_at`
 func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	var ws Workspace
 	var isDefaultInt int
-	err := row.Scan(&ws.ID, &ws.Name, &isDefaultInt, &ws.CreatedAt, &ws.UpdatedAt)
+	err := row.Scan(&ws.ID, &ws.Name, &isDefaultInt, &ws.CreatedAt, &ws.UpdatedAt, &ws.DefaultAgentID)
 	ws.IsDefault = isDefaultInt != 0
 	return ws, err
 }
@@ -131,42 +132,54 @@ func (h *workspaceHandlers) create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, ws)
 }
 
-// update handles PATCH /api/workspaces/{id} — rename (WSMGMT-02). Rename is NEVER
-// gated on is_default: the default Personal workspace is renamable (D-04). A
-// case-insensitive collision with a DIFFERENT workspace is rejected 409.
+// update handles PATCH /api/workspaces/{id} for the name and default agent.
 func (h *workspaceHandlers) update(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var req struct {
-		Name *string `json:"name"`
+		Name           *string         `json:"name"`
+		DefaultAgentID json.RawMessage `json:"default_agent_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == nil {
+	if req.Name == nil && req.DefaultAgentID == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
-	name := strings.TrimSpace(*req.Name)
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
+	sets := []string{"updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"}
+	var args []any
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+		var exists int
+		if err := h.db.QueryRow(`SELECT 1 FROM workspaces WHERE name = ? COLLATE NOCASE AND id != ?`, name, id).Scan(&exists); err == nil {
+			writeError(w, http.StatusConflict, "a workspace with that name already exists")
+			return
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		sets = append(sets, "name = ?")
+		args = append(args, name)
 	}
-	// Duplicate pre-check excluding self (a no-op rename to the same name is fine).
-	var exists int
-	if err := h.db.QueryRow(`SELECT 1 FROM workspaces WHERE name = ? COLLATE NOCASE AND id != ?`, name, id).Scan(&exists); err == nil {
-		writeError(w, http.StatusConflict, "a workspace with that name already exists")
-		return
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	if req.DefaultAgentID != nil {
+		agentID, ok := readAgentID(w, h.db, req.DefaultAgentID)
+		if !ok {
+			return
+		}
+		sets = append(sets, "default_agent_id = ?")
+		args = append(args, agentID)
 	}
+	args = append(args, id)
 	ws, err := scanWorkspace(h.db.QueryRow(
-		`UPDATE workspaces SET name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? RETURNING `+workspaceColumns,
-		name, id))
+		`UPDATE workspaces SET `+strings.Join(sets, ", ")+` WHERE id = ? RETURNING `+workspaceColumns, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return

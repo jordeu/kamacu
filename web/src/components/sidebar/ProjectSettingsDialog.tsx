@@ -71,15 +71,15 @@ export function ProjectSettingsDialog({
 }: ProjectSettingsDialogProps) {
   const { data: settings } = useSettings();
   const { data: agents } = useAgents();
+  const workspaceAgent = agents?.find((agent) => agent.id === project.workspace_agent_id);
+  const savedAgent = project.agent_id == null ? "workspace" : String(project.agent_id);
   const integrationOn = settings?.github_integration?.value === "on";
 
   const [description, setDescription] = useState(project.description);
   const [repo, setRepo] = useState(project.github_repo ?? "");
   const [letters, setLetters] = useState(project.icon_letters);
   const [color, setColor] = useState(project.icon_color);
-  // M001: the project's agent. String for the Select control; parsed back to
-  // number on PATCH. Defaults to the project's current agent.
-  const [agentId, setAgentId] = useState(String(project.agent_id));
+  const [agentId, setAgentId] = useState(savedAgent);
   // Tracks whether the user has typed in the repo field, so a late-arriving
   // origin suggestion never clobbers an edit.
   const [repoEdited, setRepoEdited] = useState(false);
@@ -107,7 +107,7 @@ export function ProjectSettingsDialog({
       setRepo(project.github_repo ?? "");
       setLetters(project.icon_letters);
       setColor(project.icon_color);
-      setAgentId(String(project.agent_id));
+      setAgentId(savedAgent);
       setRepoEdited(false);
       setError(null);
     }
@@ -140,9 +140,8 @@ export function ProjectSettingsDialog({
     // enforcer — an empty `letters` here surfaces a 400 inline below (D-12).
     const lettersChanged = letters !== project.icon_letters;
     const colorChanged = color !== project.icon_color;
-    // M001: send agent_id only when it actually changed (same conditional-PATCH
-    // shape as the icon fields). mutations.ts drops undefined keys.
-    const agentChanged = Number(agentId) !== project.agent_id;
+    const agentChanged = agentId !== savedAgent;
+    const agentOverride = agentId === "workspace" ? null : Number(agentId);
     try {
       await updateSettings.mutateAsync({
         id: project.id,
@@ -150,7 +149,7 @@ export function ProjectSettingsDialog({
         github_repo: repoChanged ? repo.trim() : undefined,
         icon_letters: lettersChanged ? letters : undefined,
         icon_color: colorChanged ? color : undefined,
-        agent_id: agentChanged ? Number(agentId) : undefined,
+        agent_id: agentChanged ? agentOverride : undefined,
       });
       // A 2xx save always closes the dialog.
       onOpenChange(false);
@@ -230,12 +229,15 @@ export function ProjectSettingsDialog({
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label className="text-xs font-medium">Agent</Label>
+            <Label htmlFor="project-agent" className="text-xs font-medium">Agent</Label>
             <Select value={agentId} onValueChange={setAgentId}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="project-agent" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="workspace">
+                  Workspace default agent{workspaceAgent ? ` (${workspaceAgent.name})` : ""}
+                </SelectItem>
                 {(agents ?? []).map((a) => (
                   <SelectItem key={a.id} value={String(a.id)}>
                     {a.name}
@@ -245,7 +247,7 @@ export function ProjectSettingsDialog({
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              The agent that runs in this project&apos;s task Agent tab.
+              New tasks use this agent by default.
             </p>
           </div>
 

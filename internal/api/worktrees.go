@@ -45,17 +45,13 @@ type worktreeHandlers struct {
 // managed checkout's Retry/PR-review worktree fetches the latest default branch
 // first; folder projects (managed=false) skip the fetch (D-24).
 func (h *worktreeHandlers) loadTaskRepo(id int64) (Task, string, bool, error) {
-	var t Task
 	var repo string
 	var managedInt int
-	err := h.db.QueryRow(
+	t, err := scanTask(h.db.QueryRow(
 		`SELECT `+taskColumns+`,
 		   (SELECT repo_path FROM projects WHERE projects.id = tasks.project_id),
 		   (SELECT managed FROM projects WHERE projects.id = tasks.project_id)
-		 FROM tasks WHERE id = ?`, id).
-		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Position,
-			&t.CreatedAt, &t.UpdatedAt, &t.Branch, &t.WorktreePath, &t.WorktreeError,
-			&t.Source, &t.PRNumber, &t.PRBaseRef, &t.IssueRepo, &t.IssueNumber, &t.IssueURL, &t.Recurrent, &t.SnoozedUntil, &t.SnoozedFrom, &t.AgentID, &t.Model, &repo, &managedInt)
+		 FROM tasks WHERE id = ?`, id), &repo, &managedInt)
 	return t, repo, managedInt != 0, err
 }
 

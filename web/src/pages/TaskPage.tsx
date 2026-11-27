@@ -113,7 +113,8 @@ function TaskPageContent({ task }: { task: Task }) {
   // Task overrides also determine agent-specific controls and quota visibility.
   const { data: allProjects } = useProjects();
   const { data: allAgents } = useAgents();
-  const activeAgentId = task.agent_id ?? allProjects?.find((p) => p.id === projectId)?.agent_id;
+  const project = allProjects?.find((p) => p.id === projectId);
+  const activeAgentId = task.agent_id ?? project?.agent_id ?? task.workspace_agent_id ?? project?.workspace_agent_id;
   const activeAgent = allAgents?.find((agent) => agent.id === activeAgentId);
   const isClaudeAgent = activeAgent?.engine === "claude";
   const navigate = useNavigate();
@@ -250,6 +251,7 @@ function TaskPageContent({ task }: { task: Task }) {
   // on its own keeps a muted tab until banner-Close within this visit; a
   // later revisit shows running sessions only.
   const [keepExitedIds, setKeepExitedIds] = useState<Set<string>>(new Set());
+  const [observedSessions, setObservedSessions] = useState<typeof sessions>();
 
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -262,20 +264,17 @@ function TaskPageContent({ task }: { task: Task }) {
   // avoids redundant POSTs.
   const reattachedRef = useRef<Set<string>>(new Set());
 
-  // Every session currently running for this task joins keepExitedIds.
-  useEffect(() => {
-    if (!sessions) return;
-    setKeepExitedIds((prev) => {
-      let next: Set<string> | null = null;
-      for (const s of sessions) {
-        if (s.status === "running" && !prev.has(s.id)) {
-          next ??= new Set(prev);
-          next.add(s.id);
-        }
-      }
-      return next ?? prev;
-    });
-  }, [sessions]);
+  // Record running sessions as query results arrive so their tabs can
+  // remain visible when a later result reports that they have exited.
+  if (observedSessions !== sessions) {
+    setObservedSessions(sessions);
+    const newlyRunningIds = (sessions ?? [])
+      .filter((s) => s.status === "running" && !keepExitedIds.has(s.id))
+      .map((s) => s.id);
+    if (newlyRunningIds.length > 0) {
+      setKeepExitedIds(new Set([...keepExitedIds, ...newlyRunningIds]));
+    }
+  }
 
   // Auto-reattach restored tmux survivors (TMUX-05, D-88): each orphaned bash
   // ghost fires ONE reattach spawn against its persisted tmux name. The ghost
@@ -327,11 +326,11 @@ function TaskPageContent({ task }: { task: Task }) {
     () => [
       "agent",
       "description",
-      ...(task?.worktree_path ? ["diff"] : []),
+      ...(task.worktree_path ? ["diff"] : []),
       ...(artifacts ?? []).map((artifact) => `artifact:${artifact.id}`),
       ...visibleSessions.map((s) => s.id),
     ],
-    [task?.worktree_path, visibleSessions, artifacts],
+    [task.worktree_path, visibleSessions, artifacts],
   );
 
   // Pitfall 7: a Radix Tabs value pointing at a removed tab renders blank.

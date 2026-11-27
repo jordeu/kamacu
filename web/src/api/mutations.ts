@@ -57,6 +57,20 @@ export function useDeleteWorkspace() {
   });
 }
 
+export function useSetWorkspaceDefaultAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, default_agent_id }: { id: number; default_agent_id: number | null }) =>
+      patch<Workspace>(`/api/workspaces/${id}`, { default_agent_id }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["workspaces"] }),
+        queryClient.invalidateQueries({ queryKey: ["projects"] }),
+      ]);
+    },
+  });
+}
+
 /**
  * Transfer a project to another workspace (WSPROJ-01, D-17). This is a PATCH to
  * the *project* endpoint (an optional `workspace_id` on the partial-PATCH — no
@@ -120,9 +134,7 @@ export function useUpdateProjectSettings() {
       github_repo?: string;
       icon_letters?: string;
       icon_color?: string;
-      // M001: optional agent_id (conditional-PATCH, same omitted-=-untouched
-      // shape as the icon fields). Undefined = untouched.
-      agent_id?: number;
+      agent_id?: number | null;
     }) => {
       // Build the PATCH body conditionally so an `undefined` field is never
       // sent (D-09: omitted key = untouched, matching the backend
@@ -132,7 +144,7 @@ export function useUpdateProjectSettings() {
         github_repo?: string;
         icon_letters?: string;
         icon_color?: string;
-        agent_id?: number;
+        agent_id?: number | null;
       } = { description };
       if (github_repo !== undefined) body.github_repo = github_repo;
       if (icon_letters !== undefined) body.icon_letters = icon_letters;
@@ -140,8 +152,12 @@ export function useUpdateProjectSettings() {
       if (agent_id !== undefined) body.agent_id = agent_id;
       return patch<Project>(`/api/projects/${id}`, body);
     },
-    onSuccess: () => {
+    onSuccess: (_, { id, agent_id }) => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      if (agent_id !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ["tasks", id] });
+        queryClient.invalidateQueries({ queryKey: ["task"] });
+      }
     },
   });
 }
@@ -325,6 +341,8 @@ export function useDeleteAgent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["task"] });
     },
   });
 }
