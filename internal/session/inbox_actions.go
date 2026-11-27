@@ -13,6 +13,7 @@ import (
 // ErrObservedChanged means no input was written: a saved action's guard failed.
 var ErrObservedChanged = errors.New("terminal changed before the action")
 var emptyAgentPrompt = regexp.MustCompile(`(?m)^[\t ]*[❯›>][\t ]*$`)
+var piContextUsage = regexp.MustCompile(`(?:^|[\t ])(?:[0-9]+(?:\.[0-9]+)?%|\?)/[1-9][0-9]*(?:\.[0-9]+)?[kKmM]?(?:[\t ]|$)`)
 
 // WaitInboxReady uses session lifecycle and terminal evidence, not an LLM. An
 // empty newborn PTY is never considered ready just because its status is idle.
@@ -33,9 +34,13 @@ func (s *Session) WaitInboxReady(ctx context.Context, allowWorking ...bool) (obs
 		quiet := obs.OutputAt.IsZero() || time.Since(obs.OutputAt) >= 250*time.Millisecond
 		text := strings.ToLower(obs.Screen)
 		busy := strings.Contains(text, "esc to interrupt") || strings.Contains(text, "esc to stop")
+		if info.Engine == "pi" && info.Monitor.State == "working" &&
+			!info.Monitor.ObservedAt.IsZero() && !obs.OutputAt.After(info.Monitor.ObservedAt) && !obs.InputAt.After(info.Monitor.ObservedAt) {
+			busy = true
+		}
 		// A verified empty input prompt permits first-turn delivery immediately,
 		// without waiting for the generic activity heuristic's 15-second cooldown.
-		hasPrompt := inboxInputPrompt(info.Engine, obs.Screen)
+		hasPrompt := (info.Engine != "pi" || !obs.UnsupportedSize) && inboxInputPrompt(info.Engine, obs.Screen)
 		sendNow := len(allowWorking) > 0 && allowWorking[0]
 		if sendNow && info.Engine == "codex" {
 			hasPrompt = false
@@ -83,8 +88,11 @@ func (s *Session) StopForInbox(ctx context.Context, input uint64) error {
 }
 
 func inboxInputPrompt(engine, screen string) bool {
-	if engine == "codex" {
+	switch engine {
+	case "codex":
 		return codexScreenStatus(screen) == "idle"
+	case "pi":
+		return piEmptyEditor(screen)
 	}
 
 	lines := strings.Split(screen, "\n")
@@ -116,4 +124,25 @@ func inboxInputPrompt(engine, screen string) bool {
 	}
 
 	return hasPrompt
+}
+
+// Pi's default editor renders a blank row between two matching horizontal
+// rules, directly above the working directory and context usage. A draft,
+// working indicator, or replacement editor changes that layout. A zero-size
+// context window is Pi's placeholder when there is no model.
+func piEmptyEditor(screen string) bool {
+	lines := strings.Split(strings.TrimRight(screen, " \t\r\n"), "\n")
+	if len(lines) < 5 {
+		return false
+	}
+	tail := lines[len(lines)-5:]
+	top, bottom := strings.TrimSpace(tail[0]), strings.TrimSpace(tail[2])
+	if top == "" || top != bottom || strings.Trim(top, "─") != "" || strings.TrimSpace(tail[1]) != "" {
+		return false
+	}
+	dir := strings.TrimSpace(tail[3])
+	if dir != "~" && !strings.HasPrefix(dir, "~/") && !strings.HasPrefix(dir, "/") {
+		return false
+	}
+	return piContextUsage.MatchString(tail[4])
 }

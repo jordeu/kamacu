@@ -103,3 +103,14 @@ func TestPendingCompletionRequiresOutputAfterSubmission(t *testing.T) {
 		t.Fatal("transient repaint counted as completion")
 	}
 }
+
+func TestPendingPiCompletionRequiresFreshMonitorEvidence(t *testing.T) {
+	now := time.Now()
+	obs := observation.Snapshot{Screen: piReadyScreen, InputAt: now.Add(-3 * time.Second), OutputAt: now.Add(-2 * time.Second)}
+	if pendingCheckFinished(obs, MonitorStatus{}, "pi", now) {
+		t.Fatal("Pi clearing its editor was counted as a reply")
+	}
+	if !pendingCheckFinished(obs, MonitorStatus{State: "idle", ObservedAt: now}, "pi", now) {
+		t.Fatal("fresh Pi completion evidence was ignored")
+	}
+}

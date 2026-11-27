@@ -69,6 +69,11 @@ func pendingCheckFinished(obs observation.Snapshot, monitor MonitorStatus, engin
 			return false
 		}
 	}
+	if engine == "pi" {
+		// Pi can clear the editor while preparing the next turn. The same
+		// empty-editor layout used for input readiness does not prove a reply.
+		return false
+	}
 	// A rendered empty prompt after new output is also evidence, even when the
 	// classifier is unavailable. Require quiet output so transient repainting
 	// does not release a slot before the response starts.

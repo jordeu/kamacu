@@ -3,8 +3,11 @@ package session
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"kamacu/internal/observation"
 )
 
 func TestInboxReadinessWaitsForAnActualPrompt(t *testing.T) {
@@ -134,4 +137,73 @@ func TestInboxReadinessDoesNotUseAnOldPromptOrDialogCursor(t *testing.T) {
 			}
 		})
 	}
+}
+
+const piEditorRule = "────────────────────────────────────────────────────────────────────────────────"
+const piDefaultFooter = "~/worktrees/project/pr-2108 (review)\n$0.000 (sub) 0.0%/500k (auto)                                    model • medium"
+const piReadyScreen = "Pi v1.6.1\n[Context]\nAGENTS.md\n\n" + piEditorRule + "\n\n" + piEditorRule + "\n" + piDefaultFooter
+
+func TestPiInboxInputRequiresAnEmptyEditor(t *testing.T) {
+	for _, tc := range []struct {
+		name, screen string
+		want         bool
+	}{
+		{"startup from observed Pi layout", piReadyScreen, true},
+		{"after a response and terminal padding", "Previous response\n" + piEditorRule + "\n     \n" + piEditorRule + "\n" + piDefaultFooter + "\n   \n", true},
+		{"draft", piEditorRule + "\nDraft review text\n" + piEditorRule + "\n" + piDefaultFooter, false},
+		{"multiline draft with a blank last line", piEditorRule + "\nDraft review text\n\n" + piEditorRule + "\n" + piDefaultFooter, false},
+		{"working inside the top rule", "── ⠹ Working ───────────\n\n" + piEditorRule + "\n" + piDefaultFooter, false},
+		{"completion selection above the footer", piEditorRule + "\n\n" + piEditorRule + "\n→ /model\n" + piDefaultFooter, false},
+		{"project trust dialog", piEditorRule + "\nProject trust\n→ Trust this project\nEnter to save   Esc to cancel\n\n" + piEditorRule + "\n" + piDefaultFooter, false},
+		{"partial startup without a footer", piEditorRule + "\n\n" + piEditorRule, false},
+		{"unrelated footer", piEditorRule + "\n\n" + piEditorRule + "\n" + "~/tmp\nCommand finished", false},
+		{"missing model", piEditorRule + "\n\n" + piEditorRule + "\n~/tmp\n0.0%/0 (auto)   no-model", false},
+		{"old or generic prompt", piReadyScreen + "\nSelect a session\n>", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := inboxInputPrompt("pi", tc.screen); got != tc.want {
+				t.Fatalf("Pi input ready = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPiEmptyEditorDoesNotOverrideCurrentWorkingStatus(t *testing.T) {
+	term := observation.New(80, 24)
+	term.Feed([]byte(strings.ReplaceAll(piReadyScreen, "\n", "\r\n")))
+	sess := &Session{kind: KindAgent, engine: "pi", status: StatusRunning, observer: term}
+	sess.SetMonitorStatus(MonitorStatus{State: "working", ObservedAt: time.Now()})
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	if _, err := sess.WaitInboxReady(ctx); err == nil {
+		t.Fatal("Pi editor was treated as ready despite current working evidence")
+	}
+}
+
+func TestPiInboxReadinessCanSubmitTheFirstPrompt(t *testing.T) {
+	manager := NewManager()
+	sess, err := manager.Spawn(SpawnOpts{
+		Kind: KindAgent, TaskID: 1, Cwd: t.TempDir(), AgentEngine: "pi",
+		AgentArgs: []string{"sh", "-c", `stty -echo
+			printf '%s\n' "$1"
+			IFS= read -r text
+			printf 'accepted:%s\n' "$text"
+			sleep 30`, "pi-test", piReadyScreen},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	obs, err := sess.WaitInboxReady(ctx)
+	if err != nil || obs.Input != 0 {
+		t.Fatalf("Pi first prompt not recognized: %v", err)
+	}
+	if err := sess.WriteObserved(obs.Revision, obs.Input, []byte("Review locally"), []byte("\r")); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, time.Second, "review instruction received", func() bool {
+		return strings.Contains(string(sess.Snapshot()), "accepted:Review locally")
+	})
 }
