@@ -815,7 +815,7 @@ func (ex *actionExecutor) handoff(ctx context.Context, a inboxaction.Action, key
 	if sid == "" {
 		var resume bool
 		var engine, piID, cwd string
-		if err = ex.s.DB.QueryRowContext(ctx, `SELECT CASE a.engine WHEN 'codex' THEN COALESCE(t.codex_session_id,'')!='' WHEN 'opencode' THEN COALESCE(t.opencode_session_id,'')!='' WHEN 'custom' THEN 0 WHEN 'pi' THEN 0 ELSE COALESCE(t.claude_session_id,'')!='' END, a.engine, COALESCE(t.pi_session_id,''), COALESCE(t.worktree_path,'') FROM tasks t JOIN projects p ON p.id=t.project_id JOIN agents a ON a.id=COALESCE(t.agent_id,p.agent_id) WHERE t.id=?`, a.TaskID).Scan(&resume, &engine, &piID, &cwd); err != nil {
+		if err = ex.s.DB.QueryRowContext(ctx, `SELECT CASE a.engine WHEN 'codex' THEN COALESCE(t.codex_session_id,'')!='' WHEN 'opencode' THEN COALESCE(t.opencode_session_id,'')!='' WHEN 'custom' THEN 0 WHEN 'pi' THEN 0 ELSE COALESCE(t.claude_session_id,'')!='' END, a.engine, COALESCE(t.pi_session_id,''), COALESCE(t.worktree_path,'') FROM tasks t JOIN task_agents ta ON ta.task_id=t.id JOIN agents a ON a.id=ta.agent_id WHERE t.id=?`, a.TaskID).Scan(&resume, &engine, &piID, &cwd); err != nil {
 			return err
 		}
 		if engine == "pi" && piID != "" {

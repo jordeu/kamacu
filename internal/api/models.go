@@ -65,17 +65,30 @@ func sameAgentOverride(a, b *int64) bool {
 // A task with an explicit model pins its agent too, so changing a project's
 // default later cannot send that model to a different agent. Existing clients
 // that omit both fields keep inheriting the project's agent.
-func validateTaskAgent(db *sql.DB, projectID int64, agentID *int64, model string) (*int64, string, error) {
+func resolveNewTaskAgent(db *sql.DB, projectID int64, agentID *int64, model string) (*int64, string, error) {
 	model = strings.TrimSpace(model)
-	if agentID == nil && model == "" {
+	if agentID == nil && model != "" {
+		var id int64
+		err := db.QueryRow(`SELECT COALESCE(p.agent_id, w.agent_id)
+		 FROM projects p JOIN workspace_agent_defaults w ON w.workspace_id = p.workspace_id
+		 WHERE p.id = ?`, projectID).Scan(&id)
+		if err != nil {
+			return nil, "", err
+		}
+		agentID = &id
+	}
+	return validateTaskAgent(db, agentID, model)
+}
+
+type rowQueryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func validateTaskAgent(db rowQueryer, agentID *int64, model string) (*int64, string, error) {
+	if agentID == nil {
 		return nil, "", nil
 	}
-	var id int64
-	if agentID != nil {
-		id = *agentID
-	} else if err := db.QueryRow(`SELECT agent_id FROM projects WHERE id = ?`, projectID).Scan(&id); err != nil {
-		return nil, "", err
-	}
+	id := *agentID
 	var modelsJSON, argument string
 	if err := db.QueryRow(`SELECT models, model_argument FROM agents WHERE id = ?`, id).Scan(&modelsJSON, &argument); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -105,7 +118,7 @@ func validateTaskAgent(db *sql.DB, projectID int64, agentID *int64, model string
 // PATCH accepts null to restore the project default, and an empty model to
 // restore the CLI default. Changing agents without a model clears the previous
 // model; model-only edits keep the task's existing agent.
-func resolveTaskAgentUpdate(db *sql.DB, task Task, rawAgent json.RawMessage, model *string) (*int64, string, bool, error) {
+func resolveTaskAgentUpdate(db rowQueryer, task Task, rawAgent json.RawMessage, model *string) (*int64, string, bool, error) {
 	agentID, nextModel := task.AgentID, task.Model
 	if len(rawAgent) > 0 {
 		var replacement *int64
@@ -114,11 +127,11 @@ func resolveTaskAgentUpdate(db *sql.DB, task Task, rawAgent json.RawMessage, mod
 		}
 		agentID = replacement
 	}
-	var projectAgent int64
-	if err := db.QueryRow(`SELECT agent_id FROM projects WHERE id = ?`, task.ProjectID).Scan(&projectAgent); err != nil {
+	var defaultAgent int64
+	if err := db.QueryRow(`SELECT default_agent_id FROM task_agents WHERE task_id = ?`, task.ID).Scan(&defaultAgent); err != nil {
 		return nil, "", false, err
 	}
-	previous, next := projectAgent, projectAgent
+	previous, next := defaultAgent, defaultAgent
 	if task.AgentID != nil {
 		previous = *task.AgentID
 	}
@@ -131,14 +144,14 @@ func resolveTaskAgentUpdate(db *sql.DB, task Task, rawAgent json.RawMessage, mod
 		nextModel = ""
 	}
 	changed := previous != next || task.Model != nextModel
-	if changed {
-		resolved, validated, err := validateTaskAgent(db, task.ProjectID, agentID, nextModel)
-		return resolved, validated, true, err
-	}
-	// Retain a saved model even if it has since been removed from suggestions.
 	if agentID == nil && nextModel != "" {
 		agentID = &next
 	}
+	if changed {
+		resolved, validated, err := validateTaskAgent(db, agentID, nextModel)
+		return resolved, validated, true, err
+	}
+	// Retain a saved model even if it has since been removed from suggestions.
 	return agentID, nextModel, false, nil
 }
 

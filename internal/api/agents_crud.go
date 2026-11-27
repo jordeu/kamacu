@@ -272,26 +272,23 @@ func (h *agentCRUDHandlers) update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
-// delete handles DELETE /api/agents/{id}. Three server-side guards, checked
-// before any mutation (mirrors the workspace delete):
-//   - System guard: the is_system claude seed is never deletable (rename-proof,
-//     keyed off the flag -- never the name "Claude Code").
-//   - In-use guard: an agent still referenced by projects is refused 409 with a
-//     count-carrying message (block-until-unassigned, D-006). The explicit COUNT
-//     precedes the delete so the 409 carries a clean message; the ON DELETE
-//     RESTRICT FK at 00013 is the ultimate backstop.
-//   - Global task guard: the agent referenced by the global_task singleton is
-//     refused 409 with the count-free D-09 string (the singleton references
-//     exactly one agent, always); the 00017 RESTRICT FK is the backstop.
-//
-// An unused, non-system agent is removed -> 204.
+// delete removes an unused, non-system agent. Checks and removal share a
+// transaction so a workspace or task cannot start using the agent in between.
 func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+
 	var isSystem int
-	err := h.db.QueryRow(`SELECT is_system FROM agents WHERE id = ?`, id).Scan(&isSystem)
+	err = tx.QueryRowContext(ctx, `SELECT is_system FROM agents WHERE id = ?`, id).Scan(&isSystem)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -307,12 +304,20 @@ func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	// In-use guard: explicit count -> clean message (block-until-unassigned).
 	var n int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE agent_id = ?`, id).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE agent_id = ?`, id).Scan(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if n > 0 {
 		writeError(w, http.StatusConflict, fmt.Sprintf("reassign its %d project(s) first", n))
+		return
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces WHERE default_agent_id = ?`, id).Scan(&n); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n > 0 {
+		writeError(w, http.StatusConflict, fmt.Sprintf("change the default agent in %d workspace(s) first", n))
 		return
 	}
 	// Global task guard: the singleton references exactly one agent, always —
@@ -321,7 +326,7 @@ func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 	// FK is the invariant of last resort; this guard runs first for the clean
 	// message (the projects.agent_id pattern).
 	var g int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM global_task WHERE agent_id = ?`, id).Scan(&g); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM global_task WHERE agent_id = ?`, id).Scan(&g); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -329,7 +334,7 @@ func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "reassign the Scratchpad agent first")
 		return
 	}
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE agent_id = ?`, id).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_agents WHERE agent_id = ?`, id).Scan(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -337,16 +342,43 @@ func (h *agentCRUDHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, fmt.Sprintf("agent is assigned to %d task(s)", n))
 		return
 	}
-	res, err := h.db.Exec(`DELETE FROM agents WHERE id = ?`, id)
-	if err != nil {
+	// Remaining snapshots are masked by explicit task or project pins.
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET workspace_agent_id = NULL WHERE workspace_agent_id = ?`, id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		writeError(w, http.StatusNotFound, "agent not found")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// readAgentID parses a supplied setting. A JSON null clears the setting.
+func readAgentID(w http.ResponseWriter, db *sql.DB, raw json.RawMessage) (*int64, bool) {
+	var id *int64
+	if err := json.Unmarshal(raw, &id); err != nil {
+		writeError(w, http.StatusBadRequest, "agent ID must be an integer or null")
+		return nil, false
+	}
+	if id == nil {
+		return nil, true
+	}
+	var exists int
+	err := db.QueryRow(`SELECT 1 FROM agents WHERE id = ?`, *id).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusBadRequest, "agent not found")
+		return nil, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	return id, true
 }
 
 // setDefault handles POST /api/agents/{id}/default (R019). Flips the is_default

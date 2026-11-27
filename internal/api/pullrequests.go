@@ -333,9 +333,9 @@ func PullRequestRoutes(mux *http.ServeMux, db *sql.DB, svc *github.Service, wtSv
 			// off the board regardless of status/position).
 			title := fmt.Sprintf("#%d %s", n, detail.Title)
 			t, err = scanTask(db.QueryRow(
-				`INSERT INTO tasks (project_id, title, status, source, pr_number, pr_base_ref, position)
-				 VALUES (?, ?, 'todo', 'github_pr', ?, ?, 0)
-				 RETURNING `+taskColumns, pid, title, n, detail.BaseRefName))
+				`INSERT INTO tasks (project_id, title, status, source, pr_number, pr_base_ref, position, workspace_agent_id)
+				 VALUES (?, ?, 'todo', 'github_pr', ?, ?, 0, `+newTaskWorkspaceAgent+`)
+				 RETURNING `+taskColumns, pid, title, n, detail.BaseRefName, pid))
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return

@@ -130,7 +130,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 		rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.codex_session_id, tasks.pi_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
 			FROM tasks
 			JOIN projects ON projects.id = tasks.project_id
-			JOIN agents ON agents.id = COALESCE(tasks.agent_id, projects.agent_id)
+			JOIN task_agents ta ON ta.task_id = tasks.id
+			JOIN agents ON agents.id = ta.agent_id
 			WHERE tasks.id IN (`+placeholders+`)`, args...)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -237,7 +238,8 @@ func (a *agentHandlers) status(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.Query(`SELECT tasks.id, tasks.project_id, agents.engine, tasks.claude_session_id, tasks.opencode_session_id, tasks.codex_session_id, tasks.pi_session_id, tasks.worktree_path, tasks.pr_number, tasks.source, tasks.title, projects.name
 		FROM tasks
 		JOIN projects ON projects.id = tasks.project_id
-		JOIN agents ON agents.id = COALESCE(tasks.agent_id, projects.agent_id)
+		JOIN task_agents ta ON ta.task_id = tasks.id
+		JOIN agents ON agents.id = ta.agent_id
 		WHERE (tasks.claude_session_id IS NOT NULL OR tasks.opencode_session_id IS NOT NULL OR tasks.codex_session_id IS NOT NULL OR tasks.pi_session_id IS NOT NULL OR agents.engine = 'codex') AND tasks.worktree_path IS NOT NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

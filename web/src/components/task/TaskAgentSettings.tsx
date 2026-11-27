@@ -19,12 +19,14 @@ export function TaskAgentSettings({ task, projectId }: { task: Task; projectId: 
   const sessions = useSessions(task.id);
   const update = useUpdateTask(projectId);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const projectAgentId = projects.data?.find((project) => project.id === projectId)?.agent_id;
-  const savedAgentId = task.agent_id ?? projectAgentId;
+  const project = projects.data?.find((entry) => entry.id === projectId);
+  const defaultAgentId = project?.agent_id ?? task.workspace_agent_id ?? project?.workspace_agent_id;
+  const defaultLabel = project?.agent_id == null && task.workspace_agent_id != null ? "Task default" : "Project default";
+  const savedAgentId = task.agent_id ?? defaultAgentId;
   const agentId = draft ? draft.agentId : task.agent_id ?? null;
-  const effectiveAgentId = agentId ?? projectAgentId;
+  const effectiveAgentId = agentId ?? defaultAgentId;
   const agent = agents.data?.find((entry) => entry.id === effectiveAgentId);
-  const projectAgent = agents.data?.find((entry) => entry.id === projectAgentId);
+  const defaultAgent = agents.data?.find((entry) => entry.id === defaultAgentId);
   const candidate = draft ? draft.model : task.model ?? "";
   const savedModel = effectiveAgentId === savedAgentId && candidate === task.model;
   const model = candidate;
@@ -44,7 +46,7 @@ export function TaskAgentSettings({ task, projectId }: { task: Task; projectId: 
 
   function changeAgent(value: string) {
     const next = value === "" ? null : Number(value);
-    const nextEffective = next ?? projectAgentId;
+    const nextEffective = next ?? defaultAgentId;
     edit({ agentId: next, model: nextEffective === effectiveAgentId ? model : "", modelAgentId: nextEffective });
   }
 
@@ -65,7 +67,7 @@ export function TaskAgentSettings({ task, projectId }: { task: Task; projectId: 
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="description-agent" className="text-xs font-medium">Agent</label>
           <select id="description-agent" className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm disabled:opacity-50" value={agentId ?? ""} onChange={(event) => changeAgent(event.target.value)}>
-            <option value="">Project default{projectAgent ? ` (${projectAgent.name})` : ""}</option>
+            <option value="">{defaultLabel}{defaultAgent ? ` (${defaultAgent.name})` : ""}</option>
             {agents.data?.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
           </select>
         </div>

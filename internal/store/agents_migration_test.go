@@ -164,12 +164,12 @@ func TestAgentsMigration(t *testing.T) {
 		t.Errorf("new project agent_id = %d, want 1 (DEFAULT 1)", gammaAg)
 	}
 
-	// (6) An explicit agent_id = NULL insert errors (NOT NULL enforced).
+	// (6) As of 00055, an explicit NULL opts into the workspace default.
 	if _, err := db.Exec(
 		"INSERT INTO projects (name, repo_path, workspace_id, agent_id) VALUES (?, ?, 1, NULL)",
 		"delta", "/tmp/ag-delta",
-	); err == nil {
-		t.Error("insert with agent_id = NULL succeeded, want NOT NULL failure")
+	); err != nil {
+		t.Errorf("insert project inheriting the workspace agent: %v", err)
 	}
 
 	// (7) DELETE the referenced Claude agent errors (ON DELETE RESTRICT) while a

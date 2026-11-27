@@ -41,9 +41,9 @@ export default function BoardPage() {
   // non-claude agent. Mirrors the TaskPage engine-awareness.
   const { data: allAgents } = useAgents();
   const projectEngine = allAgents?.find(
-    (a) => a.id === project?.agent_id,
+    (a) => a.id === (project?.agent_id ?? project?.workspace_agent_id),
   )?.engine;
-  const isClaudeAgent = projectEngine !== "custom";
+  const isClaudeAgent = projectEngine === "claude";
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);

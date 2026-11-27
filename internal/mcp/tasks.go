@@ -76,7 +76,7 @@ func registerTaskTools(s *mcp.Server, b *bridge) {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"agent_id": map[string]any{"type": "integer", "description": "Optional agent override; defaults to the project agent."},
+					"agent_id": map[string]any{"type": "integer", "description": "Optional agent override. Uses the project's configured default when omitted."},
 					"model":    map[string]any{"type": "string", "description": "Optional model ID from the selected agent configured list; empty uses the agent default."},
 					"project_id": map[string]any{
 						"type":        "integer",

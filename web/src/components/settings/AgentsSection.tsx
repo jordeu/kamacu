@@ -52,6 +52,7 @@ export function AgentsSection() {
   // countByWorkspace). Used to disable + tooltip the delete for in-use agents.
   const countByAgent = new Map<number, number>();
   for (const p of projects ?? []) {
+    if (p.agent_id == null) continue;
     countByAgent.set(p.agent_id, (countByAgent.get(p.agent_id) ?? 0) + 1);
   }
 
@@ -183,7 +184,7 @@ export function AgentsSection() {
             <AlertDialogTitle>Delete agent?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `"${deleteTarget.name}" will be removed. Agents assigned to tasks, projects, or the Scratchpad must be unassigned before deletion.`
+                ? `"${deleteTarget.name}" will be removed. Agents assigned to tasks, projects, workspaces, or the Scratchpad must be unassigned before deletion.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

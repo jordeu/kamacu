@@ -165,9 +165,9 @@ func (h *taskHandlers) importIssue(w http.ResponseWriter, r *http.Request) {
 	// The unique index makes concurrent clicks/retries idempotent. Git work is
 	// performed only by the request that inserted the task, outside a transaction.
 	task, err := scanTask(h.db.QueryRowContext(r.Context(), `INSERT INTO tasks
- (project_id,title,description,status,position,issue_repo,issue_number,issue_url)
- VALUES (?,?,?,'todo',(SELECT COALESCE(MIN(position),2.0)-1.0 FROM tasks WHERE project_id=? AND status='todo' AND source='manual'),?,?,?)
- ON CONFLICT DO NOTHING RETURNING `+taskColumns, p.ID, strings.TrimSpace(issue.Title), description, p.ID, p.Repo, n, issue.URL))
+ (project_id,title,description,status,position,issue_repo,issue_number,issue_url,workspace_agent_id)
+ VALUES (?,?,?,'todo',(SELECT COALESCE(MIN(position),2.0)-1.0 FROM tasks WHERE project_id=? AND status='todo' AND source='manual'),?,?,?,`+newTaskWorkspaceAgent+`)
+ ON CONFLICT DO NOTHING RETURNING `+taskColumns, p.ID, strings.TrimSpace(issue.Title), description, p.ID, p.Repo, n, issue.URL, p.ID))
 	if errors.Is(err, sql.ErrNoRows) {
 		existing, err = h.importedIssue(r.Context(), p, n)
 		if err != nil {
