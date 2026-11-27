@@ -79,7 +79,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	connID := uuid.NewString()
-	q := sess.Attach(connID)
+	q := sess.AttachTerminal(connID)
 	sess.ClearWaitingOnAttach() // legacy acknowledgement; Codex keeps pending permissions
 	defer sess.Detach(connID)   // Detach NEVER touches the PTY — that IS TERM-05
 
