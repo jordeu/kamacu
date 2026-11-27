@@ -7,16 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useSaveSetting, useSettings, type Settings } from "@/api/settings";
 import { useGithubStatus } from "@/api/queries";
+import { AgentSettings } from "@/components/settings/AgentSettings";
 import { SettingsField } from "@/components/settings/SettingsField";
 import { WorktreeCleanupSection } from "@/components/settings/WorktreeCleanupSection";
-import { AgentsSection } from "@/components/settings/AgentsSection";
 import { NotificationsSection } from "@/components/settings/NotificationsSection";
-import { InboxAgentSection } from "@/components/settings/InboxAgentSection";
-import { NotificationModel } from "@/components/settings/NotificationModel";
-import { NotificationRules } from "@/components/settings/NotificationRules";
-import { NotificationSchedule } from "@/components/inbox/NotificationSchedule";
-import { MonitoringSection } from "@/components/settings/MonitoringSection";
-import { ScratchpadSection } from "@/components/settings/ScratchpadSection";
 import { BrowserNotificationsSection } from "@/components/settings/BrowserNotificationsSection";
 import { CustomPromptsSection } from "@/components/settings/CustomPromptsSection";
 
@@ -135,7 +129,7 @@ function GithubSection({
 
 const SETTINGS_GROUPS = [
   { id: "workspace", label: "Workspace", description: "Choose where tasks run and how shells and branches are created." },
-  { id: "agents", label: "Agents", description: "Configure monitoring, notification and inbox agents, plus your coding agents and Scratchpad." },
+  { id: "agents", label: "Agents", description: "Configure coding agents, integrations, and Kamacu automation." },
   { id: "prompts", label: "Prompts", description: "Manage reusable prompts for your tasks." },
   { id: "github", label: "GitHub", description: "Manage GitHub integration, review prompts, and notification sources." },
   { id: "cleanup", label: "Cleanup", description: "Control idle sessions and clean up task worktrees." },
@@ -169,7 +163,7 @@ export default function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto p-4">
-      <div className="mx-auto w-full max-w-[640px]">
+      <div className={`mx-auto w-full ${activeGroup === "agents" ? "max-w-5xl" : "max-w-[640px]"}`}>
         <h1 className="text-base font-medium">{`Settings`}</h1>
         {/* SET-03 stated once for the whole page, never per field. */}
         <p className="mt-1 text-xs text-muted-foreground">
@@ -236,12 +230,7 @@ export default function SettingsPage() {
               </section>
             </TabsContent>
             <TabsContent value="agents" forceMount hidden={activeGroup !== "agents"} className="space-y-6">
-              <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "agents")?.description}</p>
-              <section aria-label="Monitoring agent" className="space-y-3"><h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Monitoring agent</h2><MonitoringSection /></section>
-              <section aria-label="Notification agent" className="space-y-3"><h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Notification agent</h2><NotificationModel /><NotificationRules /><NotificationSchedule /></section>
-              <InboxAgentSection />
-              <AgentsSection />
-              <ScratchpadSection />
+              <AgentSettings active={activeGroup === "agents"} />
             </TabsContent>
             <TabsContent value="prompts" forceMount hidden={activeGroup !== "prompts"} className="space-y-6">
               <p className="text-sm text-muted-foreground">{SETTINGS_GROUPS.find(group => group.id === "prompts")?.description}</p>

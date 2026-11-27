@@ -86,7 +86,7 @@ function AgentNameForm({
     }
   }
 
-  const title = mode === "create" ? "New agent" : "Edit agent";
+  const title = mode === "create" ? "New coding agent" : `Configure ${agent?.name ?? "agent"}`;
   const submitLabel = mode === "create" ? "Create" : "Save";
   const trimmed = name.trim() === "" || command.trim() === "";
 
@@ -110,7 +110,7 @@ function AgentNameForm({
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="agent-command" className="text-xs font-medium">
-              Command
+              Launch command
             </label>
             <Input
               id="agent-command"
@@ -128,21 +128,24 @@ function AgentNameForm({
             </p>
           </div>
           {mode === "edit" && agent?.engine === "claude" && (
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="agent-extra-params" className="text-xs font-medium">
-                Extra parameters
-              </label>
-              <Input
-                id="agent-extra-params"
-                value={extraParams}
-                onChange={(event) => setExtraParams(event.target.value)}
-                className="font-mono text-xs"
-                placeholder="--dangerously-skip-permissions"
-              />
-              <p className="text-xs text-muted-foreground">
-                {"Extra flags appended to every claude spawn. Clear to restore permission prompts."}
-              </p>
-            </div>
+            <details className="rounded-md border px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium">Advanced launch settings</summary>
+              <div className="mt-3 flex flex-col gap-1.5">
+                <label htmlFor="agent-extra-params" className="text-xs font-medium">
+                  Extra parameters
+                </label>
+                <Input
+                  id="agent-extra-params"
+                  value={extraParams}
+                  onChange={(event) => setExtraParams(event.target.value)}
+                  className="font-mono text-xs"
+                  placeholder="--dangerously-skip-permissions"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {"Extra flags appended to every claude spawn. Clear to restore permission prompts."}
+                </p>
+              </div>
+            </details>
           )}
           {open && <AgentModelsEditor
             engine={mode === "edit" ? (agent?.engine ?? "custom") : "custom"}
@@ -154,7 +157,7 @@ function AgentNameForm({
             discoveryCommand={discoveryCommand}
             onDiscoveryCommandChange={setDiscoveryCommand}
           />}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           <DialogFooter>
             <Button
               type="button"

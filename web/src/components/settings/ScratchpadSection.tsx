@@ -53,7 +53,6 @@ export function ScratchpadSection() {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{`Scratchpad`}</h2>
       {/* Composed summary card (D-44) — deliberately NOT a shadcn add; no
           card primitive exists in web/src/components/ui. */}
       <div className="flex flex-col gap-4 rounded-lg border bg-card p-4">

@@ -353,7 +353,13 @@ export function useSetDefaultAgent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => post<Agent>(`/api/agents/${id}/default`),
-    onSuccess: () => {
+    onSuccess: agent => {
+      queryClient.setQueryData<Agent[]>(["agents"], agents => {
+        if (!agents) return undefined;
+        return [agent, ...agents.filter(item => item.id !== agent.id).map(item => (
+          item.is_default ? { ...item, is_default: false } : item
+        ))];
+      });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },

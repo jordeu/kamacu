@@ -57,12 +57,7 @@ export function AgentModelsEditor({ engine, command, models, onModelsChange, mod
     <fieldset className="flex min-w-0 flex-col gap-3 border-t pt-3">
       <legend className="text-xs font-medium">Models</legend>
       <p className="text-xs text-muted-foreground">Choose which models appear when creating tasks. Discovery only suggests models; add the ones you want, then save.</p>
-      {engine !== "pi" && <div className="flex flex-col gap-1.5">
-        <label htmlFor="agent-model-argument" className="text-xs font-medium">Model argument</label>
-        <Input id="agent-model-argument" value={modelArgument} onChange={(event) => onModelArgumentChange(event.target.value)} className="font-mono text-xs" placeholder="--model {{model}}" />
-        <p className="text-xs text-muted-foreground">{"Use {{model}} for the selected model, for example --model {{model}} or --model={{model}}. Leave empty if this agent cannot select a model."}</p>
-      </div>}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2 sm:flex-nowrap">
         <Input aria-label="Model ID" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={engine === "pi" ? "provider/model-id" : "Model ID or alias"} className="font-mono text-xs" maxLength={256}
           onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); add(draft); setDraft(""); } }} />
         <Button type="button" variant="outline" disabled={!draft.trim() || models.includes(draft.trim())} onClick={() => { add(draft); setDraft(""); }}>Add model</Button>
@@ -73,11 +68,24 @@ export function AgentModelsEditor({ engine, command, models, onModelsChange, mod
           <Button type="button" size="sm" variant="ghost" aria-label={`Remove ${model}`} onClick={() => onModelsChange(models.filter((id) => id !== model))}>Remove</Button>
         </li>)}
       </ul> : <p className="text-xs text-muted-foreground">No models added. Tasks will use the agent default.</p>}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="agent-model-discovery" className="text-xs font-medium">Discovery command (optional override)</label>
-        <Input id="agent-model-discovery" value={discoveryCommand} onChange={(event) => onDiscoveryCommandChange(event.target.value)} className="font-mono text-xs" placeholder="my-agent models" />
-        <p className="text-xs text-muted-foreground">Return a JSON array of model IDs or one ID per line. Runs directly without a shell. Leave empty for built-in discovery; commands with launch arguments need an override.</p>
-      </div>
+      <details className="rounded-md border px-3 py-2">
+        <summary className="cursor-pointer text-sm font-medium">Advanced model settings</summary>
+        <div className="mt-3 space-y-3">
+          {engine !== "pi" && <div className="flex flex-col gap-1.5">
+            <label htmlFor="agent-model-argument" className="text-xs font-medium">Model argument</label>
+            <Input id="agent-model-argument" value={modelArgument} onChange={(event) => onModelArgumentChange(event.target.value)} className="font-mono text-xs" placeholder="--model {{model}}" />
+            <p className="text-xs text-muted-foreground">{"Use {{model}} for the selected model, for example --model {{model}} or --model={{model}}. Leave empty if this agent cannot select a model."}</p>
+          </div>}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="agent-model-discovery" className="text-xs font-medium">Discovery command (optional override)</label>
+            <Input id="agent-model-discovery" value={discoveryCommand} onChange={(event) => onDiscoveryCommandChange(event.target.value)} className="font-mono text-xs" placeholder="my-agent models" />
+            <p className="text-xs text-muted-foreground">Return a JSON array of model IDs or one ID per line. Runs directly without a shell. Leave empty for built-in discovery; commands with launch arguments need an override.</p>
+          </div>
+        </div>
+      </details>
+      {engine === "custom" && !discoveryCommand.trim() && (
+        <p className="text-xs text-muted-foreground">To discover models for a custom agent, add its discovery command in Advanced model settings.</p>
+      )}
       <div><Button type="button" variant="outline" disabled={discovering || !command.trim() || (engine === "custom" && !discoveryCommand.trim())} onClick={discover}>{discovering ? "Discovering…" : "Discover models"}</Button></div>
       {error && discoverySource === source && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {discovered && discoverySource === source && <div aria-live="polite" className="flex flex-col gap-2">
