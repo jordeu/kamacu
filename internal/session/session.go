@@ -112,6 +112,7 @@ type Session struct {
 	monitor      MonitorStatus
 	mu           sync.Mutex
 	ring         *circbuf.Buffer        // 1 MiB raw output ring (replay source)
+	pasteMode    pasteMode              // live input mode, independent of replay retention
 	conns        map[string]chan []byte // per-conn output queues, buffered 256
 	status       Status
 	exitCode     int
@@ -154,6 +155,7 @@ func (s *Session) pump() {
 				s.observer.Feed(chunk)
 			}
 			s.noteAgentOutputLocked(chunk)
+			s.pasteMode.feed(chunk, s.ring.TotalWritten())
 			_, _ = s.ring.Write(chunk)
 			for id, q := range s.conns {
 				select {
@@ -427,10 +429,29 @@ func (s *Session) agentStatusLocked() string {
 // channel carries the replay and is then closed, letting a late attacher
 // render the final output.
 func (s *Session) Attach(connID string) <-chan []byte {
+	return s.attach(connID, false)
+}
+
+// AttachTerminal restores input modes for an interactive terminal. Raw output
+// subscribers use Attach and receive the original PTY bytes.
+func (s *Session) AttachTerminal(connID string) <-chan []byte {
+	return s.attach(connID, true)
+}
+
+func (s *Session) attach(connID string, restoreModes bool) <-chan []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	q := make(chan []byte, 256)
-	q <- append([]byte(nil), s.ring.Bytes()...)
+	replay := s.ring.Bytes()
+	var frame []byte
+	firstRetained := s.ring.TotalWritten() - int64(len(replay))
+	if restoreModes && s.status == StatusRunning && s.pasteMode.enabled && s.pasteMode.enabledAt < firstRetained {
+		// Prepend so a partial escape at the end of replay can still be
+		// completed by the next live chunk.
+		frame = make([]byte, 0, len(enableBracketedPaste)+len(replay))
+		frame = append(frame, enableBracketedPaste...)
+	}
+	q <- append(frame, replay...)
 	if s.status == StatusExited {
 		close(q)
 		return q
