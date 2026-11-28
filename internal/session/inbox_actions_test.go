@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -206,4 +207,59 @@ func TestPiInboxReadinessCanSubmitTheFirstPrompt(t *testing.T) {
 	eventually(t, time.Second, "review instruction received", func() bool {
 		return strings.Contains(string(sess.Snapshot()), "accepted:Review locally")
 	})
+}
+
+func TestPiInboxActionRechecksTheEditorAfterARepaint(t *testing.T) {
+	banner := "Update Available\nNew version available. Run pi update\n\n"
+	for _, tc := range []struct {
+		name, screen                  string
+		newInput, cancelled, wantSend bool
+	}{
+		{name: "empty editor after banner", screen: banner + piReadyScreen, wantSend: true},
+		{name: "draft after repaint", screen: strings.Replace(piReadyScreen, piEditorRule+"\n\n"+piEditorRule, piEditorRule+"\nDraft\n"+piEditorRule, 1)},
+		{name: "keyboard input after readiness", screen: banner + piReadyScreen, newInput: true},
+		{name: "cancelled handoff", screen: banner + piReadyScreen, cancelled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := os.CreateTemp(t.TempDir(), "terminal-input")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer output.Close()
+			term := observation.New(80, 24)
+			term.Feed([]byte(strings.ReplaceAll(piReadyScreen, "\n", "\r\n")))
+			sess := &Session{kind: KindAgent, engine: "pi", status: StatusRunning, observer: term, ptmx: output}
+
+			// An existing session has already received input, and the monitor
+			// had classified it as idle before the new repaint.
+			term.Input()
+			sess.SetMonitorStatus(MonitorStatus{State: "idle", ObservedAt: time.Now()})
+			ready := sess.Observation()
+			term.Feed([]byte("\x1b[2J\x1b[H" + strings.ReplaceAll(tc.screen, "\n", "\r\n")))
+			if tc.newInput {
+				term.Input()
+			}
+			if sess.Observation().Revision == ready.Revision {
+				t.Fatal("fixture must make the readiness revision stale")
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+			defer cancel()
+			if tc.cancelled {
+				cancel()
+			}
+			err = sess.WriteInboxAction(ctx, ready.Revision, ready.Input, []byte("Review the PR"), []byte("\r"), false)
+			raw, readErr := os.ReadFile(output.Name())
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if tc.wantSend {
+				if err != nil || string(raw) != "Review the PR\r" || sess.Observation().Input != ready.Input+1 {
+					t.Fatalf("instruction was not delivered exactly once: %q, %v", raw, err)
+				}
+			} else if !errors.Is(err, ErrObservedChanged) || len(raw) != 0 {
+				t.Fatalf("stale handoff wrote bytes: %q, %v", raw, err)
+			}
+		})
+	}
 }

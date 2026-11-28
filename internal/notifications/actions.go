@@ -25,7 +25,7 @@ type ActionSession struct {
 type ActionRuntime interface {
 	Session(context.Context, string) (ActionSession, error)
 	Ready(context.Context, string, string) (ActionSession, error)
-	Submit(context.Context, ActionSession, string) error
+	Submit(context.Context, ActionSession, string, bool) error
 	Stop(context.Context, ActionSession) error
 	Move(context.Context, int64, string, string) error
 }

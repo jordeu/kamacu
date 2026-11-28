@@ -18,6 +18,10 @@ var piContextUsage = regexp.MustCompile(`(?:^|[\t ])(?:[0-9]+(?:\.[0-9]+)?%|\?)/
 // WaitInboxReady uses session lifecycle and terminal evidence, not an LLM. An
 // empty newborn PTY is never considered ready just because its status is idle.
 func (s *Session) WaitInboxReady(ctx context.Context, allowWorking ...bool) (observation.Snapshot, error) {
+	return s.waitInboxReady(ctx, len(allowWorking) > 0 && allowWorking[0], nil)
+}
+
+func (s *Session) waitInboxReady(ctx context.Context, sendNow bool, expectedInput *uint64) (observation.Snapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -28,20 +32,22 @@ func (s *Session) WaitInboxReady(ctx context.Context, allowWorking ...bool) (obs
 		if info.Kind != KindAgent || info.Status != StatusRunning || info.StopRequested {
 			return obs, ErrObservedChanged
 		}
+		if expectedInput != nil && obs.Input != *expectedInput {
+			return obs, ErrObservedChanged
+		}
 		if info.AgentStatus == "waiting" || info.AgentStatus == "error" {
 			return obs, errors.New("agent needs attention in its terminal before an Inbox action can submit input")
 		}
 		quiet := obs.OutputAt.IsZero() || time.Since(obs.OutputAt) >= 250*time.Millisecond
-		text := strings.ToLower(obs.Screen)
-		busy := strings.Contains(text, "esc to interrupt") || strings.Contains(text, "esc to stop")
-		if info.Engine == "pi" && info.Monitor.State == "working" &&
-			!info.Monitor.ObservedAt.IsZero() && !obs.OutputAt.After(info.Monitor.ObservedAt) && !obs.InputAt.After(info.Monitor.ObservedAt) {
-			busy = true
+		busy := info.Engine != "pi" && !sendNow && inboxScreenShowsWork(obs.Screen)
+		// An empty prompt permits first-turn delivery or revalidation after
+		// a repaint without waiting for the activity heuristic to cool down.
+		var hasPrompt bool
+		if info.Engine == "pi" {
+			hasPrompt = piInboxReady(obs, info.Monitor, sendNow)
+		} else {
+			hasPrompt = inboxInputPrompt(info.Engine, obs.Screen)
 		}
-		// A verified empty input prompt permits first-turn delivery immediately,
-		// without waiting for the generic activity heuristic's 15-second cooldown.
-		hasPrompt := (info.Engine != "pi" || !obs.UnsupportedSize) && inboxInputPrompt(info.Engine, obs.Screen)
-		sendNow := len(allowWorking) > 0 && allowWorking[0]
 		if sendNow && info.Engine == "codex" {
 			hasPrompt = false
 			if codexScreenStatus(obs.Screen) != "waiting" {
@@ -53,11 +59,8 @@ func (s *Session) WaitInboxReady(ctx context.Context, allowWorking ...bool) (obs
 				}
 			}
 		}
-		if sendNow && hasPrompt {
-			busy = false
-		}
-		firstPrompt := obs.Input == 0 && hasPrompt && !busy
-		if strings.TrimSpace(obs.Screen) != "" && quiet && hasPrompt && !busy && (info.AgentStatus == "idle" || firstPrompt || sendNow) {
+		promptVerified := obs.Input == 0 || expectedInput != nil
+		if quiet && hasPrompt && !busy && (info.AgentStatus == "idle" || promptVerified || sendNow) {
 			return obs, nil
 		}
 		select {
@@ -68,6 +71,49 @@ func (s *Session) WaitInboxReady(ctx context.Context, allowWorking ...bool) (obs
 		case <-ticker.C:
 		}
 	}
+}
+
+// WriteInboxAction retries a Pi action once when an intervening repaint made
+// its readiness observation stale. ErrObservedChanged is returned before any
+// PTY write, and the second attempt still checks the original input generation.
+func (s *Session) WriteInboxAction(ctx context.Context, revision, input uint64, body, submit []byte, allowWorking bool) error {
+	// The monitor can change its decision without a PTY repaint. Recheck Pi
+	// readiness and cancellation inside the same guard as the revision check.
+	guard := func(obs observation.Snapshot) bool {
+		return ctx.Err() == nil && (s.engine != "pi" || piInboxReady(obs, s.monitor, allowWorking))
+	}
+	err := s.writeObserved(revision, input, body, submit, guard)
+	if s.engine != "pi" || !errors.Is(err, ErrObservedChanged) || ctx.Err() != nil || s.Observation().Revision == revision {
+		return err
+	}
+	recheck, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	obs, err := s.waitInboxReady(recheck, allowWorking, &input)
+	if err != nil {
+		return ErrObservedChanged
+	}
+	return s.writeObserved(obs.Revision, input, body, submit, func(obs observation.Snapshot) bool {
+		return recheck.Err() == nil && guard(obs)
+	})
+}
+
+func inboxScreenShowsWork(screen string) bool {
+	text := strings.ToLower(screen)
+	return strings.Contains(text, "esc to interrupt") || strings.Contains(text, "esc to stop")
+}
+
+func piInboxReady(obs observation.Snapshot, monitor MonitorStatus, allowWorking bool) bool {
+	if !monitor.ObservedAt.IsZero() && !obs.OutputAt.After(monitor.ObservedAt) && !obs.InputAt.After(monitor.ObservedAt) {
+		switch monitor.State {
+		case "waiting", "error":
+			return false
+		case "working":
+			if !allowWorking {
+				return false
+			}
+		}
+	}
+	return !obs.UnsupportedSize && (allowWorking || !inboxScreenShowsWork(obs.Screen)) && piEmptyEditor(obs.Screen)
 }
 
 // StopForInbox serializes the input guard and shutdown with keyboard/other
