@@ -48,13 +48,13 @@ func (r *inboxActionRuntime) Ready(ctx context.Context, id string, policy string
 	info := sess.Info()
 	return notifications.ActionSession{ID: id, TaskID: info.TaskID, Input: obs.Input, Revision: obs.Revision}, nil
 }
-func (r *inboxActionRuntime) Submit(ctx context.Context, expected notifications.ActionSession, message string) error {
+func (r *inboxActionRuntime) Submit(ctx context.Context, expected notifications.ActionSession, message string, allowWorking bool) error {
 	sess, ok := r.mgr.Get(expected.ID)
 	if !ok || sess.Info().TaskID != expected.TaskID {
 		return fmt.Errorf("%w: target session changed", notifications.ErrActionBlocked)
 	}
 	body, submit := wrapInputForWrite(message)
-	err := sess.WriteObserved(expected.Revision, expected.Input, []byte(body), []byte(submit))
+	err := sess.WriteInboxAction(ctx, expected.Revision, expected.Input, []byte(body), []byte(submit), allowWorking)
 	if errors.Is(err, session.ErrObservedChanged) {
 		return fmt.Errorf("%w: %v", notifications.ErrActionBlocked, err)
 	}

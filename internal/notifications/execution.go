@@ -945,7 +945,7 @@ func (ex *actionExecutor) submit(ctx context.Context, a inboxaction.Action, key,
 				return "", e
 			}
 		}
-		if e = ex.s.Actions.Submit(ctx, ready, message); e != nil {
+		if e = ex.s.Actions.Submit(ctx, ready, message, a.BusyPolicy == "send_now"); e != nil {
 			if errors.Is(e, ErrActionBlocked) && pending == "pending" {
 				_, _ = ex.s.DB.ExecContext(context.WithoutCancel(ctx), `UPDATE notification_review_prompts SET state='pending' WHERE task_id=? AND state='sending'`, a.TaskID)
 			}

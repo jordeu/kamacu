@@ -40,7 +40,7 @@ func (r *directRuntime) Ready(ctx context.Context, id string, policy string) (Ac
 	}
 	return r.Session(ctx, id)
 }
-func (r *directRuntime) Submit(ctx context.Context, v ActionSession, msg string) error {
+func (r *directRuntime) Submit(ctx context.Context, v ActionSession, msg string, _ bool) error {
 	if r.beforeSubmit != nil {
 		r.beforeSubmit()
 	}
